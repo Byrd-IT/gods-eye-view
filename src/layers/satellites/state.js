@@ -158,8 +158,8 @@ export function createState({ services }) {
 
   state._contextRefreshedAtMs = 0;
 
-  state._lookupTleText = null;
+  state._lookupGpText = null;
 
-  state._lookupTleEntries = [];
+  state._lookupGpEntries = [];
   return state;
 }

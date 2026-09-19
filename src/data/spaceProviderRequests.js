@@ -2,7 +2,11 @@
 export function celestrakTleUrl(group) {
   const url = new URL('https://celestrak.org/NORAD/elements/gp.php');
   url.searchParams.set('GROUP', group);
-  url.searchParams.set('FORMAT', 'tle');
+  // FORMAT=tle is dead: objects cataloged after 2026-07-11 carry 6-digit
+  // NORAD numbers that cannot fit the fixed-width TLE format. CSV (GP/OMM
+  // columns) is CelesTrak's replacement; the client parses it with
+  // satellite.js' json2satrec().
+  url.searchParams.set('FORMAT', 'csv');
   return url;
 }
 
