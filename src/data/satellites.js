@@ -42,7 +42,8 @@ export const applySatellitePointFocusDeemphasis =
   layer.applySatellitePointFocusDeemphasis;
 export const getNextIssPass = layer.getNextIssPass;
 export const scoreSatelliteNameMatch = layer.scoreSatelliteNameMatch;
-export const findSatelliteOrbitTrackInTle = layer.findSatelliteOrbitTrackInTle;
+export const findSatelliteOrbitTrackInGpCatalog =
+  layer.findSatelliteOrbitTrackInGpCatalog;
 export const getSatelliteOrbitTrack = layer.getSatelliteOrbitTrack;
 export {
   ISS_OVERLAY_SOURCE_ID,

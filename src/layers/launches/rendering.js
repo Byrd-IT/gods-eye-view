@@ -12,7 +12,7 @@ export function createRendering({
   parts,
   source,
 }) {
-  const { getSatelliteOrbitTrack, findSatelliteOrbitTrackInTle } =
+  const { getSatelliteOrbitTrack, findSatelliteOrbitTrackInGpCatalog } =
     services.satellites;
 
   function setGraphicVisibility(graphic, visible, time) {
@@ -92,9 +92,13 @@ export function createRendering({
     const satelliteTrack =
       coreTrack ||
       (orbitAllowed && activeTleText && launch.satelliteQuery
-        ? findSatelliteOrbitTrackInTle(activeTleText, launch.satelliteQuery, {
-            launchTime: launch.launchTime,
-          })
+        ? findSatelliteOrbitTrackInGpCatalog(
+            activeTleText,
+            launch.satelliteQuery,
+            {
+              launchTime: launch.launchTime,
+            },
+          )
         : null);
     const orbitPath = !orbitAllowed
       ? null

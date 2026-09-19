@@ -7,6 +7,10 @@ const datacentersUrl = new URL(
 ).href;
 const damsUrl = new URL('./local_data/dams/dams.geojsonl', import.meta.url)
   .href;
+const usgsWaterUrl = new URL(
+  './local_data/usgs_water/usgs_water.geojsonl',
+  import.meta.url,
+).href;
 
 /**
  * Create fresh datacenter and dam layers without starting or loading them.
@@ -44,5 +48,20 @@ export function createInfrastructureLayers(services) {
     services,
   );
 
-  return [datacenters, dams];
+  const usgsWater = createLocalGeoJsonLayer(
+    {
+      id: 'local-usgs-water',
+      url: usgsWaterUrl,
+      name: 'USGS Water Levels',
+      color: '#33ffaa',
+      icon: '💧',
+      source: 'USGS · refreshed every 15 min',
+      labels: true,
+      labelMax: 700,
+      labelGridPx: 138,
+    },
+    services,
+  );
+
+  return [datacenters, dams, usgsWater];
 }

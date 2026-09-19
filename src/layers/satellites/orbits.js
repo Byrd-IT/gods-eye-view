@@ -5,7 +5,7 @@ import {
   eciToGeodetic,
   degreesLong,
   degreesLat,
-  twoline2satrec,
+  json2satrec,
 } from 'satellite.js';
 import { findNextIssPass } from '../../data/issPass.js';
 import { ORBIT_PATH_STEPS, ISS_NORAD } from './policy.js';
@@ -38,23 +38,36 @@ export function createOrbits({ state: layerState, services, parts, source }) {
   }
 
   /**
-   * Parse TLE text into array of { name, line1, line2 } objects.
+   * Parse CelesTrak GP CSV text (FORMAT=csv) into { name, gp } records.
+   *
+   * TLE is dead — objects cataloged after 2026-07-11 carry 6-digit NORAD
+   * numbers that cannot be represented in the fixed-width TLE format. CSV
+   * carries the same orbital elements as named OMM columns; feed them
+   * straight into satellite.js' json2satrec() (the library's OMM/JSON entry
+   * point). The catalog groups arrive as single records per satellite with a
+   * header row.
    */
+  const GP_CSV_HEADER = 'OBJECT_NAME,OBJECT_ID,EPOCH,';
 
-  function parseTLE(text) {
-    const lines = text
+  function parseGP(text) {
+    // NOTE: split on the REGEX /\r?\n/, not the string '\r?\n'. CelesTrak
+    // serves GP CSV with CRLF line endings; a string separator never
+    // matches, leaving the whole response as one "line" so the header check
+    // fails and every catalog silently parses as zero satellites.
+    const lines = String(text || '')
       .trim()
-      .split('\n')
-      .map((l) => l.trim())
+      .split(/\r?\n/)
       .filter((l) => l.length > 0);
+    if (lines.length < 2 || !lines[0].startsWith(GP_CSV_HEADER)) return [];
+    const cols = lines[0].split(',');
+    const idx = Object.fromEntries(cols.map((c, i) => [c, i]));
     const result = [];
-    for (let i = 0; i < lines.length - 2; i += 3) {
-      const name = lines[i];
-      const line1 = lines[i + 1];
-      const line2 = lines[i + 2];
-      if (line1.startsWith('1 ') && line2.startsWith('2 ')) {
-        result.push({ name, line1, line2 });
-      }
+    for (let i = 1; i < lines.length; i++) {
+      const cells = lines[i].split(',');
+      const gp = {};
+      for (const c of cols) gp[c] = cells[idx[c]];
+      if (!gp.OBJECT_NAME || !gp.NORAD_CAT_ID) continue;
+      result.push({ name: gp.OBJECT_NAME, gp });
     }
     return result;
   }
@@ -205,18 +218,22 @@ export function createOrbits({ state: layerState, services, parts, source }) {
     return shortYear >= 57 ? 1900 + shortYear : 2000 + shortYear;
   }
 
-  function lookupTleEntries(tleText) {
-    if (tleText !== layerState._lookupTleText) {
-      layerState._lookupTleText = tleText;
-      layerState._lookupTleEntries = parseTLE(tleText);
+  function lookupGpEntries(gpText) {
+    if (gpText !== layerState._lookupGpText) {
+      layerState._lookupGpText = gpText;
+      layerState._lookupGpEntries = parseGP(gpText);
     }
-    return layerState._lookupTleEntries;
+    return layerState._lookupGpEntries;
   }
 
-  function tleLineLaunchYear(line1) {
-    const shortYear = Number(String(line1 || '').slice(9, 11));
-    if (!Number.isFinite(shortYear)) return null;
-    return shortYear >= 57 ? 1900 + shortYear : 2000 + shortYear;
+  /**
+   * Launch year from the CSV OBJECT_ID international designator
+   * (e.g. "1998-067A" -> 1998) — the CSV replacement for reading it off TLE
+   * line 1.
+   */
+  function gpLaunchYear(gp) {
+    const match = String(gp?.OBJECT_ID || '').match(/^(\d{4})/);
+    return match ? Number(match[1]) : null;
   }
 
   function orbitTrackFromRecord(name, satrec) {
@@ -235,24 +252,30 @@ export function createOrbits({ state: layerState, services, parts, source }) {
   }
 
   /**
-   * Find and propagate a mission payload directly from a TLE catalog.
+   * Find and propagate a mission payload directly from a CelesTrak GP CSV
+   * catalog.
    * This supports newly launched payloads that are present in CelesTrak's active
    * feed but have not yet moved into a narrower operational group.
-   * @param {string} tleText Three-line-element catalog text.
+   * (Migrated from TLE: FORMAT=tle cannot represent 6-digit NORAD numbers.)
+   * @param {string} catalogText CelesTrak GP CSV text (FORMAT=csv).
    * @param {string} query Mission or payload name.
    * @param {{launchTime?: string|null}} [options] Optional launch epoch for namesake rejection.
    * @returns {{noradId:number,name:string,current:object,periodSec:number,orbitPath:Cesium.Cartesian3[],positionAt:function(Date):object|null}|null}
    */
 
-  function findSatelliteOrbitTrackInTle(tleText, query, options = {}) {
+  function findSatelliteOrbitTrackInGpCatalog(
+    catalogText,
+    query,
+    options = {},
+  ) {
     const launchYear = Number.isFinite(Date.parse(options.launchTime))
       ? new Date(options.launchTime).getUTCFullYear()
       : null;
     let bestEntry = null;
     let bestScore = 0;
-    const catalogText = String(tleText || '');
-    for (const entry of lookupTleEntries(catalogText)) {
-      const designatorYear = tleLineLaunchYear(entry.line1);
+    const text = String(catalogText || '');
+    for (const entry of lookupGpEntries(text)) {
+      const designatorYear = gpLaunchYear(entry.gp);
       if (
         launchYear !== null &&
         designatorYear !== null &&
@@ -266,7 +289,7 @@ export function createOrbits({ state: layerState, services, parts, source }) {
       }
     }
     if (!bestEntry || bestScore < 12) return null;
-    const satrec = twoline2satrec(bestEntry.line1, bestEntry.line2);
+    const satrec = json2satrec(bestEntry.gp);
     if (!satrec || satrec.error !== 0) return null;
     return orbitTrackFromRecord(bestEntry.name, satrec);
   }
@@ -311,17 +334,17 @@ export function createOrbits({ state: layerState, services, parts, source }) {
   }
   return {
     orbitFrameModelMatrix,
-    parseTLE,
+    parseGP,
     propagatePosition,
     orbitalPeriodSeconds,
     computeOrbitPath,
     getNextIssPass,
     scoreSatelliteNameMatch,
     internationalDesignatorYear,
-    lookupTleEntries,
-    tleLineLaunchYear,
+    lookupGpEntries,
+    gpLaunchYear,
     orbitTrackFromRecord,
-    findSatelliteOrbitTrackInTle,
+    findSatelliteOrbitTrackInGpCatalog,
     getSatelliteOrbitTrack,
   };
 }

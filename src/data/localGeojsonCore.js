@@ -1273,5 +1273,6 @@ function clampCardLine(value) {
 function layerTitle(layerId) {
   if (layerId === 'local-datacenters') return 'Datacenter';
   if (layerId === 'local-dams') return 'Dam';
+  if (layerId === 'local-usgs-water') return 'USGS Water Level';
   return 'Feature';
 }

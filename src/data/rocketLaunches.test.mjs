@@ -60,7 +60,7 @@ import rocketLaunchesLayer, {
   smoothReplayCameraHeading,
 } from './rocketLaunches.js';
 import {
-  findSatelliteOrbitTrackInTle,
+  findSatelliteOrbitTrackInGpCatalog,
   orbitFrameModelMatrix,
   satelliteCatalogModeChanged,
   scoreSatelliteNameMatch,
@@ -998,11 +998,10 @@ test('matches compact payload identifiers without accepting an arbitrary constel
   assert.ok(scoreSatelliteNameMatch('Starlink Group 17-40', 'STARLINK-1008') < 12);
 });
 
-test('finds a newly launched payload in the active TLE fallback catalog', () => {
-  const tle = `SXM-11
-1 69728U 26148A   26208.65166678  .00000015  00000+0  00000+0 0  9990
-2 69728   0.0784 264.9826 0001797 240.4588 273.9506  1.00271527   440`;
-  const track = findSatelliteOrbitTrackInTle(tle, 'Sirius SXM-11', {
+test('finds a newly launched payload in the active GP CSV fallback catalog', () => {
+  const gpCsv = `OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT\r
+SXM-11,2026-148A,2026-09-18T11:20:32.595072,1.00272792,.0000034,0.0138,95.6860,48.6182,267.9283,0,U,69728,999,97,0,-.27E-6,0`;
+  const track = findSatelliteOrbitTrackInGpCatalog(gpCsv, 'Sirius SXM-11', {
     launchTime: '2026-06-29T02:25:00Z',
   });
   assert.equal(track?.noradId, 69728);
