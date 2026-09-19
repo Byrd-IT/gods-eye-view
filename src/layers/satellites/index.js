@@ -64,7 +64,8 @@ export function createSatellitesLayer({ services, source }) {
         parts.rendering.applySatellitePointFocusDeemphasis,
       getNextIssPass: parts.orbits.getNextIssPass,
       scoreSatelliteNameMatch: parts.orbits.scoreSatelliteNameMatch,
-      findSatelliteOrbitTrackInTle: parts.orbits.findSatelliteOrbitTrackInTle,
+      findSatelliteOrbitTrackInGpCatalog:
+        parts.orbits.findSatelliteOrbitTrackInGpCatalog,
       getSatelliteOrbitTrack: parts.orbits.getSatelliteOrbitTrack,
     },
   );

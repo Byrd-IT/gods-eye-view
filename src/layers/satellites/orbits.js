@@ -263,7 +263,11 @@ export function createOrbits({ state: layerState, services, parts, source }) {
    * @returns {{noradId:number,name:string,current:object,periodSec:number,orbitPath:Cesium.Cartesian3[],positionAt:function(Date):object|null}|null}
    */
 
-  function findSatelliteOrbitTrackInTle(catalogText, query, options = {}) {
+  function findSatelliteOrbitTrackInGpCatalog(
+    catalogText,
+    query,
+    options = {},
+  ) {
     const launchYear = Number.isFinite(Date.parse(options.launchTime))
       ? new Date(options.launchTime).getUTCFullYear()
       : null;
@@ -340,7 +344,7 @@ export function createOrbits({ state: layerState, services, parts, source }) {
     lookupGpEntries,
     gpLaunchYear,
     orbitTrackFromRecord,
-    findSatelliteOrbitTrackInTle,
+    findSatelliteOrbitTrackInGpCatalog,
     getSatelliteOrbitTrack,
   };
 }
