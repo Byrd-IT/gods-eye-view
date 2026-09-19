@@ -16,21 +16,23 @@ import satellitesLayer, {
 } from './satellites.js';
 
 /**
- * A real, parseable TLE under an arbitrary 5-digit catalog number, so the dense
- * load exercises the production path. Both fixtures deliberately avoid 25544 —
- * that is the ISS, and the ISS is force-classified as a STATION everywhere.
- * @param {string} satnum Five-digit catalog number.
- * @param {string} name Object name line.
+ * Complete CelesTrak GP CSV/OMM fixture records. CRLF is deliberate: CelesTrak
+ * serves FORMAT=csv this way. The non-ISS fixture avoids 25544 because the ISS
+ * is force-classified as a STATION everywhere.
+ * @param {string} record Complete CelesTrak GP CSV data row.
  */
-const tleFor = (satnum, name) => [
-  name,
-  `1 ${satnum}U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927`,
-  `2 ${satnum}  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537`,
-].join('\n');
+const gpCsvFor = (record) => [
+  'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT',
+  record,
+].join('\r\n');
 
-const DENSE_TLE = tleFor('44444', 'STARLINK-TEST');
-const ALT_TLE = tleFor('33333', 'DRIFTER-1');
-const ISS_TLE = tleFor('25544', 'ISS (ZARYA)');
+const DENSE_GP_CSV = gpCsvFor(
+  'CSS (TIANHE),2021-035A,2026-09-18T20:58:23.471328,15.60085640,.00026238,41.4678,113.1675,289.0321,71.0233,0,U,48274,999,30779,.19580471E-3,.16037E-3,0',
+);
+const ALT_GP_CSV = DENSE_GP_CSV;
+const ISS_GP_CSV = gpCsvFor(
+  'ISS (ZARYA),1998-067A,2026-09-18T18:54:33.954336,15.49168087,.00048272,51.6308,196.8438,155.1807,204.9414,0,U,25544,999,58626,.11392763E-3,.5868E-4,0',
+);
 
 /** Poll the chip until the async dense load settles (or give up). */
 async function settleChip(maxTicks = 50) {
@@ -240,7 +242,7 @@ test('DENSE reports loading, then ACTIVE only once the points exist', async () =
   const originalFetch = globalThis.fetch;
   const refreshes = [];
   try {
-    globalThis.fetch = async () => ({ ok: true, text: async () => DENSE_TLE });
+    globalThis.fetch = async () => ({ ok: true, text: async () => DENSE_GP_CSV });
     _setDenseCatalogStateForTest({});
     satellitesLayer.setRowControlsListener(() => refreshes.push(satellitesLayer.getRowControls()));
 
@@ -297,7 +299,7 @@ test('a failed DENSE load reverts the mode rather than leaving an active chip', 
     assert.ok(pushes >= 2, 'the failure pushed its own refresh');
 
     // Retrying against a healthy feed clears the error — it does not latch.
-    globalThis.fetch = async () => ({ ok: true, text: async () => DENSE_TLE });
+    globalThis.fetch = async () => ({ ok: true, text: async () => DENSE_GP_CSV });
     satellitesLayer.setParams(settled.params);
     const recovered = await settleChip();
     assert.equal(recovered.state, 'active');
@@ -320,7 +322,7 @@ test('a 200 that yields no usable satellites is a failure, not a live catalog', 
   const bodies = {
     empty: '',
     html: '<!DOCTYPE html><html><body>502 Bad Gateway</body></html>',
-    junk: 'NOT-A-TLE\nstill not a tle\nnope',
+    junk: 'NOT-A-GP-CSV\nstill not GP CSV\nnope',
   };
   try {
     for (const [name, body] of Object.entries(bodies)) {
@@ -335,9 +337,9 @@ test('a 200 that yields no usable satellites is a failure, not a live catalog', 
       _clearDenseCatalogStateForTest();
     }
 
-    // The same guard fires when every TLE is already in the core catalog, so
+    // The same guard fires when every GP record is already in the core catalog, so
     // "added nothing" can never masquerade as "loaded".
-    globalThis.fetch = async () => ({ ok: true, text: async () => DENSE_TLE });
+    globalThis.fetch = async () => ({ ok: true, text: async () => DENSE_GP_CSV });
     _setDenseCatalogStateForTest({});
     satellitesLayer.setParams({ catalog: 'dense' });
     assert.equal((await settleChip()).state, 'active', 'a real feed still loads');
@@ -390,7 +392,7 @@ test('a real stations-feed outage keeps STATION in the legend, matching the card
     const viewer = { scene: { primitives: { add: (p) => p, remove() {} } } };
     globalThis.fetch = async (url) => ({
       ok: true,
-      text: async () => (String(url).endsWith('/visual') ? ISS_TLE : ''),
+      text: async () => (String(url).endsWith('/visual') ? ISS_GP_CSV : ''),
     });
 
     await satellitesLayer.update(viewer);
@@ -428,17 +430,17 @@ test('a catalog rebuild refreshes the detection overlay class strings', async ()
     let homeGroup = 'geo';
     globalThis.fetch = async (url) => ({
       ok: true,
-      text: async () => (String(url).endsWith(`/${homeGroup}`) ? ALT_TLE : ''),
+      text: async () => (String(url).endsWith(`/${homeGroup}`) ? ALT_GP_CSV : ''),
     });
 
     await satellitesLayer.update(viewer);
-    const first = satellitesLayer.getDetectableObjects().find((o) => o.sourceId === 33333);
+    const first = satellitesLayer.getDetectableObjects().find((o) => o.sourceId === 48274);
     assert.ok(first, 'the seeded satellite is collectable');
     assert.equal(first.klass, 'GEO');
 
     homeGroup = 'visual';
     await satellitesLayer.update(viewer);
-    const second = satellitesLayer.getDetectableObjects().find((o) => o.sourceId === 33333);
+    const second = satellitesLayer.getDetectableObjects().find((o) => o.sourceId === 48274);
     assert.equal(second.klass, 'VISUAL', 'the cached record does not outlive its catalog');
   } finally {
     console.log = log;
