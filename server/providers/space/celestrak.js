@@ -61,7 +61,13 @@ export function celestrakProxy() {
       BREAKER_MAX_MS,
       BREAKER_BASE_MS * scale * 2 ** (failures - 1),
     );
-    const reason = String(err?.message || err);
+    // Upstream error text can contain request URLs, tokens, or an HTML body.
+    // Preserve only the safe HTTP status for diagnostics; network/parse errors
+    // deliberately collapse to a generic label before reaching logs.
+    const message = String(err?.message || err);
+    const reason = /^HTTP \d+$/.test(message)
+      ? message
+      : 'upstream request failed';
     breaker.set(group, { failures, openUntil: Date.now() + backoff, reason });
     // Log ONLY on the trip, not on every suppressed request — the old code
     // logged per request and buried the signal under thousands of lines.
