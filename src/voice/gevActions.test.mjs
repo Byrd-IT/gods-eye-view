@@ -738,6 +738,44 @@ test('Data Layers voice inventory hides the Context coordinator while current-vi
   assert.deepEqual(current.cockpit, { active: false, entryAllowed: true });
 });
 
+test('generic voice visibility resolves the USGS water alias', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const viewer = {
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    camera: { moveEnd: { addEventListener() {} } },
+  };
+  let enabled = false;
+  const dataManager = {
+    layers: new Map([['local-usgs-water', { module: {} }]]),
+    getAll: () => [{ id: 'local-usgs-water', name: 'USGS Water Levels' }],
+    getLayerLifecycleState: () => ({
+      enabled,
+      lifecycleState: enabled ? 'enabled' : 'disabled',
+      uncertain: false,
+    }),
+    async setEnabled(id, value) {
+      assert.equal(id, 'local-usgs-water');
+      enabled = value;
+      return true;
+    },
+  };
+  const runner = createGevActionRunner({ viewer, styleManager: {}, dataManager });
+  const result = await runner('set_layer_visibility', {
+    layerId: 'usgs water levels',
+    enabled: true,
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    action: 'set_layer_visibility',
+    layerId: 'local-usgs-water',
+    label: 'USGS Water Levels',
+    enabled: true,
+    lifecycleState: 'enabled',
+    lifecycleUncertain: false,
+  });
+});
+
 test('generic layer visibility forwards cancellation and reports semantic failure', async () => {
   globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
   const viewer = {

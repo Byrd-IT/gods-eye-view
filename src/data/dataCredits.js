@@ -217,6 +217,13 @@ export const DATA_CREDITS = [
       '(ODbL 1.0) + Open Infrastructure Map',
   },
   {
+    key: 'usgs-water',
+    html:
+      'USGS Water Levels: U.S. Geological Survey water data — ' +
+      '<a href="https://waterdata.usgs.gov" target="_blank" rel="noopener">waterdata.usgs.gov</a>, ' +
+      'served via the USGS Water Data OGC API',
+  },
+  {
     key: 'firms',
     html:
       'Active fires: NASA FIRMS — we acknowledge the use of data and/or imagery ' +

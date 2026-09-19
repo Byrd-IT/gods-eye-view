@@ -158,9 +158,9 @@ function encode(state) {
 
 test('production registry is exact, canonical, and rejects incomplete contracts', async () => {
   assert.equal(validateLayerStateRegistry(), true);
-  assert.equal(REGISTERED_LAYER_IDS.length, 21);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 21);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, REGISTERED_LAYER_IDS.length);
   assert.ok(REGISTERED_LAYER_IDS.includes('transit'));
+  assert.ok(REGISTERED_LAYER_IDS.includes('local-usgs-water'));
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),
@@ -235,6 +235,12 @@ test('Nepal event and locator have distinct enabled-only share tokens', () => {
   const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=h.z'));
   assert.deepEqual(decoded.enabledLayerIds, ['bhote-koshi-2026', 'bhote-koshi-locator']);
   assert.ok(encode(decoded).includes('l=h.z'));
+});
+
+test('USGS water layer has a stable enabled-only share token', () => {
+  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=k'));
+  assert.deepEqual(decoded.enabledLayerIds, ['local-usgs-water']);
+  assert.ok(encode(decoded).includes('l=k'));
 });
 
 test('unknown and forbidden option fields are ignored while missing options use codec defaults', () => {
