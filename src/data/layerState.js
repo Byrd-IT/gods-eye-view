@@ -495,7 +495,8 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'local-firms', token: 'w', disposition: 'enabled-only' }),
   Object.freeze({
     id: 'local-usgs-water',
-    token: 'k',
+    // Byrd-IT fork layer: '0' avoids collision with upstream wind ('k')
+    token: '0',
     disposition: 'enabled-only',
   }),
   Object.freeze({

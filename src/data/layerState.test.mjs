@@ -312,9 +312,9 @@ test('Nepal event and locator have distinct enabled-only share tokens', () => {
 });
 
 test('USGS water layer has a stable enabled-only share token', () => {
-  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=k'));
+  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=0'));
   assert.deepEqual(decoded.enabledLayerIds, ['local-usgs-water']);
-  assert.ok(encode(decoded).includes('l=k'));
+  assert.ok(encode(decoded).includes('l=0'));
 });
 
 test('unknown and forbidden option fields are ignored while missing options use codec defaults', () => {
