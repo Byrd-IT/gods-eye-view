@@ -41,6 +41,7 @@ export const _clearSatelliteLabelLifecycleForTest =
 export const applySatellitePointFocusDeemphasis =
   layer.applySatellitePointFocusDeemphasis;
 export const getNextIssPass = layer.getNextIssPass;
+export const getNextSatellitePass = layer.getNextSatellitePass;
 export const scoreSatelliteNameMatch = layer.scoreSatelliteNameMatch;
 export const findSatelliteOrbitTrackInGpCatalog =
   layer.findSatelliteOrbitTrackInGpCatalog;
@@ -50,3 +51,5 @@ export {
   ISS_OVERLAY_SOURCE_OPTIONS,
 } from '../layers/satellites/index.js';
 export default layer;
+
+export { mapAnalystRecord } from '../layers/satellites/records.js';
