@@ -602,14 +602,13 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
     disposition: 'enabled-only',
   }),
   Object.freeze({ id: 'local-firms', token: 'w', disposition: 'enabled-only' }),
-  Object.freeze({
-    id: 'local-usgs-water',
-    // Byrd-IT fork layer. Fork tokens are allocated DOWNWARD from 'zz'
-    // (see src/byrdit/forkLayers.js); upstream allocates upward from '0',
-    // so the two never meet. Ledger row lives in layerStateTokenReservations.json.
-    token: 'zz',
-    disposition: 'enabled-only',
-  }),
+  // Byrd-IT fork water layers. Fork tokens are allocated DOWNWARD from 'zz'
+  // (see src/byrdit/forkLayers.js); upstream allocates upward from '0', so
+  // the two never meet. Ledger rows live in layerStateTokenReservations.json.
+  Object.freeze({ id: 'local-usgs-lakes', token: 'zx', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'local-usgs-springs', token: 'zw', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'local-usgs-water', token: 'zz', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'local-usgs-wells', token: 'zy', disposition: 'enabled-only' }),
   Object.freeze({
     id: 'military',
     token: 'm',

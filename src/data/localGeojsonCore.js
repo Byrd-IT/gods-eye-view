@@ -377,6 +377,12 @@ export function createLocalGeoJsonLayer(
     labels = true,
     labelMax = DEFAULT_LABEL_MAX,
     labelGridPx = DEFAULT_LABEL_GRID_PX,
+    /**
+     * Byrd-IT: optional loader `(signal, viewer) => Promise<object[]>` used
+     * instead of fetching `url`. Its result is NOT cached across enables, so
+     * viewport-driven layers can call `reload()` to rebuild from new data.
+     */
+    loadFeatures = null,
     screenSpaceEventHandlerFactory = (canvas) =>
       new Cesium.ScreenSpaceEventHandler(canvas),
     projectToWindow = (scene, position) =>
@@ -409,6 +415,8 @@ export function createLocalGeoJsonLayer(
   let _destroyed = false;
   let _loadPromise = null;
   let _loadController = null;
+  /** Byrd-IT: a reload() requested while a load was in flight. */
+  let _reloadQueued = false;
   /**
    * The parsed bundled dataset, kept across disable/enable so a re-enable
    * rebuilds entities without refetching. The Cesium entities themselves are
@@ -544,7 +552,7 @@ export function createLocalGeoJsonLayer(
     }
   };
 
-  return {
+  const api = {
     id,
     name,
     icon,
@@ -619,7 +627,10 @@ export function createLocalGeoJsonLayer(
       return result;
     },
 
-    enable: async (viewer) => {
+    enable: (viewer) => enableLayer(viewer),
+  };
+
+  async function enableLayer(viewer) {
       if (_destroyed) return;
       _enabled = true;
       _stemGeometryDirty = true;
@@ -651,8 +662,11 @@ export function createLocalGeoJsonLayer(
             // windows (before vs after the add settles) need different cleanup.
             let addedToScene = false;
             try {
-              let features = _cachedFeatures;
-              if (!features) {
+              let features = loadFeatures ? null : _cachedFeatures;
+              if (!features && loadFeatures) {
+                features = await loadFeatures(_loadController.signal, viewer);
+                if (_destroyed) return;
+              } else if (!features) {
                 const response = await fetch(url, {
                   signal: _loadController.signal,
                 });
@@ -1131,9 +1145,33 @@ export function createLocalGeoJsonLayer(
       }
       if (_dataSource) _dataSource.show = true;
       viewer.scene.requestRender?.();
-    },
+  }
 
+  Object.assign(api, {
     disable: disableLayer,
+
+    /**
+     * Byrd-IT: rebuild entities from a fresh `loadFeatures()` call while the
+     * layer stays enabled (viewport layers call this on camera settle). A
+     * reload while a load is in flight is coalesced into one follow-up.
+     * @param {object} viewer
+     * @returns {Promise<void>}
+     */
+    reload: async (viewer) => {
+      if (_destroyed || !_enabled) return;
+      if (_loadPromise) {
+        _reloadQueued = true;
+        return;
+      }
+      releaseDataSource(viewer);
+      _cachedFeatures = null;
+      await enableLayer(viewer);
+      if (_reloadQueued && _enabled && !_destroyed) {
+        _reloadQueued = false;
+        releaseDataSource(viewer);
+        await enableLayer(viewer);
+      }
+    },
 
     destroy: (viewer) => {
       if (_destroyed) return;
@@ -1158,7 +1196,8 @@ export function createLocalGeoJsonLayer(
       _lastUpdate = null;
       _error = null;
     },
-  };
+  });
+  return api;
 }
 
 function compareLocalOverlayRecords(a, b) {
@@ -1363,6 +1402,9 @@ function clampCardLine(value) {
 function layerTitle(layerId) {
   if (layerId === 'local-datacenters') return 'Datacenter';
   if (layerId === 'local-dams') return 'Dam';
-  if (layerId === 'local-usgs-water') return 'USGS Water Level';
+  if (layerId === 'local-usgs-water') return 'USGS River Gauge';
+  if (layerId === 'local-usgs-wells') return 'USGS Groundwater Well';
+  if (layerId === 'local-usgs-lakes') return 'USGS Lake/Reservoir';
+  if (layerId === 'local-usgs-springs') return 'USGS Spring';
   return 'Feature';
 }

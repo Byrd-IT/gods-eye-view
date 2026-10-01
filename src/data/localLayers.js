@@ -3,7 +3,7 @@ import { createInfrastructureLayers } from './infrastructure.js';
 import { createFirmsHeatmapLayer } from './firmsHeatmap.js';
 import submarineCablesLayer from './telegeographySubmarineCables.js';
 
-const [datacenters, dams, usgsWater] =
+const [datacenters, dams, ...usgsWater] =
   createInfrastructureLayers(localGeoJsonServices);
 
 // Live NASA FIRMS fires (VIIRS ×3 NRT via the /api/firms proxy). The id keeps
@@ -16,4 +16,4 @@ const fires = createFirmsHeatmapLayer({
   source: 'NASA FIRMS · LIVE',
 });
 
-export default [datacenters, dams, usgsWater, submarineCablesLayer, fires];
+export default [datacenters, dams, ...usgsWater, submarineCablesLayer, fires];

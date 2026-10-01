@@ -45,6 +45,16 @@ const PANEL_GROUPS = [
     ],
   },
   {
+    // Byrd-IT fork water layers
+    label: 'Water',
+    ids: [
+      'local-usgs-water',
+      'local-usgs-lakes',
+      'local-usgs-wells',
+      'local-usgs-springs',
+    ],
+  },
+  {
     label: 'Events',
     ids: ['rocket-launches', 'earthquakes', 'local-firms', 'fire-perimeters'],
   },

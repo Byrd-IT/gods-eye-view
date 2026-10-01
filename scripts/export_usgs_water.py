@@ -1,17 +1,34 @@
 #!/usr/bin/env python3
-"""Export current USGS water readings from Elasticsearch to bundled GeoJSONL.
+"""Export current USGS water readings from Elasticsearch for God's Eye View.
+
+Byrd-IT fork. Writes one GeoJSONL file per site class plus a manifest:
+
+    public/byrdit/usgs_water/<class>.geojsonl      (stream, well, lake, spring, other)
+    public/byrdit/usgs_water/stream/<x>_<y>.geojsonl  (streams, 4-degree tiles)
+    public/byrdit/usgs_water/manifest.json
+
+Streams are ~90% of sites, so they are additionally tiled so the browser
+loads only the tiles in view. Files live under public/ so Vite serves them
+as plain static files that change every 15 minutes without a module reload.
+
+Readings are the NEWEST per (site, parameter) within LOOKBACK_DAYS, chosen by
+Elasticsearch (composite aggregation + top_hits sorted by observed_time).
+The previous exporter scrolled the first 200k of ~12M unsorted docs, so the
+map showed weeks-old readings.
 
 Set USGS_WATER_ES_URL and either USGS_WATER_ES_API_KEY or both
-USGS_WATER_ES_USERNAME and USGS_WATER_ES_PASSWORD. The exporter writes the
-project's bundled `src/data/local_data/usgs_water/usgs_water.geojsonl` by
-default and is intended to run after the upstream ingestion refresh.
+USGS_WATER_ES_USERNAME and USGS_WATER_ES_PASSWORD. Optional
+USGS_WATER_OUT_DIR overrides the output directory (tests).
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import math
 import os
+import shutil
+import ssl
 import sys
 import tempfile
 import time
@@ -20,13 +37,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 INDEX = "usgs-water-levels"
-SCROLL_SIZE = 5_000
-SCROLL_TTL = "2m"
-MAX_DOCS = 200_000
-OUT_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "src/data/local_data/usgs_water/usgs_water.geojsonl"
-)
+LOOKBACK_DAYS = 14
+PAGE_SIZE = 2_000
+TILE_DEG = 4
+SCHEMA = 1
+DEFAULT_OUT_DIR = Path(__file__).resolve().parents[1] / "public/byrdit/usgs_water"
 FIELDS = [
     "site_id",
     "site_name",
@@ -52,13 +67,15 @@ SITE_TYPE_NAMES = {
     "SP": "Spring",
     "GW": "Groundwater well",
 }
+# site_type_code -> output class. Anything else (including blank) is "other".
+CLASS_BY_CODE = {"ST": "stream", "GW": "well", "LK": "lake", "SP": "spring"}
+CLASSES = ("stream", "well", "lake", "spring", "other")
 
 
 def config() -> tuple[str, dict[str, str]]:
     url = os.environ.get("USGS_WATER_ES_URL", "").rstrip("/")
     if not url:
         raise RuntimeError("USGS_WATER_ES_URL is required")
-
     api_key = os.environ.get("USGS_WATER_ES_API_KEY")
     username = os.environ.get("USGS_WATER_ES_USERNAME")
     password = os.environ.get("USGS_WATER_ES_PASSWORD")
@@ -75,74 +92,70 @@ def config() -> tuple[str, dict[str, str]]:
     return url, {"Authorization": authorization, "Content-Type": "application/json"}
 
 
-def request_json(
-    url: str,
-    headers: dict[str, str],
-    path: str,
-    body: dict,
-    method: str = "POST",
-) -> dict:
+def request_json(url: str, headers: dict[str, str], path: str, body: dict) -> dict:
     request = Request(
-        f"{url}{path}",
-        data=json.dumps(body).encode(),
-        headers=headers,
-        method=method,
+        f"{url}{path}", data=json.dumps(body).encode(), headers=headers, method="POST"
     )
-    with urlopen(request, timeout=30) as response:
+    with urlopen(request, timeout=120) as response:
         return json.load(response)
 
 
-def fetch_all(url: str, headers: dict[str, str]) -> list[dict]:
-    response = request_json(
-        url,
-        headers,
-        f"/{INDEX}/_search?scroll={SCROLL_TTL}",
-        {"size": SCROLL_SIZE, "_source": FIELDS, "query": {"match_all": {}}},
-    )
-    scroll_id = response.get("_scroll_id")
-    hits = response["hits"]["hits"]
+def fetch_latest(url: str, headers: dict[str, str]) -> list[dict]:
+    """Newest doc per (site_id, parameter_code), paged with a composite agg."""
+    after = None
     docs: list[dict] = []
-    try:
-        while hits:
-            docs.extend(hit["_source"] for hit in hits)
-            if len(docs) >= MAX_DOCS:
-                break
-            response = request_json(
-                url,
-                headers,
-                "/_search/scroll",
-                {"scroll": SCROLL_TTL, "scroll_id": scroll_id},
-            )
-            hits = response["hits"]["hits"]
-    finally:
-        if scroll_id:
-            try:
-                request_json(
-                    url,
-                    headers,
-                    "/_search/scroll",
-                    {"scroll_id": [scroll_id]},
-                    method="DELETE",
-                )
-            except (HTTPError, URLError):
-                pass
-    return docs
+    while True:
+        composite: dict = {
+            "size": PAGE_SIZE,
+            "sources": [
+                {"site": {"terms": {"field": "site_id"}}},
+                {"param": {"terms": {"field": "parameter_code"}}},
+            ],
+        }
+        if after:
+            composite["after"] = after
+        body = {
+            "size": 0,
+            "track_total_hits": False,
+            "query": {"range": {"observed_time": {"gte": f"now-{LOOKBACK_DAYS}d"}}},
+            "aggs": {
+                "pairs": {
+                    "composite": composite,
+                    "aggs": {
+                        "newest": {
+                            "top_hits": {
+                                "size": 1,
+                                "sort": [{"observed_time": {"order": "desc"}}],
+                                "_source": FIELDS,
+                            }
+                        }
+                    },
+                }
+            },
+        }
+        result = request_json(url, headers, f"/{INDEX}/_search", body)
+        agg = result["aggregations"]["pairs"]
+        for bucket in agg["buckets"]:
+            hits = bucket["newest"]["hits"]["hits"]
+            if hits:
+                docs.append(hits[0]["_source"])
+        after = agg.get("after_key")
+        if not after or not agg["buckets"]:
+            return docs
 
 
-def latest_per_site_param(docs: list[dict]) -> dict[tuple[str | None, str | None], dict]:
-    best: dict[tuple[str | None, str | None], dict] = {}
-    for doc in docs:
-        key = (doc.get("site_id"), doc.get("parameter_code"))
-        current = best.get(key)
-        if current is None or (doc.get("observed_time") or "") >= (
-            current.get("observed_time") or ""
-        ):
-            best[key] = doc
-    return best
+def site_class(site_type_code: str) -> str:
+    return CLASS_BY_CODE.get(site_type_code or "", "other")
 
 
 def to_feature(doc: dict) -> dict | None:
     location = doc.get("location") or {}
+    if isinstance(location, str):  # "lat,lon" geo_point form
+        try:
+            lat_s, lon_s = location.split(",", 1)
+            location = {"lat": float(lat_s), "lon": float(lon_s)}
+        except ValueError:
+            return None
     latitude, longitude = location.get("lat"), location.get("lon")
     if latitude is None or longitude is None:
         return None
@@ -155,7 +168,7 @@ def to_feature(doc: dict) -> dict | None:
             "name": doc.get("site_name") or doc.get("site_id") or "USGS site",
             "usgs_site_id": doc.get("site_id"),
             "site_type_code": site_type_code,
-            "site_type": SITE_TYPE_NAMES.get(site_type_code, site_type_code),
+            "site_type": SITE_TYPE_NAMES.get(site_type_code, site_type_code or "Unknown"),
             "parameter_code": parameter_code,
             "parameter_name": PARAM_NAMES.get(parameter_code, parameter_code),
             "value": doc.get("value"),
@@ -166,44 +179,110 @@ def to_feature(doc: dict) -> dict | None:
     }
 
 
-def write_features(features: list[dict]) -> None:
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", dir=OUT_PATH.parent, suffix=".tmp", delete=False
-    ) as output:
-        temporary_path = Path(output.name)
+def tile_key(lon: float, lat: float) -> str:
+    x = math.floor((lon + 180) / TILE_DEG)
+    y = math.floor((lat + 90) / TILE_DEG)
+    return f"{x}_{y}"
+
+
+def tile_bounds(key: str) -> list[float]:
+    x, y = (int(part) for part in key.split("_"))
+    west = x * TILE_DEG - 180
+    south = y * TILE_DEG - 90
+    return [west, south, west + TILE_DEG, south + TILE_DEG]
+
+
+def write_jsonl(path: Path, features: list[dict]) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as output:
         for feature in features:
             output.write(json.dumps(feature, separators=(",", ":")) + "\n")
-    temporary_path.replace(OUT_PATH)
+    return path.stat().st_size
+
+
+def build_output(features: list[dict], staging: Path) -> dict:
+    by_class: dict[str, list[dict]] = {name: [] for name in CLASSES}
+    for feature in features:
+        by_class[site_class(feature["properties"]["site_type_code"])].append(feature)
+    manifest: dict = {
+        "schema": SCHEMA,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "lookback_days": LOOKBACK_DAYS,
+        "tile_deg": TILE_DEG,
+        "classes": {},
+    }
+    for name in CLASSES:
+        items = sorted(by_class[name], key=lambda f: f["properties"]["usgs_site_id"] or "")
+        entry = {
+            "count": len(items),
+            "file": f"{name}.geojsonl",
+            "bytes": write_jsonl(staging / f"{name}.geojsonl", items),
+        }
+        if name == "stream":
+            tiles: dict[str, list[dict]] = {}
+            for feature in items:
+                lon, lat = feature["geometry"]["coordinates"][:2]
+                tiles.setdefault(tile_key(lon, lat), []).append(feature)
+            entry["tiles"] = {
+                key: {
+                    "count": len(tile),
+                    "bounds": tile_bounds(key),
+                    "file": f"stream/{key}.geojsonl",
+                    "bytes": write_jsonl(staging / "stream" / f"{key}.geojsonl", tile),
+                }
+                for key, tile in sorted(tiles.items())
+            }
+        manifest["classes"][name] = entry
+    (staging / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":")))
+    return manifest
+
+
+def publish(staging: Path, out_dir: Path) -> None:
+    """Swap the new tree in with one rename, so readers never see a partial set."""
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    old = out_dir.with_name(out_dir.name + ".old")
+    if old.exists():
+        shutil.rmtree(old)
+    if out_dir.exists():
+        out_dir.rename(old)
+    staging.rename(out_dir)
+    if old.exists():
+        shutil.rmtree(old)
 
 
 def main() -> int:
     started = time.monotonic()
+    out_dir = Path(os.environ.get("USGS_WATER_OUT_DIR") or DEFAULT_OUT_DIR)
     url, headers = config()
-    docs = fetch_all(url, headers)
-    if not docs:
-        print("ERROR: no documents returned from Elasticsearch", file=sys.stderr)
+    docs = fetch_latest(url, headers)
+    features = [feature for doc in docs if (feature := to_feature(doc))]
+    if not features:
+        print("ERROR: no current readings returned from Elasticsearch", file=sys.stderr)
         return 1
-    newest = latest_per_site_param(docs)
-    features = [feature for doc in newest.values() if (feature := to_feature(doc))]
-    features.sort(key=lambda feature: feature["properties"]["usgs_site_id"] or "")
-    write_features(features)
-    by_type: dict[str, int] = {}
-    for feature in features:
-        site_type = feature["properties"]["site_type_code"] or "?"
-        by_type[site_type] = by_type.get(site_type, 0) + 1
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".usgs_water.", dir=out_dir.parent))
+    try:
+        manifest = build_output(features, staging)
+        publish(staging, out_dir)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+    counts = {name: entry["count"] for name, entry in manifest["classes"].items()}
+    tiles = len(manifest["classes"]["stream"].get("tiles", {}))
+    newest = max((f["properties"]["observed_time"] for f in features), default="")
+    oldest = min((f["properties"]["observed_time"] for f in features), default="")
     print(
-        f"OK: {len(docs)} ES docs -> {len(features)} features "
-        f"({len(newest)} site/parameter pairs) written to {OUT_PATH} "
-        f"in {time.monotonic() - started:.1f}s"
+        f"OK: {len(features)} features ({len(docs)} site/parameter pairs, last "
+        f"{LOOKBACK_DAYS}d) -> {out_dir} in {time.monotonic() - started:.1f}s; "
+        f"classes={json.dumps(counts)} stream_tiles={tiles} "
+        f"observed {oldest} .. {newest}"
     )
-    print("features per site_type: " + json.dumps(dict(sorted(by_type.items()))))
     return 0
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (HTTPError, URLError, RuntimeError, ValueError) as error:
+    except (HTTPError, URLError, RuntimeError, ValueError, KeyError, OSError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         raise SystemExit(1)

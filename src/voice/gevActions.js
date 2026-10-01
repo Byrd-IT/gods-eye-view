@@ -217,6 +217,16 @@ const LAYER_ALIASES = new Map([
   ['water levels', 'local-usgs-water'],
   ['usgs water', 'local-usgs-water'],
   ['usgs water levels', 'local-usgs-water'],
+  ['rivers', 'local-usgs-water'],
+  ['streams', 'local-usgs-water'],
+  ['river gauges', 'local-usgs-water'],
+  ['wells', 'local-usgs-wells'],
+  ['groundwater', 'local-usgs-wells'],
+  ['groundwater wells', 'local-usgs-wells'],
+  ['lakes', 'local-usgs-lakes'],
+  ['reservoirs', 'local-usgs-lakes'],
+  ['lakes and reservoirs', 'local-usgs-lakes'],
+  ['springs', 'local-usgs-springs'],
   ['submarine cables', 'telegeography-submarine-cables'],
   ['cables', 'telegeography-submarine-cables'],
   ['telegeography', 'telegeography-submarine-cables'],
@@ -4184,7 +4194,10 @@ function cleanText(value) {
 function layerTitle(layerId) {
   if (layerId === 'local-datacenters') return 'Datacenter';
   if (layerId === 'local-dams') return 'Dam';
-  if (layerId === 'local-usgs-water') return 'USGS Water Level';
+  if (layerId === 'local-usgs-water') return 'USGS River Gauge';
+  if (layerId === 'local-usgs-wells') return 'USGS Groundwater Well';
+  if (layerId === 'local-usgs-lakes') return 'USGS Lake/Reservoir';
+  if (layerId === 'local-usgs-springs') return 'USGS Spring';
   if (layerId === 'telegeography-submarine-cables') return 'Submarine Cable';
   if (layerId === 'local-firms') return 'Active Fire';
   return layerId || 'Entity';

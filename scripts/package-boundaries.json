@@ -9,6 +9,7 @@
       "src/data/infrastructure.js",
       "src/data/localGeojsonCore.js",
       "src/data/localGeojsonLod.js",
+      "src/byrdit/usgsWater.js",
       "src/data/inputOwnership.js",
       "src/data/infrastructureOverlayEntry.js"
     ],
@@ -1438,6 +1439,7 @@
       "src/data/localGeojson.js",
       "src/data/localGeojsonCore.js",
       "src/data/localGeojsonLod.js",
+      "src/byrdit/usgsWater.js",
       "src/data/localLayers.js",
       "src/data/local_data/natural_earth/marine.json",
       "src/data/local_data/natural_earth/regions.json",
@@ -2125,6 +2127,7 @@
       "src/data/localGeojson.js",
       "src/data/localGeojsonCore.js",
       "src/data/localGeojsonLod.js",
+      "src/byrdit/usgsWater.js",
       "src/data/local_data/natural_earth/marine.json",
       "src/data/local_data/natural_earth/regions.json",
       "src/data/local_data/neighborhoods/san-francisco.json",

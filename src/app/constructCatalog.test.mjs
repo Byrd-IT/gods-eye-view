@@ -62,7 +62,8 @@ test('catalogs construct distinct layers and classification from their supplied 
     );
   assert.ok(first.get('fire-perimeters'));
   assert.ok(first.get('transit'));
-  assert.equal(first.get('local-usgs-water')?.name, 'USGS Water Levels');
+  assert.equal(first.get('local-usgs-water')?.name, 'USGS Rivers & Streams');
+  assert.equal(first.get('local-usgs-wells')?.name, 'USGS Groundwater Wells');
   const order = first.layers.map(({ id }) => id);
   assert.deepEqual(
     order.slice(order.indexOf('traffic'), order.indexOf('directions') + 1),

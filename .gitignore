@@ -19,3 +19,7 @@ output/
 3d-models/
 pinokio/ENVIRONMENT
 pinokio/.installed
+
+# Byrd-IT: generated every 15 min by scripts/export_usgs_water.py
+/public/byrdit/usgs_water/
+/public/byrdit/.usgs_water.*

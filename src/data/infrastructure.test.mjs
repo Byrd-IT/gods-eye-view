@@ -66,11 +66,12 @@ test('infrastructure factory preserves identity and creates independent state wi
     [
       { id: 'local-datacenters', name: 'Datacenters', source: 'Local' },
       { id: 'local-dams', name: 'Dams', source: 'USACE' },
-      {
-        id: 'local-usgs-water',
-        name: 'USGS Water Levels',
-        source: 'USGS · refreshed every 15 min',
-      },
+      ...[
+        ['local-usgs-water', 'USGS Rivers & Streams'],
+        ['local-usgs-wells', 'USGS Groundwater Wells'],
+        ['local-usgs-lakes', 'USGS Lakes & Reservoirs'],
+        ['local-usgs-springs', 'USGS Springs'],
+      ].map(([id, name]) => ({ id, name, source: 'USGS · refreshed every 15 min' })),
     ],
   );
   first.forEach((layer, index) => {
@@ -98,21 +99,6 @@ test('dataset URLs still name the complete bundled sources', () => {
       .filter((line) => line.trim());
     assert.equal(lines.length, count);
   }
-});
-
-test('USGS water bundle contains point features with current measurements', () => {
-  const lines = readFileSync(
-    new URL('./local_data/usgs_water/usgs_water.geojsonl', import.meta.url),
-    'utf8',
-  )
-    .split('\n')
-    .filter((line) => line.trim());
-  assert.ok(lines.length > 0);
-  const feature = JSON.parse(lines[0]);
-  assert.equal(feature.type, 'Feature');
-  assert.equal(feature.geometry.type, 'Point');
-  assert.equal(typeof feature.properties.usgs_site_id, 'string');
-  assert.equal(typeof feature.properties.observed_time, 'string');
 });
 
 test('two viewers use their supplied contexts and dispose independently', async (t) => {
@@ -215,6 +201,8 @@ test('consumer build includes only infrastructure code and resolves assets under
     'infrastructureOverlayEntry.js',
     'localGeojsonCore.js',
     'localGeojsonLod.js',
+    // Byrd-IT fork: USGS water layers ship with the infrastructure package.
+    'usgsWater.js',
   ]);
   assert.deepEqual(
     entry.imports,
