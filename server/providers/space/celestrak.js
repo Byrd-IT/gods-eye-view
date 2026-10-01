@@ -26,64 +26,69 @@ export function celestrakProxy() {
   const mem = new Map(); // group -> { at: epochMs, body: string }
   const inflight = new Map(); // group -> Promise<{at, body}|null>
 
-  // --- Circuit breaker (added 2026-09-07, Byrd-IT) --------------------------
-  // CelesTrak's usage policy (https://celestrak.org/usage-policy.php) requires
-  // M2M clients to STOP querying on any non-200 response and surface it to a
-  // human; repeatedly retrying through errors gets the source IP firewalled.
-  // Previously every failure only logged a warning and cleared the in-flight
-  // lock, so the very next page load retried all groups — a retry storm that
-  // got our egress IP blackholed. The breaker below opens on failure and
-  // suppresses upstream calls for a backoff window; stale cache is still
-  // served, so the satellites layer degrades rather than disappearing.
-  /** Backoff after the first failure — matches CelesTrak's 2 h update cadence. */
-  const BREAKER_BASE_MS = 2 * 3600_000;
-  /** Ceiling on the exponential backoff. */
-  const BREAKER_MAX_MS = 24 * 3600_000;
-  /** A non-200 HTTP status is an explicit "back off" signal — start harder. */
-  const BREAKER_HTTP_ERROR_MULTIPLIER = 2;
-  /** @type {Map<string, {failures: number, openUntil: number, reason: string}>} */
-  const breaker = new Map();
+  // --- Halt latch (Byrd-IT; replaces the 2026-09-07 backoff breaker) ------
+  // CelesTrak's usage policy (https://celestrak.org/usage-policy.php) and Dr.
+  // Kelso's 2026-09-30 email: on ANY non-200 response, stop querying and
+  // report to a human. A timed backoff still retries on its own, and since
+  // their 2026-09 firewall overhaul an automatic retry during their outage
+  // can get the egress IP firewalled within seconds.
+  //
+  // So the first failed refresh LATCHES a halt that covers every group (the
+  // firewall is per-IP, not per-group). While halted we never contact
+  // CelesTrak; cached data is still served. The halt survives restarts via
+  // HALT_FILE and is only cleared by a human deleting that file after
+  // checking https://celestrak.org. S4 cron `celestrak-halt-check` pages
+  // Telegram while the file exists.
+  const HALT_FILE = path.join(CACHE_DIR, 'celestrak-HALT.json');
+  /** @type {{at: number, group: string, reason: string} | null} */
+  let haltState = null;
 
-  /** True while the breaker is open for `group` (upstream calls suppressed). */
-  function breakerOpen(group) {
-    const b = breaker.get(group);
-    return !!b && Date.now() < b.openUntil;
+  /** Halt marker on disk, or null. Unreadable/foreign content = not halted. */
+  async function readHalt() {
+    try {
+      const parsed = JSON.parse(await fsp.readFile(HALT_FILE, 'utf8'));
+      if (parsed && parsed.halted === true) return parsed;
+    } catch {
+      /* no halt file */
+    }
+    return null;
   }
 
-  /** Opens/extends the breaker for `group` after a failed refresh. */
-  function breakerTrip(group, err) {
-    const prev = breaker.get(group);
-    const failures = (prev?.failures || 0) + 1;
-    // `HTTP <status>` failures are an explicit upstream refusal, not a blip.
-    const isHttpError = /^HTTP \d+/.test(String(err?.message || err));
-    const scale = isHttpError ? BREAKER_HTTP_ERROR_MULTIPLIER : 1;
-    const backoff = Math.min(
-      BREAKER_MAX_MS,
-      BREAKER_BASE_MS * scale * 2 ** (failures - 1),
-    );
+  /**
+   * True if upstream calls are forbidden. The in-memory latch is cleared only
+   * when the file is gone, i.e. a human removed it.
+   */
+  async function isHalted() {
+    const onDisk = await readHalt();
+    if (onDisk) {
+      haltState = onDisk;
+      return true;
+    }
+    if (haltState) {
+      console.info('[celestrak-proxy] halt file removed by operator — upstream re-enabled');
+      haltState = null;
+    }
+    return false;
+  }
+
+  /** Latches the halt after a failed refresh and logs it once. */
+  async function haltOnFailure(group, err) {
     // Upstream error text can contain request URLs, tokens, or an HTML body.
-    // Preserve only the safe HTTP status for diagnostics; network/parse errors
-    // deliberately collapse to a generic label before reaching logs.
+    // Keep only the safe HTTP status; everything else collapses to a label.
     const message = String(err?.message || err);
-    const reason = /^HTTP \d+$/.test(message)
-      ? message
-      : 'upstream request failed';
-    breaker.set(group, { failures, openUntil: Date.now() + backoff, reason });
-    // Log ONLY on the trip, not on every suppressed request — the old code
-    // logged per request and buried the signal under thousands of lines.
+    const reason = /^HTTP \d+$/.test(message) ? message : 'upstream request failed';
+    const already = haltState;
+    haltState = { halted: true, at: Date.now(), group, reason };
+    if (already) return;
     console.warn(
-      `[celestrak-proxy] ${group} refresh failed (${reason}) — breaker OPEN for ` +
-        `${Math.round(backoff / 60_000)} min (failure #${failures}); serving cache if any`,
+      `[celestrak-proxy] ${group} refresh failed (${reason}) — ALL CelesTrak requests HALTED ` +
+        `until an operator deletes ${HALT_FILE}; serving cache if any`,
     );
-  }
-
-  /** Clears the breaker for `group` after a successful refresh. */
-  function breakerReset(group) {
-    if (breaker.has(group)) {
-      console.info(
-        `[celestrak-proxy] ${group} refresh recovered — breaker closed`,
-      );
-      breaker.delete(group);
+    try {
+      await fsp.mkdir(CACHE_DIR, { recursive: true });
+      await fsp.writeFile(HALT_FILE, JSON.stringify(haltState), 'utf8');
+    } catch {
+      console.warn('[celestrak-proxy] halt file write failed — halted in memory only');
     }
   }
 
@@ -174,13 +179,11 @@ export function celestrakProxy() {
           // An out-of-process writer (the Byrd-IT caching relay on S3) may
           // have refreshed this group's cache file since we last read it.
           // Without this check the in-memory copy shadows disk until a
-          // restart, so relay updates would appear to do nothing while the
-          // breaker kept reporting failures.
+          // restart, so relay updates would appear to do nothing.
           const fromDisk = await readDisk(group);
           if (fromDisk && fromDisk.at > entry.at) {
             entry = fromDisk;
             mem.set(group, fromDisk);
-            breakerReset(group);
           }
         }
         if (entry && now - entry.at < TLE_TTL_MS) {
@@ -188,16 +191,16 @@ export function celestrakProxy() {
           return;
         }
         // Stale or missing → refresh, single-flight per group.
-        // Breaker open (recent upstream failure): do NOT contact CelesTrak.
-        // Serve whatever we have and let the backoff window expire first.
-        if (breakerOpen(group)) {
+        // Halted (a previous refresh failed): do NOT contact CelesTrak until a
+        // human clears the halt. Serve whatever we have.
+        if (await isHalted()) {
           if (entry) {
-            send(200, entry.body, 'STALE-BREAKER');
+            send(200, entry.body, 'STALE-HALTED');
           } else {
             send(
               503,
-              'celestrak upstream failing; backing off per usage policy',
-              'BREAKER',
+              'celestrak requests halted after an upstream error; operator must clear it',
+              'HALTED',
             );
           }
           return;
@@ -209,11 +212,10 @@ export function celestrakProxy() {
               .then(async (fresh) => {
                 mem.set(group, fresh);
                 await writeDisk(group, fresh);
-                breakerReset(group);
                 return fresh;
               })
-              .catch((err) => {
-                breakerTrip(group, err);
+              .catch(async (err) => {
+                await haltOnFailure(group, err);
                 return null;
               })
               .finally(() => inflight.delete(group)),
