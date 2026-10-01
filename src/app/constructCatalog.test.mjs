@@ -1,6 +1,7 @@
 import { createSurfaceServices } from './surfaceServices.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { BYRDIT_FORK_LAYER_COUNT } from '../byrdit/forkLayers.js';
 import { createApplicationCatalog } from './constructCatalog.js';
 import { createStandaloneLayerSources } from '../standalone/layerSources.js';
 import { catalogControlServices } from './catalog.js';
@@ -39,8 +40,14 @@ test('catalogs construct distinct layers and classification from their supplied 
     signal: b.signal,
     surface: fixtureSurface(b.signal),
   });
-  // Byrd-IT fork adds local-usgs-water on top of upstream 27
-  assert.ok(first.layers.length >= 27);
+  // Byrd-IT fork registers BYRDIT_FORK_LAYER_COUNT local layers on top of upstream's 29.
+  assert.equal(first.layers.length, 29 + BYRDIT_FORK_LAYER_COUNT);
+  assert.ok(first.get('local-adsb'), 'Local ADS-B is registered');
+  assert.deepEqual(
+    first.metadata.find(({ id }) => id === 'local-adsb'),
+    { id: 'local-adsb', disposition: 'local-only' },
+    'the hardware-local layer is never serialized into links',
+  );
   assert.notEqual(first.weatherClock, second.weatherClock);
   await first.weatherClock.setTarget('2026-09-21T12:00:00.000Z');
   assert.match(
@@ -53,6 +60,7 @@ test('catalogs construct distinct layers and classification from their supplied 
       first.get(id).getDiagnostics().clock.target,
       '2026-09-21T12:00:00.000Z',
     );
+  assert.ok(first.get('fire-perimeters'));
   assert.ok(first.get('transit'));
   assert.equal(first.get('local-usgs-water')?.name, 'USGS Water Levels');
   const order = first.layers.map(({ id }) => id);

@@ -220,6 +220,9 @@ const LAYER_ALIASES = new Map([
   ['submarine cables', 'telegeography-submarine-cables'],
   ['cables', 'telegeography-submarine-cables'],
   ['telegeography', 'telegeography-submarine-cables'],
+  ['fire perimeters', 'fire-perimeters'],
+  ['perimeters', 'fire-perimeters'],
+  ['wildfire perimeters', 'fire-perimeters'],
   ['firms', 'local-firms'],
   ['fires', 'local-firms'],
   ['active fires', 'local-firms'],
@@ -229,6 +232,12 @@ const LAYER_ALIASES = new Map([
   ['license plate readers', 'alpr-cameras'],
   ['license plate cameras', 'alpr-cameras'],
   ['plate readers', 'alpr-cameras'],
+  ['local-adsb', 'local-adsb'],
+  ['local adsb', 'local-adsb'],
+  ['local ads-b', 'local-adsb'],
+  ['my receiver', 'local-adsb'],
+  ['my antenna', 'local-adsb'],
+  ['my sdr', 'local-adsb'],
 ]);
 
 const CITY_ALIASES = new Map([
@@ -1050,6 +1059,17 @@ export function createGevActionRunner({
         Object.assign(out, result);
       }
       return { ...out, hud: styleManager.getControlState().hud };
+    }
+
+    if (name === 'set_cyber_sonar') {
+      if (typeof styleManager?.setCyberSonar !== 'function') {
+        return {
+          ok: false,
+          action: 'set_cyber_sonar',
+          error: 'Cyber sonar controls are unavailable.',
+        };
+      }
+      return { action: 'set_cyber_sonar', ...styleManager.setCyberSonar(args) };
     }
 
     if (name === 'set_detection') {
@@ -4307,6 +4327,7 @@ async function runAnalystQuery(
     return {
       ok: false,
       action: 'analyst_query',
+      ...(result.code ? { code: result.code } : {}),
       error: result.error,
       coverage: result.coverage,
     };
