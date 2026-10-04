@@ -16,14 +16,13 @@ Elasticsearch (composite aggregation + top_hits sorted by observed_time).
 The previous exporter scrolled the first 200k of ~12M unsorted docs, so the
 map showed weeks-old readings.
 
-Set USGS_WATER_ES_URL and either USGS_WATER_ES_API_KEY or both
-USGS_WATER_ES_USERNAME and USGS_WATER_ES_PASSWORD. Optional
+Set USGS_WATER_ES_URL and USGS_WATER_ES_API_KEY (ApiKey only; no
+username/password fallback since t_dc58fb90). Optional
 USGS_WATER_OUT_DIR overrides the output directory (tests).
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import math
 import os
@@ -76,19 +75,12 @@ def config() -> tuple[str, dict[str, str]]:
     url = os.environ.get("USGS_WATER_ES_URL", "").rstrip("/")
     if not url:
         raise RuntimeError("USGS_WATER_ES_URL is required")
-    api_key = os.environ.get("USGS_WATER_ES_API_KEY")
-    username = os.environ.get("USGS_WATER_ES_USERNAME")
-    password = os.environ.get("USGS_WATER_ES_PASSWORD")
-    if api_key:
-        authorization = f"ApiKey {api_key}"
-    elif username and password:
-        basic = base64.b64encode(f"{username}:{password}".encode()).decode()
-        authorization = f"Basic {basic}"
-    else:
-        raise RuntimeError(
-            "set USGS_WATER_ES_API_KEY or both USGS_WATER_ES_USERNAME and "
-            "USGS_WATER_ES_PASSWORD"
-        )
+    api_key = (os.environ.get("USGS_WATER_ES_API_KEY") or "").strip()
+    if not api_key:
+        # t_dc58fb90 2026-10-03: ApiKey ONLY (byrdit-es-gev-usgs-water); the
+        # username/password (elastic) fallback was removed per owner rule.
+        raise RuntimeError("USGS_WATER_ES_API_KEY is required")
+    authorization = f"ApiKey {api_key}"
     return url, {"Authorization": authorization, "Content-Type": "application/json"}
 
 
