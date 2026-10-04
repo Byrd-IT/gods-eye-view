@@ -13,6 +13,9 @@ as plain static files that change every 15 minutes without a module reload.
 
 Readings are the NEWEST per (site, parameter) within LOOKBACK_DAYS, chosen by
 Elasticsearch (composite aggregation + top_hits sorted by observed_time).
+Schema 2: those readings are grouped into ONE feature per gauge with a
+`readings` list (most useful first), so the globe shows one card per gauge
+with its levels instead of stacked duplicate name-only labels.
 The previous exporter scrolled the first 200k of ~12M unsorted docs, so the
 map showed weeks-old readings.
 
@@ -39,7 +42,7 @@ INDEX = "usgs-water-levels"
 LOOKBACK_DAYS = 14
 PAGE_SIZE = 2_000
 TILE_DEG = 4
-SCHEMA = 1
+SCHEMA = 2
 DEFAULT_OUT_DIR = Path(__file__).resolve().parents[1] / "public/byrdit/usgs_water"
 FIELDS = [
     "site_id",
@@ -59,7 +62,11 @@ PARAM_NAMES = {
     "72019": "Depth to water level",
     "62610": "Groundwater level above NGVD29",
     "62611": "Groundwater level above NAVD88",
+    "62614": "Lake elevation above NGVD29",
+    "62615": "Lake elevation above NAVD88",
 }
+# Card order: the reading people look for first comes first. Unknown codes last.
+PARAM_ORDER = ["00065", "00062", "62614", "62615", "00060", "72019", "62611", "62610"]
 SITE_TYPE_NAMES = {
     "ST": "Stream",
     "LK": "Lake/Reservoir",
@@ -140,9 +147,10 @@ def site_class(site_type_code: str) -> str:
     return CLASS_BY_CODE.get(site_type_code or "", "other")
 
 
-def to_feature(doc: dict) -> dict | None:
+def doc_location(doc: dict) -> tuple[float, float] | None:
+    """(lon, lat) from an ES geo_point object or "lat,lon" string, else None."""
     location = doc.get("location") or {}
-    if isinstance(location, str):  # "lat,lon" geo_point form
+    if isinstance(location, str):
         try:
             lat_s, lon_s = location.split(",", 1)
             location = {"lat": float(lat_s), "lon": float(lon_s)}
@@ -151,24 +159,66 @@ def to_feature(doc: dict) -> dict | None:
     latitude, longitude = location.get("lat"), location.get("lon")
     if latitude is None or longitude is None:
         return None
-    parameter_code = doc.get("parameter_code") or ""
-    site_type_code = doc.get("site_type_code") or ""
-    return {
-        "type": "Feature",
-        "geometry": {"type": "Point", "coordinates": [longitude, latitude]},
-        "properties": {
-            "name": doc.get("site_name") or doc.get("site_id") or "USGS site",
-            "usgs_site_id": doc.get("site_id"),
-            "site_type_code": site_type_code,
-            "site_type": SITE_TYPE_NAMES.get(site_type_code, site_type_code or "Unknown"),
-            "parameter_code": parameter_code,
-            "parameter_name": PARAM_NAMES.get(parameter_code, parameter_code),
-            "value": doc.get("value"),
-            "unit": doc.get("unit") or "",
-            "state": doc.get("state_name") or "",
-            "observed_time": doc.get("observed_time") or "",
-        },
-    }
+    return float(longitude), float(latitude)
+
+
+def reading_sort_key(reading: dict) -> tuple[int, str]:
+    code = reading["parameter_code"]
+    rank = PARAM_ORDER.index(code) if code in PARAM_ORDER else len(PARAM_ORDER)
+    return rank, code
+
+
+def group_sites(docs: list[dict]) -> list[dict]:
+    """One feature per gauge (site_id) carrying all of its newest readings."""
+    sites: dict[str, dict] = {}
+    for doc in docs:
+        site_id = doc.get("site_id") or ""
+        if not site_id:
+            continue
+        site = sites.setdefault(site_id, {"doc": doc, "coords": None, "readings": []})
+        if site["coords"] is None:
+            site["coords"] = doc_location(doc)
+            if site["coords"] is not None:
+                site["doc"] = doc
+        parameter_code = doc.get("parameter_code") or ""
+        site["readings"].append(
+            {
+                "parameter_code": parameter_code,
+                "parameter_name": PARAM_NAMES.get(parameter_code, parameter_code),
+                "value": doc.get("value"),
+                "unit": doc.get("unit") or "",
+                "observed_time": doc.get("observed_time") or "",
+            }
+        )
+    features = []
+    for site_id, site in sites.items():
+        if site["coords"] is None:
+            continue
+        doc = site["doc"]
+        readings = sorted(site["readings"], key=reading_sort_key)
+        primary = readings[0]
+        site_type_code = doc.get("site_type_code") or ""
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": list(site["coords"])},
+                "properties": {
+                    "name": doc.get("site_name") or site_id or "USGS site",
+                    "usgs_site_id": site_id,
+                    "site_type_code": site_type_code,
+                    "site_type": SITE_TYPE_NAMES.get(site_type_code, site_type_code or "Unknown"),
+                    "state": doc.get("state_name") or "",
+                    "observed_time": max(r["observed_time"] for r in readings),
+                    # Primary reading kept top-level for schema-1 readers.
+                    "parameter_code": primary["parameter_code"],
+                    "parameter_name": primary["parameter_name"],
+                    "value": primary["value"],
+                    "unit": primary["unit"],
+                    "readings": readings,
+                },
+            }
+        )
+    return features
 
 
 def tile_key(lon: float, lat: float) -> str:
@@ -247,7 +297,7 @@ def main() -> int:
     out_dir = Path(os.environ.get("USGS_WATER_OUT_DIR") or DEFAULT_OUT_DIR)
     url, headers = config()
     docs = fetch_latest(url, headers)
-    features = [feature for doc in docs if (feature := to_feature(doc))]
+    features = group_sites(docs)
     if not features:
         print("ERROR: no current readings returned from Elasticsearch", file=sys.stderr)
         return 1
@@ -264,7 +314,7 @@ def main() -> int:
     newest = max((f["properties"]["observed_time"] for f in features), default="")
     oldest = min((f["properties"]["observed_time"] for f in features), default="")
     print(
-        f"OK: {len(features)} features ({len(docs)} site/parameter pairs, last "
+        f"OK: {len(features)} gauges ({len(docs)} site/parameter pairs, last "
         f"{LOOKBACK_DAYS}d) -> {out_dir} in {time.monotonic() - started:.1f}s; "
         f"classes={json.dumps(counts)} stream_tiles={tiles} "
         f"observed {oldest} .. {newest}"

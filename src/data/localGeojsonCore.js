@@ -5,6 +5,7 @@ import {
   parseGeojsonLines,
 } from '../sources/infrastructureData.js';
 import { createInfrastructureOverlayEntry } from './infrastructureOverlayEntry.js';
+import { isUsgsWaterLayer, usgsWaterCardDetails } from '../byrdit/usgsWaterCopy.js';
 import { isPointerFree } from './inputOwnership.js';
 import {
   selectInfraLod,
@@ -85,6 +86,11 @@ export function localInfrastructureOverlayCopy(properties, layerId) {
     ]);
     if (river && river.toLocaleLowerCase() !== title.toLocaleLowerCase()) {
       details.push(clampCardLine(river));
+    }
+  } else if (isUsgsWaterLayer(layerId)) {
+    // Byrd-IT fork: gauge readings + observation time (src/byrdit/usgsWaterCopy.js).
+    for (const line of usgsWaterCardDetails(props)) {
+      details.push(clampCardLine(line));
     }
   }
 

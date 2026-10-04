@@ -204,6 +204,7 @@ test('consumer build includes only infrastructure code and resolves assets under
     'localGeojsonLod.js',
     // Byrd-IT fork: USGS water layers ship with the infrastructure package.
     'usgsWater.js',
+    'usgsWaterCopy.js',
   ]);
   assert.deepEqual(
     entry.imports,
