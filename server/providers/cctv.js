@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { createCctvCatalog } from './cctv/catalog.js';
 import {
   normalizeFeedType,
@@ -18,6 +19,7 @@ import {
 } from './cctv/constants.js';
 import { sanitizeCctvRangeHeader } from './cctv/range.js';
 import { createHlsPuller } from './cctv/stream.js';
+import { createFeedAvailability, probeFeedGroups } from './cctv/feedAvailability.js';
 import { googleServerApiKey } from './places/google-key.js';
 export { CCTV_FRAME_FETCH_TIMEOUT_MS, fetchCctvImageFromUpstream };
 /**
@@ -60,6 +62,35 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
       message: patch.message || prev.message || '',
       updatedAt: Date.now(),
     });
+  };
+
+  // Byrd-IT fork: location-only cameras (see ./cctv/feedAvailability.js).
+  const feedAvailability = createFeedAvailability({
+    file: path.join(sourceRoot, '.gev-cache', 'cctv-feed-availability.json'),
+  });
+  const feedGroupKey = (source) =>
+    source?.sourceKind === 'txdot-its' && source.cityId
+      ? `txdot:${source.cityId}`
+      : null;
+  let feedProbeInflight = null;
+  const maybeProbeFeedGroups = (sources) => {
+    if (feedProbeInflight) return;
+    feedProbeInflight = probeFeedGroups(
+      sources,
+      feedAvailability,
+      feedGroupKey,
+      async (source) => !!(await fetchTxdotSnapshot(source.snapshotUrl))?.ok,
+    )
+      .then((verdicts) => {
+        if (Object.keys(verdicts).length)
+          console.log('[CCTV] feed group probe:', JSON.stringify(verdicts));
+      })
+      .catch((error) =>
+        console.warn('[CCTV] feed group probe failed:', error?.message || error),
+      )
+      .finally(() => {
+        feedProbeInflight = null;
+      });
   };
 
   /** Snapshot all camera health entries as an array. */
@@ -136,6 +167,7 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
     server.middlewares.use('/api/cctv', async (req, res) => {
       try {
         const sources = await getCctvSources();
+        maybeProbeFeedGroups(sources);
         const sourceById = new Map(
           sources.map((source) => [source.id, source]),
         );
@@ -160,7 +192,13 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
               rangeM: source.rangeM,
               mountHeightM: source.mountHeightM,
               groundElevationM: source.groundElevationM,
-              feedType: normalizeFeedType(source.feedType),
+              // Byrd-IT: 'none' = location-only (no public picture found).
+              feedType: feedAvailability.isUnavailable(
+                source.id,
+                feedGroupKey(source),
+              )
+                ? 'none'
+                : normalizeFeedType(source.feedType),
               sourceKind:
                 source.sourceKind || (source.url ? 'configured' : 'fallback'),
               poseSource: source.poseSource,
@@ -491,6 +529,9 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
           source?.sourceKind === 'txdot-its'
             ? await fetchTxdotSnapshot(upstreamCandidate)
             : await fetchCctvImageFromUpstream(upstreamCandidate);
+        // Byrd-IT: learn cameras with no public picture.
+        if (source && upstreamCandidate)
+          feedAvailability.recordFrame(cameraId, !!upstreamImage?.ok);
         if (upstreamImage?.ok) {
           setHealth(cameraId, {
             status: 'ok',

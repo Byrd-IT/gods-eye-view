@@ -98,7 +98,10 @@ export function createPresentation({
         health?.sourceKind ||
         camera.sourceKind ||
         (camera.feedConfigured ? 'configured' : 'seed'),
-      sourceStatus: health?.status || 'unknown',
+      // Byrd-IT: location-only camera (server found no public picture).
+      sourceStatus: parts.model.isNoFeedType(camera.feedType)
+        ? 'no public feed'
+        : health?.status || 'unknown',
       sourceMessage: health?.message || '',
       sourceLabel: health?.label || camera.provider || '',
       credit: camera.credit || '',
@@ -129,8 +132,13 @@ export function createPresentation({
       calBadge: parts.calibration.deriveCalBadge(camera),
       poseSource: camera.poseSource || null,
       basePose: camera.basePose ? { ...camera.basePose } : null,
-      frameUrl: parts.frames.frameUrlFor(camera, refreshMs),
-      mediaUrl: parts.frames.mediaUrlFor(camera),
+      noFeed: parts.model.isNoFeedType(camera.feedType),
+      frameUrl: parts.model.isNoFeedType(camera.feedType)
+        ? null
+        : parts.frames.frameUrlFor(camera, refreshMs),
+      mediaUrl: parts.model.isNoFeedType(camera.feedType)
+        ? null
+        : parts.frames.mediaUrlFor(camera),
     };
   }
 
