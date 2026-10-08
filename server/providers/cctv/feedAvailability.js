@@ -8,10 +8,13 @@
  *     the camera; any success clears it. A mark expires after
  *     NO_FEED_CAMERA_TTL_MS so the client tries the feed again and the camera
  *     heals by itself when the provider fixes it.
- *  2. Per group (e.g. a TxDOT district): a small sample is probed; if every
- *     sampled camera fails, the whole group is location-only until the next
- *     probe (NO_FEED_GROUP_TTL_MS). Houston's TxDOT district (images live on
- *     Houston TranStar, not its.txdot.gov) is the case this exists for.
+ *  2. Per group (e.g. a TxDOT district): a small sample is probed. If every
+ *     sampled camera fails, the group becomes SUSPECT and is re-probed after
+ *     NO_FEED_SUSPECT_TTL_MS; only a second consecutive all-fail probe makes it
+ *     location-only (until NO_FEED_GROUP_TTL_MS). One upstream blip must not
+ *     hide a working district (seen live: El Paso, 2026-10-08). Houston's TxDOT
+ *     district (images live on Houston TranStar, not its.txdot.gov) is the
+ *     case this exists for.
  *
  * State persists to a small JSON file so a restart does not re-learn it.
  * Pure state + I/O; no HTTP here. Wiring lives in server/providers/cctv.js.
@@ -23,8 +26,10 @@ import path from 'node:path';
 export const NO_FEED_FAILS_TO_MARK = 2;
 export const NO_FEED_CAMERA_TTL_MS = 24 * 60 * 60 * 1000;
 export const NO_FEED_GROUP_TTL_MS = 6 * 60 * 60 * 1000;
+export const NO_FEED_SUSPECT_TTL_MS = 10 * 60 * 1000;
 export const NO_FEED_GROUP_SAMPLE = 3;
 export const NO_FEED_MAX_ENTRIES = 20000;
+const GROUP_STATES = new Set(['ok', 'suspect', 'unavailable']);
 
 /**
  * @param {object} [options]
@@ -41,7 +46,7 @@ export function createFeedAvailability({
   const fails = new Map();
   /** id -> epoch ms when marked location-only */
   const cameras = new Map();
-  /** group key -> { unavailable: boolean, at: epoch ms } */
+  /** group key -> { state: 'ok'|'suspect'|'unavailable', at: epoch ms } */
   const groups = new Map();
   let persistTimer = null;
 
@@ -51,8 +56,8 @@ export function createFeedAvailability({
       for (const [id, at] of Object.entries(saved?.cameras || {}))
         if (Number.isFinite(at)) cameras.set(id, at);
       for (const [key, verdict] of Object.entries(saved?.groups || {}))
-        if (verdict && Number.isFinite(verdict.at))
-          groups.set(key, { unavailable: verdict.unavailable === true, at: verdict.at });
+        if (verdict && Number.isFinite(verdict.at) && GROUP_STATES.has(verdict.state))
+          groups.set(key, { state: verdict.state, at: verdict.at });
       prune();
     } catch {
       /* no saved state yet */
@@ -63,6 +68,8 @@ export function createFeedAvailability({
     const t = now();
     for (const [id, at] of cameras)
       if (t - at >= NO_FEED_CAMERA_TTL_MS) cameras.delete(id);
+    // Suspect verdicts are kept for a full group TTL so the confirming
+    // re-probe can still see them; freshness is judged in groupVerdictFresh.
     for (const [key, verdict] of groups)
       if (t - verdict.at >= NO_FEED_GROUP_TTL_MS) groups.delete(key);
   }
@@ -116,16 +123,32 @@ export function createFeedAvailability({
     }
   }
 
-  /** True while a group's last probe verdict (either way) is still fresh. */
+  /** True while a group's last probe verdict is fresh (suspect = short). */
   function groupVerdictFresh(key) {
     const verdict = groups.get(key);
-    return !!verdict && now() - verdict.at < NO_FEED_GROUP_TTL_MS;
+    if (!verdict) return false;
+    const ttl =
+      verdict.state === 'suspect' ? NO_FEED_SUSPECT_TTL_MS : NO_FEED_GROUP_TTL_MS;
+    return now() - verdict.at < ttl;
   }
 
-  function setGroupVerdict(key, unavailable) {
-    if (!key) return;
-    groups.set(key, { unavailable: unavailable === true, at: now() });
+  /**
+   * Record a probe result. allFailed=true twice in a row (suspect, then
+   * confirm) makes the group unavailable; any success makes it ok.
+   * @returns {'ok'|'suspect'|'unavailable'} the new state
+   */
+  function setGroupVerdict(key, allFailed) {
+    if (!key) return null;
+    const prev = groups.get(key);
+    let state = 'ok';
+    if (allFailed === true)
+      state =
+        prev && (prev.state === 'suspect' || prev.state === 'unavailable')
+          ? 'unavailable'
+          : 'suspect';
+    groups.set(key, { state, at: now() });
     schedulePersist();
+    return state;
   }
 
   /** Location-only right now? (camera mark or group verdict, within TTL) */
@@ -135,14 +158,20 @@ export function createFeedAvailability({
     if (at !== undefined && t - at < NO_FEED_CAMERA_TTL_MS) return true;
     if (!groupKey) return false;
     const verdict = groups.get(groupKey);
-    return !!verdict && verdict.unavailable && t - verdict.at < NO_FEED_GROUP_TTL_MS;
+    return (
+      !!verdict &&
+      verdict.state === 'unavailable' &&
+      t - verdict.at < NO_FEED_GROUP_TTL_MS
+    );
   }
 
   function stats() {
     prune();
     return {
       cameras: cameras.size,
-      groupsUnavailable: [...groups].filter(([, v]) => v.unavailable).map(([k]) => k),
+      groupsUnavailable: [...groups]
+        .filter(([, v]) => v.state === 'unavailable')
+        .map(([k]) => k),
     };
   }
 
@@ -186,8 +215,8 @@ export async function probeFeedGroups(sources, availability, groupKeyFor, probe)
         anyOk = false;
       }
     }
-    availability.setGroupVerdict(key, !anyOk);
-    verdicts[key] = anyOk ? 'ok' : 'location-only';
+    const state = availability.setGroupVerdict(key, !anyOk);
+    verdicts[key] = state === 'unavailable' ? 'location-only' : state;
   }
   return verdicts;
 }

@@ -8,6 +8,7 @@ import {
   probeFeedGroups,
   NO_FEED_CAMERA_TTL_MS,
   NO_FEED_GROUP_TTL_MS,
+  NO_FEED_SUSPECT_TTL_MS,
 } from '../../server/providers/cctv/feedAvailability.js';
 
 // Byrd-IT: cameras with no public picture are served location-only.
@@ -41,7 +42,7 @@ test('a camera mark expires so the feed is retried', () => {
   assert.equal(a.isUnavailable('cam1'), false);
 });
 
-test('group probe: all sampled fail -> group location-only; one ok -> not', async () => {
+test('group probe: two consecutive all-fail probes -> location-only; one ok -> not', async () => {
   let t = 1_000;
   const a = createFeedAvailability({ now: () => t });
   const sources = [
@@ -49,24 +50,40 @@ test('group probe: all sampled fail -> group location-only; one ok -> not', asyn
     ...Array.from({ length: 10 }, (_, i) => ({ id: `dal${i}`, g: 'tx-dal' })),
   ];
   const probed = [];
-  const verdicts = await probeFeedGroups(sources, a, (s) => s.g, async (s) => {
+  const probe = async (s) => {
     probed.push(s.id);
     return s.g === 'tx-dal';
-  });
-  assert.deepEqual(verdicts, { 'tx-hou': 'location-only', 'tx-dal': 'ok' });
+  };
+  let verdicts = await probeFeedGroups(sources, a, (s) => s.g, probe);
+  assert.deepEqual(verdicts, { 'tx-hou': 'suspect', 'tx-dal': 'ok' });
   assert.equal(probed.filter((id) => id.startsWith('hou')).length, 3, 'samples 3 per failing group');
   assert.equal(probed.filter((id) => id.startsWith('dal')).length, 1, 'stops at first success');
+  assert.equal(a.isUnavailable('hou7', 'tx-hou'), false, 'one failed probe only makes it suspect');
+  // Suspect is re-probed soon; ok verdicts are not.
+  probed.length = 0;
+  await probeFeedGroups(sources, a, (s) => s.g, probe);
+  assert.equal(probed.length, 0, 'suspect verdict is fresh for NO_FEED_SUSPECT_TTL_MS');
+  t += NO_FEED_SUSPECT_TTL_MS;
+  verdicts = await probeFeedGroups(sources, a, (s) => s.g, probe);
+  assert.deepEqual(verdicts, { 'tx-hou': 'location-only' }, 'only the suspect group is re-probed');
   assert.equal(a.isUnavailable('hou7', 'tx-hou'), true);
   assert.equal(a.isUnavailable('dal7', 'tx-dal'), false);
-  // Fresh verdicts are not re-probed.
-  probed.length = 0;
-  await probeFeedGroups(sources, a, (s) => s.g, async () => true);
-  assert.equal(probed.length, 0);
-  // After the TTL the group is probed again and can recover.
+  // After the group TTL the group is probed again and can recover.
   t += NO_FEED_GROUP_TTL_MS;
   assert.equal(a.isUnavailable('hou7', 'tx-hou'), false, 'expired verdict is not applied');
   await probeFeedGroups(sources, a, (s) => s.g, async () => true);
   assert.equal(a.isUnavailable('hou7', 'tx-hou'), false);
+});
+
+test('a transient blip does not hide a working group (El Paso case)', async () => {
+  let t = 1_000;
+  const a = createFeedAvailability({ now: () => t });
+  const sources = Array.from({ length: 10 }, (_, i) => ({ id: `elp${i}`, g: 'tx-elp' }));
+  await probeFeedGroups(sources, a, (s) => s.g, async () => false); // blip
+  t += NO_FEED_SUSPECT_TTL_MS;
+  const verdicts = await probeFeedGroups(sources, a, (s) => s.g, async () => true);
+  assert.deepEqual(verdicts, { 'tx-elp': 'ok' });
+  assert.equal(a.isUnavailable('elp3', 'tx-elp'), false);
 });
 
 test('state persists across restarts', async () => {
@@ -75,6 +92,7 @@ test('state persists across restarts', async () => {
   const a = createFeedAvailability({ file });
   a.recordFrame('cam1', false);
   a.recordFrame('cam1', false);
+  a.setGroupVerdict('txdot:tx-hou', true);
   a.setGroupVerdict('txdot:tx-hou', true);
   await a.persistNow();
   const b = createFeedAvailability({ file });
