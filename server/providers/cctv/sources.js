@@ -171,8 +171,9 @@ export async function loadAustinSourcesFromOpenData() {
     const maxRaw = Number(
       process.env.CCTV_AUSTIN_MAX_SOURCES || DEFAULT_AUSTIN_MAX_SOURCES,
     );
+    // Byrd-IT fork: upstream clamps to 300; Austin publishes ~820. Allow all.
     const maxCount = Number.isFinite(maxRaw)
-      ? Math.max(8, Math.min(300, Math.floor(maxRaw)))
+      ? Math.max(8, Math.min(1000, Math.floor(maxRaw)))
       : DEFAULT_AUSTIN_MAX_SOURCES;
     const prioritized = prioritizeSources(unique, maxCount, [AUSTIN_DOWNTOWN]);
     if (prioritized.length < unique.length) {
@@ -969,8 +970,9 @@ export async function loadTxdotSourcesFromOpenData() {
   const maxRaw = Number(
     process.env.CCTV_TXDOT_MAX_SOURCES || DEFAULT_TXDOT_MAX_SOURCES,
   );
+  // Byrd-IT fork: upstream clamps to 2000; TxDOT statewide is ~4,150. Allow all.
   const maxCount = Number.isFinite(maxRaw)
-    ? Math.max(8, Math.min(2000, Math.floor(maxRaw)))
+    ? Math.max(8, Math.min(5000, Math.floor(maxRaw)))
     : DEFAULT_TXDOT_MAX_SOURCES;
   const prioritized = prioritizeSources(cameras, maxCount, TXDOT_ANCHORS);
   console.log(

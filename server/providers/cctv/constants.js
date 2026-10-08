@@ -13,7 +13,9 @@ export const DEFAULT_AUSTIN_MAX_SOURCES = 250;
  */
 export const DEFAULT_CCTV_MAX_SOURCES = 4000;
 /** Hard upper bound for CCTV_MAX_SOURCES; also sizes the health map. */
-export const CCTV_MAX_SOURCES_CEILING = 5000;
+// Byrd-IT fork: upstream ceiling 5000; raised so all Texas cameras fit
+// alongside the other packs (~8,100 total on 2026-10-08).
+export const CCTV_MAX_SOURCES_CEILING = 10000;
 /** Reference point for Austin camera prioritization (Congress & 6th). */
 export const AUSTIN_DOWNTOWN = { lat: 30.2672, lon: -97.7431 };
 /** Caltrans CCTV: one JSON feed per district, identical schema statewide. */
