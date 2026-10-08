@@ -40,8 +40,8 @@ test('catalogs construct distinct layers and classification from their supplied 
     signal: b.signal,
     surface: fixtureSurface(b.signal),
   });
-  // Byrd-IT fork registers BYRDIT_FORK_LAYER_COUNT local layers on top of upstream's 29.
-  assert.equal(first.layers.length, 29 + BYRDIT_FORK_LAYER_COUNT);
+  // Byrd-IT fork registers BYRDIT_FORK_LAYER_COUNT local layers on top of upstream's 30.
+  assert.equal(first.layers.length, 30 + BYRDIT_FORK_LAYER_COUNT);
   assert.ok(first.get('local-adsb'), 'Local ADS-B is registered');
   assert.deepEqual(
     first.metadata.find(({ id }) => id === 'local-adsb'),

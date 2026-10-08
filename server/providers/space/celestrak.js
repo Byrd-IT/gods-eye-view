@@ -176,7 +176,7 @@ export function celestrakProxy() {
           entry = await readDisk(group);
           if (entry) mem.set(group, entry);
         } else if (now - entry.at >= TLE_TTL_MS) {
-          // An out-of-process writer (the Byrd-IT caching relay on S3) may
+          // An out-of-process writer (e.g. a manual cache refresh) may
           // have refreshed this group's cache file since we last read it.
           // Without this check the in-memory copy shadows disk until a
           // restart, so relay updates would appear to do nothing.
