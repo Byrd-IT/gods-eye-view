@@ -609,10 +609,26 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   // Byrd-IT fork water layers. Fork tokens are allocated DOWNWARD from 'zz'
   // (see src/byrdit/forkLayers.js); upstream allocates upward from '0', so
   // the two never meet. Ledger rows live in layerStateTokenReservations.json.
-  Object.freeze({ id: 'local-usgs-lakes', token: 'zx', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'local-usgs-springs', token: 'zw', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'local-usgs-water', token: 'zz', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'local-usgs-wells', token: 'zy', disposition: 'enabled-only' }),
+  Object.freeze({
+    id: 'local-usgs-lakes',
+    token: 'zx',
+    disposition: 'enabled-only',
+  }),
+  Object.freeze({
+    id: 'local-usgs-springs',
+    token: 'zw',
+    disposition: 'enabled-only',
+  }),
+  Object.freeze({
+    id: 'local-usgs-water',
+    token: 'zz',
+    disposition: 'enabled-only',
+  }),
+  Object.freeze({
+    id: 'local-usgs-wells',
+    token: 'zy',
+    disposition: 'enabled-only',
+  }),
   Object.freeze({
     id: 'military',
     token: 'm',
@@ -752,7 +768,9 @@ export function validateLayerStateAllocations(
     .filter(([id, token]) => {
       if (!BYRDIT_FORK_TOKEN_PATTERN.test(token)) return true;
       if (Object.values(baseReservations).includes(token)) {
-        throw new Error(`Byrd-IT fork token ${token} for ${id} is already published`);
+        throw new Error(
+          `Byrd-IT fork token ${token} for ${id} is already published`,
+        );
       }
       return false;
     })

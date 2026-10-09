@@ -26,10 +26,34 @@ const SOURCE = 'USGS · refreshed every 15 min';
 
 /** Byrd-IT water layers in panel order. `cls` matches the exporter classes. */
 export const USGS_WATER_LAYERS = Object.freeze([
-  Object.freeze({ id: 'local-usgs-water', cls: 'stream', name: 'USGS Rivers & Streams', color: '#33ffaa', viewport: true }),
-  Object.freeze({ id: 'local-usgs-wells', cls: 'well', name: 'USGS Groundwater Wells', color: '#c58cff', viewport: false }),
-  Object.freeze({ id: 'local-usgs-lakes', cls: 'lake', name: 'USGS Lakes & Reservoirs', color: '#3fa9ff', viewport: false }),
-  Object.freeze({ id: 'local-usgs-springs', cls: 'spring', name: 'USGS Springs', color: '#ffd23f', viewport: false }),
+  Object.freeze({
+    id: 'local-usgs-water',
+    cls: 'stream',
+    name: 'USGS Rivers & Streams',
+    color: '#33ffaa',
+    viewport: true,
+  }),
+  Object.freeze({
+    id: 'local-usgs-wells',
+    cls: 'well',
+    name: 'USGS Groundwater Wells',
+    color: '#c58cff',
+    viewport: false,
+  }),
+  Object.freeze({
+    id: 'local-usgs-lakes',
+    cls: 'lake',
+    name: 'USGS Lakes & Reservoirs',
+    color: '#3fa9ff',
+    viewport: false,
+  }),
+  Object.freeze({
+    id: 'local-usgs-springs',
+    cls: 'spring',
+    name: 'USGS Springs',
+    color: '#ffd23f',
+    viewport: false,
+  }),
 ]);
 
 /** Parse a JSON Lines body into features (blank lines ignored). */
@@ -68,7 +92,10 @@ export function viewBoxDegrees(viewer) {
  */
 export function selectStreamTiles(tiles, box) {
   if (!box) return { status: 'zoom-in', tiles: [] };
-  if (box.east - box.west > STREAM_MAX_VIEW_DEG || box.north - box.south > STREAM_MAX_VIEW_DEG)
+  if (
+    box.east - box.west > STREAM_MAX_VIEW_DEG ||
+    box.north - box.south > STREAM_MAX_VIEW_DEG
+  )
     return { status: 'zoom-in', tiles: [] };
   const picked = [];
   // Degrees round-trip through radians (Cesium rectangles), so a view that
@@ -77,7 +104,13 @@ export function selectStreamTiles(tiles, box) {
   const EPS = 1e-6;
   for (const [key, tile] of Object.entries(tiles || {})) {
     const [w, s, e, n] = tile.bounds || [];
-    if (e <= box.west + EPS || w >= box.east - EPS || n <= box.south + EPS || s >= box.north - EPS) continue;
+    if (
+      e <= box.west + EPS ||
+      w >= box.east - EPS ||
+      n <= box.south + EPS ||
+      s >= box.north - EPS
+    )
+      continue;
     picked.push({ key, file: tile.file, count: tile.count });
   }
   picked.sort((a, b) => a.key.localeCompare(b.key));
@@ -114,7 +147,9 @@ export function createUsgsWaterLayers(
     let reloadTimer = null;
 
     async function loadManifest(signal) {
-      manifest = JSON.parse(await fetchText(`${base}/manifest.json`, signal, fetchImpl));
+      manifest = JSON.parse(
+        await fetchText(`${base}/manifest.json`, signal, fetchImpl),
+      );
       return manifest;
     }
 
@@ -124,13 +159,17 @@ export function createUsgsWaterLayers(
       if (!cls) throw new Error(`manifest has no ${spec.cls} class`);
       if (!spec.viewport) {
         viewStatus = 'ok';
-        return parseJsonl(await fetchText(`${base}/${cls.file}`, signal, fetchImpl));
+        return parseJsonl(
+          await fetchText(`${base}/${cls.file}`, signal, fetchImpl),
+        );
       }
       const pick = selectStreamTiles(cls.tiles, viewBoxDegrees(viewer));
       viewStatus = pick.status;
       tileKeys = pick.tiles.map((t) => t.key).join(',');
       const bodies = await Promise.all(
-        pick.tiles.map((t) => fetchText(`${base}/${t.file}`, signal, fetchImpl)),
+        pick.tiles.map((t) =>
+          fetchText(`${base}/${t.file}`, signal, fetchImpl),
+        ),
       );
       return bodies.flatMap(parseJsonl);
     };
@@ -147,7 +186,9 @@ export function createUsgsWaterLayers(
         labelMax: 700,
         labelGridPx: 138,
         loadFeatures,
-        ...(screenSpaceEventHandlerFactory ? { screenSpaceEventHandlerFactory } : {}),
+        ...(screenSpaceEventHandlerFactory
+          ? { screenSpaceEventHandlerFactory }
+          : {}),
       },
       services,
     );
@@ -205,7 +246,10 @@ export function createUsgsWaterLayers(
       return stats;
     };
     /** Diagnostics for QA/tests: which stream tiles are loaded. */
-    layer.getViewportDiagnostics = () => ({ status: viewStatus, tiles: tileKeys ? tileKeys.split(',') : [] });
+    layer.getViewportDiagnostics = () => ({
+      status: viewStatus,
+      tiles: tileKeys ? tileKeys.split(',') : [],
+    });
     return layer;
   });
 }

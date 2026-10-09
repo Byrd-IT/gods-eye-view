@@ -56,7 +56,11 @@ export function createFeedAvailability({
       for (const [id, at] of Object.entries(saved?.cameras || {}))
         if (Number.isFinite(at)) cameras.set(id, at);
       for (const [key, verdict] of Object.entries(saved?.groups || {}))
-        if (verdict && Number.isFinite(verdict.at) && GROUP_STATES.has(verdict.state))
+        if (
+          verdict &&
+          Number.isFinite(verdict.at) &&
+          GROUP_STATES.has(verdict.state)
+        )
           groups.set(key, { state: verdict.state, at: verdict.at });
       prune();
     } catch {
@@ -100,7 +104,10 @@ export function createFeedAvailability({
       await fsp.writeFile(tmp, body);
       await fsp.rename(tmp, file);
     } catch (error) {
-      console.warn('[CCTV] feed availability persist failed:', error?.message || error);
+      console.warn(
+        '[CCTV] feed availability persist failed:',
+        error?.message || error,
+      );
     }
   }
 
@@ -128,7 +135,9 @@ export function createFeedAvailability({
     const verdict = groups.get(key);
     if (!verdict) return false;
     const ttl =
-      verdict.state === 'suspect' ? NO_FEED_SUSPECT_TTL_MS : NO_FEED_GROUP_TTL_MS;
+      verdict.state === 'suspect'
+        ? NO_FEED_SUSPECT_TTL_MS
+        : NO_FEED_GROUP_TTL_MS;
     return now() - verdict.at < ttl;
   }
 
@@ -194,7 +203,12 @@ export function createFeedAvailability({
  * @param {(source: object) => string|null} groupKeyFor
  * @param {(source: object) => Promise<boolean>} probe - true if a real image came back.
  */
-export async function probeFeedGroups(sources, availability, groupKeyFor, probe) {
+export async function probeFeedGroups(
+  sources,
+  availability,
+  groupKeyFor,
+  probe,
+) {
   const byGroup = new Map();
   for (const source of sources) {
     const key = groupKeyFor(source);

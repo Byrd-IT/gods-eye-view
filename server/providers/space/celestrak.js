@@ -65,7 +65,9 @@ export function celestrakProxy() {
       return true;
     }
     if (haltState) {
-      console.info('[celestrak-proxy] halt file removed by operator — upstream re-enabled');
+      console.info(
+        '[celestrak-proxy] halt file removed by operator — upstream re-enabled',
+      );
       haltState = null;
     }
     return false;
@@ -76,7 +78,9 @@ export function celestrakProxy() {
     // Upstream error text can contain request URLs, tokens, or an HTML body.
     // Keep only the safe HTTP status; everything else collapses to a label.
     const message = String(err?.message || err);
-    const reason = /^HTTP \d+$/.test(message) ? message : 'upstream request failed';
+    const reason = /^HTTP \d+$/.test(message)
+      ? message
+      : 'upstream request failed';
     const already = haltState;
     haltState = { halted: true, at: Date.now(), group, reason };
     if (already) return;
@@ -88,7 +92,9 @@ export function celestrakProxy() {
       await fsp.mkdir(CACHE_DIR, { recursive: true });
       await fsp.writeFile(HALT_FILE, JSON.stringify(haltState), 'utf8');
     } catch {
-      console.warn('[celestrak-proxy] halt file write failed — halted in memory only');
+      console.warn(
+        '[celestrak-proxy] halt file write failed — halted in memory only',
+      );
     }
   }
 

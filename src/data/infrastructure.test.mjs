@@ -71,7 +71,11 @@ test('infrastructure factory preserves identity and creates independent state wi
         ['local-usgs-wells', 'USGS Groundwater Wells'],
         ['local-usgs-lakes', 'USGS Lakes & Reservoirs'],
         ['local-usgs-springs', 'USGS Springs'],
-      ].map(([id, name]) => ({ id, name, source: 'USGS · refreshed every 15 min' })),
+      ].map(([id, name]) => ({
+        id,
+        name,
+        source: 'USGS · refreshed every 15 min',
+      })),
     ],
   );
   first.forEach((layer, index) => {

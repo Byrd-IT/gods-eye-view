@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { BYRDIT_FORK_LAYER_COUNT, BYRDIT_FORK_LAYER_TOKENS, BYRDIT_FORK_L_FIELD_CHARS } from '../byrdit/forkLayers.js';
+import {
+  BYRDIT_FORK_LAYER_COUNT,
+  BYRDIT_FORK_LAYER_TOKENS,
+  BYRDIT_FORK_L_FIELD_CHARS,
+} from '../byrdit/forkLayers.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   mkdtempSync,
@@ -124,10 +128,17 @@ test('reservation ledger is complete, pinned, and rejects duplicate or malformed
     { ...LAYER_STATE_TOKEN_RESERVATIONS },
   );
   // Byrd-IT fork: upstream count + fork layers (src/byrdit/forkLayers.js).
-  assert.equal(Object.keys(LAYER_STATE_TOKEN_RESERVATIONS).length, 29 + BYRDIT_FORK_LAYER_COUNT);
+  assert.equal(
+    Object.keys(LAYER_STATE_TOKEN_RESERVATIONS).length,
+    29 + BYRDIT_FORK_LAYER_COUNT,
+  );
   assert.deepEqual(
     { ...LAYER_STATE_TOKEN_RESERVATIONS },
-    { ...LEGACY_LAYER_STATE_TOKENS, 'street-level': '0', ...BYRDIT_FORK_LAYER_TOKENS },
+    {
+      ...LEGACY_LAYER_STATE_TOKENS,
+      'street-level': '0',
+      ...BYRDIT_FORK_LAYER_TOKENS,
+    },
   );
   assert.throws(
     () => parseLayerStateTokenReservations(reservationRows.slice(1)),
@@ -266,7 +277,10 @@ test('PR B manually replaces provisional 3 with 4 after PR A publishes 3', () =>
     const corrected = runCheck();
     assert.equal(corrected.status, 0, corrected.stderr);
     // Byrd-IT fork: upstream count + fork layers (src/byrdit/forkLayers.js).
-    assert.match(corrected.stdout, new RegExp(`${30 + BYRDIT_FORK_LAYER_COUNT} published, 1 new`));
+    assert.match(
+      corrected.stdout,
+      new RegExp(`${30 + BYRDIT_FORK_LAYER_COUNT} published, 1 new`),
+    );
   });
 });
 
