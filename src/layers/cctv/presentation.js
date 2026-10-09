@@ -1,6 +1,7 @@
 import { CCTV_AMBIENT_CARD_MAX } from '../../data/cctvLod.js';
 import { ACTIVE_FRAME_REFRESH_MS, IDLE_FRAME_REFRESH_MS } from './policy.js';
 import { headingHudToken, isHeadingEstimated } from './headingConfidence.js';
+import { defineLazyFields } from '../../byrdit/liveVisibility.js';
 
 export function createPresentation({
   state: layerState,
@@ -71,7 +72,8 @@ export function createPresentation({
     const refreshMs = isActive
       ? ACTIVE_FRAME_REFRESH_MS
       : IDLE_FRAME_REFRESH_MS;
-    return {
+    const noFeed = parts.model.isNoFeedType(camera.feedType);
+    const publicState = {
       id: camera.id,
       name: camera.name,
       city: camera.city,
@@ -132,14 +134,15 @@ export function createPresentation({
       calBadge: parts.calibration.deriveCalBadge(camera),
       poseSource: camera.poseSource || null,
       basePose: camera.basePose ? { ...camera.basePose } : null,
-      noFeed: parts.model.isNoFeedType(camera.feedType),
-      frameUrl: parts.model.isNoFeedType(camera.feedType)
-        ? null
-        : parts.frames.frameUrlFor(camera, refreshMs),
-      mediaUrl: parts.model.isNoFeedType(camera.feedType)
-        ? null
-        : parts.frames.mediaUrlFor(camera),
+      noFeed,
     };
+    // Byrd-IT visibility: frame/media URLs are built on first read, not for
+    // every catalog camera on every notify (8k URLSearchParams per notify).
+    return defineLazyFields(publicState, {
+      frameUrl: () =>
+        noFeed ? null : parts.frames.frameUrlFor(camera, refreshMs),
+      mediaUrl: () => (noFeed ? null : parts.frames.mediaUrlFor(camera)),
+    });
   }
 
   /**

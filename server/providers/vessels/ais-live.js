@@ -4,6 +4,10 @@ import { createAisStreamAdapter } from '../../../src/data/aisStreamAdapter.js';
 import { parseSilenceTimeoutEnv } from '../../../src/data/aisWatchdog.js';
 import { clampInt } from '../common/query.js';
 import {
+  upstreamDemandActive,
+  upstreamIdleReleaseMs,
+} from '../../../src/byrdit/upstreamDemand.js';
+import {
   AISSTREAM_CACHE_MAX,
   AISSTREAM_STALE_MS,
   ingestAisStreamEnvelope,
@@ -59,6 +63,10 @@ let _aisWatchdogPolicy = null;
 let _aisStreamTickTimer = null;
 /** Set by dispose so the next ensure() re-derives budgets from a reloaded .env. */
 let _aisNeedsRearm = false;
+/** Byrd-IT visibility: last viewer request for vessels (ms epoch, 0 = never). */
+let _aisLastDemandAt = 0;
+/** Byrd-IT visibility: upstream socket released for lack of viewers. */
+let _aisIdleReleased = false;
 /** @type {Function|null|undefined} `ws` constructor; null = unavailable, undefined = not yet probed. */
 let _aisWebSocketImpl;
 
@@ -74,6 +82,9 @@ export function aisLiveProxy() {
     middlewares.use('/api/vessels', async (req, res) => {
       try {
         res.setHeader('X-Feed-Source', 'AISStream');
+        // Byrd-IT visibility: a viewer asked — (re)open the upstream feed.
+        _aisLastDemandAt = Date.now();
+        _aisIdleReleased = false;
         ensureAisStreamConnection();
         const incoming = new URL(req.url || '', 'http://localhost');
 
@@ -334,6 +345,18 @@ function startAisStreamWatchdogTick() {
   if (_aisStreamTickTimer) return;
   _aisStreamTickTimer = setInterval(() => {
     try {
+      // Byrd-IT visibility: keep the upstream socket only while a viewer
+      // asked for vessels recently; never connect at startup for nobody.
+      if (
+        !upstreamDemandActive(
+          _aisLastDemandAt,
+          Date.now(),
+          upstreamIdleReleaseMs(),
+        )
+      ) {
+        releaseIdleAisStream();
+        return;
+      }
       ensureAisStreamConnection();
     } catch (error) {
       console.warn('[AISStream] watchdog tick failed', error?.message || '');
@@ -365,6 +388,21 @@ function disposeAisStream() {
   // it, caching the outgoing configuration; the next ensure() runs after that.
   _aisWatchdogPolicy = null;
   _aisNeedsRearm = true;
+}
+
+/**
+ * Byrd-IT visibility: close the upstream socket once nobody has asked for
+ * vessels within the idle window. Same re-arm path as a dev-server restart,
+ * so the next /api/vessels request reconnects. The tick keeps running.
+ */
+function releaseIdleAisStream() {
+  if (_aisIdleReleased || !_aisAdapter) return;
+  _aisIdleReleased = true;
+  _aisAdapter.dispose();
+  _aisWatchdogPolicy = null;
+  _aisNeedsRearm = true;
+  if (_aisLastDemandAt > 0)
+    console.log('[AISStream] no viewers; upstream socket released');
 }
 
 function aisStreamSubscription() {

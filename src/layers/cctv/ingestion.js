@@ -33,7 +33,11 @@ export function createIngestion({
         // exists, so this latch effectively fires for the google-3d regime —
         // terrain-globe records resolve from the prior in their drain pass.
         const unresolved = layerState._records.filter(
-          (record) => !parts.ground.isGroundResolved(record),
+          (record) =>
+            // Byrd-IT visibility: only cameras the drain already visited
+            // (on-screen ones); off-screen cameras refine when shown.
+            record.byrditGeometryRefined &&
+            !parts.ground.isGroundResolved(record),
         );
         if (unresolved.length)
           parts.geometryQueue.enqueueGeometryRefresh(unresolved);

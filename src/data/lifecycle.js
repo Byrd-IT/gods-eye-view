@@ -527,6 +527,10 @@ export class LayerLifecycle {
           : 0;
     if (refreshInterval > 0) {
       entry.intervalId = setInterval(() => {
+        // Byrd-IT visibility: no live-layer polling while the app reports
+        // the tab hidden (src/app/tools.js); the first tick after the tab
+        // returns refreshes as usual.
+        if (this.pollingSuspended) return;
         void this._runPeriodicUpdate(layerId, entry);
       }, refreshInterval);
     } else if (updateInterval === 0) {

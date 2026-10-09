@@ -1,4 +1,5 @@
 import { createCctvVideoSurface } from './cctvVideo.js';
+import { panelPreviewVisible } from '../byrdit/liveVisibility.js';
 export function _calBadgeLabel(badge) {
   switch (badge) {
     case 'calibrated':
@@ -196,6 +197,12 @@ export function _renderCctvState(state) {
     // immediate so navigation never waits on the prior camera's request.
     if (
       nextSrc &&
+      // Byrd-IT visibility: no preview fetch for a hidden tab or a collapsed
+      // panel; the next notify after it becomes visible refreshes it.
+      panelPreviewVisible({
+        hidden: typeof document !== 'undefined' && document.hidden,
+        collapsed: !!this._cctvPanel?.classList.contains('collapsed'),
+      }) &&
       (cameraChanged ||
         (!frameLoading && this._cctvFrame.dataset.currentSrc !== nextSrc))
     ) {

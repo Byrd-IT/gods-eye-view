@@ -1,4 +1,11 @@
 import * as Cesium from 'cesium';
+import { horizonOccluder } from '../../data/iconOrientation.js';
+import {
+  createViewTest,
+  documentHidden,
+  pruneOffscreenQueue,
+  visibleRecordsNeedingGeometry,
+} from '../../byrdit/liveVisibility.js';
 import {
   GEO_PROGRESS_NOTIFY_INTERVAL_MS,
   GEO_PROGRESS_NOTIFY_BATCH_LIMIT,
@@ -200,6 +207,12 @@ export function createGeometryQueue({
       stopGeometryLoadQueue();
       return;
     }
+    // Byrd-IT visibility: a hidden tab does no per-camera ground work; the
+    // drain resumes where it stopped once the tab is visible again.
+    if (documentHidden()) {
+      layerState._geoQueueTimer = setTimeout(processGeometryBatch, 1000);
+      return;
+    }
     // Active-camera-first is re-established every batch because the operator
     // can select a new camera while a long catalog drain is in flight.
     prioritizeActiveCctvGeometryRecord(
@@ -215,6 +228,9 @@ export function createGeometryQueue({
           document.body?.classList.contains('cockpit-mode'),
       }),
       visit: (record) => {
+        // Byrd-IT visibility: one-shot latch so camera-settle passes never
+        // re-queue a camera the drain already grounded.
+        record.byrditGeometryRefined = true;
         try {
           parts.geometry.updateRecordGeometry(record);
         } catch (err) {
@@ -303,7 +319,9 @@ export function createGeometryQueue({
     const refLon = carto
       ? Cesium.Math.toDegrees(carto.longitude)
       : (active?.camera.lon ?? 0);
-    const pending = layerState._records
+    // Byrd-IT visibility: only on-screen cameras (below the refine height)
+    // get ground lookups now; the rest refine when they scroll into view.
+    const pending = visibleGeometryCandidates()
       .filter((record) => record !== active)
       .map((record) => ({
         record,
@@ -325,6 +343,52 @@ export function createGeometryQueue({
     );
     layerState._geoQueueTimer = setTimeout(processGeometryBatch, 0);
   }
+
+  /**
+   * Byrd-IT visibility: records on screen (horizon + viewport margin) that
+   * the drain has not visited yet. Empty above the refine height or while
+   * the tab is hidden.
+   * @returns {Object[]}
+   */
+  function visibleGeometryCandidates() {
+    const viewer = layerState._viewer;
+    if (!viewer || viewer.isDestroyed?.()) return [];
+    const inView = createViewTest(viewer, horizonOccluder(viewer.camera));
+    const carto = viewer.camera?.positionCartographic;
+    const lat = carto ? Cesium.Math.toDegrees(carto.latitude) : 0;
+    const lon = carto ? Cesium.Math.toDegrees(carto.longitude) : 0;
+    return visibleRecordsNeedingGeometry(layerState._records, inView, {
+      viewerHeightM: carto?.height,
+      hidden: documentHidden(),
+      distanceOf: (record) =>
+        parts.model.haversineKm(lat, lon, record.camera.lat, record.camera.lon),
+    });
+  }
+
+  /**
+   * Byrd-IT visibility: camera-settle hook. Drops queued cameras that left
+   * the screen, then queues cameras that just came on screen (one-shot per
+   * record, nearest first, bounded per pass) through the normal drain.
+   */
+  function enqueueVisibleGeometry() {
+    if (!layerState._enabled || !layerState._viewer) return;
+    if (layerState._geoQueue.length) {
+      const viewer = layerState._viewer;
+      const inView = createViewTest(viewer, horizonOccluder(viewer.camera));
+      const before = layerState._geoQueue.length;
+      layerState._geoQueue = pruneOffscreenQueue(
+        layerState._geoQueue,
+        inView,
+        parts.selection.getActiveRecord(),
+      );
+      if (layerState._geoLoading)
+        layerState._geoLoadTotal -= before - layerState._geoQueue.length;
+    }
+    const records = visibleGeometryCandidates().filter(
+      (record) => !layerState._geoQueue.includes(record),
+    );
+    if (records.length) enqueueGeometryRefresh(records);
+  }
   return {
     stopGeometryLoadQueue,
     createGeometryProgressNotifier,
@@ -335,5 +399,6 @@ export function createGeometryQueue({
     processGeometryBatch,
     enqueueGeometryRefresh,
     startGeometryLoadQueue,
+    enqueueVisibleGeometry,
   };
 }

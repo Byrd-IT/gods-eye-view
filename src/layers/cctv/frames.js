@@ -11,6 +11,11 @@ import {
   PROJECTION_IDLE_REFRESH_MS,
   PLACEHOLDER_REPAINT_MS,
 } from './policy.js';
+import { horizonOccluder } from '../../data/iconOrientation.js';
+import {
+  ACTIVE_CAMERA_MARGIN,
+  createViewTest,
+} from '../../byrdit/liveVisibility.js';
 
 export function createFrames({ state: layerState, services, parts, source }) {
   /**
@@ -208,6 +213,25 @@ export function createFrames({ state: layerState, services, parts, source }) {
   }
 
   /**
+   * Byrd-IT visibility: is the record's mount (with the wide active-camera
+   * margin for the monitor plane) on screen right now? Unknown → true, so a
+   * missing viewer never blocks a picture.
+   */
+  function activeRecordInView(record) {
+    const viewer = layerState._viewer;
+    if (!viewer?.scene || !record?.position) return true;
+    try {
+      return createViewTest(
+        viewer,
+        horizonOccluder(viewer.camera),
+        ACTIVE_CAMERA_MARGIN,
+      )(record.position);
+    } catch {
+      return true;
+    }
+  }
+
+  /**
    * Triggers a new frame fetch for an image-mode projection if the refresh
    * interval has elapsed. Active cameras refresh more frequently than idle ones.
    * @param {Object} record - Camera record.
@@ -231,6 +255,10 @@ export function createFrames({ state: layerState, services, parts, source }) {
         ? PROJECTION_ACTIVE_REFRESH_MS
         : PROJECTION_IDLE_REFRESH_MS;
     if (!force && now - runtime.lastImageRefreshAt < refreshMs) return;
+    // Byrd-IT visibility: no new picture for a camera whose plane is off
+    // screen (panned away / far side of the globe). Forced refreshes (fresh
+    // activation) still run; the next tick after it scrolls back in fetches.
+    if (!force && !activeRecordInView(record)) return;
     runtime.lastImageRefreshAt = now;
 
     const frameUrl = frameUrlFor(record.camera, refreshMs);
@@ -362,6 +390,7 @@ export function createFrames({ state: layerState, services, parts, source }) {
     mediaUrlFor,
     paintProjectionPlaceholder,
     refreshProjectionImage,
+    activeRecordInView,
     paintPlaceholderThrottled,
     drawProjectionFrame,
   };

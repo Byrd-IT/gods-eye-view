@@ -251,6 +251,9 @@ export function createLifecycle({
           layerState._cameraMoving = false;
           parts.rendering.refreshHorizonCulling();
           parts.cards.refreshAmbientCards();
+          // Byrd-IT visibility: cameras that just came on screen get their
+          // one-shot ground refinement now (never off-screen ones).
+          parts.geometryQueue.enqueueVisibleGeometry();
         };
         layerState._viewer.camera.moveEnd.addEventListener(
           layerState._horizonCullListener,

@@ -124,6 +124,8 @@ export function createApplicationTools({
     const hidden = document.hidden && !isEmbeddedInline();
     viewer.useDefaultRenderLoop = !hidden;
     cockpitCloudEffects?.setSuspended?.(hidden);
+    // Byrd-IT visibility: live layers stop polling behind a hidden tab.
+    dataManager.pollingSuspended = hidden;
     if (!hidden) {
       data.presentation.flushVisible();
       governorRequestRender('visibility-restore');

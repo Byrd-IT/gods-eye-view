@@ -44,6 +44,7 @@
     "exports": ["./server/providers/live"],
     "modules": [
       "server/providers/live.js",
+      "src/byrdit/upstreamDemand.js",
       "server/providers/common/http.js",
       "server/providers/common/query.js",
       "server/providers/aircraft/opensky.js",
@@ -166,6 +167,7 @@
     "modules": [
       "server/providers/cctv.js",
       "server/providers/cctv/cap.js",
+      "server/providers/cctv/feedAvailability.js",
       "server/providers/cctv/groundHeights.js",
       "server/providers/cctv/catalog.js",
       "server/providers/cctv/constants.js",
@@ -470,6 +472,7 @@
   "cctv-controls": {
     "exports": ["./ui/cctv"],
     "modules": [
+      "src/byrdit/liveVisibility.js",
       "src/ui/cctv.js",
       "src/ui/cctvBindings.js",
       "src/ui/cctvCalibration.js",
@@ -538,6 +541,7 @@
   "ui-shell": {
     "exports": ["./ui/shell"],
     "modules": [
+      "src/byrdit/liveVisibility.js",
       "src/hudLayouts.js",
       "src/hudLayoutPolicy.js",
       "src/cyberSonar.js",
@@ -1149,6 +1153,7 @@
   "cctv-layer": {
     "exports": ["./layers/cctv"],
     "modules": [
+      "src/byrdit/liveVisibility.js",
       "src/data/cctvCards.js",
       "src/data/cctvGizmo.js",
       "src/data/cctvLod.js",
@@ -1413,6 +1418,7 @@
       "./standalone/catalog"
     ],
     "modules": [
+      "src/byrdit/liveVisibility.js",
       "src/cyberSonarScene.js",
       "src/cyberSonar.js",
       "src/hudLayouts.js",
@@ -2213,6 +2219,7 @@
   "application-layer-construction": {
     "exports": ["./application/layers"],
     "modules": [
+      "src/byrdit/liveVisibility.js",
       "src/cyberSonar.js",
       "src/data/bhoteKoshiEvent.js",
       "src/ui/imagerySplit.js",
