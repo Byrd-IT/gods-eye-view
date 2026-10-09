@@ -19,7 +19,10 @@ import {
 } from './cctv/constants.js';
 import { sanitizeCctvRangeHeader } from './cctv/range.js';
 import { createHlsPuller } from './cctv/stream.js';
-import { createFeedAvailability, probeFeedGroups } from './cctv/feedAvailability.js';
+import {
+  createFeedAvailability,
+  probeFeedGroups,
+} from './cctv/feedAvailability.js';
 import { googleServerApiKey } from './places/google-key.js';
 export { CCTV_FRAME_FETCH_TIMEOUT_MS, fetchCctvImageFromUpstream };
 /**
@@ -86,7 +89,10 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
           console.log('[CCTV] feed group probe:', JSON.stringify(verdicts));
       })
       .catch((error) =>
-        console.warn('[CCTV] feed group probe failed:', error?.message || error),
+        console.warn(
+          '[CCTV] feed group probe failed:',
+          error?.message || error,
+        ),
       )
       .finally(() => {
         feedProbeInflight = null;

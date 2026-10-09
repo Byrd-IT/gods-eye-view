@@ -357,7 +357,14 @@ const layers = [
   // --- Byrd-IT fork: USGS water layers (src/byrdit/usgsWater.js) ---
   {
     id: 'local-usgs-water',
-    aliases: ['water levels', 'usgs water', 'usgs water levels', 'rivers', 'streams', 'river gauges'],
+    aliases: [
+      'water levels',
+      'usgs water',
+      'usgs water levels',
+      'rivers',
+      'streams',
+      'river gauges',
+    ],
     context: false,
     noQuery: 'USGS gauge readings are shown on cards, not loaded for queries',
   },
