@@ -5,7 +5,7 @@ import { BROWSER_CSP, createBrowserViteConfig } from '../../build/vite.js';
 import standaloneConfig, * as compatibility from '../../vite.config.js';
 import * as providers from '../../server/providers/local.js';
 
-test('explicit build inputs preserve browser-only defines, plugin order and loopback protections', () => {
+test('explicit build inputs preserve plugin order and loopback protections', () => {
   const plugin = { name: 'fixture-provider' };
   const config = createBrowserViteConfig({
     plugins: [plugin],
@@ -35,16 +35,11 @@ test('explicit build inputs preserve browser-only defines, plugin order and loop
   }
   assert.ok(!csp.includes("script-src 'self' 'unsafe-inline'"));
   assert.deepEqual(config.preview.headers, config.server.headers);
-  assert.deepEqual(config.define, {
-    'import.meta.env.GOOGLE_MAPS_API_KEY': '"browser-fixture"',
-    'import.meta.env.CESIUM_ION_TOKEN': '"ion-fixture"',
-    'import.meta.env.MAPILLARY_CLIENT_TOKEN': '""',
-  });
+  // Provider keys are never baked into the bundle, whatever a caller passes.
+  assert.equal(config.define, undefined);
   assert.equal(
-    createBrowserViteConfig({ mapillaryToken: 'MLY|1|abc' }).define[
-      'import.meta.env.MAPILLARY_CLIENT_TOKEN'
-    ],
-    '"MLY|1|abc"',
+    createBrowserViteConfig({ mapillaryToken: 'MLY|1|abc' }).define,
+    undefined,
   );
   // A wildcard bind keeps the Host-header check; LAN names are explicit.
   for (const host of ['0.0.0.0', '::'])
@@ -70,10 +65,7 @@ test('build helper does not discover environment values or construct local provi
   process.env.GOOGLE_MAPS_API_KEY = 'environment-fixture';
   try {
     const config = createBrowserViteConfig();
-    assert.equal(
-      config.define['import.meta.env.GOOGLE_MAPS_API_KEY'],
-      undefined,
-    );
+    assert.equal(config.define, undefined);
     assert.deepEqual(
       config.plugins.slice(3).map((plugin) => plugin.name),
       ['embed-framing', 'panel-build'],

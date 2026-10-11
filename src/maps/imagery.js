@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { ionRequestOptions } from '../byrdit/serverKeys.js';
 
 // Attribution and service rights are documented in DATA_SOURCES.md.
 export const ESRI_ATTRIBUTION_HTML =
@@ -25,5 +26,8 @@ export function createEsriImagery() {
 export function createIonImagery(style, accessToken) {
   accessToken = String(accessToken || '').trim();
   if (!accessToken) throw new Error('Ion imagery requires an explicit token');
-  return Cesium.IonImageryProvider.fromAssetId(style, { accessToken });
+  return Cesium.IonImageryProvider.fromAssetId(
+    style,
+    ionRequestOptions(accessToken),
+  );
 }

@@ -1,6 +1,5 @@
 import {
   IMAGE_FIELDS,
-  MAPILLARY_GRAPH_HOST,
   NEAREST_LIMIT,
   NEAREST_RADIUS_M,
   SEQUENCE_IMAGE_FIELDS,
@@ -40,29 +39,25 @@ async function readJsonOrThrow(response, label) {
 }
 
 /**
- * Mapillary network access: tiles via the local proxy, which adds the token
- * and caches; Graph API lookups direct with the client token, as MapillaryJS.
- * @param {{token?: string, fetchImpl?: Function, endpoints?: object}} options
+ * Mapillary network access: tiles and Graph API lookups both go through this
+ * app's server, which adds the client token (the browser never holds it).
+ * `configured` is learned from the status route.
+ * @param {{fetchImpl?: Function, endpoints?: object}} options
  */
 export function createMapillarySource({
-  token = '',
   fetchImpl = (...args) => globalThis.fetch(...args),
   endpoints = {},
 } = {}) {
   const urls = {
     status: '/api/mapillary/status',
     tiles: '/api/mapillary/tiles',
-    graph: MAPILLARY_GRAPH_HOST,
+    graph: '/api/mapillary/graph',
     ...endpoints,
   };
+  let configured = false;
 
   async function graph(path, params = {}, { signal } = {}) {
-    if (!token)
-      throw new MapillarySourceError('Mapillary token not configured', {
-        status: 503,
-        payload: { keyRequired: true },
-      });
-    const search = new URLSearchParams({ access_token: token, ...params });
+    const search = new URLSearchParams(params);
     const response = await fetchImpl(`${urls.graph}/${path}?${search}`, {
       signal,
     });
@@ -70,17 +65,26 @@ export function createMapillarySource({
   }
 
   return {
-    get token() {
-      return token;
+    /** Absolute Graph endpoint (with trailing slash) for MapillaryJS. */
+    get graphEndpoint() {
+      // MapillaryJS resolves paths against this with `new URL`, so it must be
+      // absolute and end in a slash.
+      return new URL(
+        `${urls.graph.replace(/\/$/, '')}/`,
+        globalThis.location?.href ?? 'http://localhost/',
+      ).href;
     },
-    hasToken: () => Boolean(token),
+    /** True once the server has said it holds a token. */
+    hasToken: () => configured,
 
     async getStatus({ signal } = {}) {
       const response = await fetchImpl(urls.status, {
         signal,
         cache: 'no-store',
       });
-      return readJsonOrThrow(response, 'Mapillary status');
+      const status = await readJsonOrThrow(response, 'Mapillary status');
+      configured = status?.configured === true;
+      return status;
     },
 
     /** Raw protobuf bytes for one tile; an empty array means no data. */

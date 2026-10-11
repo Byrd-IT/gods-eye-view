@@ -22,6 +22,7 @@ registerHooks({
     const source = url.includes('/library?')
       ? 'const lib = await globalThis.__gevMapillaryLibrary();\n' +
         'export const Viewer = lib.Viewer;\n' +
+        'export const GraphDataProvider = lib.GraphDataProvider;\n' +
         'export const RenderMode = lib.RenderMode;\n'
       : 'export default {};\n';
     return { format: 'module', shortCircuit: true, source };
@@ -405,14 +406,22 @@ function fakeLibrary() {
   }
   globalThis.__gevMapillaryLibrary = async () => {
     await gate.promise;
-    return { Viewer, RenderMode: {} };
+    // Records the endpoint it was given; the real one fetches from it.
+    class GraphDataProvider {
+      constructor(options) {
+        this.options = options;
+      }
+    }
+    return { Viewer, GraphDataProvider, RenderMode: {} };
   };
   return { gate, viewers };
 }
 
 test('the Mapillary viewer survives the layer going off and on during its first download', async () => {
   const { gate, viewers } = fakeLibrary();
-  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const adapter = createMapillaryViewer({
+    source: { graphEndpoint: 'http://gev.test/api/mapillary/graph/' },
+  });
   const { state, host } = harness(adapter);
   const first = host.open('mapillary', 'img1');
   await Promise.resolve();
@@ -431,7 +440,9 @@ test('the Mapillary viewer survives the layer going off and on during its first 
 
 test('a Mapillary viewer unmounted mid-download is never built; the next mount builds afresh', async () => {
   const { gate, viewers } = fakeLibrary();
-  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const adapter = createMapillaryViewer({
+    source: { graphEndpoint: 'http://gev.test/api/mapillary/graph/' },
+  });
   const element = {};
   const stale = adapter.mount(element);
   adapter.unmount();
@@ -447,7 +458,9 @@ test('a Mapillary viewer unmounted mid-download is never built; the next mount b
 
 test('a prewarm that gave up when the layer went off and on mid-download is followed by one that builds', async () => {
   const { gate, viewers } = fakeLibrary();
-  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const adapter = createMapillaryViewer({
+    source: { graphEndpoint: 'http://gev.test/api/mapillary/graph/' },
+  });
   const element = {};
   const first = adapter.prewarm(element);
   adapter.unmount(); // layer off while MapillaryJS downloads
@@ -462,7 +475,9 @@ test('a prewarm that gave up when the layer went off and on mid-download is foll
 test('the Mapillary viewer leaves resizing to the panel, so a hidden one never asks for z=NaN', async () => {
   const { gate, viewers } = fakeLibrary();
   gate.resolve();
-  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const adapter = createMapillaryViewer({
+    source: { graphEndpoint: 'http://gev.test/api/mapillary/graph/' },
+  });
   await adapter.mount({});
   assert.equal(viewers.instances[0].options.trackResize, false);
   adapter.unmount();
@@ -471,7 +486,9 @@ test('the Mapillary viewer leaves resizing to the panel, so a hidden one never a
 test('closing the photo stops sequence playback in the hidden viewer', async () => {
   const { gate, viewers } = fakeLibrary();
   gate.resolve();
-  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const adapter = createMapillaryViewer({
+    source: { graphEndpoint: 'http://gev.test/api/mapillary/graph/' },
+  });
   const { host } = harness(adapter);
   await host.open('mapillary', 'img1');
   const [viewer] = viewers.instances;
@@ -499,7 +516,9 @@ test('closing the photo or switching the layer off stops its framing flight', as
 async function mountedMapillary() {
   const library = fakeLibrary();
   library.gate.resolve();
-  const adapter = createMapillaryViewer({ source: { token: 't' } });
+  const adapter = createMapillaryViewer({
+    source: { graphEndpoint: 'http://gev.test/api/mapillary/graph/' },
+  });
   const poses = [];
   adapter.onPose((pose) => poses.push(pose));
   await adapter.mount({});
@@ -575,4 +594,25 @@ test('a photo asks for the camera when it starts opening and frames with that ti
   state.street.follow = true;
   assert.equal(await host.open('mapillary', 'b'), true);
   assert.deepEqual([framing.begun, framing.started], [1, 1]);
+});
+
+test('the Mapillary viewer gets a same-origin data provider and no access token', async () => {
+  const { gate, viewers } = fakeLibrary();
+  const adapter = createMapillaryViewer({
+    source: {
+      graphEndpoint: 'http://gev.test/api/mapillary/graph/',
+      token: 'must-not-be-used',
+    },
+  });
+  const { host } = harness(adapter);
+  const opened = host.open('mapillary', 'img1');
+  gate.resolve();
+  await opened;
+  const { options } = viewers.instances[0] ?? viewers.instances.at(-1) ?? {};
+  assert.ok(options, 'a viewer was constructed');
+  assert.equal('accessToken' in options, false);
+  assert.equal(
+    options.dataProvider.options.endpoint,
+    'http://gev.test/api/mapillary/graph/',
+  );
 });

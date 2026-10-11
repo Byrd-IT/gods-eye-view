@@ -28,8 +28,9 @@ export const KEY_SETUP_APPEND_HEADER =
  * Provider credentials, in display order — most magic per
  * minute first. `tier` mirrors the README's color legend: 'metered' (🔴) is a
  * billing-enabled account, 'free' (🟡) is a register-and-paste key.
- * `clientExposed` marks the keys that are injected into the browser
- * bundle by design (restrict them at the provider, per SECURITY.md).
+ * Fork: no key is injected into the browser bundle any more (Cesium ion,
+ * Mapillary and Google stay on the server), so `clientExposed` is unset for
+ * every entry; the field remains for embedders that do ship a browser key.
  * `hidden` keeps advanced configuration out of the panel and missing-key count.
  */
 export const KEY_SETUP_KEYS = Object.freeze([
@@ -40,7 +41,6 @@ export const KEY_SETUP_KEYS = Object.freeze([
     getUrl: 'https://developers.google.com/maps/documentation/tile/get-api-key',
     envVars: Object.freeze(['GOOGLE_MAPS_API_KEY']),
     tier: 'metered',
-    clientExposed: true,
   }),
   Object.freeze({
     id: 'google-maps-server',
@@ -91,7 +91,6 @@ export const KEY_SETUP_KEYS = Object.freeze([
     getUrl: 'https://ion.cesium.com/tokens',
     envVars: Object.freeze(['CESIUM_ION_TOKEN']),
     tier: 'free',
-    clientExposed: true,
   }),
   Object.freeze({
     id: 'opensky',
@@ -109,7 +108,6 @@ export const KEY_SETUP_KEYS = Object.freeze([
     getUrl: 'https://www.mapillary.com/dashboard/developers',
     envVars: Object.freeze(['MAPILLARY_CLIENT_TOKEN']),
     tier: 'free',
-    clientExposed: true,
   }),
   Object.freeze({
     id: 'launch-library',

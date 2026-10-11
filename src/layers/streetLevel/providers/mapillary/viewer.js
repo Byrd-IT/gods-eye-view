@@ -107,12 +107,14 @@ export function createMapillaryViewer({ source, render } = {}) {
   async function createViewer(host) {
     const built = generation;
     destroyViewer();
-    const { Viewer } = await ensureLibrary();
+    const { Viewer, GraphDataProvider } = await ensureLibrary();
     // Unmounted (layer off) while the library loaded: a viewer built now
     // would hold a WebGL context nobody releases.
     if (built !== generation) throw new Error('Mapillary viewer was unmounted');
     viewer = new Viewer({
-      accessToken: source.token,
+      // Graph requests go to this app's server, which holds the token; the
+      // viewer is given no access token.
+      dataProvider: new GraphDataProvider({ endpoint: source.graphEndpoint }),
       container: host,
       component: {
         cover: false,

@@ -5,7 +5,7 @@
  *
  * `--fixtures` (the CI mode) answers every *.mapillary.com request from
  * fixtures, so nothing reaches Mapillary. The server still needs a token
- * because the bundle carries it; CI uses a dummy one. Fixture runs also stage
+ * because the server adds it to Graph and tile calls; CI uses a dummy one. Fixture runs also stage
  * a rejected key and a keyless second server.
  *
  * `--strict` fails on any skip not in STRICT_ALLOWED_SKIPS. `--fail-on-retry`
@@ -241,11 +241,22 @@ export async function serveFixtures(page, fixture) {
     const address = new URL(request.url);
     const method = request.method;
     let answer = null;
-    if (/(^|\.)mapillary\.com$/.test(address.hostname)) {
-      const call = describeCall(method, address);
+    // Graph calls go to this server (/api/mapillary/graph), which adds the
+    // token, so the page never reaches graph.mapillary.com itself. Answer them
+    // as if it had, which keeps the fixture paths identical.
+    const graphPrefix = '/api/mapillary/graph/';
+    const viaServer = address.pathname.startsWith(graphPrefix);
+    if (viaServer || /(^|\.)mapillary\.com$/.test(address.hostname)) {
+      const upstream = viaServer
+        ? new URL(
+            `${address.pathname.slice(graphPrefix.length - 1)}${address.search}`,
+            'https://graph.mapillary.com',
+          )
+        : address;
+      const call = describeCall(method, upstream);
       answer = answerMapillaryRequest({
         method,
-        url: request.url,
+        url: upstream.href,
         images: fixture.images,
       });
       fixture.calls.add(call);
@@ -581,7 +592,7 @@ async function main() {
           assert.equal(
             real.configured,
             true,
-            'fixture runs need a server started with MAPILLARY_CLIENT_TOKEN (CI uses a dummy, non-secret one): the browser bundle carries the token, and without it no photo can open',
+            'fixture runs need a server started with MAPILLARY_CLIENT_TOKEN (CI uses a dummy, non-secret one): the server adds the token to Graph and tile calls, and without it no photo can open',
           );
       },
     );

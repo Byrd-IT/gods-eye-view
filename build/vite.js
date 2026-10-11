@@ -50,9 +50,6 @@ export const BROWSER_HEADERS = Object.freeze({
 export function createBrowserViteConfig({
   plugins = [],
   publicDir,
-  googleApiKey,
-  cesiumToken,
-  mapillaryToken,
   host = 'localhost',
   port = 4173,
   allowedHosts = DEFAULT_ALLOWED_HOSTS,
@@ -104,14 +101,9 @@ export function createBrowserViteConfig({
     // The preview server serves the same documents, so it carries the same
     // framing + CSP hardening (one constant, no drift).
     preview: { headers: BROWSER_HEADERS },
-    define: {
-      'import.meta.env.GOOGLE_MAPS_API_KEY': JSON.stringify(googleApiKey),
-      'import.meta.env.CESIUM_ION_TOKEN': JSON.stringify(cesiumToken),
-      // Mapillary client tokens are public by design (see SECURITY.md).
-      'import.meta.env.MAPILLARY_CLIENT_TOKEN': JSON.stringify(
-        mapillaryToken ?? '',
-      ),
-    },
+    // Deliberately no `define` of provider keys: third-party credentials are
+    // held by the server and never baked into the bundle (see
+    // server/byrdit/keyIsolation and src/tooling/keyExposure.test.mjs).
     build: { chunkSizeWarningLimit: 1500 },
   };
 }

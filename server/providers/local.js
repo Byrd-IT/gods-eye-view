@@ -26,6 +26,7 @@ import { weatherProxy } from './weather.js';
 import { firePerimetersProxy } from './firePerimeters.js';
 import { cycloneProxy } from './cyclones.js';
 import { windProxy } from './wind.js';
+import { keyIsolationProxy } from '../byrdit/keyIsolation/plugin.js';
 
 /**
  * Construct the local provider plugins in their established order.
@@ -59,6 +60,7 @@ function localProviderPlugins({ realtime } = {}) {
     weatherProxy(),
     cycloneProxy(),
     mapillaryProxy(),
+    keyIsolationProxy(),
     firePerimetersProxy(),
     keySetupEndpoint(),
   ];
