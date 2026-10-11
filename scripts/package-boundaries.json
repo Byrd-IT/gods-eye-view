@@ -543,6 +543,8 @@
     "exports": ["./ui/shell"],
     "modules": [
       "src/byrdit/liveVisibility.js",
+      "src/byrdit/navControl/navControl.js",
+      "src/byrdit/navControl/navMath.js",
       "src/hudLayouts.js",
       "src/hudLayoutPolicy.js",
       "src/cyberSonar.js",
@@ -1429,6 +1431,8 @@
     ],
     "modules": [
       "src/byrdit/liveVisibility.js",
+      "src/byrdit/navControl/navControl.js",
+      "src/byrdit/navControl/navMath.js",
       "src/cyberSonarScene.js",
       "src/cyberSonar.js",
       "src/hudLayouts.js",
