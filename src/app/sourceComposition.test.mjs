@@ -8,6 +8,7 @@ import { createApplicationCatalog } from './constructCatalog.js';
 import { createSurfaceServices } from './surfaceServices.js';
 import { createStandaloneLayerSources } from '../standalone/layerSources.js';
 import { LayerLifecycle } from '../data/lifecycle.js';
+import { BYRDIT_FORK_LAYER_COUNT } from '../byrdit/forkLayers.js';
 
 function catalog(sources, t) {
   const lifetime = new AbortController();
@@ -37,7 +38,8 @@ test('every acquisition source can be omitted without losing catalog membership'
 
 test('all acquisition sources may be absent, and enable fails before initializing or fetching', async (t) => {
   const actual = catalog({}, t);
-  assert.equal(actual.layers.length, 30);
+  // Byrd-IT fork: upstream's 30 + BYRDIT_FORK_LAYER_COUNT local layers.
+  assert.equal(actual.layers.length, 30 + BYRDIT_FORK_LAYER_COUNT);
   const manager = new LayerLifecycle(
     {},
     { getSourceAvailability: actual.getSourceAvailability },
