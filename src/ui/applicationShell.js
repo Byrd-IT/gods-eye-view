@@ -1479,6 +1479,9 @@ export class StyleManager extends ShellFacade {
         this._navigation.runOrientation(noun, navigate),
       showToast: (message) => this._showToast(message),
     });
+    import('../byrdit/skyView/skyView.js')
+      .then((sky) => sky.mountSkyViewForShell(this))
+      .catch((error) => console.warn('[Sky] view unavailable:', error));
   }
 
   // ── Share Button ─────────────────────────────

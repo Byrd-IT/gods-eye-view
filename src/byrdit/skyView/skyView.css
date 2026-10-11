@@ -1,0 +1,191 @@
+/* Sky view (src/byrdit/skyView/skyView.js): a "Sky" button above the map
+   navigation control, the observer panel, the in-sky toolbar and the overlay
+   canvas that sits over the Cesium canvas while Sky view is active. */
+.gev-sky-btn {
+  position: fixed;
+  right: 36px;
+  bottom: 124px;
+  z-index: 96;
+  min-width: 52px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text-secondary);
+  font: 600 12px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.gev-sky-btn:hover,
+.gev-sky-btn[aria-expanded='true'] {
+  color: var(--text-primary, #e8f4ff);
+  border-color: rgba(120, 200, 255, 0.55);
+}
+
+.gev-sky-btn[hidden],
+.gev-sky-panel[hidden],
+.gev-sky-bar[hidden],
+.gev-sky-canvas[hidden] {
+  display: none !important;
+}
+
+.gev-sky-panel {
+  position: fixed;
+  right: 36px;
+  bottom: 166px;
+  z-index: 97;
+  width: min(330px, calc(100vw - 24px));
+  padding: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text-secondary);
+  font: 12px/1.4 var(--font-mono);
+}
+
+.gev-sky-title {
+  margin: 0 24px 8px 0;
+  color: var(--text-primary, #e8f4ff);
+  font-weight: 600;
+}
+
+.gev-sky-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.gev-sky-row,
+.gev-sky-form {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.gev-sky-panel button,
+.gev-sky-bar button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: 600 11px/1 var(--font-mono);
+  cursor: pointer;
+}
+
+.gev-sky-panel button:hover,
+.gev-sky-bar button:hover,
+.gev-sky-bar button[aria-pressed='true'] {
+  color: var(--text-primary, #e8f4ff);
+  border-color: rgba(120, 200, 255, 0.55);
+  background: rgba(120, 200, 255, 0.12);
+}
+
+.gev-sky-form input,
+.gev-sky-bar input {
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-primary, #e8f4ff);
+  font: 12px var(--font-mono);
+}
+
+.gev-sky-form input {
+  flex: 1;
+}
+
+.gev-sky-status {
+  min-height: 1.4em;
+}
+
+.gev-sky-bar {
+  position: fixed;
+  top: 92px;
+  left: 50%;
+  z-index: 97;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: calc(100vw - 24px);
+  padding: 8px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text-secondary);
+  font: 12px/1.3 var(--font-mono);
+  transform: translateX(-50%);
+}
+
+.gev-sky-eye input {
+  width: 72px;
+}
+
+.gev-sky-info {
+  flex-basis: 100%;
+  text-align: center;
+}
+
+.gev-sky-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.gev-sky-canvas:active {
+  cursor: grabbing;
+}
+
+body.gev-sky-picking .cesium-widget canvas {
+  cursor: crosshair !important;
+}
+
+/* The map navigation control would fly the camera off the observer. */
+body.gev-sky-active .gev-nav {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  .gev-sky-btn {
+    right: 12px;
+    bottom: calc(2vh + 7.5rem + 110px);
+  }
+  .gev-sky-panel {
+    right: 12px;
+    bottom: calc(2vh + 7.5rem + 152px);
+  }
+  .gev-sky-bar {
+    top: 72px;
+  }
+}
+
+/* The cockpit, scene playback, recording and clean view own the screen. */
+body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
+  :is(.gev-sky-btn, .gev-sky-panel) {
+  display: none !important;
+}
