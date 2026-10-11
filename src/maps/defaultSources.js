@@ -41,7 +41,7 @@ export function createDefaultMapSources({
         return {
           ...common,
           available: Boolean(googleTileset),
-          unavailableReason: photorealUnavailableReason(hasIon || hasGoogle),
+          unavailableReason: photorealUnavailableReason(hasGoogle),
           tileset: googleTileset,
         };
       const imagery =

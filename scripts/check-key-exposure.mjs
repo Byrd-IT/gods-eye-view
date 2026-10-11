@@ -10,11 +10,19 @@
  *
  * Secret values come from the environment, else from .env in the cwd.
  * Cesium ion's endpoint documents legitimately carry Cesium's OWN provider
- * keys (Bing, Google); those responses are checked by exact value of our keys
- * only, and the pattern hits are reported separately.
+ * keys (Bing); those responses are checked by exact value of our keys only,
+ * and the pattern hits are reported separately.
+ *
+ * Google 3D needs OUR Google key in the browser, so it is delivered at runtime
+ * from /api/google/tiles-key in obfuscated form. That is allowed ONLY from that
+ * endpoint, and even there the PLAINTEXT key (and its base64/hex/url-encoded
+ * forms) must be absent: the script decodes the payload with the real codec and
+ * reports whether it matches (obfuscation, not secrecy). The ion Google asset
+ * 2275207 must be refused (404): Google 3D never falls back to Cesium's account.
  */
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { decodeGoogleKey } from '../src/byrdit/googleKeyCodec.js';
 
 const KEY_NAMES = ['GOOGLE_MAPS_API_KEY', 'GOOGLE_MAPS_SERVER_API_KEY', 'CESIUM_ION_TOKEN', 'MAPILLARY_CLIENT_TOKEN'];
 const PATTERNS = { 'AIza-shaped': /AIza[0-9A-Za-z_-]{30,}/g, 'MLY-shaped': /MLY\|\d{8,}\|[0-9a-f]{20,}/gi };
@@ -49,7 +57,11 @@ function scan(text, { label, ionEndpoint = false }) {
   report.bytes += text.length;
   for (const [name, value] of secrets) {
     // Also catch the URL-encoded form (MLY%7C...).
-    for (const form of new Set([value, encodeURIComponent(value)]))
+    const forms = [value, encodeURIComponent(value)];
+    // Trivial re-encodings a casual "view source" grep would find.
+    if (name.startsWith('GOOGLE_'))
+      forms.push(Buffer.from(value).toString('base64'), Buffer.from(value).toString('hex'));
+    for (const form of new Set(forms))
       if (text.includes(form)) report.valueHits[name] += 1, (report.where ??= []).push(`${name}@${label}`);
   }
   for (const [name, re] of Object.entries(PATTERNS)) {
@@ -71,7 +83,7 @@ async function crawl() {
     '/api/ion/v1/assets/1/endpoint',
     '/api/ion/v1/assets/2/endpoint',
     '/api/ion/v1/assets/3/endpoint',
-    '/api/ion/v1/assets/2275207/endpoint',
+    '/api/google/tiles-key',
     '/api/google/tiles-token',
     '/config',
     '/manifest.webmanifest',
@@ -103,6 +115,38 @@ async function crawl() {
       }
   }
   report.crawled = seen.size;
+  await checkGoogleRoutes(origin);
+}
+
+/** Endpoint contract checks. Counts/booleans only; never prints a key. */
+async function checkGoogleRoutes(origin) {
+  const googleKey = secrets.get('GOOGLE_MAPS_API_KEY');
+  const keyRoute = await fetch(`${origin}/api/google/tiles-key`);
+  const cacheControl = keyRoute.headers.get('cache-control') ?? '';
+  let decodes = false;
+  if (keyRoute.ok) {
+    try {
+      decodes = decodeGoogleKey(await keyRoute.json()) === googleKey;
+    } catch {
+      decodes = false;
+    }
+  } else await keyRoute.body?.cancel();
+  const googleIon = await fetch(`${origin}/api/ion/v1/assets/2275207/endpoint`);
+  await googleIon.body?.cancel();
+  report.googleKeyEndpoint = {
+    status: keyRoute.status,
+    noStore: /no-store/.test(cacheControl),
+    decodesToConfiguredKey: decodes,
+  };
+  report.ionGoogleAsset2275207Status = googleIon.status;
+  const failures = [];
+  if (googleKey) {
+    if (keyRoute.status !== 200) failures.push('google key endpoint not 200');
+    if (!report.googleKeyEndpoint.noStore) failures.push('google key endpoint cacheable');
+    if (!decodes) failures.push('google key endpoint payload does not decode to the key');
+  }
+  if (googleIon.status !== 404) failures.push('ion Google asset 2275207 is not refused');
+  report.contractFailures = failures;
 }
 
 function walk(dir, out = []) {
@@ -125,6 +169,9 @@ if (dist) {
     scan(readFileSync(file, 'utf8'), { label: file });
   }
 }
-const total = Object.values(report.valueHits).reduce((a, b) => a + b, 0) + Object.values(report.patternHits).reduce((a, b) => a + b, 0);
+const total =
+  Object.values(report.valueHits).reduce((a, b) => a + b, 0) +
+  Object.values(report.patternHits).reduce((a, b) => a + b, 0) +
+  (report.contractFailures?.length ?? 0);
 console.log(JSON.stringify({ ...report, secretsConfigured: [...secrets.keys()], leaks: total }, null, 2));
 process.exit(total === 0 ? 0 : 1);

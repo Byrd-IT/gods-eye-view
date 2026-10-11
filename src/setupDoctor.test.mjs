@@ -268,10 +268,9 @@ test('doctor describes the credential ladder without exposing values', () => {
     MAPILLARY_CLIENT_TOKEN: { configured: false },
   };
   const capabilities = buildCapabilitySummary(credentials);
-  assert.match(
-    capabilities.map,
-    /Google Photorealistic 3D Tiles through Cesium ion/,
-  );
+  // An ion token alone never turns Google 3D on (no Cesium-account fallback).
+  assert.doesNotMatch(capabilities.map, /Google Photorealistic 3D Tiles/);
+  assert.match(capabilities.map, /Google 3D needs GOOGLE_MAPS_API_KEY/);
   assert.match(capabilities.map, /Bing and world-terrain stacks/);
   assert.equal(capabilities.voice, 'available');
   assert.equal(

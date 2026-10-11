@@ -167,14 +167,15 @@ export function buildCapabilitySummary(
           : 'OpenSky keyless anonymous access (rate-limited)';
   const route = selectMapStartupRoute({
     googleApiKey: configured('GOOGLE_MAPS_API_KEY') ? 'configured' : '',
-    cesiumToken: configured('CESIUM_ION_TOKEN') ? 'configured' : '',
   });
   return {
     map: route === 'google-direct'
       ? 'Google Photorealistic 3D Tiles (direct)'
-      : route === 'google-ion'
-        ? 'Google Photorealistic 3D Tiles through Cesium ion; Bing and world-terrain stacks available'
-        : 'Esri World Imagery (keyless satellite basemap) with keyless terrain',
+      : `Esri World Imagery (keyless satellite basemap) with ${
+          configured('CESIUM_ION_TOKEN')
+            ? 'Bing and world-terrain stacks available'
+            : 'keyless terrain'
+        }; Google 3D needs GOOGLE_MAPS_API_KEY (Cesium ion is not used for Google 3D)`,
     flights,
     voice: configured('OPENAI_API_KEY')
       ? 'available'

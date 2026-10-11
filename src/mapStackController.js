@@ -7,9 +7,7 @@ export { photorealUnavailableReason } from './maps/availability.js';
 /** Preserve the standalone entry point; applications can compose the source controller directly. */
 export class MapStackController extends MapSourceController {
   constructor(viewer, options = {}) {
-    const googleApiKey =
-      typeof window !== 'undefined' ? window.__GOOGLE_MAPS_API_KEY__ : '';
-    const registry = createDefaultMapSources({ ...options, googleApiKey });
+    const registry = createDefaultMapSources(options);
     super(viewer, {
       registry,
       initialStack: options.googleTileset
@@ -20,13 +18,9 @@ export class MapStackController extends MapSourceController {
     });
     this.googleTileset = options.googleTileset || null;
     this.cesiumToken = String(options.cesiumToken || '').trim();
+    this._googleKeyPresent = Boolean(String(options.googleApiKey || '').trim());
   }
   _hasPhotorealCredentials() {
-    const googleKey =
-      typeof window !== 'undefined' ? window.__GOOGLE_MAPS_API_KEY__ : '';
-    return (
-      Boolean(String(googleKey || '').trim()) ||
-      Boolean(String(this.cesiumToken || '').trim())
-    );
+    return Boolean(this._googleKeyPresent);
   }
 }

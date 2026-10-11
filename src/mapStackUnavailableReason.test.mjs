@@ -5,12 +5,12 @@ import {
   photorealUnavailableReason,
 } from './mapStackController.js';
 
-test('missing photoreal credentials explain both supported setup routes', () => {
+test('missing photoreal credentials ask for the Google key, not a Cesium ion route', () => {
   assert.match(
     photorealUnavailableReason(false),
     /Needs GOOGLE_MAPS_API_KEY.*Provider Settings/,
   );
-  assert.match(photorealUnavailableReason(false), /Cesium ion token/);
+  assert.doesNotMatch(photorealUnavailableReason(false), /Cesium ion/);
 });
 
 test('a configured but failed photoreal route does not ask for another key', () => {
@@ -19,8 +19,9 @@ test('a configured but failed photoreal route does not ask for another key', () 
   assert.doesNotMatch(reason, /Needs|add it/);
 });
 
-test('controller credential detection accepts ion without a browser global', () => {
+test('controller credential detection needs the Google key; an ion token never counts', () => {
   const hasCredentials = MapStackController.prototype._hasPhotorealCredentials;
-  assert.equal(hasCredentials.call({ cesiumToken: 'configured' }), true);
-  assert.equal(hasCredentials.call({ cesiumToken: '   ' }), false);
+  assert.equal(hasCredentials.call({ _googleKeyPresent: true }), true);
+  assert.equal(hasCredentials.call({ _googleKeyPresent: false }), false);
+  assert.equal(hasCredentials.call({ cesiumToken: 'configured' }), false);
 });

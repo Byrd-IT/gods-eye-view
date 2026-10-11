@@ -33,15 +33,6 @@ export async function createApplicationScene({
     signal,
   });
   defer(initLogoGaze());
-  const previousKey = window.__GOOGLE_MAPS_API_KEY__;
-  if (googleApiKey) {
-    window.__GOOGLE_MAPS_API_KEY__ = googleApiKey;
-    defer(() => {
-      if (window.__GOOGLE_MAPS_API_KEY__ !== googleApiKey) return;
-      if (previousKey === undefined) delete window.__GOOGLE_MAPS_API_KEY__;
-      else window.__GOOGLE_MAPS_API_KEY__ = previousKey;
-    });
-  }
   loaderStatus.textContent = 'Configuring viewer...';
   // Provider attribution stays visible, including clean-view and recording.
   const creditContainer = document.createElement('div');
@@ -60,13 +51,12 @@ export async function createApplicationScene({
   registerDataCredits(viewer, credits);
   configureCreditKeyboardAccess(document);
   loaderStatus.textContent =
-    googleApiKey || googleTokens || cesiumToken
+    googleApiKey || googleTokens
       ? 'Loading Google 3D Tiles...'
       : 'Loading the keyless globe...';
   const photoreal = await loadPhotorealisticTileset(Cesium, {
     googleApiKey,
     googleTokens,
-    cesiumToken,
   });
   const tileset = photoreal.tileset;
   // A provider can finish after cancellation; retain ownership of its result.
@@ -90,7 +80,7 @@ export async function createApplicationScene({
         tileError,
       );
       const tileErrorDetail = describeError(tileError);
-      loaderStatus.textContent = `Google 3D Tiles unavailable (${tileErrorDetail}). Loading the keyless globe...`;
+      loaderStatus.textContent = `Google 3D Tiles unavailable (${tileErrorDetail}). Loading the non-Google globe...`;
     }
     viewer.scene.globe.show = true;
   }
@@ -101,6 +91,8 @@ export async function createApplicationScene({
     requestRender: governorRequestRender,
     ...mapOptions,
     googleTileset: tileset,
+    // Held in memory for the source registry only; never put on window.
+    googleApiKey,
     cesiumToken,
     initialStack: tileset ? 'photoreal' : 'esri-imagery',
     // Task 5 (height-datum fix): rebroadcast stack changes as a window

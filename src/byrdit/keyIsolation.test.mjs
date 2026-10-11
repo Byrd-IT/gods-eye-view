@@ -169,8 +169,13 @@ test('ion: only the app’s assets are served; other methods and routes are refu
       return '{}';
     },
   });
-  for (const id of ['1', '2', '3', '4', '2275207'])
-    assert.ok(ION_ALLOWED_ASSETS.has(id));
+  for (const id of ['1', '2', '3', '4']) assert.ok(ION_ALLOWED_ASSETS.has(id));
+  // Google 3D (ion asset 2275207) must never be served: no Cesium-account fallback.
+  assert.equal(ION_ALLOWED_ASSETS.has('2275207'), false);
+  assert.equal(
+    (await call(handler, { url: '/v1/assets/2275207/endpoint' })).status,
+    404,
+  );
   assert.equal(
     (await call(handler, { url: '/v1/assets/96188/endpoint' })).status,
     404,

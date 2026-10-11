@@ -13,15 +13,17 @@ import { readResponseTextCapped } from '../../providers/common/http.js';
  * route answers that exact request shape from the server: it calls the real
  * ion API with CESIUM_ION_TOKEN and returns only ion's endpoint document. For
  * terrain that document carries a one-hour JWT limited to the one asset; for
- * Bing and Google 3D it carries Cesium's own provider URL/key. The configured
+ * Bing it carries Cesium's own provider URL/key. The configured
  * token never leaves the process (a response containing it is refused).
  */
 
 export const ION_API_ORIGIN = 'https://api.cesium.com';
-/** Assets the app uses: World Terrain, Bing aerial/labels/road, Google 3D Tiles. */
-export const ION_ALLOWED_ASSETS = Object.freeze(
-  new Set(['1', '2', '3', '4', '2275207']),
-);
+/**
+ * Assets the app uses: World Terrain and Bing aerial/labels/road. Google 3D
+ * Tiles (ion asset 2275207) is deliberately NOT allowed: Google 3D loads
+ * directly on our own Google key and must never fall back to Cesium's account.
+ */
+export const ION_ALLOWED_ASSETS = Object.freeze(new Set(['1', '2', '3', '4']));
 const ENDPOINT_MAX_BYTES = 256 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
 /** Serve a cached endpoint only while its token has at least this long left. */

@@ -4,11 +4,18 @@
 // it, and fails if any secret value (or its recognisable prefix pattern) shows
 // up in served client code. The full production-build variant lives in
 // scripts/check-key-exposure.mjs (npm run check:key-exposure).
+//
+// Google 3D is the one key the browser really needs (it requests tiles from
+// Google itself). It is delivered at runtime from /api/google/tiles-key in
+// obfuscated form: the PLAINTEXT key (and its base64/hex forms) must still be
+// absent from every served file and from that endpoint's body.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import http from 'node:http';
 import { createServer } from 'vite';
+import { decodeGoogleKey } from '../byrdit/googleKeyCodec.js';
 import { createBrowserViteConfig } from '../../build/vite.js';
 import { KEY_SETUP_KEYS, keySetupStatus } from '../keySetupCore.mjs';
 
@@ -31,9 +38,19 @@ const SECRETS = {
 // token is excluded: it is compared by exact value of OUR token instead).
 const LEAK_PATTERNS = [/AIza[0-9A-Za-z_-]{30,}/, /MLY\|\d{8,}\|[0-9a-f]{20,}/i];
 
+// Trivial re-encodings of the Google key that a "view source" grep would catch.
+const GOOGLE_FORMS = [
+  GOOGLE,
+  Buffer.from(GOOGLE).toString('base64'),
+  Buffer.from(GOOGLE).toString('hex'),
+  encodeURIComponent(GOOGLE),
+  [...GOOGLE].reverse().join(''),
+];
+
 function findLeaks(text, secrets = Object.values(SECRETS)) {
   const hits = [];
   for (const secret of secrets) if (text.includes(secret)) hits.push('value');
+  for (const form of GOOGLE_FORMS) if (text.includes(form)) hits.push('google-form');
   for (const pattern of LEAK_PATTERNS)
     if (pattern.test(text)) hits.push(String(pattern));
   return hits;
@@ -44,6 +61,8 @@ test('the scanner itself catches each credential shape', () => {
   assert.ok(findLeaks(`k="${GOOGLE}"`).length);
   assert.ok(findLeaks(`k="${MAPILLARY}"`).length);
   assert.ok(findLeaks(`k="${ION}"`).length);
+  assert.ok(findLeaks(`k="${Buffer.from(GOOGLE).toString('base64')}"`).length);
+  assert.ok(findLeaks(`k="${Buffer.from(GOOGLE).toString('hex')}"`).length);
 });
 
 test('no src module reads a provider key from the build environment', () => {
@@ -155,3 +174,61 @@ test('entry module has no top-level await (production build target)', async () =
     format: 'esm',
   });
 });
+
+// The runtime endpoint: behind the app's server, obfuscated, never cached.
+test(
+  'the Google key endpoint serves only an obfuscated, no-store payload; ion asset 2275207 is refused',
+  { timeout: 240_000 },
+  async () => {
+    const saved = {};
+    for (const [name, value] of Object.entries(SECRETS)) {
+      saved[name] = process.env[name];
+      process.env[name] = value;
+    }
+    let server;
+    let listener;
+    try {
+      server = await createServer({
+        configFile: new URL(
+          '../../server/standalone/vite.config.js',
+          import.meta.url,
+        ).pathname,
+        server: { middlewareMode: true, hmr: false, watch: null },
+        appType: 'custom',
+        optimizeDeps: { noDiscovery: true, include: [] },
+        logLevel: 'silent',
+      });
+      listener = http.createServer(server.middlewares);
+      await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
+      const origin = `http://127.0.0.1:${listener.address().port}`;
+
+      const res = await fetch(`${origin}/api/google/tiles-key`);
+      const body = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('cache-control') ?? '', /no-store/);
+      assert.deepEqual(findLeaks(body), [], 'plaintext key in endpoint body');
+      assert.equal(decodeGoogleKey(JSON.parse(body)), GOOGLE);
+      // A second call is a different wire form (fresh nonce, shuffled shards).
+      const again = await (await fetch(`${origin}/api/google/tiles-key`)).text();
+      assert.notEqual(again, body);
+
+      // No fallback of Google 3D to Cesium's account: ion asset 2275207 is refused.
+      const ion = await fetch(`${origin}/api/ion/v1/assets/2275207/endpoint`);
+      assert.equal(ion.status, 404);
+      await ion.arrayBuffer();
+
+      // Other key routes stay free of every plaintext secret.
+      for (const route of ['/api/ion/status', '/api/mapillary/status', '/api/setup/status']) {
+        const other = await fetch(`${origin}${route}`);
+        assert.deepEqual(findLeaks(await other.text()), [], route);
+      }
+    } finally {
+      await new Promise((resolve) => (listener ? listener.close(resolve) : resolve()));
+      await server?.close();
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  },
+);

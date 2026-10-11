@@ -1,38 +1,34 @@
-import { ionRequestOptions } from '../byrdit/serverKeys.js';
-
 const clean = (value) => String(value || '').trim();
 
 /**
  * Decide which map provider can deliver the best startup experience.
- * @param {{googleApiKey?: string, cesiumToken?: string}} credentials
- * @returns {'google-direct'|'google-ion'|'osm'}
+ * Google 3D is only ever reached with OUR Google key (or server tokens); a
+ * Cesium ion token never selects Google 3D (the ion-hosted Google asset runs
+ * on Cesium's account and quota, which the owner does not want to depend on).
+ * @param {{googleApiKey?: string}} credentials
+ * @returns {'google-direct'|'osm'}
  */
-export function selectMapStartupRoute({
-  googleApiKey = '',
-  cesiumToken = '',
-} = {}) {
-  if (clean(googleApiKey)) return 'google-direct';
-  if (clean(cesiumToken)) return 'google-ion';
-  return 'osm';
+export function selectMapStartupRoute({ googleApiKey = '' } = {}) {
+  return clean(googleApiKey) ? 'google-direct' : 'osm';
 }
 
 /**
- * Load Google Photorealistic 3D Tiles through direct Google access when
- * configured, otherwise through Cesium ion's hosted Google asset. Direct
- * access uses a browser key, or else short-lived tokens from the app's
- * server (see googleTokens.js). If direct access fails and an ion token is
- * available, ion is the recovery path.
+ * Load Google Photorealistic 3D Tiles directly from Google, with the app's
+ * Google key (delivered at runtime, see byrdit/serverKeys.js) or, for
+ * embedders, short-lived server tokens (googleTokens.js). There is NO
+ * fallback to Cesium ion's hosted Google asset: when Google direct fails the
+ * caller gets `{tileset: null, route: 'osm', errors}` and shows the non-Google
+ * globe with a visible status.
  *
  * @param {object} Cesium
- * @param {{googleApiKey?: string, cesiumToken?: string, googleTokens?: {token: Function}|null}} credentials
- * @returns {Promise<{tileset: object|null, route: 'google-direct'|'google-token'|'google-ion'|'osm', errors: Error[]}>}
+ * @param {{googleApiKey?: string, googleTokens?: {token: Function}|null}} credentials
+ * @returns {Promise<{tileset: object|null, route: 'google-direct'|'google-token'|'osm', errors: Error[]}>}
  */
 export async function loadPhotorealisticTileset(
   Cesium,
-  { googleApiKey = '', cesiumToken = '', googleTokens = null } = {},
+  { googleApiKey = '', googleTokens = null } = {},
 ) {
   const googleKey = clean(googleApiKey);
-  const ionToken = clean(cesiumToken);
   const errors = [];
 
   const attempts = [];
@@ -45,11 +41,6 @@ export async function loadPhotorealisticTileset(
     attempts.push({
       route: 'google-token',
       create: () => createGoogleTokenTileset(Cesium, googleTokens),
-    });
-  if (ionToken)
-    attempts.push({
-      route: 'google-ion',
-      create: () => createGoogleIonTileset(Cesium, ionToken),
     });
 
   for (const attempt of attempts) {
@@ -99,30 +90,6 @@ export async function createGoogleTokenTileset(Cesium, tokens) {
     },
   });
   // The settings Cesium's Google helper applies to the key route.
-  return Cesium.Cesium3DTileset.fromUrl(resource, {
-    cacheBytes: 1536 * 1024 * 1024,
-    maximumCacheOverflowBytes: 1024 * 1024 * 1024,
-    enableCollision: true,
-    // Tiles keep drawing their own texture while draped weather loads.
-    asynchronouslyLoadImagery: true,
-  });
-}
-
-export async function createGoogleIonTileset(
-  Cesium,
-  accessToken,
-  { signal } = {},
-) {
-  accessToken = clean(accessToken);
-  if (!accessToken)
-    throw new Error('Google 3D through ion requires an explicit token');
-  signal?.throwIfAborted();
-  const resource = await Cesium.IonResource.fromAssetId(
-    2275207,
-    ionRequestOptions(accessToken),
-  );
-  signal?.throwIfAborted();
-  // Match the installed SDK's Google helper rendering/cache defaults.
   return Cesium.Cesium3DTileset.fromUrl(resource, {
     cacheBytes: 1536 * 1024 * 1024,
     maximumCacheOverflowBytes: 1024 * 1024 * 1024,
