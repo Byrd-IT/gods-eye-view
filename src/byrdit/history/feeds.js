@@ -8,7 +8,12 @@
  * to the upstream plugin (D7): when the collector cannot answer, the bridge
  * serves its own last-good copy marked STALE, or 503 when it has none.
  *
- * Later cards add entries here (B6 FIRMS/perimeters/cyclones, B7, B8 vessels).
+ * Later cards add entries here (B7, B8 vessels). B6 added firms (+ its
+ * /status sub-route), fire-perimeters and cyclones: `path` is the sub-path
+ * under `route` the entry answers (default "/"); every other sub-path goes
+ * to the next middleware (e.g. /api/fire-perimeters/inciweb/* stays live:
+ * InciWeb catalog links, not a recorded feed). Both firms entries share
+ * GEV_BRIDGE_FIRMS, so the FIRMS route can never be half bridged.
  * Hook for B20: /api/flights is answered from the OpenSky viewport poller's
  * tile cache; that entry sets forwardQuery: true so `view=w,s,e,n` reaches
  * the collector. It is deliberately NOT registered in B4.
@@ -21,6 +26,46 @@ export const BRIDGE_FEEDS = Object.freeze({
     cadenceMs: 60_000,
     source: 'adsb.lol',
     flag: 'GEV_BRIDGE_MILITARY',
+    forwardQuery: false,
+  }),
+  // gev-history src/feeds/firms.js (FIRMS area API world/2, 30 min).
+  firms: Object.freeze({
+    route: '/api/firms',
+    path: '/',
+    collectorFeed: 'firms',
+    cadenceMs: 1_800_000,
+    source: 'NASA FIRMS',
+    flag: 'GEV_BRIDGE_FIRMS',
+    forwardQuery: false,
+  }),
+  // GET /api/firms/status: derived by the collector from the firms snapshot.
+  firmsStatus: Object.freeze({
+    route: '/api/firms',
+    path: '/status',
+    collectorFeed: 'firms-status',
+    cadenceMs: 1_800_000,
+    source: 'NASA FIRMS',
+    flag: 'GEV_BRIDGE_FIRMS',
+    forwardQuery: false,
+  }),
+  // gev-history src/feeds/perimeters.js (NIFC WFIGS, 15 min).
+  firePerimeters: Object.freeze({
+    route: '/api/fire-perimeters',
+    path: '/',
+    collectorFeed: 'fire-perimeters',
+    cadenceMs: 900_000,
+    source: 'NIFC WFIGS',
+    flag: 'GEV_BRIDGE_FIRE_PERIMETERS',
+    forwardQuery: false,
+  }),
+  // gev-history src/feeds/cyclones.js (NOAA NHC CurrentStorms + GIS, 15 min).
+  cyclones: Object.freeze({
+    route: '/api/cyclones',
+    path: '/',
+    collectorFeed: 'cyclones',
+    cadenceMs: 900_000,
+    source: 'NOAA NHC / CPHC',
+    flag: 'GEV_BRIDGE_CYCLONES',
     forwardQuery: false,
   }),
 });

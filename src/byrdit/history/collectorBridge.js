@@ -246,8 +246,9 @@ export function createCollectorBridge({
     } catch {
       return next();
     }
-    // The mount also matches sub-routes (/api/military/track): not bridged.
-    if (url.pathname !== '/') return next();
+    // The mount also matches sub-routes (/api/military/track,
+    // /api/fire-perimeters/inciweb/*): only the entry's own path is bridged.
+    if (url.pathname !== (feed.path ?? '/')) return next();
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, {
         'Content-Type': 'application/json',
