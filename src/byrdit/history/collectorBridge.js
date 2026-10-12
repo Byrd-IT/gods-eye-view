@@ -38,6 +38,14 @@ import {
  * The group set is not listed here: the collector discovers groups from
  * these requests.
  *
+ * Last-good copies are kept per collector snapshot and, inside it, per
+ * feed.cacheKey(url) (B8; default: one slot), so a query-shaped answer
+ * (vessels ?maxRows=) is never served for a different query: the vessels key
+ * is GEV's normalised maxRows. At most feed.cacheEntries copies (default 1)
+ * and BRIDGE_CACHE_MAX_BYTES in total are kept per snapshot, least recently
+ * used evicted first. A query with no copy of its own gets the 503
+ * no-snapshot answer, never another query's.
+ *
  * Owner N5: the server never clears a layer. It adds X-Feed-Grey-Until
  * (X-Feed-Stale-Since + GEV_STALE_GREY_MS) so the client decides grey vs
  * cleared on the server clock (staleness.js feedDisplayState).
@@ -54,6 +62,8 @@ export const DEFAULT_COLLECTOR_URLS = Object.freeze(['http://127.0.0.1:4180']);
 export const DEFAULT_COLLECTOR_TIMEOUT_MS = 2_000;
 /** Most per-path copies one pattern route keeps (CelesTrak groups). */
 export const MAX_PATTERN_SLOTS = 32;
+/** Upper bound of the last-good copies one snapshot keeps (all keys together). */
+export const BRIDGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Collector response headers relayed to the browser. */
 export const RELAYED_HEADERS = Object.freeze([
@@ -159,13 +169,45 @@ export function createCollectorBridge({
   if (!feed) throw new Error(`unknown bridge feed: ${name}`);
   /**
    * Per collector snapshot (B15: one route can resolve to many, e.g. one per
-   * transit feed or GBFS system): last good copy { body: Uint8Array,
-   * contentType, lastOkAt } and the last served answer ('collector' |
-   * 'cache' | 'none') for transition logging. Keys are bounded by the
-   * resolvers (registry ids only).
+   * transit feed or GBFS system): last good copies and the last served answer
+   * ('collector' | 'cache' | 'none') for transition logging. Keys are bounded
+   * by the resolvers (registry ids only) or MAX_PATTERN_SLOTS.
+   * caches: snapshot -> Map(cache key -> { body: Uint8Array, contentType,
+   * lastOkAt }), Map order = least recently used first (B8 R3).
    */
   const caches = new Map();
   const states = new Map();
+  const cacheKeyOf = feed.cacheKey ?? (() => '');
+  const cacheEntries = Math.max(1, feed.cacheEntries ?? 1);
+
+  function cacheGet(key, ck) {
+    const slots = caches.get(key);
+    const entry = slots?.get(ck);
+    if (entry) {
+      slots.delete(ck);
+      slots.set(ck, entry);
+    }
+    return entry ?? null;
+  }
+
+  function cacheSet(key, ck, entry) {
+    if (!remembers(key)) return;
+    let slots = caches.get(key);
+    if (!slots) {
+      slots = new Map();
+      caches.set(key, slots);
+    }
+    slots.delete(ck);
+    slots.set(ck, entry);
+    let bytes = 0;
+    for (const e of slots.values()) bytes += e.body.byteLength;
+    for (const [k, e] of slots) {
+      if (k === ck) break; // the newest copy is always kept
+      if (slots.size <= cacheEntries && bytes <= BRIDGE_CACHE_MAX_BYTES) break;
+      slots.delete(k);
+      bytes -= e.body.byteLength;
+    }
+  }
   /** In-flight collector read shared by concurrent requests, keyed by feed+query. */
   const inflight = new Map();
   const trails = feed.trails ? createTransitTrails({ now }) : null;
@@ -216,13 +258,16 @@ export function createCollectorBridge({
           },
         );
         const body = new Uint8Array(await response.arrayBuffer());
-        if (response.status === 200) {
+        if (
+          response.status === 200 ||
+          (feed.relayStatus ?? []).includes(response.status)
+        ) {
           const headers = {};
           for (const key of RELAYED_HEADERS) {
             const value = response.headers.get(key);
             if (value !== null) headers[CANONICAL[key]] = value;
           }
-          return { ok: true, body, headers };
+          return { ok: true, status: response.status, body, headers };
         }
         // Standby (503, no X-Feed-Reason) or an active collector with no
         // snapshot yet: keep its reason, try the next collector.
@@ -233,6 +278,24 @@ export function createCollectorBridge({
       }
     }
     return { ok: false, reason };
+  }
+
+  /**
+   * Query string sent to the collector: the raw one (forwardQuery), only
+   * the allow-listed parameters in a canonical order (forwardParams, B8), or
+   * nothing.
+   */
+  function forwardedSearch(url) {
+    if (feed.forwardParams) {
+      const out = new URLSearchParams();
+      for (const key of feed.forwardParams) {
+        const value = url.searchParams.get(key);
+        if (value !== null) out.set(key, value);
+      }
+      const text = out.toString();
+      return text ? `?${text}` : '';
+    }
+    return feed.forwardQuery ? url.search : '';
   }
 
   function sharedRead(collectorFeed, search) {
@@ -262,9 +325,8 @@ export function createCollectorBridge({
     return feed.decorate ? feed.decorate(headers, target) : headers;
   }
 
-  function serveCache(req, res, reason, target) {
+  function serveCache(req, res, reason, target, cache) {
     const key = target.collectorFeed;
-    const cache = caches.get(key);
     const t = now();
     const age = Math.max(0, t - cache.lastOkAt);
     const stale = age > staleThresholdMs(target.cadenceMs);
@@ -360,36 +422,55 @@ export function createCollectorBridge({
       return;
     }
     const key = target.collectorFeed;
+    const fallback = (reason) => {
+      const entry = cacheGet(key, cacheKeyOf(url));
+      if (entry) serveCache(req, res, reason, target, entry);
+      else serveNone(req, res, reason, target);
+    };
     try {
-      const result = await sharedRead(key, feed.forwardQuery ? url.search : '');
+      const result = await sharedRead(key, forwardedSearch(url));
+      if (result.ok && result.status !== 200) {
+        // relayed client error (vessels track 400): never cached
+        transition(key, 'collector');
+        send(
+          req,
+          res,
+          result.status,
+          { ...result.headers, 'X-Feed-Bridge': 'collector' },
+          result.body,
+        );
+        return;
+      }
       if (result.ok) {
         const headers = withGrey({ ...result.headers });
         headers['X-Feed-Bridge'] = 'collector';
+        if (feed.cache === false) {
+          // per-request answer (vessels track): no last-good copy
+          transition(key, 'collector');
+          send(req, res, 200, decorate(headers, target), result.body);
+          return;
+        }
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
-        if (remembers(key)) {
-          caches.set(key, {
-            body: result.body,
-            contentType: headers['Content-Type'] ?? 'application/json',
-            lastOkAt: lastOk ?? now() - (age ?? 0),
-          });
-        }
+        cacheSet(key, cacheKeyOf(url), {
+          body: result.body,
+          contentType: headers['Content-Type'] ?? 'application/json',
+          lastOkAt: lastOk ?? now() - (age ?? 0),
+        });
         if (trails && target.transitFeed)
           trails.ingest(target.transitFeed, result.body);
         transition(key, 'collector');
         send(req, res, 200, decorate(headers, target), result.body);
         return;
       }
-      if (caches.has(key)) serveCache(req, res, result.reason, target);
-      else serveNone(req, res, result.reason, target);
+      fallback(result.reason);
     } catch {
       // Never fall through to the upstream plugin, whatever failed here.
       if (res.headersSent) {
         res.end();
         return;
       }
-      if (caches.has(key)) serveCache(req, res, 'bridge_error', target);
-      else serveNone(req, res, 'bridge_error', target);
+      fallback('bridge_error');
     }
   };
 }

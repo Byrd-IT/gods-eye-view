@@ -39,10 +39,43 @@ import {
  * requests (gev-history src/feeds/celestrak.js); celestrak is terminal too, so
  * an invalid group, an extra path segment or another method can never reach
  * GEV's own CelesTrak proxy (it would fetch and could trip its halt latch).
+ * B8 vessels: /api/vessels and /api/vessels/track share GEV_BRIDGE_VESSELS
+ * and the route is terminal: GEV's aisLiveProxy (re)opens the AISStream
+ * socket on ANY /api/vessels request (upstream demand), and AISStream allows
+ * one connection per key, so no request may ever reach it while the
+ * collector holds the socket. `forwardParams` lists the query parameters
+ * forwarded to the collector (canonical order; everything else, e.g. the
+ * client's lat/lon/radius_km, which GEV ignores too, is dropped). `cache:
+ * false` (track): no last-good copy, because a per-vessel answer must never
+ * be served for another vessel; `relayStatus` lists collector statuses
+ * relayed as-is (track 400 = GEV's "mmsi query param required").
+ * `cacheKey(url)` / `cacheEntries` (collectorBridge.js): last-good copies
+ * per normalised query. vessels: GEV ais-live.js answers maxRows rows
+ * (clampInt(maxRows, 1, 50000, 50000)), so ?maxRows=7 and the full list are
+ * different bodies and each keeps its own copy (review t_c4eefd79 R3). The
+ * GEV client asks 500 (layer), 12000 (live source default) and the full list
+ * (tools), so 4 copies cover real use; the bridge also caps the bytes.
  * Hook for B20: /api/flights is answered from the OpenSky viewport poller's
  * tile cache; that entry sets forwardQuery: true so `view=w,s,e,n` reaches
  * the collector. It is deliberately NOT registered in B4.
  */
+/** GEV server/providers/vessels/ais-store.js AISSTREAM_CACHE_MAX. */
+export const AIS_MAX_ROWS = 50_000;
+
+/** GEV server/providers/common/query.js clampInt (parity pinned in tests). */
+export function clampInt(value, min, max, fallback) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+/** The maxRows GEV's ais-live.js would serve for this request. */
+export function vesselsCacheKey(url) {
+  return String(
+    clampInt(url.searchParams.get('maxRows'), 1, AIS_MAX_ROWS, AIS_MAX_ROWS),
+  );
+}
+
 export const BRIDGE_FEEDS = Object.freeze({
   military: Object.freeze({
     route: '/api/military',
@@ -152,6 +185,35 @@ export const BRIDGE_FEEDS = Object.freeze({
     source: 'CelesTrak',
     flag: 'GEV_BRIDGE_CELESTRAK',
     forwardQuery: false,
+    terminal: true,
+  }),
+  // gev-history src/ais/aisRunner.js (AISStream socket held 24/7; latest
+  // snapshot every 10 s, stale rule on a 60 s cadence).
+  vessels: Object.freeze({
+    route: '/api/vessels',
+    path: '/',
+    collectorFeed: 'vessels',
+    cadenceMs: 60_000,
+    source: 'AISStream',
+    flag: 'GEV_BRIDGE_VESSELS',
+    forwardQuery: false,
+    forwardParams: Object.freeze(['maxRows']),
+    cacheKey: vesselsCacheKey,
+    cacheEntries: 4,
+    terminal: true,
+  }),
+  // GET /api/vessels/track?mmsi=: the collector's accumulated track ring.
+  vesselsTrack: Object.freeze({
+    route: '/api/vessels',
+    path: '/track',
+    collectorFeed: 'vessels-track',
+    cadenceMs: 60_000,
+    source: 'AISStream',
+    flag: 'GEV_BRIDGE_VESSELS',
+    forwardQuery: false,
+    forwardParams: Object.freeze(['mmsi']),
+    cache: false,
+    relayStatus: Object.freeze([400]),
     terminal: true,
   }),
 });
