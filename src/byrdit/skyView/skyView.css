@@ -170,6 +170,32 @@ body.gev-sky-active .gev-nav {
   display: none !important;
 }
 
+/* The map's layer/scene stack sits where the satellite panel goes; it is a
+   map tool, so Sky mode hides it like the nav control (back on exit). */
+body.gev-sky-active #left-panel-stack {
+  display: none !important;
+}
+
+/* The map's right context rail (CCTV, street level, global context) is a map
+   tool too; on narrow screens it stacks over the satellite panel and at
+   desktop widths under the toolbar, so Sky mode hides it (back on exit). */
+body.gev-sky-active #right-context-rail {
+  display: none !important;
+}
+
+/* Desktop: the toolbar centres in the room right of the satellite panel
+   (12 + 300 + 12 px), so the two never overlap at any width. */
+@media (min-width: 901px) {
+  .gev-sky-bar {
+    left: 324px;
+    right: 12px;
+    width: fit-content;
+    max-width: min(760px, calc(100vw - 336px));
+    margin-inline: auto;
+    transform: none;
+  }
+}
+
 @media (max-width: 900px) {
   .gev-sky-btn {
     right: 12px;
@@ -179,8 +205,192 @@ body.gev-sky-active .gev-nav {
     right: 12px;
     bottom: calc(2vh + 7.5rem + 152px);
   }
+  /* Full width: a centred toolbar only gets half the screen and wraps tall. */
   .gev-sky-bar {
     top: 72px;
+    left: 12px;
+    right: 12px;
+    max-width: none;
+    transform: none;
+  }
+}
+
+/* Satellites panel (P2a): "Overhead now", class chips, data sets, card. */
+.gev-sky-sats {
+  position: fixed;
+  top: 92px;
+  left: 12px;
+  z-index: 97;
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 24px));
+  max-height: calc(100vh - 180px);
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text-secondary);
+  font: 11px/1.35 var(--font-mono);
+}
+
+.gev-sky-sats[hidden],
+.gev-sky-sats-body[hidden],
+.gev-sky-sats-card[hidden] {
+  display: none !important;
+}
+
+.gev-sky-sats-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 4px 12px;
+}
+
+.gev-sky-sats-head h2 {
+  margin: 0;
+  color: var(--text-primary, #e8f4ff);
+  font: 600 12px/1.2 var(--font-mono);
+}
+
+/* The body is the panel's one scroll box: when the list, the card and the
+   controls do not all fit, it scrolls (the card is scrolled into view on
+   select) instead of squeezing the list to nothing. */
+.gev-sky-sats-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 0 10px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.gev-sky-sats-body > * {
+  flex: none;
+}
+
+.gev-sky-sats button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: 600 10px/1 var(--font-mono);
+  cursor: pointer;
+}
+
+.gev-sky-sats button[aria-pressed='true'] {
+  color: var(--text-primary, #e8f4ff);
+  background: rgba(120, 200, 255, 0.12);
+}
+
+.gev-sky-sats button[aria-pressed='false'] {
+  opacity: 0.55;
+}
+
+.gev-sky-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gev-sky-sats-banner[data-level='warn'] {
+  color: #ffd27a;
+}
+
+.gev-sky-sats-banner[data-level='error'] {
+  color: #ff9a8a;
+}
+
+.gev-sky-sats-legend {
+  opacity: 0.75;
+}
+
+/* Takes the room that is left, but never less than three rows. */
+.gev-sky-sats-list {
+  flex: 1 1 auto;
+  min-height: 76px;
+  max-height: 34vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.gev-sky-sats-list button {
+  width: 100%;
+  min-height: 24px;
+  border: 0;
+  background: none;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gev-sky-sats-list button[aria-current='true'] {
+  outline: 1px solid rgba(255, 210, 120, 0.8);
+}
+
+.gev-sky-sats-card h3 {
+  margin: 4px 0;
+  color: var(--text-primary, #e8f4ff);
+  font: 600 12px/1.2 var(--font-mono);
+}
+
+.gev-sky-sats-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0 0 6px;
+}
+
+.gev-sky-sats-card dt {
+  opacity: 0.7;
+}
+
+.gev-sky-sats-card dd {
+  margin: 0;
+}
+
+.gev-sky-sats-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Narrow screens: above the command dock, clear of the Sky button on the
+   right (12 + 52 + 8 px) and below the toolbar, whose real bottom edge
+   skyView.js writes to --gev-sky-bar-bottom (it wraps differently at every
+   width). */
+@media (max-width: 900px) {
+  .gev-sky-sats {
+    top: auto;
+    bottom: calc(2vh + 7.5rem);
+    width: min(300px, calc(100vw - 96px));
+    max-height: calc(
+      100vh - 2vh - 7.5rem - var(--gev-sky-bar-bottom, 200px) - 8px
+    );
+  }
+  .gev-sky-sats-list {
+    max-height: none;
+  }
+}
+
+/* Short landscape phones: there is no room above the dock, so the panel
+   hangs from the toolbar down the left edge, narrow enough to clear the
+   centred command dock. */
+@media (max-width: 900px) and (max-height: 520px) {
+  .gev-sky-sats {
+    top: calc(var(--gev-sky-bar-bottom, 170px) + 8px);
+    bottom: auto;
+    width: min(260px, calc(100vw - 96px));
+    max-height: calc(100vh - var(--gev-sky-bar-bottom, 170px) - 20px);
   }
 }
 

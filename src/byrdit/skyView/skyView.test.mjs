@@ -4,10 +4,13 @@ import * as Cesium from 'cesium';
 import {
   describeObserver,
   mountSkyView,
+  skyViewFor,
   toLocalInputValue,
 } from './skyView.js';
 import { worldDirectionToAzEl } from './skyCamera.js';
 import { createObserver } from './observer.js';
+import { readFileSync } from 'node:fs';
+import { createSatWorkerHandler } from './satWorker.js';
 
 // ── a very small DOM ───────────────────────────────────────────────────────
 class FakeElement extends EventTarget {
@@ -231,6 +234,10 @@ function setup(options = {}) {
     geocode: options.geocode,
     runNavigation: options.runNavigation,
     lifetime: options.lifetime,
+    createSatWorker: options.createSatWorker,
+    fetchCelestrak: options.fetchCelestrak,
+    requestFrame: options.requestFrame ?? (() => null),
+    reducedMotion: options.reducedMotion,
   });
   return { doc, viewer, timers, location, history, handle };
 }
@@ -257,6 +264,8 @@ test('mount: Sky button, panel, toolbar, overlay canvas; once per viewer; null w
   assert.ok(doc.body.find('bar').hidden);
   assert.ok(viewer.container.find('canvas').hidden);
   assert.equal(mountSkyView({ viewer, document: doc }), handle);
+  assert.equal(skyViewFor(viewer), handle);
+  assert.equal(skyViewFor(null), null);
   assert.equal(mountSkyView({ viewer: fakeViewer(), document: null }), null);
   assert.equal(mountSkyView({ viewer: null, document: doc }), null);
   click(button);
@@ -266,6 +275,7 @@ test('mount: Sky button, panel, toolbar, overlay canvas; once per viewer; null w
   assert.equal(doc.body.find('panel').hidden, true);
   handle.destroy();
   assert.equal(doc.body.find('open'), null);
+  assert.equal(skyViewFor(viewer), null);
 });
 
 test('enter at typed lat, lon: eye at 1.7 m over unknown ground (0, flagged), inputs off, URL written; exit restores the camera to 1e-6', async () => {
@@ -583,4 +593,199 @@ test('describeObserver and toLocalInputValue', () => {
     toLocalInputValue(Date.parse('2026-10-12T03:30:00Z')),
     /^\d{4}-\d\d-\d\dT\d\d:\d\d$/,
   );
+});
+
+// ── satellites (P2a) ───────────────────────────────────────────────────────
+const SAT_FIXTURE = readFileSync(
+  new URL('./reference/satFixture200.csv', import.meta.url),
+  'utf8',
+);
+
+class InlineSatWorker extends EventTarget {
+  constructor() {
+    super();
+    this.outbox = [];
+    this.terminated = false;
+    this.handle = createSatWorkerHandler((m) => this.outbox.push(m));
+  }
+  postMessage(message) {
+    this.handle(message);
+    queueMicrotask(() => this.deliver());
+  }
+  deliver() {
+    for (const data of this.outbox.splice(0))
+      this.dispatchEvent(Object.assign(new Event('message'), { data }));
+  }
+  terminate() {
+    this.terminated = true;
+  }
+}
+
+function satSetup(extra = {}) {
+  const worker = new InlineSatWorker();
+  const fetched = [];
+  const env = setup({
+    createSatWorker: () => worker,
+    fetchCelestrak: async (path) => {
+      fetched.push(path);
+      return path === 'active'
+        ? SAT_FIXTURE
+        : SAT_FIXTURE.split(/\r?\n/)[0] + '\r\n';
+    },
+    reducedMotion: () => true,
+    ...extra,
+  });
+  return { ...env, worker, fetched };
+}
+
+async function pumpSats(worker) {
+  for (let i = 0; i < 6; i++) {
+    await settle();
+    worker.deliver();
+  }
+}
+
+const clickWithTarget = (node, target) => {
+  const event = new Event('click');
+  Object.defineProperty(event, 'target', { value: target });
+  node.dispatchEvent(event);
+};
+
+test('satellites: worker starts on enter, panel lists overhead objects with the element-age banner', async () => {
+  const { doc, handle, worker, fetched } = satSetup();
+  assert.equal(doc.body.find('sats').hidden, true, 'hidden before Sky');
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  assert.equal(doc.body.find('sats').hidden, false);
+  assert.ok(fetched.includes('active') && fetched.includes('stations'));
+  assert.ok(!fetched.includes('starlink'), 'Starlink off by default');
+  assert.equal(handle.satellites.status, 'ready');
+  const list = doc.body.find('sats-list');
+  assert.ok(list.children.length > 0, 'rows listed');
+  assert.match(
+    doc.body.find('sats-title').textContent,
+    /^Overhead now \(\d+\)$/,
+  );
+  assert.match(
+    doc.body.find('sats-banner').textContent,
+    /^Elements: newest epoch 2026-10-1\d/,
+  );
+  handle.redraw();
+  assert.ok(handle.satelliteModel, 'satellite model drawn');
+});
+
+test('satellites: canvas click selects (card), list click selects + looks at it, chips filter, exit stops the worker', async () => {
+  const { doc, viewer, handle, worker } = satSetup();
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  // clicks on the list background or a row gap select nothing (not index 0)
+  const listNode = doc.body.find('sats-list');
+  clickWithTarget(listNode, listNode);
+  clickWithTarget(listNode, listNode.children[0]);
+  assert.equal(handle.selectedSatellite, null, 'background click: no select');
+  assert.equal(doc.body.find('sats-card').hidden, true);
+  // look at the highest object so it is on screen, then click it
+  const first = doc.body.find('sats-list').children[0].children[0];
+  const index = Number(first.getAttribute('data-index'));
+  clickWithTarget(doc.body.find('sats-list'), first);
+  assert.equal(handle.selectedSatellite, index);
+  const row = handle.satellites.lookup(index).row;
+  assert.ok(
+    Math.abs(((handle.view.azDeg - row.azDeg + 540) % 360) - 180) < 1e-3,
+    'looked at it (reduced motion: instant)',
+  );
+  assert.ok(Math.abs(handle.view.elDeg - row.elDeg) < 1e-3);
+  const card = doc.body.find('sats-card');
+  assert.equal(card.hidden, false);
+  assert.equal(
+    card.children[0].textContent,
+    handle.satellites.meta[index].name,
+  );
+  // rows and card buttons survive refreshes (a click must not be lost)
+  const lookButton = doc.body.find('sats-look');
+  const rowButton = doc.body.find('sats-list').children[0].children[0];
+  handle.satellites.requestTick(true);
+  await pumpSats(worker);
+  assert.equal(doc.body.find('sats-look'), lookButton);
+  assert.equal(doc.body.find('sats-list').children[0].children[0], rowButton);
+  // a nested element inside a row button selects that row
+  handle.selectSatellite(null);
+  const inner = doc.createElement('span');
+  rowButton.append(inner);
+  clickWithTarget(doc.body.find('sats-list'), inner);
+  assert.equal(
+    handle.selectedSatellite,
+    Number(rowButton.getAttribute('data-index')),
+  );
+  inner.remove();
+  handle.selectSatellite(index);
+  handle.setView({ azDeg: (row.azDeg + 180) % 360 });
+  click(lookButton);
+  assert.ok(Math.abs(((handle.view.azDeg - row.azDeg + 540) % 360) - 180) < 1);
+  // clear, then click the dot on the canvas
+  handle.selectSatellite(null);
+  handle.redraw();
+  const dot = handle.satelliteModel.dots.find((d) => d.index === index);
+  assert.ok(dot, 'dot at the view centre');
+  const canvas = viewer.container.find('canvas');
+  canvas.dispatchEvent(
+    pointer('pointerdown', { pointerId: 5, clientX: dot.x, clientY: dot.y }),
+  );
+  canvas.dispatchEvent(
+    pointer('pointerup', { pointerId: 5, clientX: dot.x + 1, clientY: dot.y }),
+  );
+  assert.equal(handle.selectedSatellite, index);
+  // a click on empty sky clears the selection
+  canvas.dispatchEvent(
+    pointer('pointerdown', { pointerId: 6, clientX: 3, clientY: 3 }),
+  );
+  canvas.dispatchEvent(
+    pointer('pointerup', { pointerId: 6, clientX: 3, clientY: 3 }),
+  );
+  assert.equal(handle.selectedSatellite, null);
+  // chip: hide the class of that object
+  const klass = handle.satellites.meta[index].klass;
+  const chip = doc.body.find(`chip-${klass}`);
+  click(chip);
+  assert.equal(chip.getAttribute('aria-pressed'), 'false');
+  handle.redraw();
+  assert.ok(!handle.satelliteModel.dots.some((d) => d.index === index));
+  click(chip);
+  // GEO belt switch and data-set switches
+  click(doc.body.find('geo-belt'));
+  assert.equal(doc.body.find('geo-belt').getAttribute('aria-pressed'), 'true');
+  handle.redraw();
+  assert.ok(handle.satelliteModel.belt.length > 0);
+  click(doc.body.find('set-starlink'));
+  assert.equal(handle.satellites.sets.starlink, true);
+  // exit
+  click(doc.body.find('back'));
+  assert.equal(worker.terminated, true);
+  assert.equal(handle.satellites.running, false);
+  assert.equal(doc.body.find('sats').hidden, true);
+  assert.equal(handle.selectedSatellite, null);
+  handle.destroy();
+  assert.equal(doc.body.find('sats'), null);
+});
+
+test('satellites: a picked Sky time forces an immediate worker tick at that time', async () => {
+  const { doc, handle, worker } = satSetup();
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  const time = doc.body.find('time');
+  time.value = '2026-10-11T18:00';
+  time.dispatchEvent(new Event('change'));
+  await pumpSats(worker);
+  assert.equal(
+    handle.satellites.stats.timeMs,
+    new Date('2026-10-11T18:00').getTime(),
+  );
+});
+
+test('satellites: without Web Workers the sky still works and the panel says why', async () => {
+  const { doc, handle } = setup({ createSatWorker: () => null });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  assert.equal(handle.active, true);
+  assert.equal(handle.satellites.status, 'unavailable');
+  assert.match(doc.body.find('sats-banner').textContent, /Web Workers/);
 });
