@@ -8,6 +8,7 @@ import {
   json2satrec,
 } from 'satellite.js';
 import { findNextSatellitePass } from '../../data/satellitePass.js';
+import { parseGP } from '../../byrdit/gpCsv.js'; // Byrd-IT: shared
 import { ORBIT_PATH_STEPS, ISS_NORAD } from './policy.js';
 
 export function createOrbits({ state: layerState, services, parts, source }) {
@@ -35,41 +36,6 @@ export function createOrbits({ state: layerState, services, parts, source }) {
       Cesium.Cartesian3.ZERO,
       result,
     );
-  }
-
-  /**
-   * Parse CelesTrak GP CSV text (FORMAT=csv) into { name, gp } records.
-   *
-   * TLE is dead — objects cataloged after 2026-07-11 carry 6-digit NORAD
-   * numbers that cannot be represented in the fixed-width TLE format. CSV
-   * carries the same orbital elements as named OMM columns; feed them
-   * straight into satellite.js' json2satrec() (the library's OMM/JSON entry
-   * point). The catalog groups arrive as single records per satellite with a
-   * header row.
-   */
-  const GP_CSV_HEADER = 'OBJECT_NAME,OBJECT_ID,EPOCH,';
-
-  function parseGP(text) {
-    // NOTE: split on the REGEX /\r?\n/, not the string '\r?\n'. CelesTrak
-    // serves GP CSV with CRLF line endings; a string separator never
-    // matches, leaving the whole response as one "line" so the header check
-    // fails and every catalog silently parses as zero satellites.
-    const lines = String(text || '')
-      .trim()
-      .split(/\r?\n/)
-      .filter((l) => l.length > 0);
-    if (lines.length < 2 || !lines[0].startsWith(GP_CSV_HEADER)) return [];
-    const cols = lines[0].split(',');
-    const idx = Object.fromEntries(cols.map((c, i) => [c, i]));
-    const result = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cells = lines[i].split(',');
-      const gp = {};
-      for (const c of cols) gp[c] = cells[idx[c]];
-      if (!gp.OBJECT_NAME || !gp.NORAD_CAT_ID) continue;
-      result.push({ name: gp.OBJECT_NAME, gp });
-    }
-    return result;
   }
 
   /**

@@ -170,6 +170,12 @@ body.gev-sky-active .gev-nav {
   display: none !important;
 }
 
+/* The map's layer/scene stack sits where the satellite panel goes; it is a
+   map tool, so Sky mode hides it like the nav control (back on exit). */
+body.gev-sky-active #left-panel-stack {
+  display: none !important;
+}
+
 @media (max-width: 900px) {
   .gev-sky-btn {
     right: 12px;
@@ -181,6 +187,149 @@ body.gev-sky-active .gev-nav {
   }
   .gev-sky-bar {
     top: 72px;
+  }
+}
+
+/* Satellites panel (P2a): "Overhead now", class chips, data sets, card. */
+.gev-sky-sats {
+  position: fixed;
+  top: 92px;
+  left: 12px;
+  z-index: 97;
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 24px));
+  max-height: calc(100vh - 180px);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text-secondary);
+  font: 11px/1.35 var(--font-mono);
+}
+
+.gev-sky-sats[hidden],
+.gev-sky-sats-body[hidden],
+.gev-sky-sats-card[hidden] {
+  display: none !important;
+}
+
+.gev-sky-sats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 4px 12px;
+}
+
+.gev-sky-sats-head h2 {
+  margin: 0;
+  color: var(--text-primary, #e8f4ff);
+  font: 600 12px/1.2 var(--font-mono);
+}
+
+.gev-sky-sats-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 0 10px 10px;
+}
+
+.gev-sky-sats button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: 600 10px/1 var(--font-mono);
+  cursor: pointer;
+}
+
+.gev-sky-sats button[aria-pressed='true'] {
+  color: var(--text-primary, #e8f4ff);
+  background: rgba(120, 200, 255, 0.12);
+}
+
+.gev-sky-sats button[aria-pressed='false'] {
+  opacity: 0.55;
+}
+
+.gev-sky-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gev-sky-sats-banner[data-level='warn'] {
+  color: #ffd27a;
+}
+
+.gev-sky-sats-banner[data-level='error'] {
+  color: #ff9a8a;
+}
+
+.gev-sky-sats-legend {
+  opacity: 0.75;
+}
+
+.gev-sky-sats-list {
+  min-height: 0;
+  max-height: 34vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.gev-sky-sats-list button {
+  width: 100%;
+  min-height: 24px;
+  border: 0;
+  background: none;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gev-sky-sats-list button[aria-current='true'] {
+  outline: 1px solid rgba(255, 210, 120, 0.8);
+}
+
+.gev-sky-sats-card h3 {
+  margin: 4px 0;
+  color: var(--text-primary, #e8f4ff);
+  font: 600 12px/1.2 var(--font-mono);
+}
+
+.gev-sky-sats-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0 0 6px;
+}
+
+.gev-sky-sats-card dt {
+  opacity: 0.7;
+}
+
+.gev-sky-sats-card dd {
+  margin: 0;
+}
+
+.gev-sky-sats-actions {
+  display: flex;
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .gev-sky-sats {
+    top: auto;
+    bottom: calc(2vh + 7.5rem);
+    max-height: 38vh;
   }
 }
 

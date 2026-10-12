@@ -7,8 +7,10 @@
  * Sun at Sky time, and "Back to map" restores the previous camera, inputs,
  * clock and scene flags exactly.
  *
- * P1 scope: observer, camera, horizon, sky brightness, `sv` URL. Stars,
- * planets and satellites are later cards and draw into the same overlay.
+ * P1 scope: observer, camera, horizon, sky brightness, `sv` URL.
+ * P2a: satellites above the horizon (module worker, states, labels, the
+ * "Overhead now" panel, element-age rules) drawn into the same overlay.
+ * Stars and planets are later cards.
  */
 import * as Cesium from 'cesium';
 import { observerSolarElevation } from '../../data/satellitePass.js';
@@ -34,8 +36,25 @@ import {
   snapshotCamera,
   snapshotScene,
 } from './skyCamera.js';
+import { createSatSky } from './satSky.js';
+import {
+  drawSatellites,
+  geoBeltPoints,
+  hitTest,
+  lookAtView,
+  satelliteModel,
+} from './satOverlay.js';
+import {
+  ageBanner,
+  buildSatPanel,
+  cardData,
+  overheadList,
+  renderSatPanel,
+} from './satPanel.js';
+import { SKY_CLASSES } from './satCore.js';
 import { createSkyClock } from './skyClock.js';
 import {
+  clampEl,
   dragView,
   inertiaStep,
   keyView,
@@ -58,6 +77,12 @@ const PHASE_TEXT = {
   night: 'Night',
   unknown: '',
 };
+/** Satellite redraw cap while objects move (frames per second). */
+const SAT_FPS = 15;
+const LOOK_AT_MS = 600;
+/** A press that moves less than this and ends sooner than CLICK_MS is a click. */
+const CLICK_PX = 5;
+const CLICK_MS = 400;
 /** A pick this far from the ellipsoid is a streaming-tile glitch, not ground. */
 const PLAUSIBLE_GROUND_M = [-500, 9000];
 
@@ -282,6 +307,14 @@ export function mountSkyView({
   now = () => Date.now(),
   CesiumApi = Cesium,
   autoEnterDelayMs = 2500,
+  createSatWorker,
+  fetchCelestrak,
+  reducedMotion = () =>
+    Boolean(
+      globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches,
+    ),
+  requestFrame = (fn) => globalThis.requestAnimationFrame?.(fn) ?? null,
+  cancelFrame = (id) => globalThis.cancelAnimationFrame?.(id),
 } = {}) {
   if (!viewer?.camera || !viewer?.scene || !doc?.createElement) return null;
   const existing = mounted.get(viewer);
@@ -290,7 +323,8 @@ export function mountSkyView({
   if (!host) return null;
 
   const dom = buildDom(doc);
-  host.append(dom.button, dom.panel, dom.bar);
+  const satDom = buildSatPanel(doc);
+  host.append(dom.button, dom.panel, dom.bar, satDom.root);
   const canvasHost = viewer.container || host;
   canvasHost.append(dom.canvas);
 
@@ -319,6 +353,28 @@ export function mountSkyView({
   const pointers = new Map();
   let pinch = null;
   let lastSunAlt = null;
+  // satellites (P2a)
+  const classesOn = new Set(SKY_CLASSES);
+  let geoBelt = false;
+  let beltPoints = null;
+  let selectedIndex = null;
+  let satModel = null;
+  let satFrame = null;
+  let satFrameAt = 0;
+  let lookFrame = null;
+  let press = null;
+  const satSky = createSatSky({
+    ...(createSatWorker ? { createWorker: createSatWorker } : {}),
+    ...(fetchCelestrak ? { fetchText: fetchCelestrak } : {}),
+    timers,
+    getTime: () => clock.getTime(),
+    onChange: (what) => {
+      if (!active) return;
+      updateSatPanel();
+      if (what === 'tick' && satFrame == null) redraw();
+      if (what === 'tick') startSatAnimation();
+    },
+  });
 
   const setStatus = (text) => {
     dom.status.textContent = text || '';
@@ -366,6 +422,120 @@ export function mountSkyView({
       sunAltDeg: lastSunAlt,
     });
     drawOverlay(ctx, model, { width, height });
+    if (satSky.running) {
+      satModel = satelliteModel({
+        objects: satSky.objectsAt(clock.getTime()),
+        view,
+        width,
+        height,
+        occlusion: (az, elDeg) => profileOcclusion(profile, az, elDeg),
+        classesOn,
+        selectedIndex,
+        geoBelt: geoBelt ? beltPoints : null,
+        insets: arrowInsets(width, height),
+      });
+      drawSatellites(ctx, satModel);
+    } else satModel = null;
+  }
+
+  // ── satellites ───────────────────────────────────────────────────────────
+  /** Keep the edge arrow clear of the satellite panel and the toolbar. */
+  function arrowInsets(width, height) {
+    const pad = 28;
+    const insets = {};
+    const panel = satDom.root.hidden
+      ? null
+      : satDom.root.getBoundingClientRect?.();
+    if (panel && panel.width > 0 && panel.left < width / 2)
+      insets.left = panel.right + pad;
+    const bar = dom.bar.hidden ? null : dom.bar.getBoundingClientRect?.();
+    if (bar && bar.height > 0 && bar.top < height / 2)
+      insets.top = bar.bottom + pad;
+    return insets;
+  }
+
+  function updateSatPanel() {
+    if (!active) return;
+    const t = clock.getTime();
+    const objects = satSky.objectsAt(t);
+    const occlusion = (az, elDeg) => profileOcclusion(profile, az, elDeg);
+    const stats = satSky.stats;
+    const loads = satSky.loads;
+    let statusText = '';
+    if (satSky.status === 'unavailable')
+      statusText =
+        'Satellites need Web Workers, which this browser does not offer.';
+    else if (satSky.status === 'loading') statusText = 'Loading satellites...';
+    if (loads.get('active') === 'error')
+      statusText =
+        `${statusText} All-active list unavailable; showing the core groups.`.trim();
+    renderSatPanel(satDom, {
+      doc,
+      list: overheadList(objects, { classesOn, occlusion }),
+      banner: ageBanner(stats.age, t),
+      card:
+        selectedIndex == null
+          ? null
+          : cardData(satSky.lookup(selectedIndex), t),
+      status: satSky.status,
+      statusText,
+      selectedIndex,
+    });
+  }
+
+  /** Redraw at <= SAT_FPS while satellites move (extrapolated between ticks). */
+  function startSatAnimation() {
+    if (satFrame != null || !active || !satSky.running) return;
+    const step = () => {
+      satFrame = null;
+      if (!active || !satSky.running) return;
+      const t = now();
+      if (t - satFrameAt >= 1000 / SAT_FPS) {
+        satFrameAt = t;
+        redraw();
+      }
+      if (clock.mode === 'live') satFrame = requestFrame(step);
+    };
+    satFrame = requestFrame(step);
+  }
+  function stopSatAnimation() {
+    if (satFrame != null) cancelFrame(satFrame);
+    satFrame = null;
+  }
+
+  function cancelLook() {
+    if (lookFrame != null) cancelFrame(lookFrame);
+    lookFrame = null;
+  }
+  /** Animated look-at (instant with reduced motion). */
+  function lookAtSatellite(index) {
+    const row = satSky.lookup(index)?.row;
+    if (!row || !(row.elDeg > 0)) return false;
+    cancelLook();
+    cancelInertia();
+    const target = { azDeg: row.azDeg, elDeg: clampEl(row.elDeg) };
+    if (reducedMotion()) {
+      applyView({ ...view, ...target });
+      return true;
+    }
+    const from = view;
+    const started = now();
+    const step = () => {
+      lookFrame = null;
+      if (!active) return;
+      const f = Math.min(1, (now() - started) / LOOK_AT_MS);
+      applyView(lookAtView(from, target, f));
+      if (f < 1) lookFrame = requestFrame(step);
+    };
+    lookFrame = requestFrame(step);
+    if (lookFrame == null) applyView({ ...view, ...target });
+    return true;
+  }
+  function selectSatellite(index, { look = false } = {}) {
+    selectedIndex = Number.isInteger(index) ? index : null;
+    updateSatPanel();
+    redraw();
+    if (look && selectedIndex != null) lookAtSatellite(selectedIndex);
   }
 
   function applyTime() {
@@ -472,6 +642,10 @@ export function mountSkyView({
       applyView(view);
       startTicking();
       refreshProfile();
+      satDom.root.hidden = false;
+      beltPoints = geoBeltPoints(observer.latDeg, observer.lonDeg);
+      satSky.start(observer);
+      updateSatPanel();
       dom.canvas.focus?.();
     });
     if (!entered) setStatus('Sky view is not available in this mode.');
@@ -487,6 +661,13 @@ export function mountSkyView({
     active = false;
     stopTicking();
     cancelInertia();
+    cancelLook();
+    stopSatAnimation();
+    satSky.stop();
+    satModel = null;
+    selectedIndex = null;
+    press = null;
+    satDom.root.hidden = true;
     if (!keepCamera) restoreCamera(CesiumApi, viewer.camera, cameraSnap);
     restoreScene(CesiumApi, viewer, sceneSnap, { nowMs: now() });
     cameraSnap = null;
@@ -684,9 +865,21 @@ export function mountSkyView({
     return Math.hypot(a.x - b.x, a.y - b.y);
   };
 
+  function canvasPoint(event) {
+    const rect = dom.canvas.getBoundingClientRect?.();
+    return {
+      x: event.clientX - (rect?.left || 0),
+      y: event.clientY - (rect?.top || 0),
+    };
+  }
   function onPointerDown(event) {
     if (!active) return;
     cancelInertia();
+    cancelLook();
+    press =
+      pointers.size === 0
+        ? { id: event.pointerId, x: event.clientX, y: event.clientY, t: now() }
+        : null;
     dom.canvas.setPointerCapture?.(event.pointerId);
     pointers.set(event.pointerId, {
       x: event.clientX,
@@ -726,6 +919,21 @@ export function mountSkyView({
   function onPointerUp(event) {
     const p = pointers.get(event.pointerId);
     pointers.delete(event.pointerId);
+    if (
+      active &&
+      press &&
+      press.id === event.pointerId &&
+      event.type !== 'pointercancel' &&
+      Math.hypot(event.clientX - press.x, event.clientY - press.y) < CLICK_PX &&
+      now() - press.t < CLICK_MS
+    ) {
+      press = null;
+      const { x, y } = canvasPoint(event);
+      const hit = hitTest(satModel, x, y);
+      if (hit != null || selectedIndex != null) selectSatellite(hit);
+      return;
+    }
+    press = null;
     if (pointers.size < 2) pinch = null;
     if (!active || !p || pointers.size) return;
     if (now() - p.t < 80 && Math.abs(p.vAz) + Math.abs(p.vEl) > 0.005)
@@ -808,6 +1016,51 @@ export function mountSkyView({
     applyView(view);
     refreshProfile();
   });
+  // satellite panel
+  listen(satDom.fold, 'click', () => {
+    const open = satDom.body.hidden;
+    satDom.body.hidden = !open;
+    satDom.fold.setAttribute('aria-expanded', open ? 'true' : 'false');
+    satDom.fold.textContent = open ? '–' : '+';
+  });
+  for (const [klass, chip] of Object.entries(satDom.chips)) {
+    listen(chip, 'click', () => {
+      if (classesOn.has(klass)) classesOn.delete(klass);
+      else classesOn.add(klass);
+      setPressed(chip, classesOn.has(klass));
+      updateSatPanel();
+      redraw();
+    });
+  }
+  listen(satDom.active, 'click', () => {
+    const on = !satSky.sets.active;
+    setPressed(satDom.active, on);
+    satSky.setSets({ active: on });
+  });
+  listen(satDom.starlink, 'click', () => {
+    const on = !satSky.sets.starlink;
+    setPressed(satDom.starlink, on);
+    satSky.setSets({ starlink: on });
+  });
+  listen(satDom.belt, 'click', () => {
+    geoBelt = !geoBelt;
+    setPressed(satDom.belt, geoBelt);
+    redraw();
+  });
+  listen(satDom.list, 'click', (event) => {
+    const button =
+      event.target?.closest?.('button[data-index]') ?? event.target;
+    const index = Number(button?.getAttribute?.('data-index'));
+    if (Number.isInteger(index)) selectSatellite(index, { look: true });
+  });
+  listen(satDom.look, 'click', () => {
+    if (selectedIndex != null) lookAtSatellite(selectedIndex);
+  });
+  listen(satDom.clear, 'click', () => selectSatellite(null));
+  clock.subscribe(() => {
+    if (active) satSky.timeChanged();
+  });
+
   listen(dom.canvas, 'pointerdown', onPointerDown);
   listen(dom.canvas, 'pointermove', onPointerMove);
   listen(dom.canvas, 'pointerup', onPointerUp);
@@ -881,6 +1134,19 @@ export function mountSkyView({
     get geolocator() {
       return geolocator;
     },
+    /** Satellites controller (stats, objects, sets) and the last drawn model. */
+    get satellites() {
+      return satSky;
+    },
+    get satelliteModel() {
+      return satModel;
+    },
+    get selectedSatellite() {
+      return selectedIndex;
+    },
+    selectSatellite: (index, options) => selectSatellite(index, options),
+    lookAtSatellite: (index) => lookAtSatellite(index),
+    satelliteElements: satDom,
     elements: dom,
     enterAt,
     exit: () => exit(),
@@ -899,6 +1165,7 @@ export function mountSkyView({
       dom.button.remove?.();
       dom.panel.remove?.();
       dom.bar.remove?.();
+      satDom.root.remove?.();
       dom.canvas.remove?.();
       mounted.delete(viewer);
     },
@@ -906,6 +1173,12 @@ export function mountSkyView({
   mounted.set(viewer, handle);
   lifetime?.removers?.add?.(() => handle.destroy());
   return handle;
+}
+
+/** The mounted Sky view for a viewer (QA harnesses and later cards). */
+export function skyViewFor(viewer) {
+  const handle = viewer ? mounted.get(viewer) : null;
+  return handle && !handle.destroyed ? handle : null;
 }
 
 /**
