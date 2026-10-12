@@ -30,6 +30,13 @@ import {
  * (createTerminalRoute), because the upstream FIRMS plugin polls on any
  * sub-path.
  *
+ * Last-good copies are kept per feed.cacheKey(url) (default: one slot per
+ * feed), so a query-shaped answer (vessels ?maxRows=) is never served for a
+ * different query: the vessels key is GEV's normalised maxRows. At most
+ * feed.cacheEntries copies (default 1) and BRIDGE_CACHE_MAX_BYTES in total
+ * are kept per feed, least recently used evicted first. A query with no
+ * copy of its own gets the 503 no-snapshot answer, never another query's.
+ *
  * Owner N5: the server never clears a layer. It adds X-Feed-Grey-Until
  * (X-Feed-Stale-Since + GEV_STALE_GREY_MS) so the client decides grey vs
  * cleared on the server clock (staleness.js feedDisplayState).
@@ -44,6 +51,8 @@ import {
 
 export const DEFAULT_COLLECTOR_URLS = Object.freeze(['http://127.0.0.1:4180']);
 export const DEFAULT_COLLECTOR_TIMEOUT_MS = 2_000;
+/** Upper bound of the last-good copies one feed keeps (all keys together). */
+export const BRIDGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Collector response headers relayed to the browser. */
 export const RELAYED_HEADERS = Object.freeze([
@@ -141,8 +150,35 @@ export function createCollectorBridge({
   const feed = BRIDGE_FEEDS[name];
   if (!feed) throw new Error(`unknown bridge feed: ${name}`);
   const threshold = staleThresholdMs(feed.cadenceMs);
-  /** Last good copy: { body: Uint8Array, contentType, lastOkAt }. */
-  let cache = null;
+  /**
+   * Last good copies by cache key (Map order = least recently used first):
+   * key -> { body: Uint8Array, contentType, lastOkAt }.
+   */
+  const cache = new Map();
+  const cacheKeyOf = feed.cacheKey ?? (() => '');
+  const cacheEntries = Math.max(1, feed.cacheEntries ?? 1);
+
+  function cacheGet(key) {
+    const entry = cache.get(key);
+    if (entry) {
+      cache.delete(key);
+      cache.set(key, entry);
+    }
+    return entry ?? null;
+  }
+
+  function cacheSet(key, entry) {
+    cache.delete(key);
+    cache.set(key, entry);
+    let bytes = 0;
+    for (const e of cache.values()) bytes += e.body.byteLength;
+    for (const [k, e] of cache) {
+      if (k === key) break; // the newest copy is always kept
+      if (cache.size <= cacheEntries && bytes <= BRIDGE_CACHE_MAX_BYTES) break;
+      cache.delete(k);
+      bytes -= e.body.byteLength;
+    }
+  }
   /** 'collector' | 'cache' | 'none' — last served answer, for transitions. */
   let state = null;
   /** In-flight collector read shared by concurrent requests, keyed by query. */
@@ -230,25 +266,25 @@ export function createCollectorBridge({
     res.end(req.method === 'HEAD' ? undefined : body);
   }
 
-  function serveCache(req, res, reason) {
+  function serveCache(req, res, reason, entry) {
     const t = now();
-    const age = Math.max(0, t - cache.lastOkAt);
+    const age = Math.max(0, t - entry.lastOkAt);
     const stale = age > threshold;
     const headers = {
-      'Content-Type': cache.contentType,
+      'Content-Type': entry.contentType,
       'Cache-Control': 'no-store',
       'X-Feed-Source': feed.source,
       'X-Feed-Cache': stale ? 'STALE' : 'HIT',
       'X-Feed-Age-Ms': String(age),
-      'X-Feed-Last-OK': String(cache.lastOkAt),
+      'X-Feed-Last-OK': String(entry.lastOkAt),
       'X-Feed-Bridge': 'cache',
     };
     if (stale) {
-      headers['X-Feed-Stale-Since'] = String(cache.lastOkAt + threshold);
+      headers['X-Feed-Stale-Since'] = String(entry.lastOkAt + threshold);
       headers['X-Feed-Reason'] = reason;
     }
     transition('cache', reason);
-    send(req, res, 200, withGrey(headers), cache.body);
+    send(req, res, 200, withGrey(headers), entry.body);
   }
 
   function serveNone(req, res, reason) {
@@ -286,6 +322,11 @@ export function createCollectorBridge({
       res.end(JSON.stringify({ error: 'method not allowed' }));
       return;
     }
+    const fallback = (reason) => {
+      const entry = cacheGet(cacheKeyOf(url));
+      if (entry) serveCache(req, res, reason, entry);
+      else serveNone(req, res, reason);
+    };
     try {
       const result = await sharedRead(forwardedSearch(url));
       if (result.ok && result.status !== 200) {
@@ -310,25 +351,23 @@ export function createCollectorBridge({
         }
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
-        cache = {
+        cacheSet(cacheKeyOf(url), {
           body: result.body,
           contentType: headers['Content-Type'] ?? 'application/json',
           lastOkAt: lastOk ?? now() - (age ?? 0),
-        };
+        });
         transition('collector');
         send(req, res, 200, headers, result.body);
         return;
       }
-      if (cache) serveCache(req, res, result.reason);
-      else serveNone(req, res, result.reason);
+      fallback(result.reason);
     } catch {
       // Never fall through to the upstream plugin, whatever failed here.
       if (res.headersSent) {
         res.end();
         return;
       }
-      if (cache) serveCache(req, res, 'bridge_error');
-      else serveNone(req, res, 'bridge_error');
+      fallback('bridge_error');
     }
   };
 }

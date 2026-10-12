@@ -4,13 +4,22 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { historyPlugins } from './index.js';
-import { BRIDGE_FEEDS, enabledBridgeFeeds } from './feeds.js';
+import {
+  BRIDGE_FEEDS,
+  enabledBridgeFeeds,
+  clampInt,
+  vesselsCacheKey,
+  AIS_MAX_ROWS,
+} from './feeds.js';
+import { createCollectorBridge } from './collectorBridge.js';
+import { clampInt as gevClampInt } from '../../../server/providers/common/query.js';
 import {
   ingestAisStreamEnvelope,
   aisStreamRows,
   newestAisPositionAt,
   readAisTrack,
   AISSTREAM_STALE_MS,
+  AISSTREAM_CACHE_MAX,
 } from '../../../server/providers/vessels/ais-store.js';
 
 /**
@@ -189,7 +198,8 @@ async function startCollector(t, { lastOk }) {
         'X-Feed-Age-Ms': '1000',
         'X-Feed-Last-OK': String(lastOk),
       });
-      res.end(u.searchParams.get('maxRows') === '7' ? BODY7 : BODY);
+      // GEV semantics: maxRows normalised by clampInt (7, '7.9', '07' -> 7)
+      res.end(vesselsCacheKey(u) === '7' ? BODY7 : BODY);
       return;
     }
     if (u.pathname === '/v1/latest/vessels-track') {
@@ -285,12 +295,15 @@ test('network-blocked: /api/vessels namespace never reaches aisLiveProxy; bytes 
     assert.equal(r.statusCode, status, `${method} ${path}`);
   }
 
-  // collector gone: vessels -> last good STALE (N5 grey), track -> 503
+  // collector gone: vessels -> last good STALE (N5 grey) of the SAME query,
+  // track -> 503
   await collector.stop();
   now = lastOk + 4 * 60_000;
   const stale = await request('/api/vessels?maxRows=7');
   assert.equal(stale.statusCode, 200);
-  assert.ok(stale.body.equals(BODY), 'last good copy (whatever maxRows)');
+  assert.ok(stale.body.equals(BODY7), 'last good copy of maxRows=7');
+  const staleFull = await request('/api/vessels');
+  assert.ok(staleFull.body.equals(BODY), 'full list never gets the 7 rows');
   assert.equal(stale.headers['x-feed-cache'], 'STALE');
   assert.equal(stale.headers['x-feed-bridge'], 'cache');
   assert.equal(stale.headers['x-feed-stale-since'], String(lastOk + 180_000));
@@ -316,4 +329,145 @@ test('flag off: no vessels middleware (aisLiveProxy keeps the route)', async () 
   const r = await request('/api/vessels?maxRows=5');
   assert.equal(r.statusCode, 599);
   assert.deepEqual(sentinel.hits, ['GET /?maxRows=5']);
+});
+
+test('R3 maxRows normalisation matches GEV ais-live.js (clampInt, AISSTREAM_CACHE_MAX)', () => {
+  assert.equal(AIS_MAX_ROWS, AISSTREAM_CACHE_MAX);
+  for (const v of [
+    null,
+    '',
+    'abc',
+    '0',
+    '-5',
+    '1',
+    '7',
+    '7.9',
+    '07',
+    '1e3',
+    '500',
+    '12000',
+    '50000',
+    '50001',
+    '999999999',
+  ])
+    assert.equal(
+      clampInt(v, 1, AIS_MAX_ROWS, AIS_MAX_ROWS),
+      gevClampInt(v, 1, AISSTREAM_CACHE_MAX, AISSTREAM_CACHE_MAX),
+      String(v),
+    );
+  const key = (q) => vesselsCacheKey(new URL(`http://x/${q}`));
+  assert.equal(key(''), '50000');
+  assert.equal(key('?maxRows=999999'), '50000');
+  assert.equal(key('?maxRows=abc'), '50000');
+  assert.equal(key('?maxRows=0'), '1');
+  assert.equal(key('?maxRows=7.9'), '7');
+  assert.equal(key('?maxRows=500&lat=1'), '500');
+});
+
+/** Fake collector + request driver straight on the vessels handler. */
+function vesselsHandler({ now } = {}) {
+  const state = { up: true, seen: [] };
+  const lastOk = 1_791_800_000_000;
+  const body = (n) => new TextEncoder().encode(JSON.stringify({ rows: n }));
+  const fetchImpl = async (u) => {
+    const url = new URL(u);
+    state.seen.push(url.pathname + url.search);
+    if (!state.up) throw new Error('ECONNREFUSED');
+    return new Response(body(vesselsCacheKey(url)), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'x-feed-source': 'AISStream',
+        'x-feed-cache': 'HIT',
+        'x-feed-age-ms': '0',
+        'x-feed-last-ok': String(lastOk),
+      },
+    });
+  };
+  const handler = createCollectorBridge({
+    name: 'vessels',
+    urls: ['http://collector.test'],
+    fetchImpl,
+    now: now ?? (() => lastOk + 1_000),
+    log: () => {},
+  });
+  const get = (q) =>
+    new Promise((resolve) => {
+      const res = {
+        headersSent: false,
+        writeHead(status, headers) {
+          this.status = status;
+          this.headers = headers;
+          this.headersSent = true;
+        },
+        end(b) {
+          resolve({
+            status: this.status,
+            headers: this.headers,
+            rows: b ? JSON.parse(Buffer.from(b).toString()).rows : null,
+          });
+        },
+      };
+      handler({ url: `/${q}`, method: 'GET' }, res, () => resolve('next'));
+    });
+  return { state, get, lastOk };
+}
+
+for (const order of [
+  ['', '?maxRows=7'],
+  ['?maxRows=7', ''],
+]) {
+  test(`R3 last-good copies are per normalised maxRows (order ${order.map((q) => q || 'full').join(' -> ')}), through the outage and grey window`, async () => {
+    let t = 1_791_800_000_000 + 1_000;
+    const v = vesselsHandler({ now: () => t });
+    for (const q of order) assert.equal((await v.get(q)).status, 200);
+    v.state.up = false;
+    for (const at of [10_000, 4 * 60_000, 30 * 60_000]) {
+      t = v.lastOk + at;
+      const full = await v.get('');
+      assert.equal(full.status, 200);
+      assert.equal(full.rows, '50000', 'full request never gets 7 rows');
+      assert.equal(full.headers['X-Feed-Bridge'], 'cache');
+      const seven = await v.get('?maxRows=7');
+      assert.equal(seven.rows, '7');
+      // same normalised value, other spelling: same copy
+      assert.equal((await v.get('?maxRows=7.9&lat=1')).rows, '7');
+      assert.equal((await v.get('?maxRows=999999')).rows, '50000');
+      assert.equal((await v.get('?maxRows=abc')).rows, '50000');
+      // a query never answered while up has no copy of its own: 503
+      const other = await v.get('?maxRows=12');
+      assert.equal(other.status, 503);
+      assert.equal(other.headers['X-Feed-Bridge'], 'none');
+    }
+    // inside the stale window the copies are STALE + grey-until (N5)
+    t = v.lastOk + 4 * 60_000;
+    const g = await v.get('');
+    assert.equal(g.headers['X-Feed-Cache'], 'STALE');
+    assert.equal(
+      g.headers['X-Feed-Grey-Until'],
+      String(v.lastOk + 180_000 + 3_600_000),
+    );
+  });
+}
+
+test('R3 last-good copies are bounded: 4 most recently used maxRows values per feed', async () => {
+  const v = vesselsHandler();
+  for (const n of [1, 2, 3, 4, 5]) await v.get(`?maxRows=${n}`);
+  await v.get('?maxRows=2'); // refresh: 2 is now most recently used
+  await v.get('?maxRows=6'); // 5 copies -> evicts 3 (1 went at 5)
+  v.state.up = false;
+  const served = {};
+  for (const n of [1, 2, 3, 4, 5, 6])
+    served[n] = (await v.get(`?maxRows=${n}`)).status;
+  assert.deepEqual(served, { 1: 503, 2: 200, 3: 503, 4: 200, 5: 200, 6: 200 });
+});
+
+test('R3 other bridged feeds keep one last-good slot whatever the query', () => {
+  for (const [name, feed] of Object.entries(BRIDGE_FEEDS)) {
+    if (name === 'vessels') continue;
+    assert.equal(feed.cacheKey, undefined, name);
+    assert.equal(feed.cacheEntries, undefined, name);
+  }
+  assert.equal(BRIDGE_FEEDS.vessels.cacheKey, vesselsCacheKey);
+  assert.equal(BRIDGE_FEEDS.vessels.cacheEntries, 4);
 });
