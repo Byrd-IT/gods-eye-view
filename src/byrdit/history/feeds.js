@@ -20,6 +20,16 @@
  * non-/status sub-path (/api/firms/x, /status/, //) with a full four-source
  * area poll (D7). Routes whose sub-paths are live GEV routes
  * (/api/military/track, /api/fire-perimeters/inciweb/*) stay non-terminal.
+ * B8 vessels: /api/vessels and /api/vessels/track share GEV_BRIDGE_VESSELS
+ * and the route is terminal: GEV's aisLiveProxy (re)opens the AISStream
+ * socket on ANY /api/vessels request (upstream demand), and AISStream allows
+ * one connection per key, so no request may ever reach it while the
+ * collector holds the socket. `forwardParams` lists the query parameters
+ * forwarded to the collector (canonical order; everything else, e.g. the
+ * client's lat/lon/radius_km, which GEV ignores too, is dropped). `cache:
+ * false` (track): no last-good copy, because a per-vessel answer must never
+ * be served for another vessel; `relayStatus` lists collector statuses
+ * relayed as-is (track 400 = GEV's "mmsi query param required").
  * Hook for B20: /api/flights is answered from the OpenSky viewport poller's
  * tile cache; that entry sets forwardQuery: true so `view=w,s,e,n` reaches
  * the collector. It is deliberately NOT registered in B4.
@@ -75,6 +85,33 @@ export const BRIDGE_FEEDS = Object.freeze({
     source: 'NOAA NHC / CPHC',
     flag: 'GEV_BRIDGE_CYCLONES',
     forwardQuery: false,
+  }),
+  // gev-history src/ais/aisRunner.js (AISStream socket held 24/7; latest
+  // snapshot every 10 s, stale rule on a 60 s cadence).
+  vessels: Object.freeze({
+    route: '/api/vessels',
+    path: '/',
+    collectorFeed: 'vessels',
+    cadenceMs: 60_000,
+    source: 'AISStream',
+    flag: 'GEV_BRIDGE_VESSELS',
+    forwardQuery: false,
+    forwardParams: Object.freeze(['maxRows']),
+    terminal: true,
+  }),
+  // GET /api/vessels/track?mmsi=: the collector's accumulated track ring.
+  vesselsTrack: Object.freeze({
+    route: '/api/vessels',
+    path: '/track',
+    collectorFeed: 'vessels-track',
+    cadenceMs: 60_000,
+    source: 'AISStream',
+    flag: 'GEV_BRIDGE_VESSELS',
+    forwardQuery: false,
+    forwardParams: Object.freeze(['mmsi']),
+    cache: false,
+    relayStatus: Object.freeze([400]),
+    terminal: true,
   }),
 });
 

@@ -170,13 +170,16 @@ export function createCollectorBridge({
           },
         );
         const body = new Uint8Array(await response.arrayBuffer());
-        if (response.status === 200) {
+        if (
+          response.status === 200 ||
+          (feed.relayStatus ?? []).includes(response.status)
+        ) {
           const headers = {};
           for (const key of RELAYED_HEADERS) {
             const value = response.headers.get(key);
             if (value !== null) headers[CANONICAL[key]] = value;
           }
-          return { ok: true, body, headers };
+          return { ok: true, status: response.status, body, headers };
         }
         // Standby (503, no X-Feed-Reason) or an active collector with no
         // snapshot yet: keep its reason, try the next collector.
@@ -187,6 +190,24 @@ export function createCollectorBridge({
       }
     }
     return { ok: false, reason };
+  }
+
+  /**
+   * Query string sent to the collector: the raw one (forwardQuery), only
+   * the allow-listed parameters in a canonical order (forwardParams), or
+   * nothing.
+   */
+  function forwardedSearch(url) {
+    if (feed.forwardParams) {
+      const out = new URLSearchParams();
+      for (const key of feed.forwardParams) {
+        const value = url.searchParams.get(key);
+        if (value !== null) out.set(key, value);
+      }
+      const text = out.toString();
+      return text ? `?${text}` : '';
+    }
+    return feed.forwardQuery ? url.search : '';
   }
 
   function sharedRead(search) {
@@ -266,10 +287,27 @@ export function createCollectorBridge({
       return;
     }
     try {
-      const result = await sharedRead(feed.forwardQuery ? url.search : '');
+      const result = await sharedRead(forwardedSearch(url));
+      if (result.ok && result.status !== 200) {
+        // relayed client error (track 400): never cached
+        transition('collector');
+        send(
+          req,
+          res,
+          result.status,
+          { ...result.headers, 'X-Feed-Bridge': 'collector' },
+          result.body,
+        );
+        return;
+      }
       if (result.ok) {
         const headers = withGrey({ ...result.headers });
         headers['X-Feed-Bridge'] = 'collector';
+        if (feed.cache === false) {
+          transition('collector');
+          send(req, res, 200, headers, result.body);
+          return;
+        }
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
         cache = {
