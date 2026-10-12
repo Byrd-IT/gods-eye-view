@@ -354,7 +354,7 @@ test('terminal: odd sub-paths and methods never reach GEV launch / CelesTrak pro
   );
 });
 
-test('pattern route keeps at most MAX_PATTERN_SLOTS group copies, still answers the rest', async (t) => {
+test('pattern route over the cap: every group still answered, one log line per group transition, repeats log nothing (t_eb2c4e10)', async (t) => {
   t.mock.method(console, 'warn', () => {});
   const blocked = blockNetwork(t, 'http://127.0.0.1:9');
   const lines = [];
@@ -364,11 +364,37 @@ test('pattern route keeps at most MAX_PATTERN_SLOTS group copies, still answers 
       log: (l) => lines.push(l),
     }),
   ]);
-  for (let i = 0; i < MAX_PATTERN_SLOTS + 8; i++) {
+  const total = MAX_PATTERN_SLOTS + 8;
+  for (let i = 0; i < total; i++) {
     const r = await request(`/api/celestrak/g${i}`);
     assert.equal(r.statusCode, 503);
   }
-  assert.ok(lines.length <= MAX_PATTERN_SLOTS + 8);
+  // exactly one start -> none line per group, in request order
+  assert.deepEqual(
+    lines,
+    Array.from(
+      { length: total },
+      (_, i) =>
+        `[gev-history bridge] celestrak/celestrak-g${i}: start -> none (collector_down)`,
+    ),
+  );
+  // the most recent group, over the cap, asked again and again: no new line
+  lines.length = 0;
+  for (let i = 0; i < 5; i++) {
+    assert.equal(
+      (await request(`/api/celestrak/g${total - 1}`)).statusCode,
+      503,
+    );
+  }
+  assert.deepEqual(lines, [], 'same result repeated: no log line');
+  // the oldest group's state was dropped (bounded): it logs its start line
+  // once more, then nothing for the repeats
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await request('/api/celestrak/g0')).statusCode, 503);
+  }
+  assert.deepEqual(lines, [
+    '[gev-history bridge] celestrak/celestrak-g0: start -> none (collector_down)',
+  ]);
   assert.deepEqual(blocked, []);
 });
 
