@@ -74,6 +74,7 @@ import {
   wheelZoomFactor,
   zoomView,
 } from './skyMath.js';
+import { satelliteSearchProvider } from './skySearch.js';
 import { DEFAULT_SKY_FLAGS, readSkyUrl, writeSkyUrl } from './skyUrl.js';
 
 const mounted = new WeakMap();
@@ -337,24 +338,6 @@ export function mountSkyView({
   host.append(dom.button, dom.panel, dom.bar, satDom.root);
   const canvasHost = viewer.container || host;
   canvasHost.append(dom.canvas);
-  const content = createSkyContent({
-    doc,
-    getView: () => view,
-    applyView: (next) => applyView(next),
-    requestRedraw: () => redraw(),
-    // `next` holds only the switches that changed (never the whole copy)
-    onFlagsChange: (next) => {
-      flags = { ...flags, ...next };
-      setPressed(dom.buttons.flat, flags.flatHorizon);
-      setPressed(dom.buttons.grid, flags.grid);
-      redraw();
-      scheduleUrl();
-    },
-    now,
-    ...skyContentOptions,
-  });
-  if (content.root) host.append(content.root);
-
   const removers = [];
   const listen = (target, type, handler, options) => {
     if (!target?.addEventListener) return;
@@ -402,6 +385,36 @@ export function mountSkyView({
       if (what === 'tick') startSatAnimation();
     },
   });
+  /** Satellite objects of the last paint (P2a extrapolated az/el). */
+  let satObjects = null;
+  const satellitePosition = (id) => {
+    const drawn = satObjects?.find((o) => o.index === id);
+    if (drawn) return { azDeg: drawn.azDeg, elDeg: drawn.elDeg };
+    const row = satSky.lookup(id)?.row;
+    return row ? { azDeg: row.azDeg, elDeg: row.elDeg } : null;
+  };
+  const content = createSkyContent({
+    doc,
+    getView: () => view,
+    applyView: (next) => applyView(next),
+    requestRedraw: () => redraw(),
+    // `next` holds only the switches that changed (never the whole copy)
+    onFlagsChange: (next) => {
+      flags = { ...flags, ...next };
+      setPressed(dom.buttons.flat, flags.flatHorizon);
+      setPressed(dom.buttons.grid, flags.grid);
+      redraw();
+      scheduleUrl();
+    },
+    now,
+    // search finds satellites by name in the P2a engine; the marker uses
+    // the az/el the satellite overlay draws (extrapolated between ticks)
+    satellites: satelliteSearchProvider(satSky, {
+      positionOf: (id) => satellitePosition(id),
+    }),
+    ...skyContentOptions,
+  });
+  if (content.root) host.append(content.root);
 
   const setStatus = (text) => {
     dom.status.textContent = text || '';
@@ -474,6 +487,7 @@ export function mountSkyView({
       sunAltDeg: lastSunAlt,
     });
     drawOverlay(ctx, model, { width, height });
+    satObjects = satSky.running ? satSky.objectsAt(clock.getTime()) : null;
     content.draw(ctx, {
       view,
       width,
@@ -485,7 +499,7 @@ export function mountSkyView({
     });
     if (satSky.running) {
       satModel = satelliteModel({
-        objects: satSky.objectsAt(clock.getTime()),
+        objects: satObjects,
         view,
         width,
         height,
@@ -761,6 +775,7 @@ export function mountSkyView({
     stopSatAnimation();
     satSky.stop();
     satModel = null;
+    satObjects = null;
     selectedIndex = null;
     press = null;
     satDom.root.hidden = true;

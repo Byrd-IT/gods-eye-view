@@ -853,3 +853,63 @@ test('redraws reuse the cached canvas size (no forced layout per frame); a resiz
     globalThis.ResizeObserver = saved;
   }
 });
+
+// ── P3b search x P2a satellites (review t_89d6442c R2) ────────────────────
+test('R2: the search box finds satellites from the P2a engine; look-at + marker on the drawn dot; below-horizon objects say so', async () => {
+  const { doc, handle, worker } = satSetup();
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  assert.equal(handle.satellites.status, 'ready');
+  const meta = handle.satellites.meta;
+  const count = (name) => meta.filter((m) => m.name === name).length;
+  const query = doc.body.find('sky-search-query');
+  const submit = (text) => {
+    query.value = text;
+    doc.body.find('sky-search').dispatchEvent(new Event('submit'));
+    return doc.body.find('sky-search-status').textContent;
+  };
+  // "ISS" ranks the space station first, never the star Meissa
+  const iss = handle.content.search('ISS');
+  assert.equal(iss[0].kind, 'satellite');
+  assert.match(iss[0].label, /^ISS/);
+  assert.equal(meta[iss[0].target.id].noradId, 25544);
+  // an object above the horizon: animated look-at (instant here) + marker
+  const up = handle.satellites
+    .objectsAt(handle.clock.getTime())
+    .filter((o) => o.elDeg > 10 && count(meta[o.index].name) === 1)
+    .sort((a, b) => b.elDeg - a.elDeg)
+    .map((o) => ({ d: o, m: meta[o.index] }))[0];
+  assert.ok(up, 'a uniquely named satellite above 10 deg');
+  const text = submit(up.m.name);
+  assert.ok(text.startsWith(`${up.m.name}: az `), text);
+  assert.equal(handle.content.marker.target.type, 'satellite');
+  assert.equal(handle.content.marker.target.id, up.d.index);
+  const objects = handle.satellites.objectsAt(handle.clock.getTime());
+  const drawn = objects.find((o) => o.index === up.d.index);
+  assert.ok(
+    Math.abs(((handle.view.azDeg - drawn.azDeg + 540) % 360) - 180) < 1e-6,
+  );
+  assert.ok(Math.abs(handle.view.elDeg - drawn.elDeg) < 1e-6);
+  handle.redraw();
+  const marker = handle.content.lastStats.marker;
+  const dot = handle.satelliteModel.dots.find((d) => d.index === up.d.index);
+  assert.ok(marker && dot, 'marker and dot drawn');
+  assert.ok(
+    Math.hypot(marker.x - dot.x, marker.y - dot.y) < 1,
+    `marker ${marker.x},${marker.y} on the dot ${dot.x},${dot.y}`,
+  );
+  // an object the worker does not report (below -2 deg): honest status
+  const below = meta.findIndex(
+    (m, i) => count(m.name) === 1 && !handle.satellites.lookup(i)?.row,
+  );
+  assert.ok(below >= 0, 'an object below the horizon');
+  const before = handle.view;
+  assert.match(
+    submit(meta[below].name),
+    /right now: it is below the horizon or not computed yet/,
+  );
+  assert.deepEqual(handle.view, before);
+  // leaving the sky drops the satellite positions
+  handle.exit();
+  assert.ok(!handle.content.search('ISS').some((r) => r.kind === 'satellite'));
+});

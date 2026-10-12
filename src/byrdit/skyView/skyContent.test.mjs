@@ -275,3 +275,12 @@ test('overlay pixel ratio is capped at 2x', () => {
   assert.equal(overlayPixelRatio(undefined), 1);
   assert.equal(overlayPixelRatio(0), 1);
 });
+
+test('R1: a switch change notifies only the changed key (never the whole stale copy)', async () => {
+  const notified = [];
+  const { c } = await content({ onFlagsChange: (next) => notified.push(next) });
+  c.setFlags({ flatHorizon: false, grid: false });
+  c.setFlags({ lines: false }, { notify: true });
+  c.setFlags({ boundaries: true }, { notify: true });
+  assert.deepEqual(notified, [{ lines: false }, { boundaries: true }]);
+});
