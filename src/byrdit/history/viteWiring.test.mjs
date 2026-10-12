@@ -56,7 +56,7 @@ test('the upstream-owned touch point is the import plus one plugin line', () => 
   assert.deepEqual(
     lines.map((l) => l.trim()),
     [
-      "import { historyPlugins } from '../../src/byrdit/history/index.js';",
+      "import { historyPlugins } from '../byrdit/history.js';",
       '...historyPlugins(),',
     ],
   );

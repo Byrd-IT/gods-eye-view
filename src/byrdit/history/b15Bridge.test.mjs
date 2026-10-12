@@ -146,7 +146,14 @@ test('resolvers: only registered ids and registry URLs map to collector snapshot
     );
   assert.equal(resolveWeather(u('/manifest?product=snow')), null);
   assert.equal(resolveWeather(u('/manifest?product=radar&x=1')), null);
-  assert.equal(resolveWeather(u('/tile?product=radar')), null);
+  // R4: tile/image are answered by the bridge itself, never passed on
+  assert.deepEqual(resolveWeather(u('/tile?product=radar')), {
+    local: 'weatherImagery',
+  });
+  assert.deepEqual(resolveWeather(u('/image?product=radar')), {
+    local: 'weatherImagery',
+  });
+  assert.equal(resolveWeather(u('/tile/')), null);
 });
 
 // ------------------------------------------------------------ integration
@@ -209,7 +216,11 @@ function chain(plugins) {
  * The REAL upstream plugins behind the history plugin, global fetch replaced
  * by a blocker that records every non-collector request and refuses it.
  */
-function rig({ now = () => WEATHER_NOW } = {}) {
+function rig({
+  now = () => WEATHER_NOW,
+  liveFetchImpl,
+  injectWeather = true,
+} = {}) {
   const blocked = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
@@ -222,6 +233,7 @@ function rig({ now = () => WEATHER_NOW } = {}) {
     collector.calls.push(url);
     if (!collector.up) throw new TypeError('collector down');
     const feed = /\/v1\/latest\/([a-z0-9-]+)$/.exec(url)[1];
+    if (collector.failFeeds?.has(feed)) throw new TypeError('collector down');
     const snap = snapshots.get(feed);
     if (!snap)
       return new Response('{"error":"no snapshot yet","noDataSince":null}', {
@@ -252,6 +264,9 @@ function rig({ now = () => WEATHER_NOW } = {}) {
     ...historyPlugins({
       env: ALL_ON,
       fetchImpl: collectorFetch,
+      ...(liveFetchImpl ? { liveFetchImpl } : {}),
+      // server/byrdit/history.js injects GEV's weatherProxy the same way
+      ...(injectWeather ? { weatherProxy } : {}),
       now,
       log: (l) => lines.push(l),
     }),
@@ -407,7 +422,7 @@ test('integration: GBFS registry URLs from the collector; other URLs 404 and are
   }
 });
 
-test('integration: weather manifest from the collector; tiles stay on the live plugin', async () => {
+test('integration: weather manifest from the collector; invalid queries answered offline', async () => {
   const r = rig();
   try {
     r.snapshots.set('weather-radar', {
@@ -424,17 +439,235 @@ test('integration: weather manifest from the collector; tiles stay on the live p
     const bad = await r.call('/api/weather/manifest?product=snow');
     assert.equal(bad.statusCode, 400);
     assert.deepEqual(r.blocked, [], 'manifest never read nowCOAST');
-    // the tile route is NOT bridged: imagery bytes stay live (DESIGN #14)
-    await r.call(
-      '/api/weather/tile?product=radar&time=2026-10-12T15:11:52.000Z&z=0&x=0&y=0',
-    );
-    assert.ok(r.blocked.length >= 1, 'tile route reached the live plugin');
-    assert.ok(
-      r.blocked.every((u) => u.startsWith('https://nowcoast.noaa.gov/')),
-    );
   } finally {
     r.restore();
   }
+});
+
+// ------------------------------------------------- R4 weather tile / image
+// Review t_c057aa83 R4: with the bridge on, /api/weather/tile and /image
+// validate time/bounds against COLLECTOR-owned capabilities (collector
+// snapshot nowcoast-caps-<service>); only GetMap image bytes are live, and
+// GEV never requests NOAA GetCapabilities, also not when the collector is
+// down. Every case starts with cold caches (a fresh rig = a fresh bridge).
+const RADAR_MANIFEST = JSON.parse(
+  fx('b15-collector-weather-radar.body').toString('utf8'),
+);
+const RADAR_TIME = RADAR_MANIFEST.latest;
+const tileUrl = (time = RADAR_TIME, x = 0) =>
+  `/api/weather/tile?product=radar&time=${encodeURIComponent(time)}&z=0&x=${x}&y=0`;
+const imageUrl = (time = RADAR_TIME) =>
+  `/api/weather/image?product=radar&time=${encodeURIComponent(time)}&size=1024x512`;
+
+/** A PNG header weatherProxy's validatePng accepts for width x height. */
+function png(width, height) {
+  const b = Buffer.alloc(64);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(b, 0);
+  b.writeUInt32BE(13, 8);
+  b.write('IHDR', 12, 'ascii');
+  b.writeUInt32BE(width, 16);
+  b.writeUInt32BE(height, 20);
+  return b;
+}
+
+/** Live nowCOAST stand-in: answers GetMap only, records every request. */
+function liveNoaa() {
+  const live = { urls: [] };
+  live.fetch = async (url) => {
+    const u = new URL(String(url));
+    live.urls.push(u.href);
+    const req = u.searchParams.get('request');
+    if (req !== 'GetMap') return new Response('', { status: 500 });
+    return new Response(
+      png(
+        Number(u.searchParams.get('width')),
+        Number(u.searchParams.get('height')),
+      ),
+      { status: 200, headers: { 'Content-Type': 'image/png' } },
+    );
+  };
+  live.capabilities = () =>
+    live.urls.filter((x) => /request=getcapabilities/i.test(x));
+  return live;
+}
+
+function radarCaps(r, { stale = false, lastOk = WEATHER_NOW - 1000 } = {}) {
+  r.snapshots.set('nowcoast-caps-weather-radar', {
+    body: fx('b15-nowcoast-weather_radar.xml'),
+    type: 'application/xml',
+    lastOk,
+    stale,
+  });
+}
+
+for (const [kind, path, size] of [
+  ['tile', tileUrl, [256, 256]],
+  ['image', imageUrl, [1024, 512]],
+]) {
+  test(`R4 weather ${kind}: cold cache, collector up -> validated by collector metadata; GetMap only, zero GetCapabilities`, async () => {
+    const live = liveNoaa();
+    const r = rig({ liveFetchImpl: live.fetch });
+    try {
+      radarCaps(r);
+      const res = await r.call(path());
+      assert.equal(res.statusCode, 200, String(res.body));
+      assert.equal(res.headers['content-type'], 'image/png');
+      assert.equal(res.body.readUInt32BE(16), size[0]);
+      assert.ok(
+        r.collector.calls.some((u) =>
+          u.endsWith('/v1/latest/nowcoast-caps-weather-radar'),
+        ),
+        'metadata read from the collector',
+      );
+      assert.equal(live.urls.length, 1);
+      assert.match(live.urls[0], /request=GetMap/);
+      assert.deepEqual(live.capabilities(), [], 'no GetCapabilities from GEV');
+      assert.deepEqual(r.blocked, []);
+      // a time the collector metadata does not list: 400, no GetMap
+      const unknown = await r.call(path('2026-10-12T09:00:00.000Z'));
+      assert.equal(unknown.statusCode, 400);
+      assert.equal(JSON.parse(unknown.body).error, 'unknown_weather_time');
+      assert.equal(live.urls.length, 1);
+    } finally {
+      r.restore();
+    }
+  });
+
+  test(`R4 weather ${kind}: cold cache, collector down -> 503, no NOAA request at all`, async () => {
+    const live = liveNoaa();
+    const r = rig({ liveFetchImpl: live.fetch });
+    try {
+      radarCaps(r);
+      r.collector.up = false;
+      const res = await r.call(path());
+      assert.equal(res.statusCode, 503);
+      assert.deepEqual(live.urls, [], 'no GetCapabilities, no GetMap');
+      assert.deepEqual(r.blocked, [], 'no global fetch either');
+    } finally {
+      r.restore();
+    }
+  });
+
+  test(`R4 weather ${kind}: cold cache, collector metadata STALE -> 503, no NOAA request`, async () => {
+    const live = liveNoaa();
+    const r = rig({ liveFetchImpl: live.fetch });
+    try {
+      radarCaps(r, { stale: true });
+      const res = await r.call(path());
+      assert.equal(res.statusCode, 503);
+      assert.deepEqual(live.urls, []);
+      assert.deepEqual(r.blocked, []);
+    } finally {
+      r.restore();
+    }
+  });
+}
+
+test('R4 weather: warm cache then collector down -> cached frame served, NO new GetMap for stale metadata, no GetCapabilities', async () => {
+  let t = WEATHER_NOW;
+  const live = liveNoaa();
+  const r = rig({ now: () => t, liveFetchImpl: live.fetch });
+  try {
+    radarCaps(r);
+    assert.equal((await r.call(tileUrl())).statusCode, 200);
+    assert.equal(live.urls.length, 1);
+    // collector gone; metadata TTL (120 s) passed -> metadata is stale
+    r.collector.up = false;
+    t += 5 * 60_000;
+    const cached = await r.call(tileUrl());
+    assert.equal(cached.statusCode, 200, 'cached frame still served');
+    const fresh = await r.call(tileUrl(RADAR_TIME, 1));
+    assert.equal(fresh.statusCode, 503, 'stale metadata: no new frame');
+    assert.equal(live.urls.length, 1, 'no GetMap for a stale manifest');
+    assert.deepEqual(live.capabilities(), []);
+    assert.deepEqual(r.blocked, []);
+    // the collector comes back (after weatherProxy's 30 s retry gap)
+    r.collector.up = true;
+    radarCaps(r, { lastOk: t });
+    t += 31_000;
+    assert.equal((await r.call(tileUrl(RADAR_TIME, 1))).statusCode, 200);
+    assert.equal(live.urls.length, 2);
+    assert.deepEqual(live.capabilities(), []);
+  } finally {
+    r.restore();
+  }
+});
+
+test('R4 weather: an expired frame (older than 24 h) is refused before any request', async () => {
+  const live = liveNoaa();
+  const r = rig({
+    now: () => WEATHER_NOW + 25 * 3600_000,
+    liveFetchImpl: live.fetch,
+  });
+  try {
+    radarCaps(r, { lastOk: WEATHER_NOW + 25 * 3600_000 - 1000 });
+    const res = await r.call(tileUrl());
+    // every time in the capture is > 24 h old at this clock: weatherProxy
+    // rejects the metadata as expired and never asks for the image
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(live.urls, []);
+    assert.deepEqual(r.blocked, []);
+  } finally {
+    r.restore();
+  }
+});
+
+test('R4 weather: without the injected weatherProxy the bridge fails closed (503, no request)', async () => {
+  const live = liveNoaa();
+  const r = rig({ liveFetchImpl: live.fetch, injectWeather: false });
+  try {
+    radarCaps(r);
+    const res = await r.call(tileUrl());
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(live.urls, []);
+    assert.deepEqual(r.blocked, [], 'never reached the live plugin');
+  } finally {
+    r.restore();
+  }
+});
+
+test('R4 weather: server/byrdit/history.js injects GEV weatherProxy (vite.config.js composition)', async () => {
+  const { historyPlugins: serverHistoryPlugins } =
+    await import('../../../server/byrdit/history.js');
+  const live = liveNoaa();
+  const collectorFetch = async (url) => {
+    assert.ok(url.endsWith('/v1/latest/nowcoast-caps-weather-radar'), url);
+    return new Response(fx('b15-nowcoast-weather_radar.xml'), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/xml',
+        'X-Feed-Cache': 'HIT',
+        'X-Feed-Last-OK': String(WEATHER_NOW - 1000),
+      },
+    });
+  };
+  const call = chain(
+    serverHistoryPlugins({
+      env: { GEV_BRIDGE_WEATHER: '1', GEV_COLLECTOR_URLS: 'http://c.test' },
+      fetchImpl: collectorFetch,
+      liveFetchImpl: live.fetch,
+      now: () => WEATHER_NOW,
+      log: () => {},
+    }),
+  );
+  const res = await call(tileUrl());
+  assert.equal(res.statusCode, 200);
+  assert.equal(live.urls.length, 1);
+  assert.match(live.urls[0], /request=GetMap/);
+});
+
+test('R4 weather: flag off -> no bridge middleware; GEV provider unchanged (rollback)', () => {
+  assert.deepEqual(
+    historyPlugins({ env: { GEV_COLLECTOR_URLS: 'http://collector.test' } }),
+    [],
+  );
+  const onlyTransit = historyPlugins({
+    env: { GEV_BRIDGE_TRANSIT: '1' },
+  });
+  const mounted = [];
+  for (const p of onlyTransit)
+    p.configureServer({ middlewares: { use: (route) => mounted.push(route) } });
+  assert.deepEqual(mounted, ['/api/transit'], 'weather not bridged');
 });
 
 test('flags off: no B15 middleware at all', () => {

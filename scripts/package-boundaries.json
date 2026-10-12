@@ -69,6 +69,7 @@
       "src/byrdit/history/feeds.js",
       "src/byrdit/history/staleness.js",
       "src/byrdit/history/feedsC.js",
+      "src/byrdit/history/weatherImagery.js",
       "src/data/transitFeeds.js",
       "src/data/gbfsSource.js",
       "src/layers/bikeshare/registry.js",

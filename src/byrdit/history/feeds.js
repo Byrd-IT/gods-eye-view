@@ -111,7 +111,9 @@ export const BRIDGE_FEEDS = Object.freeze({
     resolve: resolveGbfs,
     decorate: gbfsHeaders,
   }),
-  // only /api/weather/manifest (imagery METADATA); tile/image stay live
+  // /api/weather/manifest from the collector; /tile and /image answered by
+  // the bridge (weatherImagery.js) with collector-owned capabilities, only
+  // the GetMap image bytes are live (B15 review R4)
   weather: Object.freeze({
     route: '/api/weather',
     collectorFeed: null,
@@ -120,6 +122,7 @@ export const BRIDGE_FEEDS = Object.freeze({
     flag: 'GEV_BRIDGE_WEATHER',
     forwardQuery: false,
     resolve: resolveWeather,
+    imagery: true,
   }),
 });
 

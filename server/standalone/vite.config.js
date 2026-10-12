@@ -6,7 +6,7 @@ import { localProviderPlugins } from '../providers/local.js';
 import { localMcpPlugin } from '../mcp/plugin.js';
 import { apiNotFoundPlugin } from './api-not-found.js';
 import { standaloneVoiceTools } from './voiceTools.js';
-import { historyPlugins } from '../../src/byrdit/history/index.js';
+import { historyPlugins } from '../byrdit/history.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 

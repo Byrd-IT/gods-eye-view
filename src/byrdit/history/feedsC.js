@@ -18,14 +18,21 @@ import { makeRateLimiter } from '../../sources/rateLimit.js';
  *                                          store, unchanged limits)
  *   /api/gbfs/<encoded registry URL>    -> gbfs-<systemId>-status | -info
  *   /api/weather/manifest?product=<p>   -> weather-<p>
+ *   /api/weather/tile|image?...         -> answered HERE (weatherImagery.js):
+ *                                          GEV's weatherProxy validating
+ *                                          against collector-owned
+ *                                          capabilities; only GetMap image
+ *                                          bytes are live (review R4)
  *
  * A resolver answers one of: a collector target, a direct reply (D7: a GBFS
  * URL that is not a recorded registry system gets 404 and is NEVER proxied to
  * the operator), a local handler, or null = "not a bridged sub-route" (next
  * middleware). null is only returned where the upstream plugin itself answers
  * without contacting any operator (unknown transit routes -> its 404, invalid
- * weather queries -> its 400) or for the weather tile/image routes, which stay
- * live by design: imagery bytes are not recorded (DESIGN 1.5, #14).
+ * weather manifest queries -> its 400, unknown weather paths -> its 404).
+ * Weather /tile and /image are NOT passed on any more (B15 review t_c057aa83
+ * R4): GEV's own weatherProxy would read NOAA GetCapabilities, the recorded
+ * metadata the collector already consumes (DESIGN 2.1/4.2: one consumer).
  */
 
 export const TRANSIT_CADENCE_MS = 60_000; // gev-history src/feeds/transit.js
@@ -201,8 +208,13 @@ export function gbfsHeaders(headers, target) {
 }
 
 // ----------------------------------------------------------------- weather
-/** Only the manifest is recorded; exactly GEV's accepted query shape. */
+/**
+ * Manifest: the collector snapshot, exactly GEV's accepted query shape.
+ * Tile/image: the bridge's local weather imagery handler (R4).
+ */
 export function resolveWeather(url) {
+  if (url.pathname === '/tile' || url.pathname === '/image')
+    return { local: 'weatherImagery' };
   if (url.pathname !== '/manifest') return null;
   const keys = [...url.searchParams.keys()];
   if (keys.length !== 1 || keys[0] !== 'product') return null;

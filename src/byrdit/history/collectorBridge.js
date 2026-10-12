@@ -1,5 +1,6 @@
 import { BRIDGE_FEEDS, enabledBridgeFeeds } from './feeds.js';
 import { createTransitTrails } from './feedsC.js';
+import { createWeatherImagery } from './weatherImagery.js';
 import {
   DEFAULT_STALE_GREY_MS,
   parseGreyMs,
@@ -126,7 +127,12 @@ function epoch(value) {
  * @param {string[]} [options.urls] collector base URLs, tried in order
  * @param {number} [options.timeoutMs] per collector attempt
  * @param {number} [options.greyMs] GEV_STALE_GREY_MS
- * @param {typeof fetch} [options.fetchImpl]
+ * @param {typeof fetch} [options.fetchImpl] collector reads
+ * @param {typeof fetch} [options.liveFetchImpl] live image bytes only
+ *   (weather GetMap, feed.imagery)
+ * @param {Function} [options.weatherProxy] GEV's weatherProxy factory,
+ *   injected server-side (server/byrdit/history.js); absent = weather
+ *   tile/image fail closed (503)
  * @param {() => number} [options.now]
  * @param {(line: string) => void} [options.log] state transitions only
  */
@@ -136,6 +142,8 @@ export function createCollectorBridge({
   timeoutMs = DEFAULT_COLLECTOR_TIMEOUT_MS,
   greyMs = DEFAULT_STALE_GREY_MS,
   fetchImpl = (...args) => globalThis.fetch(...args),
+  liveFetchImpl = (...args) => globalThis.fetch(...args),
+  weatherProxy,
   now = () => Date.now(),
   log = (line) => console.warn(line),
 }) {
@@ -153,6 +161,15 @@ export function createCollectorBridge({
   /** In-flight collector read shared by concurrent requests, keyed by feed+query. */
   const inflight = new Map();
   const trails = feed.trails ? createTransitTrails({ now }) : null;
+  // B15 R4: weather tile/image validated against collector-owned metadata
+  const imagery = feed.imagery
+    ? createWeatherImagery({
+        readCollector: (collectorFeed) => sharedRead(collectorFeed, ''),
+        liveFetch: liveFetchImpl,
+        weatherProxy,
+        now,
+      })
+    : null;
 
   function transition(key, next, detail) {
     const state = states.get(key) ?? null;
@@ -307,6 +324,11 @@ export function createCollectorBridge({
       send(req, res, r.status, r.headers, r.body);
       return;
     }
+    if (target.local === 'weatherImagery') {
+      // never next(): GEV's live plugin would read NOAA GetCapabilities
+      await imagery.handle(req, res);
+      return;
+    }
     const key = target.collectorFeed;
     try {
       const result = await sharedRead(key, feed.forwardQuery ? url.search : '');
@@ -388,6 +410,8 @@ export function createTerminalRoute({ source, entries }) {
 export function collectorBridgePlugin({
   env = globalThis.process?.env ?? {},
   fetchImpl,
+  liveFetchImpl,
+  weatherProxy,
   now,
   log,
 } = {}) {
@@ -402,6 +426,8 @@ export function collectorBridgePlugin({
         timeoutMs: config.timeoutMs,
         greyMs: config.greyMs,
         fetchImpl,
+        liveFetchImpl,
+        weatherProxy,
         now,
         log,
       });
