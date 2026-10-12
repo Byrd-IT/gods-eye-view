@@ -10,7 +10,8 @@ import {
   starNameCandidates,
   starNameLimit,
 } from './constellationLayer.js';
-import { createStarField, starModel } from './starLayer.js';
+import { TERRAIN_ALPHA, createStarField, starModel } from './starLayer.js';
+import { occlusion as profileOcclusion } from './horizonProfile.js';
 import { placeLabels, textWidth } from './skyLabels.js';
 import { makeView, radecToVector } from './skyMath.js';
 import { parseBoundaries, parseSkyData } from './starData.js';
@@ -206,4 +207,58 @@ test('proper star names: brightest named stars first, fewer in a wide view', () 
   assert.ok(names.every((n) => n.mag <= 2.5));
   const close = starNameCandidates(field, model, { fovDeg: 20 });
   assert.ok(close.length > names.length);
+});
+
+test('R3: lines and names behind a terrain ridge are dimmed, the rest unchanged', () => {
+  const { field, prepared, positioned } = setup();
+  const view = makeView({ azDeg: 145, elDeg: 30, fovDeg: 100 });
+  const base = { view, width: W, height: H };
+  const open = constellationModel(prepared, positioned, field, {
+    ...base,
+    occlusion: (az, el) => profileOcclusion(null, az, el),
+  });
+  assert.equal(open.dimSegments.length, 0);
+  assert.ok(open.names.every((n) => n.alpha === 1));
+  const ridgeDeg = 40;
+  const ridge = {
+    azCount: 180,
+    anglesDeg: new Float32Array(180).fill(ridgeDeg),
+  };
+  const dim = constellationModel(prepared, positioned, field, {
+    ...base,
+    occlusion: (az, el) => profileOcclusion(ridge, az, el),
+  });
+  // same segments in total, split by the ridge
+  assert.equal(
+    dim.segments.length + dim.dimSegments.length,
+    open.segments.length,
+  );
+  assert.ok(dim.dimSegments.length > 0 && dim.segments.length > 0);
+  const c = positioned.centroids;
+  for (const name of dim.names) {
+    const k = prepared.list.findIndex((e) => e.iau === name.iau);
+    assert.equal(
+      name.alpha,
+      c.el[k] < ridgeDeg ? TERRAIN_ALPHA : 1,
+      `${name.iau} el ${c.el[k]}`,
+    );
+  }
+  assert.ok(dim.names.some((n) => n.alpha === TERRAIN_ALPHA));
+  // draw: the dimmed lines are one stroke at TERRAIN_ALPHA
+  const ops = [];
+  const ctx = new Proxy(
+    { globalAlpha: 1 },
+    {
+      get: (t, k) =>
+        k in t
+          ? t[k]
+          : () => {
+              if (k === 'stroke') ops.push(t.globalAlpha);
+            },
+      set: (t, k, v) => ((t[k] = v), true),
+    },
+  );
+  drawConstellations(ctx, dim);
+  assert.deepEqual(ops, [1, TERRAIN_ALPHA]);
+  assert.equal(ctx.globalAlpha, 1);
 });

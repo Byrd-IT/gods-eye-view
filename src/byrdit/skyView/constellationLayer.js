@@ -6,7 +6,12 @@
  * build time) and proper star names. Models are pure; drawing is separate.
  */
 import { DEG } from './skyMath.js';
-import { makeProjector, transformVectors, unitVectors } from './starLayer.js';
+import {
+  TERRAIN_ALPHA,
+  makeProjector,
+  transformVectors,
+  unitVectors,
+} from './starLayer.js';
 
 /**
  * Static geometry from the parsed catalogue: segment pairs and the J2000
@@ -101,6 +106,13 @@ export function constellationModel(
   const project = makeProjector(view, width, height);
   const { pos } = field;
   const segments = [];
+  // segments with an end behind the terrain profile: drawn dimmed
+  const dimSegments = [];
+  const behind = (e, n, el) => {
+    if (!occlusion) return false;
+    const az = Math.atan2(e, n) / DEG;
+    return occlusion(az < 0 ? az + 360 : az, el) === 'terrain';
+  };
   if (lines) {
     const { pairs } = prepared;
     for (let k = 0; k < pairs.length; k += 2) {
@@ -121,7 +133,12 @@ export function constellationModel(
         (ay > height && pb.y > height)
       )
         continue;
-      segments.push(ax, ay, pb.x, pb.y);
+      const out =
+        behind(pos.e[a], pos.n[a], pos.el[a]) ||
+        behind(pos.e[b], pos.n[b], pos.el[b])
+          ? dimSegments
+          : segments;
+      out.push(ax, ay, pb.x, pb.y);
     }
   }
   const nameList = [];
@@ -129,9 +146,12 @@ export function constellationModel(
     const c = positioned.centroids;
     prepared.list.forEach((entry, k) => {
       if (!(c.el[k] > 0)) return;
+      let alpha = 1;
       if (occlusion) {
         const az = Math.atan2(c.e[k], c.n[k]) / DEG;
-        if (occlusion(az < 0 ? az + 360 : az, c.el[k]) === 'below') return;
+        const state = occlusion(az < 0 ? az + 360 : az, c.el[k]);
+        if (state === 'below') return;
+        if (state === 'terrain') alpha = TERRAIN_ALPHA;
       }
       const p = project(c.e[k], c.n[k], c.u[k]);
       if (!p || p.x < 0 || p.y < 0 || p.x > width || p.y > height) return;
@@ -140,6 +160,7 @@ export function constellationModel(
         text: constellationLabel(entry),
         x: p.x,
         y: p.y,
+        alpha,
       });
     });
   }
@@ -160,7 +181,7 @@ export function constellationModel(
       if (run.length > 2) runs.push(run);
     }
   }
-  return { segments, names: nameList, boundaries: runs };
+  return { segments, dimSegments, names: nameList, boundaries: runs };
 }
 
 /**
@@ -187,6 +208,7 @@ export function starNameCandidates(field, model, { fovDeg }) {
       mag,
       x: model.x[k] + model.r[k] + 3,
       y: model.y[k],
+      alpha: model.alpha ? model.alpha[k] : 1,
     });
   }
   return out;
@@ -211,18 +233,22 @@ export function drawConstellations(ctx, model) {
     }
     ctx.stroke();
   }
-  if (model.segments.length) {
+  const strokeSegments = (s, alpha) => {
+    if (!s?.length) return;
+    ctx.globalAlpha = alpha;
     ctx.strokeStyle = LINE_STYLE;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    const s = model.segments;
     for (let k = 0; k < s.length; k += 4) {
       ctx.moveTo(s[k], s[k + 1]);
       ctx.lineTo(s[k + 2], s[k + 3]);
       calls++;
     }
     ctx.stroke();
-  }
+  };
+  strokeSegments(model.segments, 1);
+  strokeSegments(model.dimSegments, TERRAIN_ALPHA);
+  ctx.globalAlpha = 1;
   ctx.restore();
   return calls;
 }

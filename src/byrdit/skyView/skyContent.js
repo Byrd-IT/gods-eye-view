@@ -57,6 +57,8 @@ export const LAYER_SWITCHES = Object.freeze([
 /** Height of the P1 compass strip at the bottom (kept clear of sky drawing). */
 export const COMPASS_STRIP_PX = 34;
 export const PERF_SAMPLES = 600;
+/** Worst skySearch.matchScore a submitted query jumps to (2 = word prefix). */
+export const MAX_JUMP_SCORE = 2;
 /**
  * The overlay canvas renders at most at 2x the CSS pixel size: a 2.6-3x
  * phone canvas costs ~1.7-2.25x the fill work for detail the eye cannot see
@@ -276,6 +278,16 @@ export function createSkyContent({
   satellites = null,
 } = {}) {
   const dom = doc?.createElement ? buildContentDom(doc) : null;
+  // Called through the provider object (never extracted): a class-based
+  // provider keeps its `this`.
+  const satelliteSearch =
+    typeof satellites?.search === 'function'
+      ? (query) => satellites.search(query)
+      : undefined;
+  const satellitePosition =
+    typeof satellites?.position === 'function'
+      ? (id) => satellites.position(id)
+      : undefined;
   let flags = { ...DEFAULT_SKY_FLAGS };
   let userLimit = null;
   let data = null;
@@ -294,7 +306,10 @@ export function createSkyContent({
   let atlas = null;
   let atlasRatio = 0;
   let buffers = null;
-  let index = [];
+  // The Sun, Moon and planets come from the ephemeris, not the star
+  // catalogue: they are searchable while the catalogue loads or after it
+  // failed. Catalogue entries are merged in when it arrives.
+  let index = buildSearchIndex();
   let marker = null;
   let lookFrame = null;
   let lastResults = [];
@@ -419,7 +434,7 @@ export function createSkyContent({
     field,
     positioned,
     ephemeris,
-    satellite: satellites?.position,
+    satellite: satellitePosition,
   });
 
   /**
@@ -443,6 +458,7 @@ export function createSkyContent({
       stars: 0,
       lim: null,
       segments: 0,
+      dimSegments: 0,
       names: 0,
       boundaries: 0,
       starNames: 0,
@@ -472,7 +488,10 @@ export function createSkyContent({
         boundaries: flags.boundaries && boundaryState === 'ready',
         occlusion,
       });
-      stats.segments = constellations.segments.length / 4;
+      stats.segments =
+        (constellations.segments.length + constellations.dimSegments.length) /
+        4;
+      stats.dimSegments = constellations.dimSegments.length / 4;
       stats.boundaries = constellations.boundaries.length;
       drawConstellations(ctx, constellations);
       if (flags.stars) {
@@ -494,6 +513,7 @@ export function createSkyContent({
           y: name.y,
           align: 'center',
           priority: 50,
+          alpha: name.alpha ?? 1,
         });
       stats.names = constellations.names.length;
       if (flags.starNames && model) {
@@ -507,6 +527,7 @@ export function createSkyContent({
             y: s.y,
             align: 'left',
             priority: 30 - s.mag,
+            alpha: s.alpha ?? 1,
           });
       }
     }
@@ -522,6 +543,9 @@ export function createSkyContent({
       });
       stats.bodies = drawBodies(ctx, bodies);
       stats.bodyNames = bodies.map((b) => b.name);
+      stats.bodyAlpha = Object.fromEntries(
+        bodies.map((b) => [b.name, b.alpha]),
+      );
       for (const body of bodies)
         candidates.push({
           kind: 'body',
@@ -530,6 +554,7 @@ export function createSkyContent({
           y: body.y,
           align: 'left',
           priority: body.kind === 'planet' ? 100 : 110,
+          alpha: body.alpha ?? 1,
         });
     }
     if (marker) {
@@ -575,10 +600,18 @@ export function createSkyContent({
       ctx.font = FONTS[label.kind];
       ctx.textAlign = label.align;
       ctx.fillStyle = LABEL_COLOURS[label.kind];
+      // labels of objects behind the terrain are dimmed with their object
+      ctx.globalAlpha = label.alpha ?? 1;
       ctx.strokeText?.(label.text, label.x, label.y);
       ctx.fillText(label.text, label.x, label.y);
     }
-    stats.labels = placed.map(({ kind, text, box }) => ({ kind, text, box }));
+    ctx.globalAlpha = 1;
+    stats.labels = placed.map(({ kind, text, box, alpha }) => ({
+      kind,
+      text,
+      box,
+      alpha: alpha ?? 1,
+    }));
     ctx.restore();
     const spent = perfNow() - t0;
     perf.push(spent);
@@ -587,19 +620,51 @@ export function createSkyContent({
     return stats;
   }
 
+  /**
+   * Merge flag changes. With notify, the parent receives ONLY the changed
+   * keys: this content keeps a copy of every flag, and handing the whole
+   * copy back would overwrite state the parent owns (the Flat horizon
+   * button) with a stale value.
+   */
   function setFlags(next, { notify = false } = {}) {
     flags = { ...flags, ...next };
     if (flags.boundaries) ensureBoundaries();
     syncSwitches();
-    if (notify) onFlagsChange({ ...flags });
+    if (notify) onFlagsChange({ ...next });
   }
 
   // ── search ───────────────────────────────────────────────────────────────
   function search(query) {
     lastResults = searchSky(query, index, {
-      satellites: satellites?.search,
+      satellites: satelliteSearch,
     });
     return lastResults;
+  }
+
+  /** Why a submitted query found nothing worth jumping to. */
+  function noMatchText(query, results) {
+    const q = String(query ?? '').trim();
+    const notes = [];
+    if (data == null && !dataError)
+      notes.push(
+        'Star data is still loading: only the Sun, Moon and planets can be found yet.',
+      );
+    else if (dataError)
+      notes.push(
+        'Star data could not be loaded: only the Sun, Moon and planets can be found.',
+      );
+    const satStatus = satellites?.status;
+    if (satellites && satStatus === 'loading')
+      notes.push('Satellites are still loading.');
+    else if (satellites && satStatus === 'unavailable')
+      notes.push('Satellites are not available.');
+    const head = results.length
+      ? `No exact match for "${q}". Closest: ${results
+          .slice(0, 3)
+          .map((r) => r.label)
+          .join(', ')}.`
+      : `Nothing called "${q}" here.`;
+    return [head, ...notes].join(' ');
   }
 
   function cancelLook() {
@@ -611,7 +676,11 @@ export function createSkyContent({
   function lookAt(result) {
     const at = resolveTarget(result?.target, sources());
     if (!at) {
-      setSearchStatus(`No position for ${result?.label ?? 'that'} yet.`);
+      setSearchStatus(
+        result?.target?.type === 'satellite'
+          ? `No position for ${result.label} right now: it is below the horizon or not computed yet.`
+          : `No position for ${result?.label ?? 'that'} yet.`,
+      );
       return null;
     }
     marker = { target: result.target, label: result.label };
@@ -704,12 +773,16 @@ export function createSkyContent({
     listen(dom.form, 'submit', (event) => {
       event.preventDefault?.();
       const results = search(dom.query.value);
-      renderResults([]);
-      if (!results.length) {
-        setSearchStatus(`Nothing called "${dom.query.value.trim()}" here.`);
+      // Jump only to a real hit (exact, prefix or word prefix). A bare
+      // substring ("ISS" inside "Meissa") is listed, never jumped to.
+      const best = results[0];
+      if (!best || best.score > MAX_JUMP_SCORE) {
+        renderResults(results);
+        setSearchStatus(noMatchText(dom.query.value, results));
         return;
       }
-      lookAt(results[0]);
+      renderResults([]);
+      lookAt(best);
     });
     listen(dom.clear, 'click', () => clearMarker());
   }

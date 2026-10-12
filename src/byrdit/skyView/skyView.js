@@ -342,8 +342,10 @@ export function mountSkyView({
     getView: () => view,
     applyView: (next) => applyView(next),
     requestRedraw: () => redraw(),
+    // `next` holds only the switches that changed (never the whole copy)
     onFlagsChange: (next) => {
       flags = { ...flags, ...next };
+      setPressed(dom.buttons.flat, flags.flatHorizon);
       setPressed(dom.buttons.grid, flags.grid);
       redraw();
       scheduleUrl();
@@ -1078,6 +1080,7 @@ export function mountSkyView({
   listen(dom.buttons.flat, 'click', () => {
     flags = { ...flags, flatHorizon: !flags.flatHorizon };
     setPressed(dom.buttons.flat, flags.flatHorizon);
+    content.setFlags({ flatHorizon: flags.flatHorizon });
     applyTime();
     scheduleUrl();
   });

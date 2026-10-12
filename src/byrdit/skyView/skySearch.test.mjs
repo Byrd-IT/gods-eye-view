@@ -6,6 +6,7 @@ import {
   lookAtView,
   matchScore,
   resolveTarget,
+  satelliteSearchProvider,
   searchSky,
 } from './skySearch.js';
 import { makeView } from './skyMath.js';
@@ -119,4 +120,68 @@ test('look-at animation: eased, short way round, lands exactly on the target', (
   assert.ok(Math.abs(mid.elDeg - 25) < 1e-9);
   // below the horizon: view clamps at -10 instead of flipping
   assert.equal(lookAtView(from, { azDeg: 0, elDeg: -40 }, 1).elDeg, -10);
+});
+
+/** Same shape as satSky.createSatSky's api (meta, status, lookup). */
+class FakeSatSky {
+  constructor() {
+    this.meta = [
+      { name: 'ISS (ZARYA)', noradId: 25544 },
+      { name: 'CSS (TIANHE)', noradId: 48274 },
+      { name: 'ISS (NAUKA)', noradId: 49044 },
+      { name: 'STARLINK-1007', noradId: 44713 },
+    ];
+    this.rows = new Map([[0, { azDeg: 210.5, elDeg: 42.25 }]]);
+    this.status = 'ready';
+    this.lookups = 0;
+  }
+  lookup(index) {
+    this.lookups += 1;
+    const m = this.meta[index];
+    return m ? { meta: m, row: this.rows.get(index) ?? null } : null;
+  }
+}
+
+test('satellite provider over the P2a engine: names from meta, catalogue order breaks ties', () => {
+  const sky = new FakeSatSky();
+  const provider = satelliteSearchProvider(sky);
+  assert.deepEqual(provider.search('iss'), [
+    { id: 0, name: 'ISS (ZARYA)' },
+    { id: 2, name: 'ISS (NAUKA)' },
+  ]);
+  assert.deepEqual(provider.search('ISS (ZARYA)'), [
+    { id: 0, name: 'ISS (ZARYA)' },
+  ]);
+  assert.deepEqual(provider.search('tianhe'), [
+    { id: 1, name: 'CSS (TIANHE)' },
+  ]);
+  assert.deepEqual(provider.search(''), []);
+  // through searchSky (method called via the provider): ISS beats Meissa
+  const hits = searchSky('ISS', index, {
+    satellites: (q) => provider.search(q),
+  });
+  assert.equal(hits[0].kind, 'satellite');
+  assert.equal(hits[0].label, 'ISS (ZARYA)');
+  assert.ok(hits.some((h) => h.label === 'Meissa' && h.score === 3));
+  // positions: the newest worker row; none below -2 deg / before a tick
+  assert.deepEqual(provider.position(0), { azDeg: 210.5, elDeg: 42.25 });
+  assert.equal(provider.position(2), null);
+  assert.equal(provider.position(99), null);
+  assert.ok(sky.lookups >= 3, 'lookup ran with its receiver');
+  assert.equal(provider.status, 'ready');
+  // a new catalogue (worker reload) is picked up
+  sky.meta = [{ name: 'HUBBLE SPACE TELESCOPE', noradId: 20580 }];
+  assert.deepEqual(provider.search('hubble'), [
+    { id: 0, name: 'HUBBLE SPACE TELESCOPE' },
+  ]);
+  // positionOf overrides (the drawn, extrapolated az/el)
+  const drawn = satelliteSearchProvider(sky, {
+    positionOf: (id) => (id === 0 ? { azDeg: 1, elDeg: 2 } : null),
+  });
+  assert.deepEqual(drawn.position(0), { azDeg: 1, elDeg: 2 });
+  // no engine at all
+  const none = satelliteSearchProvider(null);
+  assert.deepEqual(none.search('iss'), []);
+  assert.equal(none.position(0), null);
+  assert.equal(none.status, 'unavailable');
 });

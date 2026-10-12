@@ -12,7 +12,8 @@ import {
 } from './bodyLayer.js';
 import { skyEphemeris } from './ephemeris.js';
 import { enuFromAzEl, makeView } from './skyMath.js';
-import { makeProjector } from './starLayer.js';
+import { TERRAIN_ALPHA, makeProjector } from './starLayer.js';
+import { occlusion as profileOcclusion } from './horizonProfile.js';
 
 const HOUSTON = { latDeg: 29.7604, lonDeg: -95.3698, heightM: 16.7 };
 
@@ -159,4 +160,100 @@ test('daylight model draws the Sun but no faint planet; planets off -> nothing',
   assert.equal(drawBodies(ctx, []), 0);
   assert.equal(calls.filter((k) => k === 'fill').length, 0);
   assert.deepEqual(bodiesModel(null, {}), []);
+});
+
+/** Synthetic profile: a 20 deg ridge all round (horizonProfile shape). */
+const RIDGE = { azCount: 180, anglesDeg: new Float32Array(180).fill(20) };
+const ridge = (az, el) => profileOcclusion(RIDGE, az, el);
+const clear = (az, el) => profileOcclusion(null, az, el);
+
+/** A ctx that records globalAlpha at every fill/stroke. */
+function alphaCtx() {
+  const ops = [];
+  const target = { globalAlpha: 1 };
+  const ctx = new Proxy(target, {
+    get: (t, k) =>
+      k in t
+        ? t[k]
+        : (...a) => {
+            if (k === 'fill' || k === 'stroke') ops.push([k, t.globalAlpha]);
+          },
+    set: (t, k, v) => ((t[k] = v), true),
+  });
+  return { ctx, ops };
+}
+
+test('R3: Sun, Moon and planets behind a terrain ridge are drawn dimmed, clear sky at full alpha', () => {
+  // The Sun and the Moon at about 10 deg, under a 20 deg ridge.
+  const ms0 = Date.parse('2026-10-20T00:00:00Z');
+  let eph = null;
+  for (let m = 0; m < 24 * 60 * 30 && !eph; m += 10) {
+    const e = skyEphemeris(ms0 + m * 60_000, HOUSTON, { refraction: true });
+    if (e.moon.elDeg > 8 && e.moon.elDeg < 12) eph = e;
+  }
+  assert.ok(eph, 'found the Moon near 10 deg');
+  const view = makeView({ azDeg: eph.moon.azDeg, elDeg: 10, fovDeg: 100 });
+  const opts = { view, width: 1280, height: 800, sunAltDeg: -30, lim: 6.5 };
+  const open = bodiesModel(eph, { ...opts, occlusion: clear });
+  const hidden = bodiesModel(eph, { ...opts, occlusion: ridge });
+  const moonOpen = open.find((b) => b.kind === 'moon');
+  const moonRidge = hidden.find((b) => b.kind === 'moon');
+  assert.equal(moonOpen.alpha, 1);
+  assert.equal(moonRidge.alpha, TERRAIN_ALPHA);
+  assert.equal(moonRidge.x, moonOpen.x);
+  // every body under 20 deg is dimmed, every one above is not
+  for (const b of hidden) {
+    const src =
+      b.kind === 'moon'
+        ? eph.moon
+        : b.kind === 'sun'
+          ? eph.sun
+          : eph.planets.find((p) => p.name === b.name);
+    const top = src.elDeg + (src.angularDiameterDeg || 0) / 2;
+    assert.equal(b.alpha, top < 20 ? TERRAIN_ALPHA : 1, b.name);
+  }
+  // draw: the dimmed Moon paints at TERRAIN_ALPHA, the clear one at 1
+  const a = alphaCtx();
+  drawBodies(a.ctx, [moonOpen]);
+  assert.ok(
+    a.ops.every(([, alpha]) => alpha === 1),
+    JSON.stringify(a.ops),
+  );
+  const b = alphaCtx();
+  drawBodies(b.ctx, [moonRidge]);
+  assert.ok(b.ops.length > 0);
+  assert.ok(
+    b.ops.every(([, alpha]) => Math.abs(alpha - TERRAIN_ALPHA) < 1e-12),
+    JSON.stringify(b.ops),
+  );
+  assert.equal(b.ctx.globalAlpha, 1, 'alpha restored');
+});
+
+test('R3: the Sun behind a ridge keeps its own dimming times the terrain alpha', () => {
+  const ms = Date.parse('2026-10-11T18:00:00Z');
+  const eph = skyEphemeris(ms, HOUSTON, { refraction: true });
+  const high = { azCount: 180, anglesDeg: new Float32Array(180).fill(80) };
+  const view = makeView({
+    azDeg: eph.sun.azDeg,
+    elDeg: eph.sun.elDeg,
+    fovDeg: 60,
+  });
+  const opts = {
+    view,
+    width: 1280,
+    height: 800,
+    sunAltDeg: eph.sun.elDeg,
+    lim: -4,
+  };
+  const sunClear = bodiesModel(eph, opts).find((b) => b.kind === 'sun');
+  const sunRidge = bodiesModel(eph, {
+    ...opts,
+    occlusion: (az, el) => profileOcclusion(high, az, el),
+  }).find((b) => b.kind === 'sun');
+  assert.equal(sunClear.alpha, 1);
+  assert.equal(sunRidge.alpha, TERRAIN_ALPHA);
+  const c = alphaCtx();
+  drawBodies(c.ctx, [sunRidge]);
+  const fills = c.ops.filter(([k]) => k === 'fill');
+  assert.ok(Math.abs(fills[0][1] - 0.7 * TERRAIN_ALPHA) < 1e-12);
 });

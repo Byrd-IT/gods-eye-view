@@ -22,8 +22,11 @@ const fold = (text) =>
 
 /** 0 exact, 1 prefix, 2 word prefix, 3 substring, null no match. */
 export function matchScore(key, query) {
-  const k = fold(key);
-  const q = fold(query);
+  return foldedScore(fold(key), fold(query));
+}
+
+/** matchScore on already folded strings (hot loop over 16k satellites). */
+function foldedScore(k, q) {
   if (!q || !k) return null;
   if (k === q) return 0;
   if (k.startsWith(q)) return 1;
@@ -89,6 +92,7 @@ export function searchSky(
     if (best != null) hits.push({ ...entry, score: best });
   }
   if (typeof satellites === 'function') {
+    let rank = 0;
     for (const sat of satellites(q) || []) {
       const score = matchScore(sat.name, q);
       if (score == null) continue;
@@ -100,6 +104,8 @@ export function searchSky(
         target: { type: 'satellite', id: sat.id },
         mag: 0,
         score,
+        // the provider's own order (catalogue order: ISS (ZARYA) first)
+        rank: rank++,
       });
     }
   }
@@ -108,6 +114,7 @@ export function searchSky(
       a.score - b.score ||
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
       a.mag - b.mag ||
+      (a.rank ?? 0) - (b.rank ?? 0) ||
       (a.label < b.label ? -1 : a.label > b.label ? 1 : 0),
   );
   return hits.slice(0, limit);
@@ -153,6 +160,57 @@ export function resolveTarget(target, sources = {}) {
     default:
       return null;
   }
+}
+
+/**
+ * Search provider over the P2a satellite engine (satSky.createSatSky):
+ * names from satSky.meta (every loaded object, also those below the
+ * horizon), positions from satSky.lookup (the newest worker row; null when
+ * the object is below -2 deg or not computed yet). Ties keep catalogue
+ * order, so the core groups (stations first: ISS) win over ACTIVE/STARLINK.
+ * positionOf(id) (optional) overrides the position, e.g. with the same
+ * extrapolated az/el the satellite overlay draws, so the marker sits on it.
+ */
+export function satelliteSearchProvider(
+  satSky,
+  { limit = MAX_RESULTS, positionOf = null } = {},
+) {
+  let foldedFor = null;
+  let folded = [];
+  const keys = () => {
+    const meta = satSky?.meta || [];
+    if (foldedFor !== meta) {
+      folded = meta.map((m) => fold(m?.name));
+      foldedFor = meta;
+    }
+    return folded;
+  };
+  return {
+    get status() {
+      return satSky?.status ?? 'unavailable';
+    },
+    search(query) {
+      const q = fold(query);
+      if (!q) return [];
+      const meta = satSky?.meta || [];
+      const names = keys();
+      const hits = [];
+      for (let i = 0; i < names.length; i++) {
+        const score = foldedScore(names[i], q);
+        if (score == null) continue;
+        hits.push({ id: i, name: meta[i].name, score });
+      }
+      hits.sort((a, b) => a.score - b.score || a.id - b.id);
+      return hits.slice(0, limit).map(({ id, name }) => ({ id, name }));
+    },
+    position(id) {
+      if (typeof positionOf === 'function') return positionOf(id);
+      const row = satSky?.lookup?.(id)?.row;
+      return row && Number.isFinite(row.azDeg) && Number.isFinite(row.elDeg)
+        ? { azDeg: row.azDeg, elDeg: row.elDeg }
+        : null;
+    },
+  };
 }
 
 /** Eased view between two views (az the short way round), f in 0..1. */

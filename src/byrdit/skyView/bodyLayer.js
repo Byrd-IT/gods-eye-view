@@ -13,7 +13,7 @@
  * Pure model + a separate draw step.
  */
 import { clamp, enuFromAzEl } from './skyMath.js';
-import { makeProjector } from './starLayer.js';
+import { TERRAIN_ALPHA, makeProjector } from './starLayer.js';
 
 export const MIN_DISC_PX = 14;
 export const DAYLIGHT_PLANETS = Object.freeze(['Venus', 'Jupiter']);
@@ -83,7 +83,9 @@ export function screenDirectionTowards(fromEnu, toEnu, project) {
 
 /**
  * What to draw for one ephemeris (ephemeris.skyEphemeris with refraction).
- * @returns {Array<{name, kind, x, y, r, magnitude, colour?, phase?}>}
+ * alpha is TERRAIN_ALPHA when the body is behind the terrain profile
+ * (drawn dimmed, like stars and satellites: SKYVIEW.md 3.2), else 1.
+ * @returns {Array<{name, kind, x, y, r, magnitude, alpha, colour?, phase?}>}
  */
 export function bodiesModel(
   eph,
@@ -95,12 +97,21 @@ export function bodiesModel(
   const place = (body) => {
     const radiusDeg = (body.angularDiameterDeg || 0) / 2;
     if (!(body.elDeg > -radiusDeg)) return null;
-    if (occlusion && occlusion(body.azDeg, body.elDeg + radiusDeg) === 'below')
-      return null;
+    // the top of the disc decides: a half-set Sun behind a ridge is dimmed
+    // only once all of it is behind the terrain profile
+    const state = occlusion
+      ? occlusion(body.azDeg, body.elDeg + radiusDeg)
+      : 'clear';
+    if (state === 'below') return null;
     const enu = enuFromAzEl(body.azDeg, body.elDeg);
     const p = project(...enu);
     if (!p) return null;
-    return { x: p.x, y: p.y, enu };
+    return {
+      x: p.x,
+      y: p.y,
+      enu,
+      alpha: state === 'terrain' ? TERRAIN_ALPHA : 1,
+    };
   };
   const onCanvas = (p, r) =>
     p.x > -r && p.y > -r && p.x < width + r && p.y < height + r;
@@ -118,6 +129,7 @@ export function bodiesModel(
         y: sun.y,
         r,
         magnitude: eph.sun.magnitude,
+        alpha: sun.alpha,
       });
   }
   const moon = place(eph.moon);
@@ -132,6 +144,7 @@ export function bodiesModel(
         y: moon.y,
         r,
         magnitude: eph.moon.magnitude,
+        alpha: moon.alpha,
         phase: {
           fraction: eph.moon.illuminatedFraction,
           angle: screenDirectionTowards(moon.enu, sunEnu, project),
@@ -152,6 +165,7 @@ export function bodiesModel(
       y: p.y,
       r,
       magnitude: planet.magnitude,
+      alpha: p.alpha,
       colour: PLANET_COLORS[planet.name] || '#ffffff',
     });
   }
@@ -162,14 +176,16 @@ export function bodiesModel(
 export function drawBodies(ctx, bodies) {
   ctx.save();
   for (const body of bodies) {
+    const alpha = Number.isFinite(body.alpha) ? body.alpha : 1;
+    ctx.globalAlpha = alpha;
     if (body.kind === 'sun') {
       // Dimmed on purpose: no glare, never an invitation to look at it.
-      ctx.globalAlpha = 0.7;
+      ctx.globalAlpha = 0.7 * alpha;
       ctx.fillStyle = 'rgb(255, 228, 150)';
       ctx.beginPath();
       ctx.arc(body.x, body.y, body.r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = alpha;
       ctx.strokeStyle = 'rgba(120, 70, 20, 0.9)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
@@ -203,6 +219,7 @@ export function drawBodies(ctx, bodies) {
       ctx.stroke();
     }
   }
+  ctx.globalAlpha = 1;
   ctx.restore();
   return bodies.length;
 }

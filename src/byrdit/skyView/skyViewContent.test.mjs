@@ -372,3 +372,180 @@ test('magnitude limit: Auto by default; a user limit caps what is drawn', async 
   assert.ok(handle.content.lastStats.stars < autoStars);
   assert.equal(doc.body.find('mag-text').textContent, '3.0');
 });
+
+// ── review t_89d6442c R1: a layer switch must not reset Flat horizon ──────
+const SWITCH_NAMES = [
+  'stars',
+  'lines',
+  'names',
+  'boundaries',
+  'starNames',
+  'planets',
+  'telescopic',
+  'grid',
+];
+
+function assertFlat(env, label) {
+  const { doc, viewer, handle, location } = env;
+  assert.equal(handle.flags.flatHorizon, true, `${label}: flag`);
+  assert.equal(
+    doc.body.find('flat').getAttribute('aria-pressed'),
+    'true',
+    `${label}: button`,
+  );
+  assert.equal(viewer.scene.globe.show, false, `${label}: scene`);
+  const svf = Number(/[?&]svf=(\d+)/.exec(location.href)?.[1] ?? 0);
+  assert.equal(svf & 1, 1, `${label}: svf bit 1 in ${location.href}`);
+}
+
+test('R1: Flat horizon survives every layer switch, the time refresh and the shared link', async () => {
+  const env = await enterOrion();
+  const { doc, timers, handle } = env;
+  click(doc.body.find('flat'));
+  timers.flush();
+  assertFlat(env, 'after Flat click');
+  for (const name of SWITCH_NAMES) {
+    const box = doc.body.find(`layer-${name}`);
+    change(box, !box.checked);
+    timers.flush();
+    assertFlat(env, `${name} toggled`);
+    // a later time refresh (applyTime) keeps the flat scene
+    click(doc.body.find('live'));
+    timers.flush();
+    assertFlat(env, `${name} toggled + Live`);
+    change(box, !box.checked);
+    timers.flush();
+    assertFlat(env, `${name} back`);
+  }
+  // the bar Grid button too
+  click(doc.body.find('grid'));
+  timers.flush();
+  assertFlat(env, 'bar grid');
+  assert.equal(handle.content.flags.flatHorizon, true);
+  // Flat off again: only the flat bit leaves the link
+  click(doc.body.find('flat'));
+  timers.flush();
+  assert.equal(handle.flags.flatHorizon, false);
+  assert.equal(env.viewer.scene.globe.show, true);
+});
+
+test('R1: a link with Flat horizon (svf bit 1) keeps it through layer switches', async () => {
+  const href =
+    'https://gev.test/?sv=29.7604,-95.3698,145,52,90,2026-01-16T03:00:00Z&svf=1#v=2';
+  const env = await enterOrion({ href });
+  env.timers.flush();
+  assertFlat(env, 'opened from link');
+  for (const name of SWITCH_NAMES) {
+    const box = env.doc.body.find(`layer-${name}`);
+    change(box, !box.checked);
+    env.timers.flush();
+    assertFlat(env, `link + ${name}`);
+    change(box, !box.checked);
+    env.timers.flush();
+    assertFlat(env, `link + ${name} back`);
+  }
+});
+
+// ── review R4: Sun/Moon/planets are searchable without the star catalogue ──
+async function enterWithCatalogue(loadData) {
+  const env = setup({ href: ORION_HREF, skyContentOptions: { loadData } });
+  env.timers.flush();
+  for (let i = 0; i < 4; i++) await settle();
+  assert.equal(env.handle.active, true);
+  return env;
+}
+
+function submit(doc, text) {
+  const query = doc.body.find('sky-search-query');
+  query.value = text;
+  doc.body.find('sky-search').dispatchEvent(new Event('submit'));
+  return doc.body.find('sky-search-status').textContent;
+}
+
+for (const [label, loadData, status] of [
+  ['pending', () => new Promise(() => {}), 'loading'],
+  ['failed', () => Promise.reject(new Error('offline')), 'error'],
+]) {
+  test(`R4: planet and Sun search work while the star catalogue is ${label}`, async () => {
+    const { doc, handle } = await enterWithCatalogue(loadData);
+    assert.equal(handle.content.status, status);
+    assert.ok(handle.content.ephemeris, 'ephemeris works without stars');
+    const jupiter = handle.content.ephemeris.planets.find(
+      (p) => p.name === 'Jupiter',
+    );
+    assert.match(submit(doc, 'Jupiter'), /Jupiter: az|Jupiter is below/);
+    assert.equal(handle.content.marker?.label, 'Jupiter');
+    assert.ok(Math.abs(handle.view.azDeg - jupiter.azDeg) < 1e-9);
+    assert.equal(handle.content.search('Sun')[0].label, 'Sun');
+    assert.equal(handle.content.search('moo')[0].label, 'Moon');
+    // catalogue objects are honestly reported as unavailable
+    const text = submit(doc, 'Betelgeuse');
+    assert.match(text, /Nothing called "Betelgeuse" here\./);
+    assert.match(
+      text,
+      status === 'loading' ? /still loading/ : /could not be loaded/,
+    );
+  });
+}
+
+test('R4: catalogue entries join the body entries once the data arrives', async () => {
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const { handle } = await enterWithCatalogue(() => gate.then(() => DATA));
+  assert.equal(handle.content.search('Betelgeuse').length, 0);
+  assert.equal(handle.content.search('Jupiter')[0].label, 'Jupiter');
+  release();
+  for (let i = 0; i < 4; i++) await settle();
+  assert.equal(handle.content.status, 'ready');
+  assert.equal(handle.content.search('Betelgeuse')[0].label, 'Betelgeuse');
+  assert.equal(handle.content.search('Jupiter')[0].label, 'Jupiter');
+});
+
+// ── review R2: substring-only hits are listed, never jumped to ────────────
+test('R2: "ISS" with no satellite match does not jump to Meissa', async () => {
+  const { doc, handle } = await enterOrion();
+  const before = handle.view;
+  const text = submit(doc, 'ISS');
+  assert.match(text, /No exact match for "ISS"\. Closest: .*Meissa/);
+  assert.equal(handle.content.marker, null);
+  assert.deepEqual(handle.view, before);
+  const results = doc.body.find('sky-search-results');
+  assert.equal(results.hidden, false, 'the substring hits are listed');
+});
+
+test('R2: a class-based satellite provider keeps its receiver; look-at + marker; no position', async () => {
+  class Provider {
+    constructor() {
+      this.rows = new Map([
+        [0, { azDeg: 200, elDeg: 35 }],
+        [1, null],
+      ]);
+      this.names = ['ISS (ZARYA)', 'ISS (NAUKA)'];
+      this.status = 'ready';
+    }
+    search(q) {
+      return this.names
+        .map((name, id) => ({ id, name }))
+        .filter((s) => s.name.toLowerCase().includes(q));
+    }
+    position(id) {
+      return this.rows.get(id) ?? null;
+    }
+  }
+  const { doc, handle } = await enterOrion({
+    skyContentOptions: { satellites: new Provider() },
+  });
+  assert.match(submit(doc, 'ISS'), /ISS \(ZARYA\): az 200\.0°, alt 35\.0°/);
+  assert.equal(handle.content.marker.label, 'ISS (ZARYA)');
+  assert.ok(Math.abs(handle.view.azDeg - 200) < 1e-9);
+  assert.ok(Math.abs(handle.view.elDeg - 35) < 1e-9);
+  handle.redraw();
+  assert.ok(handle.content.lastStats.marker, 'marker drawn on the satellite');
+  // a satellite with no position: honest status, no jump, no marker change
+  const before = handle.view;
+  assert.match(
+    submit(doc, 'ISS (NAUKA)'),
+    /No position for ISS \(NAUKA\) right now/,
+  );
+  assert.deepEqual(handle.view, before);
+});
