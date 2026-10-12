@@ -23,7 +23,10 @@ import puppeteer from 'puppeteer';
 import { moonState } from '../src/byrdit/skyView/ephemeris.js';
 import { declinationDeg } from '../src/byrdit/skyView/declination.js';
 import { cameraBasis } from '../src/byrdit/skyView/skyMath.js';
-import { quatFromAxes, wrap180 } from '../src/byrdit/skyView/orientationMath.js';
+import {
+  quatFromAxes,
+  wrap180,
+} from '../src/byrdit/skyView/orientationMath.js';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -63,14 +66,26 @@ for (let h = 0; h < 24 * 20 && skyTime == null; h += 1) {
 }
 const moon = moonState(skyTime, OBS, { refraction: true });
 const decl = declinationDeg(OBS.latDeg, OBS.lonDeg, Date.now());
-say('sky time', new Date(skyTime).toISOString(), 'moon', {
-  az: moon.azDeg,
-  el: moon.elDeg,
-}, 'declination', decl);
+say(
+  'sky time',
+  new Date(skyTime).toISOString(),
+  'moon',
+  {
+    az: moon.azDeg,
+    el: moon.elDeg,
+  },
+  'declination',
+  decl,
+);
 
 /** Virtual-sensor quaternion for the back of the phone at az/el (screen angle). */
 function pose(azDeg, elDeg, screenAngle = 0, rollDeg = 0) {
-  const { forward, right, up } = cameraBasis({ azDeg, elDeg, rollDeg, fovDeg: 60 });
+  const { forward, right, up } = cameraBasis({
+    azDeg,
+    elDeg,
+    rollDeg,
+    fovDeg: 60,
+  });
   const t = (screenAngle * Math.PI) / 180;
   const c = Math.cos(t);
   const s = Math.sin(t);
@@ -117,10 +132,10 @@ async function openSky(base, { sensors = true } = {}) {
       type: 'absolute-orientation',
     });
   const iso = new Date(skyTime).toISOString().replace(/\.\d+Z$/, 'Z');
-  await page.goto(
-    `${base}/?sv=${OBS.latDeg},${OBS.lonDeg},180,30,70,${iso}`,
-    { waitUntil: 'domcontentloaded', timeout: 120000 },
-  );
+  await page.goto(`${base}/?sv=${OBS.latDeg},${OBS.lonDeg},180,30,70,${iso}`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 120000,
+  });
   await page.waitForFunction(() => window.__godsEyeView?.viewer, {
     timeout: 180000,
   });
@@ -179,18 +194,22 @@ const readSensor = (cdp, q) =>
 
 /** Sample h.view on every animation frame for ms (Cesium loop paused). */
 async function sampleViews(page, ms, during) {
-  await page.evaluate(async (src, ms) => {
-    const h = await eval(src);
-    window.__godsEyeView.viewer.useDefaultRenderLoop = false;
-    window.__p4 = [];
-    const t0 = performance.now();
-    const step = () => {
-      const v = h.view;
-      window.__p4.push([v.azDeg, v.elDeg, v.rollDeg, performance.now() - t0]);
-      if (performance.now() - t0 < ms) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }, HANDLE, ms);
+  await page.evaluate(
+    async (src, ms) => {
+      const h = await eval(src);
+      window.__godsEyeView.viewer.useDefaultRenderLoop = false;
+      window.__p4 = [];
+      const t0 = performance.now();
+      const step = () => {
+        const v = h.view;
+        window.__p4.push([v.azDeg, v.elDeg, v.rollDeg, performance.now() - t0]);
+        if (performance.now() - t0 < ms) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    },
+    HANDLE,
+    ms,
+  );
   if (during) await during();
   await sleep(ms + 300);
   return page.evaluate(() => {
@@ -212,7 +231,11 @@ async function sampleViews(page, ms, during) {
       aos: typeof AbsoluteOrientationSensor,
     };
   });
-  check('A: button offered on a touch phone', offered.hidden === false, offered);
+  check(
+    'A: button offered on a touch phone',
+    offered.hidden === false,
+    offered,
+  );
 
   const magAz = moon.azDeg - decl;
   await readSensor(cdp, pose(magAz, moon.elDeg));
@@ -235,7 +258,7 @@ async function sampleViews(page, ms, during) {
   const missAz = wrap180(on.view.azDeg - moon.azDeg);
   const missEl = on.view.elDeg - moon.elDeg;
   check(
-    'B: phone at the Moon\'s magnetic azimuth -> view centre on the true Moon (declination applied)',
+    "B: phone at the Moon's magnetic azimuth -> view centre on the true Moon (declination applied)",
     Math.abs(missAz) < 0.1 && Math.abs(missEl) < 0.1,
     { missAz, missEl, decl, status: on.status },
   );
@@ -244,7 +267,11 @@ async function sampleViews(page, ms, during) {
     const c = document.querySelector('[data-sky=crosshair]');
     const r = c.getBoundingClientRect();
     return {
-      crosshair: { x: r.left + r.width / 2, y: r.top + r.height / 2, hidden: c.hidden },
+      crosshair: {
+        x: r.left + r.width / 2,
+        y: r.top + r.height / 2,
+        hidden: c.hidden,
+      },
       bodies: h.content.lastStats?.bodyNames,
       canvas: { w: window.innerWidth, h: window.innerHeight },
     };
@@ -257,10 +284,17 @@ async function sampleViews(page, ms, during) {
     drawn,
   );
   await sleep(4000);
-  await page.screenshot({ path: path.join(OUT, '01-pointing-moon-portrait.png') });
+  await page.screenshot({
+    path: path.join(OUT, '01-pointing-moon-portrait.png'),
+  });
 
   // C: landscape, same pose of the phone's back
-  await page.setViewport({ ...PHONE, width: 915, height: 412, isLandscape: true });
+  await page.setViewport({
+    ...PHONE,
+    width: 915,
+    height: 412,
+    isLandscape: true,
+  });
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 915,
     height: 412,
@@ -269,11 +303,23 @@ async function sampleViews(page, ms, during) {
     screenOrientation: { type: 'landscapePrimary', angle: 90 },
   });
   await readSensor(cdp, pose(magAz, moon.elDeg, 90));
-  await sleep(1500);
-  const land = await handleEval(page, (h) => ({
-    view: h.view,
-    angle: screen.orientation?.angle,
-  }));
+  await sleep(3000); // the 90 deg screen turn is smoothed (~1 s to < 1 deg)
+  const land = await handleEval(page, (h) => {
+    const bar = document
+      .querySelector('[data-sky=bar]')
+      .getBoundingClientRect();
+    const ring = document
+      .querySelector('[data-sky=crosshair]')
+      .getBoundingClientRect();
+    const tools = document.querySelector('.gev-sky-tools');
+    return {
+      view: h.view,
+      angle: screen.orientation?.angle,
+      barBottom: bar.bottom,
+      ringTop: ring.top,
+      toolsShown: tools ? getComputedStyle(tools).display !== 'none' : null,
+    };
+  });
   check(
     'C: landscape (angle 90) -> same az/el, roll 0',
     land.angle === 90 &&
@@ -282,8 +328,19 @@ async function sampleViews(page, ms, during) {
       Math.abs(land.view.rollDeg) < 0.1,
     land,
   );
+  check(
+    'C: landscape pointing keeps the centre circle clear (compact toolbar, tools folded)',
+    land.barBottom < land.ringTop && land.toolsShown === false,
+    {
+      barBottom: land.barBottom,
+      ringTop: land.ringTop,
+      toolsShown: land.toolsShown,
+    },
+  );
   await sleep(4000);
-  await page.screenshot({ path: path.join(OUT, '02-pointing-moon-landscape.png') });
+  await page.screenshot({
+    path: path.join(OUT, '02-pointing-moon-landscape.png'),
+  });
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 412,
     height: 915,
@@ -303,22 +360,30 @@ async function sampleViews(page, ms, during) {
   const t0 = startIdx >= 0 ? turn[startIdx][3] : NaN;
   const within = turn.find((s, i) => i >= startIdx && 180 - s[0] < 1);
   const overshoot = Math.max(...turn.map((s) => s[0])) - 180;
+  // By design a 90 deg step is within 1 deg after ~0.92 s (0.15 per 1/30 s);
+  // headless frames come every 50-100 ms here, so the measured time can land
+  // up to one frame gap later than the true crossing.
+  const gaps = turn.slice(1).map((s, i) => s[3] - turn[i][3]);
+  const frameGap = Math.max(...gaps);
   check(
-    'D: 90 deg turn settles within 1 s (to < 1 deg), no overshoot',
-    within && within[3] - t0 < 1000 && overshoot < 0.05,
+    'D: 90 deg turn settles within 1 s (to < 1 deg; + one headless frame gap), no overshoot',
+    within && within[3] - t0 < 1000 + frameGap && overshoot < 0.05,
     {
       frames: turn.length,
       settleMs: within ? Math.round(within[3] - t0) : null,
+      frameGapMs: Math.round(frameGap),
       overshoot,
       last: turn.at(-1),
     },
   );
+  await sleep(2500); // let the last smoothing steps finish before "still"
 
   // E: battery - still phone: no view changes; moving: <= 30 changes/s
   const still = await sampleViews(page, 2000);
   const changes = (samples) =>
     samples.filter(
-      (s, i) => i > 0 && (s[0] !== samples[i - 1][0] || s[1] !== samples[i - 1][1]),
+      (s, i) =>
+        i > 0 && (s[0] !== samples[i - 1][0] || s[1] !== samples[i - 1][1]),
     ).length;
   const stillChanges = changes(still);
   let k = 0;
@@ -446,8 +511,22 @@ check('no page errors', relevant.length === 0, relevant.slice(0, 10));
 const pass = checks.every((c) => c.ok);
 fs.writeFileSync(
   path.join(OUT, 'qa-sky-p4.json'),
-  JSON.stringify({ pass, skyTime, moon: { az: moon.azDeg, el: moon.elDeg }, decl, checks, errors }, null, 2),
+  JSON.stringify(
+    {
+      pass,
+      skyTime,
+      moon: { az: moon.azDeg, el: moon.elDeg },
+      decl,
+      checks,
+      errors,
+    },
+    null,
+    2,
+  ),
 );
 fs.writeFileSync(path.join(OUT, 'qa-sky-p4.log'), log.join('\n') + '\n');
-say(pass ? 'QA P4 PASS' : 'QA P4 FAIL', `${checks.filter((c) => c.ok).length}/${checks.length}`);
+say(
+  pass ? 'QA P4 PASS' : 'QA P4 FAIL',
+  `${checks.filter((c) => c.ok).length}/${checks.length}`,
+);
 process.exit(pass ? 0 : 1);

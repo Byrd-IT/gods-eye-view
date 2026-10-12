@@ -1060,6 +1060,7 @@ test('P4: the phone drives the real Cesium camera (true north via declination, r
   assert.equal(point.getAttribute('aria-pressed'), 'true');
   assert.equal(point.textContent, 'Stop pointing');
   assert.equal(viewer.container.find('crosshair').hidden, false);
+  assert.ok(doc.body.classList.contains('gev-sky-pointing'), 'compact toolbar class');
   assert.ok(Math.abs(handle.view.azDeg - 90) < 1e-6, `az ${handle.view.azDeg}`);
   assert.ok(Math.abs(handle.view.elDeg) < 1e-6);
   let look = worldDirectionToAzEl(Cesium, viewer.camera.positionWC, viewer.camera.directionWC);
@@ -1094,6 +1095,7 @@ test('P4: the phone drives the real Cesium camera (true north via declination, r
   assert.equal(win.count('deviceorientationabsolute'), 0);
   assert.match(doc.body.find('orient-status').textContent, /Drag took over/);
   assert.equal(viewer.container.find('crosshair').hidden, true);
+  assert.ok(!doc.body.classList.contains('gev-sky-pointing'));
   const az = handle.view.azDeg;
   win.fire('deviceorientationabsolute', portraitPose(0, 0));
   assert.equal(handle.view.azDeg, az, 'the phone no longer moves the view');

@@ -621,6 +621,9 @@ export function mountSkyView({
       ? 'Stop pointing'
       : 'Point at the sky';
     dom.crosshair.hidden = !(active && running);
+    // short (landscape) phones: a compact toolbar while pointing (CSS)
+    if (active && running) doc.body?.classList?.add('gev-sky-pointing');
+    else doc.body?.classList?.remove('gev-sky-pointing');
     o.figure8.hidden = !(
       state === 'calibrating' && orientation.reason === 'accuracy'
     );

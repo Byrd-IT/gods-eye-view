@@ -553,7 +553,9 @@ body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
 }
 /* figure-8 calibration hint: a slowly traced lemniscate glyph */
 .gev-sky-figure8 {
-  font: 700 28px/1 system-ui, sans-serif;
+  font:
+    700 28px/1 system-ui,
+    sans-serif;
   color: rgba(255, 210, 120, 0.95);
   animation: gev-sky-figure8 2.4s ease-in-out infinite;
 }
@@ -584,4 +586,40 @@ body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
   pointer-events: none;
+}
+
+/* Landscape phones have ~400 px of height: while pointing, keep only Back,
+   Stop pointing and the pointing row (Align buttons + a one-line status) in
+   a slim toolbar under the app's top icons, and fold the satellite list and
+   the search/Layers tools away, so the sky and the centre circle stay
+   visible. Everything returns when pointing stops. */
+@media (max-height: 520px) {
+  body.gev-sky-pointing
+    .gev-sky-bar
+    > :not([data-sky='back'], [data-sky='point'], .gev-sky-orient) {
+    display: none !important;
+  }
+  body.gev-sky-pointing .gev-sky-bar {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+  body.gev-sky-pointing .gev-sky-orient {
+    display: contents;
+  }
+  body.gev-sky-pointing .gev-sky-orient-status {
+    order: 10;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  body.gev-sky-pointing .gev-sky-figure8 {
+    font-size: 20px;
+  }
+  body.gev-sky-pointing :is(.gev-sky-tools, .gev-sky-sats) {
+    display: none !important;
+  }
+  /* wider-than-900 px landscape phones: tools still hang below the toolbar */
+  .gev-sky-tools {
+    top: calc(var(--gev-sky-bar-bottom, 162px) + 8px);
+  }
 }
