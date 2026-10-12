@@ -6,9 +6,11 @@
  * paints the model.
  */
 import {
+  cameraBasis,
+  enuFromAzEl,
   fovAngles,
+  frustumTangents,
   normalizeAz,
-  projectAzEl,
   skyGradient,
   twilightWash,
 } from './skyMath.js';
@@ -41,12 +43,50 @@ export function azDelta(a, b) {
   return d;
 }
 
+/**
+ * skyMath.projectAzEl for many directions of one view: the camera basis and
+ * frustum are computed once per redraw instead of once per point (the grid is
+ * ~1,600 points; per-point bases were the grid's main cost on the throttled
+ * mid-phone profile). Same arithmetic, so results are bit-identical.
+ * Takes an ENU unit vector, returns canvas pixels or null when behind.
+ */
+export function viewProjector(view, width, height) {
+  const { forward: f, right: r, up: u } = cameraBasis(view);
+  const { tx, ty } = frustumTangents(view.fovDeg, width, height);
+  return (d) => {
+    const z = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
+    if (z <= 1e-6) return null;
+    const x = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / z / tx;
+    const y = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / z / ty;
+    return { x: ((x + 1) / 2) * width, y: ((1 - y) / 2) * height };
+  };
+}
+
+// The alt/az grid never changes in ENU: build its unit vectors once.
+let gridEnu = null;
+function gridLinesEnu() {
+  if (gridEnu) return gridEnu;
+  const lines = [];
+  for (let el = GRID_EL_STEP; el < 90; el += GRID_EL_STEP) {
+    const points = [];
+    for (let az = 0; az <= 360; az += 2) points.push(enuFromAzEl(az, el));
+    lines.push({ kind: 'alt', value: el, points });
+  }
+  for (let az = 0; az < 360; az += GRID_AZ_STEP) {
+    const points = [];
+    for (let el = 0; el <= 88; el += 2) points.push(enuFromAzEl(az, el));
+    lines.push({ kind: 'az', value: az, points });
+  }
+  gridEnu = lines;
+  return gridEnu;
+}
+
 /** Polyline of projected points along a curve, split where it leaves the view. */
-function curve(points, view, width, height) {
+function curve(points, project, width, height) {
   const runs = [];
   let run = [];
-  for (const [az, el] of points) {
-    const p = projectAzEl(az, el, view, width, height);
+  for (const d of points) {
+    const p = project(d);
     if (p && Math.abs(p.x) < width * 20 && Math.abs(p.y) < height * 20)
       run.push(p);
     else {
@@ -71,9 +111,10 @@ export function overlayModel({
   flatHorizon = false,
   sunAltDeg = null,
 }) {
+  const project = viewProjector(view, width, height);
   const span = [];
-  for (let d = -89; d <= 89; d += 1) span.push([view.azDeg + d, 0]);
-  const horizonRuns = curve(span, view, width, height);
+  for (let d = -89; d <= 89; d += 1) span.push(enuFromAzEl(view.azDeg + d, 0));
+  const horizonRuns = curve(span, project, width, height);
   const horizon = horizonRuns[0] || [];
 
   let ground = null;
@@ -99,7 +140,7 @@ export function overlayModel({
 
   const cardinals = [];
   for (const [label, az] of CARDINALS) {
-    const p = projectAzEl(az, 0, view, width, height);
+    const p = project(enuFromAzEl(az, 0));
     if (onCanvas(p, width, height, 0))
       cardinals.push({
         label,
@@ -112,18 +153,9 @@ export function overlayModel({
 
   const lines = [];
   if (grid) {
-    for (let el = GRID_EL_STEP; el < 90; el += GRID_EL_STEP) {
-      const pts = [];
-      for (let az = 0; az <= 360; az += 2) pts.push([az, el]);
-      for (const run of curve(pts, view, width, height))
-        lines.push({ kind: 'alt', value: el, points: run });
-    }
-    for (let az = 0; az < 360; az += GRID_AZ_STEP) {
-      const pts = [];
-      for (let el = 0; el <= 88; el += 2) pts.push([az, el]);
-      for (const run of curve(pts, view, width, height))
-        lines.push({ kind: 'az', value: az, points: run });
-    }
+    for (const line of gridLinesEnu())
+      for (const run of curve(line.points, project, width, height))
+        lines.push({ kind: line.kind, value: line.value, points: run });
   }
 
   // Compass strip: linear in azimuth across the horizontal fov.
@@ -203,18 +235,29 @@ export function drawOverlay(ctx, model, { width, height }) {
     ctx.stroke();
   }
   if (model.grid.length) {
+    // one batched stroke (a stroke per line is slow on phone canvases)
     ctx.strokeStyle = 'rgba(120, 190, 255, 0.28)';
     ctx.lineWidth = 1;
-    for (const line of model.grid) {
-      ctx.beginPath();
+    ctx.beginPath();
+    for (const line of model.grid)
       line.points.forEach((p, i) =>
         i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y),
       );
-      ctx.stroke();
-    }
+    ctx.stroke();
   }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
+  // ticks first as one batched stroke, then the labels (a stroke per tick
+  // costs a raster flush each on phone canvases)
+  if (model.cardinals.length) {
+    ctx.strokeStyle = 'rgba(230, 240, 255, 0.8)';
+    ctx.beginPath();
+    for (const c of model.cardinals) {
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(c.x, c.y - (c.major ? 12 : 7));
+    }
+    ctx.stroke();
+  }
   for (const c of model.cardinals) {
     ctx.font = c.major
       ? '600 16px system-ui, sans-serif'
@@ -223,11 +266,6 @@ export function drawOverlay(ctx, model, { width, height }) {
       c.label === 'N'
         ? 'rgba(255, 120, 110, 0.95)'
         : 'rgba(230, 240, 255, 0.92)';
-    ctx.strokeStyle = 'rgba(230, 240, 255, 0.8)';
-    ctx.beginPath();
-    ctx.moveTo(c.x, c.y);
-    ctx.lineTo(c.x, c.y - (c.major ? 12 : 7));
-    ctx.stroke();
     ctx.fillText(c.label, c.x, c.y - (c.major ? 14 : 9));
   }
   // compass strip
@@ -236,19 +274,22 @@ export function drawOverlay(ctx, model, { width, height }) {
   ctx.fillRect(0, y - 16, width, 30);
   ctx.textBaseline = 'middle';
   ctx.font = '500 11px system-ui, sans-serif';
-  for (const tick of model.compass) {
+  if (model.compass.length) {
     ctx.strokeStyle = 'rgba(200, 225, 255, 0.7)';
     ctx.beginPath();
-    ctx.moveTo(tick.x, y - 16);
-    ctx.lineTo(tick.x, y - (tick.label ? 10 : 12));
-    ctx.stroke();
-    if (tick.label) {
-      ctx.fillStyle =
-        tick.label === 'N'
-          ? 'rgba(255, 120, 110, 0.95)'
-          : 'rgba(220, 235, 255, 0.9)';
-      ctx.fillText(tick.label, tick.x, y + 2);
+    for (const tick of model.compass) {
+      ctx.moveTo(tick.x, y - 16);
+      ctx.lineTo(tick.x, y - (tick.label ? 10 : 12));
     }
+    ctx.stroke();
+  }
+  for (const tick of model.compass) {
+    if (!tick.label) continue;
+    ctx.fillStyle =
+      tick.label === 'N'
+        ? 'rgba(255, 120, 110, 0.95)'
+        : 'rgba(220, 235, 255, 0.9)';
+    ctx.fillText(tick.label, tick.x, y + 2);
   }
   ctx.strokeStyle = 'rgba(255, 210, 120, 0.9)';
   ctx.beginPath();

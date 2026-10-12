@@ -21,6 +21,9 @@
  *   constellations.json  88 western constellations: IAU abbreviation, names,
  *                        line chains as HIP ids (Stellarium "thin" style
  *                        markers dropped).
+ *   boundaries.json      IAU constellation boundaries (western `edges`,
+ *                        B1875) densified to <= 1 deg steps and precessed to
+ *                        J2000 here, so the app never precesses from B1875.
  *   manifest.json        input and output SHA-256, counts, sizes.
  *
  * --check rebuilds in memory and fails if the committed files differ.
@@ -30,6 +33,10 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
+import {
+  julianCenturies,
+  precessionMatrix,
+} from '../src/byrdit/skyView/skyMath.js';
 
 export const MAG_LIMIT = 6.5;
 export const HYG_SHA256 =
@@ -95,6 +102,79 @@ export function buildConstellations(western) {
         .filter((chain) => chain.length >= 2),
     }))
     .sort((a, b) => (a.iau < b.iau ? -1 : a.iau > b.iau ? 1 : 0));
+}
+
+/**
+ * Besselian epoch B1875.0 as a UTC ms instant (JD 2405889.258550475; the
+ * 1875 boundary epoch of Delporte's IAU constellation boundaries).
+ */
+export const B1875_MS = (2405889.258550475 - 2440587.5) * 86_400_000;
+/** Densify boundary edges so no step is longer than this (degrees of arc). */
+export const BOUNDARY_STEP_DEG = 1;
+
+const EDGE_RE =
+  /^(\d+):(\d+) ([MP])[+-] (\d\d):(\d\d):(\d\d) ([+-])(\d\d):(\d\d):(\d\d) (\d\d):(\d\d):(\d\d) ([+-])(\d\d):(\d\d):(\d\d) ([A-Z]{3}\d?) ([A-Z]{3}\d?)$/;
+
+/**
+ * Constellation boundaries from the western `edges` (pbarbier.com edges_18,
+ * epoch B1875): each edge is a meridian (constant RA) or a parallel
+ * (constant Dec) OF B1875, densified in B1875 (so a parallel keeps its true
+ * curved shape after precession) and precessed B1875 -> J2000 with the
+ * inverse of the IAU 2006 matrix (skyMath.precessionMatrix). Output: one
+ * flat [ra, dec, ra, dec, ...] J2000 polyline per edge (degrees, 2 dp).
+ */
+export function buildBoundaries(western, precessionMatrix, toJ2000T) {
+  const edges = western?.edges;
+  if (!Array.isArray(edges) || !edges.length)
+    throw new Error('western index.json: no edges array');
+  if (western.edges_epoch && western.edges_epoch !== 'B1875')
+    throw new Error(`edges epoch ${western.edges_epoch} != B1875`);
+  const p = precessionMatrix(toJ2000T);
+  const D = Math.PI / 180;
+  const toJ2000 = (raDeg, decDeg) => {
+    // p maps J2000 -> B1875 (T < 0); its transpose maps B1875 -> J2000.
+    const v = [
+      Math.cos(decDeg * D) * Math.cos(raDeg * D),
+      Math.cos(decDeg * D) * Math.sin(raDeg * D),
+      Math.sin(decDeg * D),
+    ];
+    const w = [0, 1, 2].map(
+      (i) => p[0][i] * v[0] + p[1][i] * v[1] + p[2][i] * v[2],
+    );
+    const ra = round((((Math.atan2(w[1], w[0]) / D) % 360) + 360) % 360, 2);
+    return [
+      ra >= 360 ? 0 : ra,
+      round(Math.atan2(w[2], Math.hypot(w[0], w[1])) / D, 2),
+    ];
+  };
+  return edges.map((text) => {
+    const m = EDGE_RE.exec(String(text));
+    if (!m) throw new Error(`bad boundary edge: ${text}`);
+    const hms = (h, mi, s) =>
+      (Number(h) + Number(mi) / 60 + Number(s) / 3600) * 15;
+    const dms = (sign, d, mi, s) =>
+      (sign === '-' ? -1 : 1) *
+      (Number(d) + Number(mi) / 60 + Number(s) / 3600);
+    const ra1 = hms(m[4], m[5], m[6]);
+    const dec1 = dms(m[7], m[8], m[9], m[10]);
+    const ra2 = hms(m[11], m[12], m[13]);
+    const dec2 = dms(m[14], m[15], m[16], m[17]);
+    let dRa = ra2 - ra1;
+    if (dRa > 180) dRa -= 360;
+    if (dRa < -180) dRa += 360;
+    const dDec = dec2 - dec1;
+    const arc =
+      m[3] === 'P'
+        ? Math.abs(dRa) * Math.cos(dec1 * D)
+        : Math.hypot(dRa * Math.cos(dec1 * D), dDec);
+    const steps = Math.max(1, Math.ceil(arc / BOUNDARY_STEP_DEG - 1e-9));
+    const flat = [];
+    for (let i = 0; i <= steps; i++) {
+      const f = i / steps;
+      flat.push(...toJ2000(ra1 + dRa * f, dec1 + dDec * f));
+    }
+    return { a: m[18], b: m[19], points: flat };
+  });
 }
 
 /** Star columns from parsed HYG rows (header first), keeping line stars. */
@@ -205,6 +285,23 @@ export function buildSkyData(hygGz, westernJson) {
   };
   const starsText = `${JSON.stringify(stars)}\n`;
   const constellationsText = `${JSON.stringify(constellationFile)}\n`;
+  const western = JSON.parse(westernJson.toString('utf8'));
+  const boundaryEdges = buildBoundaries(
+    western,
+    precessionMatrix,
+    julianCenturies(B1875_MS),
+  );
+  const boundaryFile = {
+    format: 'gev-sky-boundaries/1',
+    source:
+      'Stellarium sky cultures, western/index.json edges (pbarbier.com edges_18, IAU B1875), https://github.com/Stellarium/stellarium-skycultures',
+    licence: 'CC BY-SA (text and data, per western/description.md)',
+    epoch: 'J2000 (precessed from B1875 at build time, IAU 2006)',
+    units: { points: 'flat [raDeg, decDeg, ...] J2000, 2 dp' },
+    count: boundaryEdges.length,
+    edges: boundaryEdges,
+  };
+  const boundariesText = `${JSON.stringify(boundaryFile)}\n`;
   const describe = (text) => {
     const buffer = Buffer.from(text, 'utf8');
     return {
@@ -232,15 +329,22 @@ export function buildSkyData(hygGz, westernJson) {
         0,
       ),
       properNames: columns.names.length,
+      boundaryEdges: boundaryEdges.length,
+      boundaryPoints: boundaryEdges.reduce(
+        (sum, edge) => sum + edge.points.length / 2,
+        0,
+      ),
     },
     outputs: {
       'stars.json': describe(starsText),
       'constellations.json': describe(constellationsText),
+      'boundaries.json': describe(boundariesText),
     },
   };
   return {
     'stars.json': starsText,
     'constellations.json': constellationsText,
+    'boundaries.json': boundariesText,
     'manifest.json': `${JSON.stringify(manifest, null, 2)}\n`,
   };
 }

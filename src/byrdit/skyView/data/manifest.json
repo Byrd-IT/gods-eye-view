@@ -18,7 +18,9 @@
     "lineStars": 691,
     "constellations": 88,
     "lineSegments": 674,
-    "properNames": 440
+    "properNames": 440,
+    "boundaryEdges": 781,
+    "boundaryPoints": 5624
   },
   "outputs": {
     "stars.json": {
@@ -30,6 +32,11 @@
       "sha256": "ce489d162785eb0ecff07dcb6ce77ea6304b9ad4bb60d784be28ad35ca3339c2",
       "bytes": 11489,
       "gzipBytes": 4424
+    },
+    "boundaries.json": {
+      "sha256": "267ab3241162145737cfc1cddd370d463e4323611ed313aaddc2b4122d3bb025",
+      "bytes": 98190,
+      "gzipBytes": 29450
     }
   }
 }

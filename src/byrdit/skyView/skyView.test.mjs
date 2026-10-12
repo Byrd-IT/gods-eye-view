@@ -789,3 +789,67 @@ test('satellites: without Web Workers the sky still works and the panel says why
   assert.equal(handle.satellites.status, 'unavailable');
   assert.match(doc.body.find('sats-banner').textContent, /Web Workers/);
 });
+
+test('redraws reuse the cached canvas size (no forced layout per frame); a resize re-measures', async () => {
+  const observers = [];
+  const saved = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(callback) {
+      this.callback = callback;
+      this.targets = [];
+      this.disconnected = false;
+      observers.push(this);
+    }
+    observe(target) {
+      this.targets.push(target);
+    }
+    disconnect() {
+      this.disconnected = true;
+    }
+  };
+  try {
+    const { viewer, handle } = setup();
+    // one on the globe canvas (size cache); P2a adds one on the toolbar
+    const canvasObserver = observers.find(
+      (o) => o.targets[0] === viewer.scene.canvas,
+    );
+    assert.ok(canvasObserver, 'the globe canvas is observed');
+    await handle.enterAt({
+      latDeg: 29.7604,
+      lonDeg: -95.3698,
+      source: 'manual',
+    });
+    const globe = viewer.scene.canvas;
+    let width = 1200;
+    let reads = 0;
+    Object.defineProperty(globe, 'clientWidth', {
+      configurable: true,
+      get() {
+        reads += 1;
+        return width;
+      },
+    });
+    for (let i = 0; i < 5; i++) handle.setView({ azDeg: 100 + i });
+    assert.equal(reads, 0, 'five redraws, no size read');
+    const timing = handle.redrawPerf();
+    assert.ok(timing.count >= 5 && timing.p95 >= 0, 'redraws are timed');
+    handle.resetRedrawPerf();
+    assert.equal(handle.redrawPerf().count, 0);
+    const overlay = handle.elements.canvas;
+    const before = overlay.width;
+    width = 900;
+    canvasObserver.callback([]);
+    assert.ok(reads > 0, 'the resize re-measured');
+    assert.ok(overlay.width < before, 'overlay follows the new size');
+    reads = 0;
+    handle.setView({ azDeg: 140 });
+    assert.equal(reads, 0, 'cached again after the resize');
+    handle.destroy?.();
+    assert.ok(
+      observers.every((o) => o.disconnected),
+      'observers released',
+    );
+  } finally {
+    globalThis.ResizeObserver = saved;
+  }
+});

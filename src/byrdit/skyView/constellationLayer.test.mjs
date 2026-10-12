@@ -1,0 +1,209 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import {
+  constellationModel,
+  drawConstellations,
+  positionConstellations,
+  prepareBoundaries,
+  prepareConstellations,
+  starNameCandidates,
+  starNameLimit,
+} from './constellationLayer.js';
+import { createStarField, starModel } from './starLayer.js';
+import { placeLabels, textWidth } from './skyLabels.js';
+import { makeView, radecToVector } from './skyMath.js';
+import { parseBoundaries, parseSkyData } from './starData.js';
+
+const read = (name) =>
+  JSON.parse(readFileSync(new URL(`./data/${name}`, import.meta.url)));
+const data = parseSkyData(read('stars.json'), read('constellations.json'));
+const edges = parseBoundaries(read('boundaries.json'));
+const HOUSTON = { latDeg: 29.7604, lonDeg: -95.3698 };
+const ORION_MS = Date.parse('2026-01-16T03:00:00Z');
+const W = 1280;
+const H = 800;
+
+function setup(ms = ORION_MS, observer = HOUSTON) {
+  const field = createStarField(data.stars);
+  field.update(ms, observer);
+  const prepared = prepareConstellations(data.constellations, data.stars);
+  const boundaries = prepareBoundaries(edges);
+  const positioned = positionConstellations(prepared, boundaries, field.matrix);
+  return { field, prepared, boundaries, positioned };
+}
+
+test('boundaries.json: 781 B1875 edges precessed to J2000, every point valid', () => {
+  assert.equal(edges.length, 781);
+  const points = edges.reduce((sum, e) => sum + e.ra.length, 0);
+  assert.equal(points, read('manifest.json').counts.boundaryPoints);
+  assert.throws(() => parseBoundaries({ format: 'x' }), /format/);
+  assert.throws(
+    () =>
+      parseBoundaries({
+        format: 'gev-sky-boundaries/1',
+        edges: [{ a: 'A', b: 'B', points: [1, 2, 3] }],
+      }),
+    /points/,
+  );
+});
+
+test("names sit at the unit-vector mean of each figure's line stars", () => {
+  const { prepared } = setup();
+  const k = data.constellations.findIndex((c) => c.iau === 'Ori');
+  const members = new Set(data.constellations[k].lines.flat());
+  const sum = [0, 0, 0];
+  for (const i of members) {
+    const v = radecToVector(data.stars.ra[i], data.stars.dec[i]);
+    for (let j = 0; j < 3; j++) sum[j] += v[j];
+  }
+  const len = Math.hypot(...sum);
+  assert.ok(Math.abs(prepared.centroid.x[k] - sum[0] / len) < 1e-12);
+  assert.ok(Math.abs(prepared.centroid.y[k] - sum[1] / len) < 1e-12);
+  assert.ok(Math.abs(prepared.centroid.z[k] - sum[2] / len) < 1e-12);
+  // Orion's figure centre is near RA 5h 30m, Dec +3 (J2000)
+  const ra =
+    (Math.atan2(prepared.centroid.y[k], prepared.centroid.x[k]) * 180) /
+    Math.PI;
+  const dec = (Math.asin(prepared.centroid.z[k]) * 180) / Math.PI;
+  assert.ok(ra > 78 && ra < 90, `ra ${ra}`);
+  assert.ok(dec > -5 && dec < 12, `dec ${dec}`);
+  assert.equal(prepared.pairs.length / 2, 674); // manifest lineSegments
+});
+
+test('lines join the drawn star positions; only segments with both ends above the horizon', () => {
+  const { field, prepared, positioned } = setup();
+  const view = makeView({ azDeg: 145, elDeg: 52, fovDeg: 60 });
+  const model = constellationModel(prepared, positioned, field, {
+    view,
+    width: W,
+    height: H,
+  });
+  assert.ok(model.segments.length / 4 > 10);
+  // every catalogue star (line stars may be fainter than 6.5)
+  const stars = starModel(field, { view, width: W, height: H, lim: 99 });
+  const near = (x, y) => {
+    for (let k = 0; k < stars.count; k++)
+      if (Math.abs(stars.x[k] - x) < 0.01 && Math.abs(stars.y[k] - y) < 0.01)
+        return true;
+    return false;
+  };
+  // every segment endpoint that is on the canvas is a drawn star
+  const s = model.segments;
+  let onCanvas = 0;
+  for (let k = 0; k < s.length; k += 2) {
+    const [x, y] = [s[k], s[k + 1]];
+    if (x < 10 || y < 10 || x > W - 10 || y > H - 10) continue;
+    onCanvas++;
+    assert.ok(near(x, y), `${x},${y}`);
+  }
+  assert.ok(onCanvas > 10);
+  // looking at the ground: no constellation line at all
+  const down = constellationModel(prepared, positioned, field, {
+    view: makeView({ azDeg: 0, elDeg: -10, fovDeg: 20 }),
+    width: W,
+    height: H,
+  });
+  assert.equal(down.segments.length, 0);
+});
+
+test('each switch drives exactly its own part of the model', () => {
+  const { field, prepared, positioned } = setup();
+  const view = makeView({ azDeg: 145, elDeg: 52, fovDeg: 90 });
+  const run = (opts) =>
+    constellationModel(prepared, positioned, field, {
+      view,
+      width: W,
+      height: H,
+      ...opts,
+    });
+  const all = run({ lines: true, names: true, boundaries: true });
+  assert.ok(all.segments.length && all.names.length && all.boundaries.length);
+  const noLines = run({ lines: false, names: true, boundaries: true });
+  assert.equal(noLines.segments.length, 0);
+  assert.deepEqual(noLines.names, all.names);
+  assert.deepEqual(noLines.boundaries, all.boundaries);
+  const noNames = run({ lines: true, names: false, boundaries: true });
+  assert.equal(noNames.names.length, 0);
+  assert.deepEqual(noNames.segments, all.segments);
+  const noBounds = run({ lines: true, names: true, boundaries: false });
+  assert.equal(noBounds.boundaries.length, 0);
+  assert.deepEqual(noBounds.segments, all.segments);
+  // default: boundaries off
+  assert.equal(
+    constellationModel(prepared, positioned, field, {
+      view,
+      width: W,
+      height: H,
+    }).boundaries.length,
+    0,
+  );
+  const calls = [];
+  const ctx = new Proxy(
+    {},
+    {
+      get: (t, k) => (k in t ? t[k] : (...a) => calls.push(k)),
+      set: (t, k, v) => ((t[k] = v), true),
+    },
+  );
+  drawConstellations(ctx, noBounds);
+  const strokesWithout = calls.filter((k) => k === 'stroke').length;
+  calls.length = 0;
+  drawConstellations(ctx, all);
+  // boundaries add exactly one batched stroke
+  assert.equal(calls.filter((k) => k === 'stroke').length, strokesWithout + 1);
+});
+
+test('ACCEPTANCE: all 88 constellation names are placed in an all-sky wide setting (collision culled)', () => {
+  const names = new Set();
+  for (const latDeg of [45, -45])
+    for (const hour of [0, 6, 12, 18]) {
+      const ms = Date.parse('2026-03-20T00:00:00Z') + hour * 3600_000;
+      const { field, prepared, positioned } = setup(ms, {
+        latDeg,
+        lonDeg: 0,
+      });
+      for (const [azDeg, elDeg] of [
+        [0, 30],
+        [90, 30],
+        [180, 30],
+        [270, 30],
+        [0, 90],
+      ]) {
+        const view = makeView({ azDeg, elDeg, fovDeg: 100 });
+        const model = constellationModel(prepared, positioned, field, {
+          view,
+          width: 1600,
+          height: 1000,
+        });
+        const placed = placeLabels(
+          model.names.map((n) => ({
+            ...n,
+            width: textWidth(null, n.text, '500 11px system-ui'),
+            height: 13,
+            align: 'center',
+            priority: 50,
+          })),
+          { width: 1600, height: 1000 },
+        );
+        for (const p of placed) names.add(p.iau);
+      }
+    }
+  assert.equal(names.size, 88, `missing ${88 - names.size}`);
+});
+
+test('proper star names: brightest named stars first, fewer in a wide view', () => {
+  const { field } = setup();
+  assert.equal(starNameLimit(90, 6.5), 1.5);
+  assert.equal(starNameLimit(45, 6.5), 2.5);
+  assert.equal(starNameLimit(20, 6.5), 4.0);
+  assert.equal(starNameLimit(20, 3), 3);
+  const view = makeView({ azDeg: 145, elDeg: 52, fovDeg: 60 });
+  const model = starModel(field, { view, width: W, height: H, lim: 6.5 });
+  const names = starNameCandidates(field, model, { fovDeg: 60 });
+  const texts = names.map((n) => n.text);
+  assert.ok(texts.includes('Betelgeuse') && texts.includes('Rigel'), texts);
+  assert.ok(names.every((n) => n.mag <= 2.5));
+  const close = starNameCandidates(field, model, { fovDeg: 20 });
+  assert.ok(close.length > names.length);
+});

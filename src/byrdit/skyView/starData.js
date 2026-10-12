@@ -153,4 +153,57 @@ export function loadSkyData({ fetchImpl = globalThis.fetch } = {}) {
 /** Test hook: forget the memoised load. */
 export function resetSkyDataCache() {
   cached = null;
+  boundariesCached = null;
+}
+
+export const BOUNDARIES_FORMAT = 'gev-sky-boundaries/1';
+
+/**
+ * Validate data/boundaries.json (J2000 polylines, precessed from B1875 at
+ * build time) into [{a, b, ra: Float32Array, dec: Float32Array}].
+ */
+export function parseBoundaries(json) {
+  const problems = [];
+  if (json?.format !== BOUNDARIES_FORMAT)
+    problems.push(`boundaries format ${json?.format} != ${BOUNDARIES_FORMAT}`);
+  const edges = Array.isArray(json?.edges) ? json.edges : [];
+  if (!edges.length) problems.push('no boundary edges');
+  const out = edges.map((edge, i) => {
+    const flat = Array.isArray(edge?.points) ? edge.points : [];
+    if (flat.length < 4 || flat.length % 2)
+      problems.push(`edge ${i} has ${flat.length / 2} points`);
+    const n = Math.floor(flat.length / 2);
+    const ra = new Float32Array(n);
+    const dec = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
+      ra[k] = flat[2 * k];
+      dec[k] = flat[2 * k + 1];
+      if (!(ra[k] >= 0 && ra[k] < 360) || !(dec[k] >= -90 && dec[k] <= 90))
+        problems.push(`edge ${i} point ${k} out of range`);
+    }
+    return { a: String(edge?.a ?? ''), b: String(edge?.b ?? ''), ra, dec };
+  });
+  if (problems.length) throw new SkyDataError(problems);
+  return out;
+}
+
+let boundariesCached = null;
+
+/** Boundaries are optional (off by default), so they load only on demand. */
+export function loadBoundaries({ fetchImpl = globalThis.fetch } = {}) {
+  if (boundariesCached) return boundariesCached;
+  const url = new URL('./data/boundaries.json', import.meta.url);
+  boundariesCached = Promise.resolve()
+    .then(() => fetchImpl(url))
+    .then((response) => {
+      if (!response.ok)
+        throw new Error(`sky data ${response.status} for ${url}`);
+      return response.json();
+    })
+    .then(parseBoundaries)
+    .catch((error) => {
+      boundariesCached = null;
+      throw error;
+    });
+  return boundariesCached;
 }

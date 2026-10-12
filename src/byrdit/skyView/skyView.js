@@ -10,7 +10,8 @@
  * P1 scope: observer, camera, horizon, sky brightness, `sv` URL.
  * P2a: satellites above the horizon (module worker, states, labels, the
  * "Overhead now" panel, element-age rules) drawn into the same overlay.
- * Stars and planets are later cards.
+ * P3b: stars, constellations, Sun/Moon/planets, layer switches and search
+ * live in skyContent.js and draw into the same overlay after the P1 pass.
  */
 import * as Cesium from 'cesium';
 import { observerSolarElevation } from '../../data/satellitePass.js';
@@ -27,6 +28,12 @@ import {
   sampleGroundHeight,
 } from './observer.js';
 import { drawOverlay, overlayModel } from './overlay.js';
+import {
+  cardinalBoxes,
+  createSkyContent,
+  overlayPixelRatio,
+  PERF_SAMPLES,
+} from './skyContent.js';
 import {
   applySkyCamera,
   applySkyScene,
@@ -67,7 +74,7 @@ import {
   wheelZoomFactor,
   zoomView,
 } from './skyMath.js';
-import { readSkyUrl, writeSkyUrl } from './skyUrl.js';
+import { DEFAULT_SKY_FLAGS, readSkyUrl, writeSkyUrl } from './skyUrl.js';
 
 const mounted = new WeakMap();
 const PHASE_TEXT = {
@@ -316,6 +323,8 @@ export function mountSkyView({
     ),
   requestFrame = (fn) => globalThis.requestAnimationFrame?.(fn) ?? null,
   cancelFrame = (id) => globalThis.cancelAnimationFrame?.(id),
+  /** Test/harness overrides for createSkyContent (data loaders, frames). */
+  skyContentOptions = {},
 } = {}) {
   if (!viewer?.camera || !viewer?.scene || !doc?.createElement) return null;
   const existing = mounted.get(viewer);
@@ -328,6 +337,21 @@ export function mountSkyView({
   host.append(dom.button, dom.panel, dom.bar, satDom.root);
   const canvasHost = viewer.container || host;
   canvasHost.append(dom.canvas);
+  const content = createSkyContent({
+    doc,
+    getView: () => view,
+    applyView: (next) => applyView(next),
+    requestRedraw: () => redraw(),
+    onFlagsChange: (next) => {
+      flags = { ...flags, ...next };
+      setPressed(dom.buttons.grid, flags.grid);
+      redraw();
+      scheduleUrl();
+    },
+    now,
+    ...skyContentOptions,
+  });
+  if (content.root) host.append(content.root);
 
   const removers = [];
   const listen = (target, type, handler, options) => {
@@ -340,7 +364,7 @@ export function mountSkyView({
   let active = false;
   let observer = null;
   let view = makeView();
-  let flags = { flatHorizon: false, grid: false };
+  let flags = { ...DEFAULT_SKY_FLAGS };
   let cameraSnap = null;
   let sceneSnap = null;
   let profile = null;
@@ -395,18 +419,43 @@ export function mountSkyView({
   });
 
   // ── rendering ────────────────────────────────────────────────────────────
+  // Reading clientWidth/clientHeight forces a synchronous layout whenever
+  // anything else (HUD text, URL chip) dirtied the page since the last frame;
+  // on the throttled mid-phone profile that was the largest single cost of a
+  // redraw. The size is cached and dropped on resize (window event and a
+  // ResizeObserver on the globe canvas) and on every entry into the sky.
+  let sizeCache = null;
   const canvasSize = () => {
+    if (sizeCache) return sizeCache;
     const c = viewer.scene.canvas;
-    return {
+    const size = {
       width: c?.clientWidth || c?.width || 1,
       height: c?.clientHeight || c?.height || 1,
     };
+    // a hidden or not-yet-laid-out canvas reports 0: measure again next time
+    if (c?.clientWidth > 0 && c?.clientHeight > 0) sizeCache = size;
+    return size;
   };
+  const dropSize = () => {
+    sizeCache = null;
+  };
+
+  // Whole overlay redraw timings (P1 horizon/grid/compass + P3b content):
+  // the SKYVIEW.md section 8 budget metric ("overlay redraw p95").
+  const redrawPerf = [];
+  const perfNow = () => globalThis.performance?.now?.() ?? Date.now();
 
   function redraw() {
     if (!active) return;
+    const t0 = perfNow();
+    paint();
+    redrawPerf.push(perfNow() - t0);
+    if (redrawPerf.length > PERF_SAMPLES) redrawPerf.shift();
+  }
+
+  function paint() {
     const { width, height } = canvasSize();
-    const ratio = globalThis.devicePixelRatio || 1;
+    const ratio = overlayPixelRatio(globalThis.devicePixelRatio);
     if (dom.canvas.width !== Math.round(width * ratio))
       dom.canvas.width = Math.round(width * ratio);
     if (dom.canvas.height !== Math.round(height * ratio))
@@ -423,6 +472,15 @@ export function mountSkyView({
       sunAltDeg: lastSunAlt,
     });
     drawOverlay(ctx, model, { width, height });
+    content.draw(ctx, {
+      view,
+      width,
+      height,
+      sunAltDeg: lastSunAlt,
+      occlusion: (azDeg, elDeg) => profileOcclusion(profile, azDeg, elDeg),
+      reserved: cardinalBoxes(model.cardinals),
+      ratio,
+    });
     if (satSky.running) {
       satModel = satelliteModel({
         objects: satSky.objectsAt(clock.getTime()),
@@ -574,6 +632,7 @@ export function mountSkyView({
     const t = clock.getTime();
     applySkyTime(CesiumApi, viewer, t);
     lastSunAlt = observerSolarElevation(observer.latDeg, observer.lonDeg, t);
+    content.update(t, observer);
     applySkyScene(viewer, sceneSnap, {
       flatHorizon: flags.flatHorizon,
       skyBox: skyBoxVisible(lastSunAlt),
@@ -664,11 +723,13 @@ export function mountSkyView({
       observer = next;
       active = true;
       entered = true;
+      dropSize();
       dom.canvas.hidden = false;
       dom.bar.hidden = false;
       dom.panel.hidden = true;
       dom.button.setAttribute('aria-expanded', 'false');
       doc.body?.classList?.add('gev-sky-active');
+      content.start(observer, clock.getTime());
       applyTime();
       applyView(view);
       startTicking();
@@ -693,6 +754,7 @@ export function mountSkyView({
     active = false;
     stopTicking();
     cancelInertia();
+    content.stop();
     cancelLook();
     stopSatAnimation();
     satSky.stop();
@@ -1022,6 +1084,7 @@ export function mountSkyView({
   listen(dom.buttons.grid, 'click', () => {
     flags = { ...flags, grid: !flags.grid };
     setPressed(dom.buttons.grid, flags.grid);
+    content.setFlags({ grid: flags.grid });
     redraw();
     scheduleUrl();
   });
@@ -1108,14 +1171,23 @@ export function mountSkyView({
     }
   });
   listen(globalThis.window, 'resize', () => {
+    dropSize();
     syncSkyLayout();
     redraw();
   });
-  // The toolbar also changes height when its info line rewraps.
   if (typeof globalThis.ResizeObserver === 'function') {
+    // The toolbar also changes height when its info line rewraps.
     const barObserver = new globalThis.ResizeObserver(() => syncSkyLayout());
     barObserver.observe(dom.bar);
     removers.push(() => barObserver.disconnect());
+    if (viewer.scene.canvas) {
+      const resizeObserver = new globalThis.ResizeObserver(() => {
+        dropSize();
+        if (active) redraw();
+      });
+      resizeObserver.observe(viewer.scene.canvas);
+      removers.push(() => resizeObserver.disconnect());
+    }
   }
 
   // Hidden while the camera follows an entity (CSS hides it in cockpit,
@@ -1137,6 +1209,7 @@ export function mountSkyView({
     flags = { ...flags, ...fromUrl.flags };
     setPressed(dom.buttons.flat, flags.flatHorizon);
     setPressed(dom.buttons.grid, flags.grid);
+    content.setFlags(flags);
     if (Number.isFinite(fromUrl.timeMs)) {
       clock.setFixed(fromUrl.timeMs);
       setPressed(dom.buttons.live, false);
@@ -1177,6 +1250,10 @@ export function mountSkyView({
     get geolocator() {
       return geolocator;
     },
+    /** Stars, constellations, bodies, layers and search (P3b). */
+    get content() {
+      return content;
+    },
     /** Satellites controller (stats, objects, sets) and the last drawn model. */
     get satellites() {
       return satSky;
@@ -1195,12 +1272,30 @@ export function mountSkyView({
     exit: () => exit(),
     setView: (next) => applyView({ ...view, ...next }),
     redraw,
+    /** Overlay redraw timings (ms): count, p50, p95, max. */
+    redrawPerf() {
+      const sorted = [...redrawPerf].sort((a, b) => a - b);
+      const at = (q) =>
+        sorted.length
+          ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]
+          : NaN;
+      return {
+        count: sorted.length,
+        p50: at(0.5),
+        p95: at(0.95),
+        max: sorted.at(-1) ?? NaN,
+      };
+    },
+    resetRedrawPerf() {
+      redrawPerf.length = 0;
+    },
     /** 'clear' | 'terrain' | 'below' for a sky direction (P2/P3 use this). */
     occlusion: (azDeg, elDeg) => profileOcclusion(profile, azDeg, elDeg),
     destroy() {
       if (destroyed) return;
       exit();
       stopPicking();
+      content.destroy();
       destroyed = true;
       timers.clearTimeout?.(autoTimer);
       timers.clearTimeout?.(urlTimer);

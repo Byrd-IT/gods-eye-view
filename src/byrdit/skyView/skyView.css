@@ -399,3 +399,114 @@ body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
   :is(.gev-sky-btn, .gev-sky-panel) {
   display: none !important;
 }
+
+/* P3b: Layers + search tools (skyContent.js) */
+.gev-sky-tools {
+  position: fixed;
+  top: 190px;
+  right: 16px;
+  z-index: 97;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(280px, calc(100vw - 24px));
+  color: var(--text-secondary);
+  font: 12px/1.35 var(--font-mono);
+}
+
+.gev-sky-tools[hidden],
+.gev-sky-tools [hidden] {
+  display: none !important;
+}
+
+.gev-sky-search {
+  display: flex;
+  gap: 6px;
+}
+
+.gev-sky-tools input[type='search'] {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-bg);
+  color: var(--text-primary, #e8f4ff);
+  font: 12px var(--font-mono);
+}
+
+.gev-sky-tools button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-bg);
+  color: inherit;
+  font: 600 11px/1 var(--font-mono);
+  cursor: pointer;
+}
+
+.gev-sky-tools button:hover,
+.gev-sky-layers-btn[aria-expanded='true'] {
+  color: var(--text-primary, #e8f4ff);
+  border-color: rgba(120, 200, 255, 0.55);
+  background: rgba(120, 200, 255, 0.12);
+}
+
+.gev-sky-layers-btn {
+  align-self: flex-end;
+}
+
+.gev-sky-results,
+.gev-sky-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.gev-sky-results button {
+  text-align: left;
+  font-weight: 500;
+}
+
+.gev-sky-search-status,
+.gev-sky-data-status {
+  color: var(--text-primary, #e8f4ff);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.gev-sky-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.gev-sky-mag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.gev-sky-mag input[type='range'] {
+  flex: 1;
+  min-width: 90px;
+}
+
+@media (max-width: 900px) {
+  .gev-sky-tools {
+    top: 170px;
+    right: 12px;
+    width: min(240px, calc(100vw - 24px));
+  }
+}

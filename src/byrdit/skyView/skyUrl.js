@@ -4,13 +4,42 @@
  * which rewrites only the hash, so a query parameter survives it).
  *
  *   sv=<lat>,<lon>,<azDeg>,<elDeg>,<fovDeg>[,<ISO UTC>]
- *   svf=<bit flags>   bit 0 = flat horizon, bit 1 = alt/az grid
+ *   svf=<bit flags>   a set bit means "this switch differs from its
+ *                     default", so svf absent / 0 is always the default view
+ *                     and every P1 link (bits 1 and 2) keeps its meaning:
+ *     1 flat horizon on       2 alt/az grid on       4 stars off
+ *     8 constellation lines off                     16 constellation names off
+ *    32 constellation boundaries on                 64 planets/Sun/Moon off
+ *   128 proper star names off                      256 telescopic planets on
  */
 import { makeView } from './skyMath.js';
 
 export const SV_PARAM = 'sv';
 export const SVF_PARAM = 'svf';
-export const SKY_FLAGS = Object.freeze({ flatHorizon: 1, grid: 2 });
+/** name -> [bit, default value]. Append only: never reuse or renumber a bit. */
+export const SKY_FLAG_BITS = Object.freeze({
+  flatHorizon: [1, false],
+  grid: [2, false],
+  stars: [4, true],
+  lines: [8, true],
+  names: [16, true],
+  boundaries: [32, false],
+  planets: [64, true],
+  starNames: [128, true],
+  telescopic: [256, false],
+});
+/** name -> bit (kept for P1 callers). */
+export const SKY_FLAGS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(SKY_FLAG_BITS).map(([name, [bit]]) => [name, bit]),
+  ),
+);
+/** Every switch at its default value. */
+export const DEFAULT_SKY_FLAGS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(SKY_FLAG_BITS).map(([name, [, value]]) => [name, value]),
+  ),
+);
 
 const trim = (value, digits) => {
   const text = Number(value).toFixed(digits);
@@ -23,20 +52,25 @@ export function isoUtc(ms) {
   return iso.endsWith('.000Z') ? `${iso.slice(0, -5)}Z` : iso;
 }
 
-/** Flags object -> integer. */
+/** Flags object -> integer (a missing switch counts as its default). */
 export function encodeFlags(flags = {}) {
   let bits = 0;
-  for (const [name, bit] of Object.entries(SKY_FLAGS))
-    if (flags[name]) bits |= bit;
+  for (const [name, [bit, fallback]] of Object.entries(SKY_FLAG_BITS)) {
+    const on = name in flags ? Boolean(flags[name]) : fallback;
+    if (on !== fallback) bits |= bit;
+  }
   return bits;
 }
 
-/** Integer -> flags object (unknown bits ignored). */
+/** Integer -> complete flags object (unknown bits ignored). */
 export function decodeFlags(bits) {
   const value = Number.parseInt(bits, 10);
   const safe = Number.isFinite(value) && value >= 0 ? value : 0;
   return Object.fromEntries(
-    Object.entries(SKY_FLAGS).map(([name, bit]) => [name, Boolean(safe & bit)]),
+    Object.entries(SKY_FLAG_BITS).map(([name, [bit, fallback]]) => [
+      name,
+      safe & bit ? !fallback : fallback,
+    ]),
   );
 }
 

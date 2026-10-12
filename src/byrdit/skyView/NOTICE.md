@@ -1,7 +1,7 @@
 # Sky view: third-party data and code notices
 
 The Sky view code in this folder is MIT licensed like the rest of God's Eye
-View. The two catalogue files in `data/` are NOT MIT: they are derived from
+View. The three catalogue files in `data/` are NOT MIT: they are derived from
 Creative Commons Attribution-ShareAlike data and stay under that licence.
 Anyone redistributing those files must keep the attribution below and share
 derived data files under the same licence. (Not legal advice.)
@@ -32,7 +32,18 @@ derived data files under the same licence. (Not legal advice.)
   upstream). Illustrations are Free Art License and are NOT bundled.
 - Changes made: kept the 88 constellations' IAU abbreviation, English and
   Latin names and line chains (Hipparcos ids); dropped the "thin" line-style
-  markers, illustrations, boundaries and asterisms; sorted by abbreviation.
+  markers, illustrations and asterisms; sorted by abbreviation.
+
+## Constellation boundaries: `data/boundaries.json`
+
+- Source: the same Stellarium `western/index.json` (commit above), its
+  `edges` list (781 edges; upstream source pbarbier.com `edges_18`, IAU
+  boundaries at epoch B1875).
+- Licence: as above ("Text and data: CC BY-SA").
+- Changes made: each B1875 meridian/parallel edge was densified to steps of
+  at most 1 degree of arc and precessed B1875 -> J2000 (IAU 2006 precession,
+  `skyMath.precessionMatrix`) at build time; written as flat RA/Dec polylines
+  (degrees, 2 decimals). Loaded only when the boundaries switch is on.
 
 ## Credits in the app
 

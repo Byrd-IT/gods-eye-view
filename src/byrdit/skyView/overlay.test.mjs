@@ -122,3 +122,26 @@ test('drawOverlay paints without throwing on a recording context', () => {
   assert.ok(calls.some(([k]) => k === 'fillText'));
   assert.equal(calls[0][0], 'clearRect');
 });
+
+test('viewProjector (one camera basis per redraw) is bit-identical to projectAzEl', async () => {
+  const { viewProjector } = await import('./overlay.js');
+  const { enuFromAzEl, projectAzEl } = await import('./skyMath.js');
+  for (const view of [
+    { azDeg: 145, elDeg: 52, fovDeg: 60, rollDeg: 0 },
+    { azDeg: 10, elDeg: 89, fovDeg: 100, rollDeg: 0 },
+    { azDeg: 300, elDeg: 5, fovDeg: 25, rollDeg: 12 },
+  ]) {
+    for (const [w, h] of [
+      [1280, 800],
+      [412, 915],
+    ]) {
+      const project = viewProjector(view, w, h);
+      for (let az = 0; az < 360; az += 7)
+        for (let el = -10; el <= 90; el += 9)
+          assert.deepEqual(
+            project(enuFromAzEl(az, el)),
+            projectAzEl(az, el, view, w, h),
+          );
+    }
+  }
+});
