@@ -23,6 +23,14 @@ import {
  * has never had a snapshot. Other methods get 405 (the upstream plugin does
  * not check methods and would otherwise poll the upstream).
  *
+ * Sub-paths: a non-terminal route (military, fire-perimeters, cyclones)
+ * passes sub-paths it does not own to the next middleware (live GEV routes
+ * such as /api/military/track, /api/fire-perimeters/inciweb/*). A terminal
+ * route (feed.terminal: FIRMS) is one middleware that answers its exact
+ * entry paths and 404s every other sub-path and method itself
+ * (createTerminalRoute), because the upstream FIRMS plugin polls on any
+ * sub-path.
+ *
  * Owner N5: the server never clears a layer. It adds X-Feed-Grey-Until
  * (X-Feed-Stale-Since + GEV_STALE_GREY_MS) so the client decides grey vs
  * cleared on the server clock (staleness.js feedDisplayState).
@@ -333,6 +341,47 @@ export function createCollectorBridge({
 }
 
 /**
+ * One middleware for a terminal route namespace (feed.terminal, e.g.
+ * /api/firms): the exact entry paths go to their bridge handlers; every other
+ * sub-path, whatever the method, is answered 404 here and NEVER reaches the
+ * upstream plugin (D7). The raw sub-path (before `?`) must equal an entry's
+ * path byte for byte, so /status/, //, /%73tatus and /./status are not
+ * aliases. A bridge handler that would call next() is answered 404 too.
+ *
+ * @param {object} options
+ * @param {string} options.source X-Feed-Source of the namespace
+ * @param {{path: string, handler: Function}[]} options.entries
+ */
+export function createTerminalRoute({ source, entries }) {
+  const notFound = (req, res) => {
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
+    res.writeHead(404, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      'X-Feed-Source': source,
+      'X-Feed-Bridge': 'unrouted',
+    });
+    res.end(
+      req.method === 'HEAD'
+        ? undefined
+        : JSON.stringify({ error: 'not found' }),
+    );
+  };
+  return function terminalRoute(req, res) {
+    const subPath = String(req.url || '/').split('?')[0];
+    const entry = entries.find((e) => e.path === subPath);
+    if (!entry) {
+      notFound(req, res);
+      return undefined;
+    }
+    return entry.handler(req, res, () => notFound(req, res));
+  };
+}
+
+/**
  * Vite plugin. `env` is read once when the plugin is created (Vite loads .env
  * into process.env before vite.config.js builds the plugin list).
  */
@@ -344,18 +393,35 @@ export function collectorBridgePlugin({
 } = {}) {
   const config = bridgeConfigFromEnv(env);
   const install = (server) => {
+    /** Terminal routes already mounted in this install (one middleware each). */
+    const terminalMounted = new Set();
+    const make = (name) =>
+      createCollectorBridge({
+        name,
+        urls: config.urls,
+        timeoutMs: config.timeoutMs,
+        greyMs: config.greyMs,
+        fetchImpl,
+        now,
+        log,
+      });
     for (const name of config.feeds) {
+      const { route, terminal } = BRIDGE_FEEDS[name];
+      if (!terminal) {
+        server.middlewares.use(route, make(name));
+        continue;
+      }
+      if (terminalMounted.has(route)) continue;
+      terminalMounted.add(route);
+      const entries = config.feeds
+        .filter((other) => BRIDGE_FEEDS[other].route === route)
+        .map((other) => ({
+          path: BRIDGE_FEEDS[other].path ?? '/',
+          handler: make(other),
+        }));
       server.middlewares.use(
-        BRIDGE_FEEDS[name].route,
-        createCollectorBridge({
-          name,
-          urls: config.urls,
-          timeoutMs: config.timeoutMs,
-          greyMs: config.greyMs,
-          fetchImpl,
-          now,
-          log,
-        }),
+        route,
+        createTerminalRoute({ source: BRIDGE_FEEDS[name].source, entries }),
       );
     }
   };
