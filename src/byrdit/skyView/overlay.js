@@ -81,6 +81,50 @@ function gridLinesEnu() {
   return gridEnu;
 }
 
+/**
+ * Does the segment (a, b) possibly touch the canvas grown by `pad`? A box
+ * test: conservative (never drops a segment that crosses the canvas).
+ */
+export const segmentNearCanvas = (ax, ay, bx, by, width, height, pad) =>
+  !(
+    (ax < -pad && bx < -pad) ||
+    (ay < -pad && by < -pad) ||
+    (ax > width + pad && bx > width + pad) ||
+    (ay > height + pad && by > height + pad)
+  );
+
+/** Pixels a polyline may run outside the canvas before it is cut (> line width). */
+export const CULL_PAD = 8;
+
+/**
+ * Like curve(), but only the segments that can touch the canvas: the grid's
+ * off-screen parts (most of every alt circle) cost stroke work for nothing.
+ * The drawn pixels are the same as stroking the whole curve.
+ */
+export function visibleRuns(points, project, width, height, pad = CULL_PAD) {
+  const runs = [];
+  let run = [];
+  let prev = null;
+  for (const d of points) {
+    const p = project(d);
+    const ok = p && Math.abs(p.x) < width * 20 && Math.abs(p.y) < height * 20;
+    if (
+      ok &&
+      prev &&
+      segmentNearCanvas(prev.x, prev.y, p.x, p.y, width, height, pad)
+    ) {
+      if (!run.length) run.push(prev);
+      run.push(p);
+    } else if (run.length) {
+      if (run.length > 1) runs.push(run);
+      run = [];
+    }
+    prev = ok ? p : null;
+  }
+  if (run.length > 1) runs.push(run);
+  return runs;
+}
+
 /** Polyline of projected points along a curve, split where it leaves the view. */
 function curve(points, project, width, height) {
   const runs = [];
@@ -154,7 +198,7 @@ export function overlayModel({
   const lines = [];
   if (grid) {
     for (const line of gridLinesEnu())
-      for (const run of curve(line.points, project, width, height))
+      for (const run of visibleRuns(line.points, project, width, height))
         lines.push({ kind: line.kind, value: line.value, points: run });
   }
 
@@ -196,7 +240,23 @@ export function overlayModel({
 }
 
 /** Paint a model onto a 2-D context sized width x height (CSS pixels). */
-export function drawOverlay(ctx, model, { width, height }) {
+export function drawOverlay(
+  ctx,
+  model,
+  { width, height, text = null, ratio = 1 },
+) {
+  // `text`: a textSprites cache (pre-rendered labels, no font switch per
+  // frame); without one the labels are drawn with fillText.
+  const label = (str, x, y, style) => {
+    if (text) text.draw(ctx, str, x, y, style, ratio);
+    else {
+      ctx.font = style.font;
+      ctx.fillStyle = style.fill;
+      ctx.textAlign = style.align;
+      ctx.textBaseline = style.baseline;
+      ctx.fillText(str, x, y);
+    }
+  };
   ctx.clearRect(0, 0, width, height);
   ctx.save();
   const sky = model.gradient || model.wash;
@@ -245,8 +305,6 @@ export function drawOverlay(ctx, model, { width, height }) {
       );
     ctx.stroke();
   }
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
   // ticks first as one batched stroke, then the labels (a stroke per tick
   // costs a raster flush each on phone canvases)
   if (model.cardinals.length) {
@@ -258,22 +316,22 @@ export function drawOverlay(ctx, model, { width, height }) {
     }
     ctx.stroke();
   }
-  for (const c of model.cardinals) {
-    ctx.font = c.major
-      ? '600 16px system-ui, sans-serif'
-      : '500 12px system-ui, sans-serif';
-    ctx.fillStyle =
-      c.label === 'N'
-        ? 'rgba(255, 120, 110, 0.95)'
-        : 'rgba(230, 240, 255, 0.92)';
-    ctx.fillText(c.label, c.x, c.y - (c.major ? 14 : 9));
-  }
+  for (const c of model.cardinals)
+    label(c.label, c.x, c.y - (c.major ? 14 : 9), {
+      font: c.major
+        ? '600 16px system-ui, sans-serif'
+        : '500 12px system-ui, sans-serif',
+      fill:
+        c.label === 'N'
+          ? 'rgba(255, 120, 110, 0.95)'
+          : 'rgba(230, 240, 255, 0.92)',
+      align: 'center',
+      baseline: 'bottom',
+    });
   // compass strip
   const y = height - 18;
   ctx.fillStyle = 'rgba(4, 10, 18, 0.55)';
   ctx.fillRect(0, y - 16, width, 30);
-  ctx.textBaseline = 'middle';
-  ctx.font = '500 11px system-ui, sans-serif';
   if (model.compass.length) {
     ctx.strokeStyle = 'rgba(200, 225, 255, 0.7)';
     ctx.beginPath();
@@ -285,11 +343,15 @@ export function drawOverlay(ctx, model, { width, height }) {
   }
   for (const tick of model.compass) {
     if (!tick.label) continue;
-    ctx.fillStyle =
-      tick.label === 'N'
-        ? 'rgba(255, 120, 110, 0.95)'
-        : 'rgba(220, 235, 255, 0.9)';
-    ctx.fillText(tick.label, tick.x, y + 2);
+    label(tick.label, tick.x, y + 2, {
+      font: '500 11px system-ui, sans-serif',
+      fill:
+        tick.label === 'N'
+          ? 'rgba(255, 120, 110, 0.95)'
+          : 'rgba(220, 235, 255, 0.9)',
+      align: 'center',
+      baseline: 'middle',
+    });
   }
   ctx.strokeStyle = 'rgba(255, 210, 120, 0.9)';
   ctx.beginPath();

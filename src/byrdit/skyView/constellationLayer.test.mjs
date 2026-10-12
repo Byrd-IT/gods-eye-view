@@ -262,3 +262,97 @@ test('R3: lines and names behind a terrain ridge are dimmed, the rest unchanged'
   assert.deepEqual(ops, [1, TERRAIN_ALPHA]);
   assert.equal(ctx.globalAlpha, 1);
 });
+
+/** Does segment (a, b) really cross the rectangle [0, w] x [0, h]? */
+function segmentHitsRect(ax, ay, bx, by, w, h) {
+  // Liang-Barsky clip
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  for (const [p, q] of [
+    [-dx, ax],
+    [dx, w - ax],
+    [-dy, ay],
+    [dy, h - ay],
+  ]) {
+    if (p === 0) {
+      if (q < 0) return false;
+    } else {
+      const r = q / p;
+      if (p < 0) t0 = Math.max(t0, r);
+      else t1 = Math.min(t1, r);
+      if (t0 > t1) return false;
+    }
+  }
+  return true;
+}
+
+const segmentsOf = (runs) => {
+  const out = [];
+  for (const run of runs)
+    for (let i = 2; i < run.length; i += 2)
+      out.push([run[i - 2], run[i - 1], run[i], run[i + 1]]);
+  return out;
+};
+
+test('boundary culling (edge caps + off-canvas segments) drops nothing that crosses the canvas', () => {
+  const { field, prepared, positioned } = setup();
+  // the same edges with no caps and no segment culling = every point
+  const uncapped = {
+    ...positioned,
+    boundaries: positioned.boundaries.map(({ cap, ...rest }) => rest),
+  };
+  assert.ok(positioned.boundaries.every((b) => b.cap));
+  let kept = 0;
+  let culled = 0;
+  for (const [azDeg, elDeg, fovDeg, width, height] of [
+    [145, 52, 60, W, H],
+    [145, 52, 100, W, H],
+    [10, 5, 60, 412, 915],
+    [250, 80, 30, 412, 915],
+    [300, 20, 5, W, H],
+    [0, 89, 100, W, H],
+  ]) {
+    const view = makeView({ azDeg, elDeg, fovDeg });
+    const opts = { view, width, height, lines: false, boundaries: true };
+    const fast = constellationModel(prepared, positioned, field, opts);
+    const full = constellationModel(prepared, uncapped, field, opts);
+    const key = (s) => s.map((v) => v.toFixed(3)).join(',');
+    const fastSet = new Set(segmentsOf(fast.boundaries).map(key));
+    for (const s of segmentsOf(full.boundaries)) {
+      if (!segmentHitsRect(...s, width, height)) continue;
+      assert.ok(fastSet.has(key(s)), `visible boundary segment kept ${s}`);
+      kept++;
+    }
+    culled += positioned.boundaries.length;
+  }
+  assert.ok(kept > 100, `checked ${kept} visible segments`);
+  assert.ok(culled > 0);
+});
+
+test('boundary culling skips most edges outside a 60 deg view', () => {
+  const { field, prepared, positioned } = setup();
+  const walked = new Set();
+  const counting = {
+    ...positioned,
+    boundaries: positioned.boundaries.map((b, k) => ({
+      ...b,
+      get el() {
+        walked.add(k);
+        return b.el;
+      },
+    })),
+  };
+  constellationModel(prepared, counting, field, {
+    view: makeView({ azDeg: 145, elDeg: 52, fovDeg: 60 }),
+    width: W,
+    height: H,
+    lines: false,
+    boundaries: true,
+  });
+  assert.ok(
+    walked.size < positioned.boundaries.length / 3,
+    `${walked.size} of ${positioned.boundaries.length} edges walked`,
+  );
+});

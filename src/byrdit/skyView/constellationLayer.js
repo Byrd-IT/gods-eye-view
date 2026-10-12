@@ -5,7 +5,7 @@
  * stars, optional IAU boundaries (J2000 polylines precessed from B1875 at
  * build time) and proper star names. Models are pure; drawing is separate.
  */
-import { DEG } from './skyMath.js';
+import { DEG, cameraBasis, frustumTangents } from './skyMath.js';
 import {
   TERRAIN_ALPHA,
   makeProjector,
@@ -59,12 +59,46 @@ export function prepareConstellations(constellations, stars) {
 
 /** J2000 unit vectors of every boundary point, one flat set per edge. */
 export function prepareBoundaries(edges) {
-  return edges.map((edge) => ({
-    a: edge.a,
-    b: edge.b,
-    vectors: unitVectors(edge.ra, edge.dec),
-  }));
+  return edges.map((edge) => {
+    const vectors = unitVectors(edge.ra, edge.dec);
+    return { a: edge.a, b: edge.b, vectors, cap: boundingCap(vectors) };
+  });
 }
+
+/**
+ * A cap (centre unit vector + angular radius, radians) holding every point
+ * of a polyline: the model skips whole edges outside the view cone.
+ */
+export function boundingCap({ x, y, z }) {
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  for (let i = 0; i < x.length; i++) {
+    cx += x[i];
+    cy += y[i];
+    cz += z[i];
+  }
+  const len = Math.hypot(cx, cy, cz);
+  if (!(len > 1e-9)) return null;
+  cx /= len;
+  cy /= len;
+  cz /= len;
+  let minDot = 1;
+  for (let i = 0; i < x.length; i++)
+    minDot = Math.min(minDot, cx * x[i] + cy * y[i] + cz * z[i]);
+  return {
+    x: cx,
+    y: cy,
+    z: cz,
+    radius: Math.acos(Math.max(-1, Math.min(1, minDot))),
+  };
+}
+
+/**
+ * Extra angle (radians) around an edge's cap before it is culled: covers
+ * refraction (<= 0.6 deg lift) and the off-canvas pad.
+ */
+export const CAP_MARGIN = 2 * DEG;
 
 /**
  * Move the label anchors and boundaries to the field's current matrix
@@ -72,11 +106,27 @@ export function prepareBoundaries(edges) {
  */
 export function positionConstellations(prepared, boundaries, matrix) {
   const { x, y, z } = prepared.centroid;
+  const [m0, m1, m2] = matrix;
   return {
     centroids: transformVectors(matrix, x, y, z),
-    boundaries: (boundaries || []).map((edge) =>
-      transformVectors(matrix, edge.vectors.x, edge.vectors.y, edge.vectors.z),
-    ),
+    boundaries: (boundaries || []).map((edge) => {
+      const out = transformVectors(
+        matrix,
+        edge.vectors.x,
+        edge.vectors.y,
+        edge.vectors.z,
+      );
+      const c = edge.cap;
+      // the cap centre in ENU (unrefracted; CAP_MARGIN covers refraction)
+      if (c)
+        out.cap = {
+          e: m0[0] * c.x + m0[1] * c.y + m0[2] * c.z,
+          n: m1[0] * c.x + m1[1] * c.y + m1[2] * c.z,
+          u: m2[0] * c.x + m2[1] * c.y + m2[2] * c.z,
+          radius: c.radius,
+        };
+      return out;
+    }),
   };
 }
 
@@ -167,16 +217,57 @@ export function constellationModel(
   const runs = [];
   if (boundaries && positioned?.boundaries?.length) {
     const far = Math.max(width, height) * 20;
+    // only the segments that can touch the canvas (a box test, so nothing
+    // visible is dropped): most of the 781 edges' points are off screen
+    const pad = BOUNDARY_CULL_PAD;
+    // whole edges outside the view cone (or below the horizon) are skipped
+    // before any point is projected
+    const { forward: f } = cameraBasis(view);
+    const { tx, ty } = frustumTangents(view.fovDeg, width, height);
+    const halfDiag = Math.atan(Math.hypot(tx, ty));
     for (const edge of positioned.boundaries) {
+      const cap = edge.cap;
+      if (cap) {
+        const reach = halfDiag + cap.radius + CAP_MARGIN;
+        const dot = cap.e * f[0] + cap.n * f[1] + cap.u * f[2];
+        if (reach < Math.PI && dot < Math.cos(reach)) continue;
+        if (
+          Math.asin(Math.max(-1, Math.min(1, cap.u))) +
+            cap.radius +
+            CAP_MARGIN <
+          0
+        )
+          continue;
+      }
       let run = [];
+      let havePrev = false;
+      let px = 0;
+      let py = 0;
       for (let i = 0; i < edge.el.length; i++) {
         const p =
           edge.el[i] > 0 ? project(edge.e[i], edge.n[i], edge.u[i]) : null;
-        if (p && Math.abs(p.x) < far && Math.abs(p.y) < far) run.push(p.x, p.y);
-        else {
+        const ok = p && Math.abs(p.x) < far && Math.abs(p.y) < far;
+        const x = ok ? p.x : 0;
+        const y = ok ? p.y : 0;
+        if (
+          ok &&
+          havePrev &&
+          !(
+            (px < -pad && x < -pad) ||
+            (py < -pad && y < -pad) ||
+            (px > width + pad && x > width + pad) ||
+            (py > height + pad && y > height + pad)
+          )
+        ) {
+          if (!run.length) run.push(px, py);
+          run.push(x, y);
+        } else if (run.length) {
           if (run.length > 2) runs.push(run);
           run = [];
         }
+        havePrev = Boolean(ok);
+        px = x;
+        py = y;
       }
       if (run.length > 2) runs.push(run);
     }
@@ -213,6 +304,9 @@ export function starNameCandidates(field, model, { fovDeg }) {
   }
   return out;
 }
+
+/** Pixels a boundary may run outside the canvas before it is cut. */
+export const BOUNDARY_CULL_PAD = 8;
 
 export const LINE_STYLE = 'rgba(120, 170, 235, 0.55)';
 export const BOUNDARY_STYLE = 'rgba(200, 160, 90, 0.35)';

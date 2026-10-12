@@ -33,6 +33,7 @@ import {
 } from './constellationLayer.js';
 import { bodiesModel, drawBodies } from './bodyLayer.js';
 import { placeLabels, textWidth } from './skyLabels.js';
+import { createTextSprites } from './textSprites.js';
 import {
   LOOK_AT_MS,
   buildSearchIndex,
@@ -74,6 +75,8 @@ const FONTS = {
   star: '400 11px system-ui, sans-serif',
   marker: '600 12px system-ui, sans-serif',
 };
+/** Dark halo behind label text (keeps it readable over lines and stars). */
+const LABEL_HALO = 'rgba(0, 0, 0, 0.55)';
 const LABEL_COLOURS = {
   body: 'rgba(255, 236, 190, 0.95)',
   constellation: 'rgba(150, 190, 245, 0.85)',
@@ -422,6 +425,9 @@ export function createSkyContent({
     return changed;
   }
 
+  // label text sprites, rasterised once per (text, style, pixel ratio)
+  const labelText = createTextSprites(createCanvas);
+
   function spriteAtlas(ratio) {
     if (!atlas || atlasRatio !== ratio) {
       atlas = createSpriteAtlas(createCanvas, ratio);
@@ -470,7 +476,11 @@ export function createSkyContent({
     if (!active) return stats;
     const lim = starLimit({ sunAltDeg, fovDeg: view.fovDeg, userLimit });
     stats.lim = lim;
-    if (dom) dom.magText.textContent = lim.toFixed(1);
+    // write the DOM only when the text changes (a write per redraw dirties
+    // the page's style for every later canvas font/layout read)
+    const limText = lim.toFixed(1);
+    if (dom && dom.magText.textContent !== limText)
+      dom.magText.textContent = limText;
     const skyHeight = Math.max(0, height - COMPASS_STRIP_PX);
     ctx.save();
     ctx.beginPath?.();
@@ -593,17 +603,25 @@ export function createSkyContent({
       height: skyHeight,
       reserved,
     });
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+    // pre-rendered label text (textSprites.js): no font switch per frame
     for (const label of placed) {
-      ctx.font = FONTS[label.kind];
-      ctx.textAlign = label.align;
-      ctx.fillStyle = LABEL_COLOURS[label.kind];
       // labels of objects behind the terrain are dimmed with their object
       ctx.globalAlpha = label.alpha ?? 1;
-      ctx.strokeText?.(label.text, label.x, label.y);
-      ctx.fillText(label.text, label.x, label.y);
+      labelText.draw(
+        ctx,
+        label.text,
+        label.x,
+        label.y,
+        {
+          font: FONTS[label.kind],
+          fill: LABEL_COLOURS[label.kind],
+          stroke: LABEL_HALO,
+          strokeWidth: 3,
+          align: label.align,
+          baseline: 'middle',
+        },
+        ratio,
+      );
     }
     ctx.globalAlpha = 1;
     stats.labels = placed.map(({ kind, text, box, alpha }) => ({
@@ -829,6 +847,8 @@ export function createSkyContent({
     get lastResults() {
       return lastResults;
     },
+    /** Pre-rendered label text (shared with the P1 overlay labels). */
+    textSprites: labelText,
     /** Redraw timings of draw() (ms): count, p50, p95, max. */
     perf() {
       const sorted = [...perf].sort((a, b) => a - b);

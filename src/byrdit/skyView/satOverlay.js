@@ -322,7 +322,7 @@ export function lookAtView(from, to, f) {
 }
 
 /** Paint a satellite model (CSS pixels). */
-export function drawSatellites(ctx, model) {
+export function drawSatellites(ctx, model, { text = null, ratio = 1 } = {}) {
   if (!model) return;
   ctx.save();
   if (model.belt.length) {
@@ -358,22 +358,47 @@ export function drawSatellites(ctx, model) {
     }
   }
   ctx.globalAlpha = 1;
-  ctx.font = `500 ${LABEL_FONT_PX}px system-ui, sans-serif`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
+  // Setting ctx.font forces a style resolution (a synchronous style recalc
+  // when the page changed since the last frame): only when there is text,
+  // and labels go through the pre-rendered text sprites when given.
+  const font = `500 ${LABEL_FONT_PX}px system-ui, sans-serif`;
+  if (model.labels.length && !text) {
+    ctx.font = font;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+  }
   for (const label of model.labels) {
     const { box } = label;
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(2, 6, 12, 0.8)';
     // maxWidth keeps the glyphs inside the reserved box whatever the font,
     // so non-overlapping boxes mean non-overlapping text.
     const maxWidth = box.w - 6;
+    if (text) {
+      text.draw(
+        ctx,
+        label.text,
+        box.x + 3,
+        box.y + box.h / 2,
+        {
+          font,
+          fill: label.color,
+          stroke: 'rgba(2, 6, 12, 0.8)',
+          strokeWidth: 3,
+          align: 'left',
+          baseline: 'middle',
+          maxWidth,
+        },
+        ratio,
+      );
+      continue;
+    }
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(2, 6, 12, 0.8)';
     ctx.strokeText(label.text, box.x + 3, box.y + box.h / 2, maxWidth);
     ctx.fillStyle = label.color;
     ctx.fillText(label.text, box.x + 3, box.y + box.h / 2, maxWidth);
   }
   if (model.arrow) {
-    const { x, y, angle, text, textX, textY } = model.arrow;
+    const { x, y, angle, text: arrowText, textX, textY } = model.arrow;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
@@ -386,10 +411,12 @@ export function drawSatellites(ctx, model) {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
-    if (text) {
+    if (arrowText) {
+      ctx.font = font;
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(255, 225, 160, 0.95)';
-      ctx.fillText(text, textX, textY);
+      ctx.fillText(arrowText, textX, textY);
     }
   }
   ctx.restore();

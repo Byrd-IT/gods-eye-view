@@ -486,7 +486,12 @@ export function mountSkyView({
       flatHorizon: flags.flatHorizon,
       sunAltDeg: lastSunAlt,
     });
-    drawOverlay(ctx, model, { width, height });
+    drawOverlay(ctx, model, {
+      width,
+      height,
+      text: content.textSprites,
+      ratio,
+    });
     satObjects = satSky.running ? satSky.objectsAt(clock.getTime()) : null;
     content.draw(ctx, {
       view,
@@ -512,7 +517,7 @@ export function mountSkyView({
         // plain redraw never forces a synchronous layout
         insets: selectedIndex != null ? arrowInsets(width, height) : {},
       });
-      drawSatellites(ctx, satModel);
+      drawSatellites(ctx, satModel, { text: content.textSprites, ratio });
     } else satModel = null;
   }
 
