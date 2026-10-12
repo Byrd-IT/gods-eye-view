@@ -408,3 +408,44 @@ test('observer validation and an engine without an observer returns nothing', ()
   assert.equal(engine.setObserver(NaN, 0), false);
   assert.equal(engine.tick({ timeMs: Date.now() }).count, 0);
 });
+
+test('P2b: ticks pack the brightness estimate for sunlit objects with an RCS (NaN otherwise); setRcs reaches later loads', () => {
+  const engine = fixtureEngine();
+  const ids = engine.entries.map((e) => e.noradId);
+  const rcs = { 999999999: 3, bad: 'x', [ids[1]]: -1, [ids[3]]: '' };
+  ids.forEach((id, i) => {
+    if (i % 2 === 0) rcs[id] = 2;
+  });
+  const result = engine.setRcs(rcs);
+  assert.equal(result.matched, Math.ceil(ids.length / 2));
+  assert.equal(engine.rcsVersion, 1);
+  const t = Date.parse('2026-10-12T01:00:00Z');
+  const tick = engine.tick({ timeMs: t, cull: false });
+  let withMag = 0;
+  for (let o = 0; o < tick.records.length; o += RECORD_FIELDS) {
+    const entry = engine.entry(tick.records[o]);
+    const flags = decodeFlags(tick.records[o + 5]);
+    const estMag = tick.records[o + 6];
+    if (!flags.sunlit || entry.rcsM2 == null) {
+      assert.ok(Number.isNaN(estMag), `${entry.name} has no estimate`);
+      continue;
+    }
+    withMag += 1;
+    const d = describeLook(entry, t, engine.observer);
+    assert.ok(Math.abs(estMag - d.estMag) < 1e-4, entry.name);
+    assert.ok(estMag > -10 && estMag < 20);
+  }
+  assert.ok(withMag > 0, `${withMag} with an estimate`);
+  const bare = engine.entries.find((e) => e.rcsM2 == null);
+  assert.equal(describeLook(bare, t, engine.observer).estMag, null);
+  // groups loaded after the RCS map pick it up too
+  const late = createSatEngine();
+  late.setRcs({ 25544: 399.0524 });
+  late.loadGroup('stations', FIXTURE);
+  assert.equal(late.byNorad(25544).rcsM2, 399.0524);
+  assert.equal(late.meta().find((m) => m.noradId === 25544).rcsM2, 399.0524);
+  // pass-scanned groups bump passVersion, others do not
+  const v = late.passVersion;
+  late.loadGroup('gps-ops', FIXTURE);
+  assert.equal(late.passVersion, v);
+});

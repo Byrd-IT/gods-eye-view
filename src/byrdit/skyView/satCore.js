@@ -12,7 +12,9 @@
  *
  * One tick returns a packed Float32Array, RECORD_FIELDS floats per object
  * whose elevation is above MIN_EL_DEG:
- *   [index, azDeg, elDeg, rangeKm, rangeRateKmS, flags]
+ *   [index, azDeg, elDeg, rangeKm, rangeRateKmS, flags, estMag]
+ * estMag (P2b) is the brightness ESTIMATE from brightness.js (SATCAT RCS,
+ * diffuse sphere), NaN when the object is in shadow or has no RCS.
  * `index` is the object's slot in the engine catalogue (stable for the life of
  * the engine; meta() maps it to name/NORAD/class), `flags` is an integer bit
  * set (see FLAG and decodeFlags). Float32 holds az/el to about 1.5e-5 deg,
@@ -44,15 +46,17 @@ import {
   isSatelliteSunlit,
   lookAnglesAt,
   observerSolarElevation,
+  solarPositionECI,
 } from '../../data/satellitePass.js';
+import { estimateMagnitude, phaseAngleDeg, rcsValue } from './brightness.js';
 import {
   SATELLITE_CLASS_ORDER,
   satelliteClassOf,
 } from '../../data/satelliteClass.js';
 import { parseGP } from '../gpCsv.js';
 
-/** [index, azDeg, elDeg, rangeKm, rangeRateKmS, flags] */
-export const RECORD_FIELDS = 6;
+/** [index, azDeg, elDeg, rangeKm, rangeRateKmS, flags, estMag] */
+export const RECORD_FIELDS = 7;
 export const MIN_EL_DEG = -2;
 /** Grey an object whose element set is this far from the Sky time. */
 export const STALE_DAYS = 7;
@@ -304,7 +308,7 @@ export function describeLook(
   entry,
   timeMs,
   observer,
-  { dark, look, pv, obs } = {},
+  { dark, look, pv, obs, sun } = {},
 ) {
   const here =
     look ||
@@ -320,6 +324,19 @@ export function describeLook(
     dark ?? isObserverDark(observer.latDeg, observer.lonDeg, timeMs);
   const state = satelliteState(sunlit, isDark);
   const stale = elementAge(entry.epochMs, timeMs) === 'stale';
+  const estMag =
+    sunlit && entry.rcsM2 != null && Number.isFinite(rangeKm)
+      ? estimateMagnitude({
+          noradId: entry.noradId,
+          rcsM2: entry.rcsM2,
+          rangeKm,
+          phaseDeg: phaseAngleDeg(
+            here.satECI,
+            o.r,
+            sun || solarPositionECI(timeMs),
+          ),
+        })
+      : null;
   return {
     index: entry.index,
     azDeg: here.azDeg,
@@ -330,6 +347,7 @@ export function describeLook(
     dark: isDark,
     state,
     stale,
+    estMag,
     flags: packFlags({
       sunlit,
       dark: isDark,
@@ -382,6 +400,11 @@ export function createSatEngine({
   let scratch = new Float32Array(0);
   let observer = null;
   let version = 0;
+  /** Bumps when a pass-scanned group (stations/visual) changes. */
+  let passVersion = 0;
+  let rcsVersion = 0;
+  /** noradId -> RCS m2 from /api/celestrak-rcs (SATCAT), P2b. */
+  let rcsByNorad = new Map();
 
   const resetCull = (i) => {
     if (i === undefined) cullSlack.fill(0);
@@ -401,6 +424,7 @@ export function createSatEngine({
   /** Load one group's CSV text. Returns counts. */
   function loadGroup(path, text) {
     const rows = parseGP(text);
+    let passTouched = false;
     let added = 0;
     let updated = 0;
     let rejected = 0;
@@ -439,8 +463,10 @@ export function createSatEngine({
           info.tag === 'stations' ||
           info.tag === 'visual' ||
           noradId === ISS_NORAD,
+        rcsM2: rcsByNorad.get(noradId) ?? null,
         ...cullBounds(satrec),
       };
+      if (info.tag === 'stations' || info.tag === 'visual') passTouched = true;
       if (existing) {
         Object.assign(existing, fields);
         resetCull(existing.index);
@@ -454,7 +480,29 @@ export function createSatEngine({
     }
     growCull();
     if (added || updated) version += 1;
+    if (passTouched) passVersion += 1;
     return { path, parsed: rows.length, added, updated, rejected };
+  }
+
+  /**
+   * Radar cross-sections { noradId: rcsM2 } (SATCAT through the same-origin
+   * /api/celestrak-rcs cache). Missing or non-positive = no estimate.
+   */
+  function setRcs(map) {
+    const next = new Map();
+    for (const [id, value] of Object.entries(map || {})) {
+      const v = rcsValue(value);
+      const n = Number(id);
+      if (v != null && Number.isSafeInteger(n)) next.set(n, v);
+    }
+    rcsByNorad = next;
+    let matched = 0;
+    for (const e of entries) {
+      e.rcsM2 = next.get(e.noradId) ?? null;
+      if (e.rcsM2 != null) matched += 1;
+    }
+    rcsVersion += 1;
+    return { size: next.size, matched };
   }
 
   function setObserver(latDeg, lonDeg) {
@@ -494,6 +542,7 @@ export function createSatEngine({
     const dark = isObserverDark(latDeg, lonDeg, t);
     const gmst = gstime(new Date(t));
     const obs = observerEci(observer, gmst);
+    const sun = solarPositionECI(t);
     const up = obs.up;
     if (scratch.length < entries.length * RECORD_FIELDS)
       scratch = new Float32Array(entries.length * RECORD_FIELDS);
@@ -544,7 +593,13 @@ export function createSatEngine({
         continue;
       }
       if (look.elevDeg <= MIN_EL_DEG) continue;
-      const d = describeLook(entry, t, observer, { dark, look, pv, obs });
+      const d = describeLook(entry, t, observer, {
+        dark,
+        look,
+        pv,
+        obs,
+        sun,
+      });
       const o = n * RECORD_FIELDS;
       scratch[o] = entry.index;
       scratch[o + 1] = d.azDeg;
@@ -552,6 +607,7 @@ export function createSatEngine({
       scratch[o + 3] = d.rangeKm;
       scratch[o + 4] = d.rangeRateKmS;
       scratch[o + 5] = d.flags;
+      scratch[o + 6] = d.estMag ?? NaN;
       n += 1;
     }
     return {
@@ -579,6 +635,7 @@ export function createSatEngine({
       set: e.set,
       klass: e.klass,
       epochMs: e.epochMs,
+      rcsM2: e.rcsM2 ?? null,
     }));
   }
 
@@ -612,6 +669,12 @@ export function createSatEngine({
     get version() {
       return version;
     },
+    get passVersion() {
+      return passVersion;
+    },
+    get rcsVersion() {
+      return rcsVersion;
+    },
     get observer() {
       return observer;
     },
@@ -619,6 +682,7 @@ export function createSatEngine({
     entry: (index) => entries[index],
     byNorad: (id) => byNorad.get(Number(id)),
     loadGroup,
+    setRcs,
     setObserver,
     tick,
     meta,

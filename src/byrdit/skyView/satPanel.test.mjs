@@ -7,8 +7,13 @@ import {
   STATE_TEXT,
   ageBanner,
   cardData,
+  fmtPassTime,
   overheadList,
+  passKey,
+  passRowText,
+  passesView,
 } from './satPanel.js';
+import { upcomingPasses } from './passes.js';
 
 const DAY = 86_400_000;
 
@@ -129,5 +134,159 @@ test('chips cover every sky class', () => {
   assert.deepEqual(
     CLASS_CHIPS.map((c) => c.klass),
     ['station', 'nav', 'geo', 'visual', 'comms', 'other'],
+  );
+});
+
+// ── P2b ────────────────────────────────────────────────────────────────────
+const NOW = new Date(2026, 9, 12, 20, 0).getTime(); // local time
+const pass = (extra = {}) => ({
+  index: 3,
+  noradId: 25544,
+  name: 'ISS (ZARYA)',
+  riseMs: new Date(2026, 9, 12, 21, 14).getTime(),
+  riseAzDeg: 225,
+  peakMs: new Date(2026, 9, 12, 21, 17).getTime(),
+  peakElevDeg: 72.6,
+  peakAzDeg: 314,
+  setMs: new Date(2026, 9, 12, 21, 20).getTime(),
+  setAzDeg: 42,
+  visible: true,
+  estMag: -4.04,
+  alsoNames: [],
+  ...extra,
+});
+
+test('pass row: rise time/az, max elevation/time, set time/az, VISIBLE, est. mag; weekday when not today', () => {
+  const t = passRowText(pass(), NOW);
+  assert.deepEqual(t, {
+    name: 'ISS (ZARYA)',
+    rise: '21:14 SW',
+    peak: '73° 21:17',
+    set: '21:20 NE',
+    visible: true,
+    mag: 'est. mag -4.0',
+  });
+  const tomorrow = passRowText(
+    pass({
+      riseMs: NOW + 26 * 3600_000,
+      peakMs: NOW + 26 * 3600_000,
+      setMs: NOW + 26 * 3600_000,
+      estMag: null,
+      visible: false,
+      alsoNames: ['ISS (NAUKA)'],
+    }),
+    NOW,
+  );
+  assert.match(tomorrow.rise, /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d\d:\d\d SW$/);
+  assert.equal(tomorrow.mag, null);
+  assert.equal(tomorrow.name, 'ISS (ZARYA) (+1 docked)');
+  assert.equal(
+    passRowText(pass({ riseMs: NOW - 1000, inProgress: true }), NOW).rise,
+    'now SW',
+  );
+  assert.equal(fmtPassTime(NOW, NOW), '20:00');
+  assert.equal(passKey(pass()), `25544@${pass().riseMs}`);
+});
+
+test('passes view: scanning progress, empty and done texts; visible-only filter', () => {
+  assert.match(passesView(null, NOW).status, /Finding passes/);
+  const scanning = {
+    scanId: 1,
+    done: false,
+    processed: 4,
+    total: 120,
+    list: [],
+  };
+  assert.match(passesView(scanning, NOW).status, /^Scanning 4 of 120/);
+  const done = {
+    scanId: 1,
+    done: true,
+    processed: 120,
+    total: 120,
+    list: [
+      pass(),
+      pass({
+        noradId: 5,
+        riseMs: NOW + 600_000,
+        setMs: NOW + 900_000,
+        visible: false,
+      }),
+    ],
+  };
+  const v = passesView(done, NOW, {
+    visibleOnly: true,
+    upcoming: upcomingPasses,
+  });
+  assert.equal(v.rows.length, 1);
+  assert.equal(v.title, 'Next passes (1)');
+  assert.match(v.status, /estimates/);
+  assert.equal(
+    passesView(done, NOW, { visibleOnly: false, upcoming: upcomingPasses }).rows
+      .length,
+    2,
+  );
+  assert.match(
+    passesView({ ...done, list: [] }, NOW, { upcoming: upcomingPasses }).status,
+    /^No visible passes/,
+  );
+});
+
+test('overhead list include filter; card brightness wording and next pass', () => {
+  const objects = [
+    { index: 1, name: 'A', azDeg: 10, elDeg: 30, klass: 'other', estMag: 4 },
+    { index: 2, name: 'B', azDeg: 20, elDeg: 40, klass: 'other', estMag: null },
+  ];
+  const list = overheadList(objects, { include: (o) => o.estMag != null });
+  assert.deepEqual(
+    list.rows.map((r) => r.index),
+    [1],
+  );
+  const meta = {
+    name: 'A',
+    noradId: 7,
+    group: 'active',
+    klass: 'other',
+    epochMs: NOW,
+    objectId: '',
+    rcsM2: 2,
+  };
+  const row = {
+    azDeg: 10,
+    elDeg: 30,
+    rangeKm: 900,
+    rangeRateKmS: 1,
+    state: STATE.VISIBLE,
+    sunlit: true,
+    estMag: 4.04,
+  };
+  const lines = (found, opts) =>
+    Object.fromEntries(cardData(found, NOW, opts).lines);
+  assert.equal(
+    lines({ meta, row })['Brightness'],
+    'est. mag 4.0 (estimate, +/- 2 mag)',
+  );
+  assert.equal(
+    lines({ meta: { ...meta, rcsM2: null }, row: { ...row, estMag: null } })[
+      'Brightness'
+    ],
+    'no estimate (no radar size in the catalogue)',
+  );
+  assert.equal(
+    lines(
+      { meta: { ...meta, rcsM2: null }, row: { ...row, estMag: null } },
+      { rcsStatus: 'error' },
+    )['Brightness'],
+    'no estimate (catalogue sizes unavailable)',
+  );
+  assert.equal(
+    lines({
+      meta,
+      row: { ...row, sunlit: false, estMag: null, state: STATE.SHADOW },
+    })['Brightness'],
+    'no estimate (in shadow)',
+  );
+  assert.equal(
+    lines({ meta, row }, { nextPass: pass() })['Next pass'],
+    '21:14 SW -> 73° 21:17 -> 21:20 NE (visible)',
   );
 });

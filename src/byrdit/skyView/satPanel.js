@@ -1,10 +1,17 @@
 /**
- * Sky view satellite panel (SKYVIEW.md 4.2, 4.5): "Overhead now" list,
+ * Sky view satellite panel (SKYVIEW.md 4.2-4.5): "Overhead now" list,
  * class chips, data-set switches (all active, Starlink), GEO belt switch,
- * the element-age banner and the selected-object card. Text builders are
+ * the naked-eye filter (est. mag slider, P2b), the element-age banner, the
+ * selected-object card and the "Next passes" list (P2b). Text builders are
  * pure (tested); buildSatPanel()/renderSatPanel() only touch the DOM.
  */
 import { satelliteClassLabel } from '../../data/satelliteClass.js';
+import {
+  formatEstMag,
+  MAG_LIMIT_DEFAULT,
+  MAG_LIMIT_MAX,
+  MAG_LIMIT_MIN,
+} from './brightness.js';
 import { DROP_DAYS, SKY_CLASSES, STALE_DAYS, STATE } from './satCore.js';
 import { skyClassColor, skyClassLabel } from './satOverlay.js';
 
@@ -19,21 +26,33 @@ export const STATE_TEXT = Object.freeze({
     'Sunlit, but the sky is too bright (probably not visible)',
   [STATE.SHADOW]: "In the Earth's shadow (radio-visible only)",
 });
+export const NAKED_EYE_TEXT =
+  'Naked-eye candidates: visible now (sunlit under a dark sky) and an ESTIMATED magnitude at or below the limit, or a station / bright-object (visual) satellite. Brightness is an estimate from the radar size (about +/- 2 mag); objects with no radar size in the catalogue have no estimate.';
+export const PASS_LIMIT = 12;
 export const LEGEND_TEXT =
   '● visible · ○ sunlit, bright sky · ◦ in shadow · grey = old elements. Shadow is a cylinder of radius 6,371 km (a second or two of error at the terminator, no penumbra).';
 
 const compass = (az) =>
   ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(az / 45) % 8];
 
-/** Rows for "Overhead now": above 0 deg, chip filter, sorted by elevation. */
+/**
+ * Rows for "Overhead now": above 0 deg, chip filter, optional extra filter
+ * (`include`, the naked-eye filter), sorted by elevation.
+ */
 export function overheadList(
   objects,
-  { classesOn = null, occlusion = () => 'clear', limit = LIST_LIMIT } = {},
+  {
+    classesOn = null,
+    occlusion = () => 'clear',
+    limit = LIST_LIMIT,
+    include = null,
+  } = {},
 ) {
   const rows = [];
   for (const o of objects || []) {
     if (!(o.elDeg > 0)) continue;
     if (classesOn && !classesOn.has(o.klass)) continue;
+    if (include && !include(o)) continue;
     const occ = occlusion(o.azDeg, o.elDeg);
     if (occ === 'below') continue;
     rows.push({ ...o, behindTerrain: occ === 'terrain' });
@@ -71,8 +90,79 @@ export function ageBanner(age, timeMs) {
   return { level, text: parts.join(' · ') };
 }
 
+/** Local clock time of a pass event; the weekday when not on `nowMs`'s day. */
+export function fmtPassTime(ms, nowMs) {
+  const d = new Date(ms);
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const n = new Date(nowMs);
+  const sameDay =
+    d.getFullYear() === n.getFullYear() &&
+    d.getMonth() === n.getMonth() &&
+    d.getDate() === n.getDate();
+  return sameDay
+    ? hm
+    : `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${hm}`;
+}
+
+/** Stable key of one pass (object + rise time). */
+export const passKey = (pass) =>
+  pass ? `${pass.noradId}@${pass.riseMs}` : null;
+
+/**
+ * One "Next passes" row: object, rise time/az, max elevation/time, set
+ * time/az, VISIBLE chip, estimated peak magnitude.
+ */
+export function passRowText(pass, nowMs) {
+  const name =
+    pass.alsoNames?.length > 0
+      ? `${pass.name} (+${pass.alsoNames.length} docked)`
+      : pass.name;
+  const when =
+    pass.inProgress || pass.riseMs <= nowMs
+      ? 'now'
+      : fmtPassTime(pass.riseMs, nowMs);
+  return {
+    name,
+    rise: `${when} ${compass(pass.riseAzDeg)}`,
+    peak: `${Math.round(pass.peakElevDeg)}° ${fmtPassTime(pass.peakMs, nowMs)}`,
+    set: `${fmtPassTime(pass.setMs, nowMs)} ${compass(pass.setAzDeg)}`,
+    visible: Boolean(pass.visible),
+    mag: formatEstMag(pass.estMag),
+  };
+}
+
+/** Title, status line and rows of the "Next passes" section. */
+export function passesView(
+  state,
+  timeMs,
+  { visibleOnly = true, limit = PASS_LIMIT, upcoming } = {},
+) {
+  const list = upcoming
+    ? upcoming(state?.list || [], timeMs, { visibleOnly, limit })
+    : (state?.list || []).slice(0, limit);
+  let status = '';
+  if (!state || state.scanId == null) status = 'Finding passes...';
+  else if (!state.done)
+    status = `Scanning ${state.processed} of ${state.total} (stations + bright objects, next 48 h)...`;
+  else if (!list.length)
+    status = visibleOnly
+      ? 'No visible passes of stations or bright objects in the next 48 h.'
+      : 'No passes of stations or bright objects in the next 48 h.';
+  else
+    status = `Stations + bright objects, next 48 h${visibleOnly ? ', visible only' : ''}. Magnitudes are estimates.`;
+  return {
+    title: `Next passes${state?.done ? ` (${list.length})` : ''}`,
+    status,
+    rows: list,
+  };
+}
+
 /** Card lines for the selected object (meta + newest row, may be null). */
-export function cardData(found, timeMs) {
+export function cardData(
+  found,
+  timeMs,
+  { nextPass = null, rcsStatus = 'ready' } = {},
+) {
   if (!found?.meta) return null;
   const { meta, row } = found;
   const classLabel =
@@ -107,6 +197,24 @@ export function cardData(found, timeMs) {
     ]);
   } else {
     lines.push(['Position', 'Below your horizon now']);
+  }
+  let brightness;
+  if (row && row.elDeg > 0 && row.estMag != null)
+    brightness = `${formatEstMag(row.estMag)} (estimate, +/- 2 mag)`;
+  else if (meta.rcsM2 == null)
+    brightness =
+      rcsStatus === 'error'
+        ? 'no estimate (catalogue sizes unavailable)'
+        : 'no estimate (no radar size in the catalogue)';
+  else if (row && row.elDeg > 0 && !row.sunlit)
+    brightness = 'no estimate (in shadow)';
+  if (brightness) lines.push(['Brightness', brightness]);
+  if (nextPass) {
+    const t = passRowText(nextPass, timeMs);
+    lines.push([
+      'Next pass',
+      `${t.rise} -> ${t.peak} -> ${t.set}${t.visible ? ' (visible)' : ''}`,
+    ]);
   }
   lines.push([
     'Elements',
@@ -222,6 +330,40 @@ export function buildSatPanel(doc) {
     'GEO belt',
   );
   switches.append(active, starlink, belt);
+  const naked = el(doc, 'div', {
+    className: 'gev-sky-chips gev-sky-naked',
+    role: 'group',
+    'aria-label': 'Naked-eye filter (brightness is an estimate)',
+    title: NAKED_EYE_TEXT,
+  });
+  const nakedEye = el(
+    doc,
+    'button',
+    {
+      type: 'button',
+      'data-sky': 'naked-eye',
+      'aria-pressed': 'true',
+      title: NAKED_EYE_TEXT,
+    },
+    'Naked-eye only',
+  );
+  const magLimit = el(doc, 'input', {
+    type: 'range',
+    min: String(MAG_LIMIT_MIN),
+    max: String(MAG_LIMIT_MAX),
+    step: '0.5',
+    value: String(MAG_LIMIT_DEFAULT),
+    'data-sky': 'mag-limit',
+    'aria-label': 'Faintest estimated magnitude shown',
+  });
+  magLimit.value = String(MAG_LIMIT_DEFAULT);
+  const magText = el(
+    doc,
+    'span',
+    { 'data-sky': 'mag-limit-text' },
+    `est. mag <= ${MAG_LIMIT_DEFAULT.toFixed(1)}`,
+  );
+  naked.append(nakedEye, magLimit, magText);
   const legend = el(
     doc,
     'div',
@@ -263,7 +405,54 @@ export function buildSatPanel(doc) {
   );
   cardActions.append(look, clear);
   card.append(cardTitle, cardLines, cardActions);
-  body.append(banner, chips, switches, legend, list, card);
+  const passes = el(doc, 'div', {
+    className: 'gev-sky-passes',
+    'data-sky': 'passes',
+    role: 'region',
+    'aria-label': 'Next passes',
+  });
+  const passesHead = el(doc, 'div', { className: 'gev-sky-passes-head' });
+  const passesTitle = el(
+    doc,
+    'h3',
+    { 'data-sky': 'passes-title' },
+    'Next passes',
+  );
+  const nextIss = el(
+    doc,
+    'button',
+    {
+      type: 'button',
+      'data-sky': 'next-iss',
+      title: 'Jump the Sky time to the peak of the next visible ISS pass',
+    },
+    'Next ISS pass',
+  );
+  passesHead.append(passesTitle, nextIss);
+  const passesStatus = el(doc, 'div', {
+    className: 'gev-sky-passes-status',
+    'data-sky': 'passes-status',
+    role: 'status',
+    'aria-live': 'polite',
+  });
+  const passesList = el(doc, 'ul', {
+    className: 'gev-sky-passes-list',
+    'data-sky': 'passes-list',
+    'aria-label': 'Next passes, soonest first',
+  });
+  const passGo = el(
+    doc,
+    'button',
+    {
+      type: 'button',
+      'data-sky': 'pass-go',
+      title: 'Set the Sky time to the peak of the selected pass',
+    },
+    'Go to peak time',
+  );
+  passGo.disabled = true;
+  passes.append(passesHead, passesStatus, passesList, passGo);
+  body.append(banner, chips, switches, naked, legend, list, card, passes);
   root.append(head, body);
   return {
     root,
@@ -282,6 +471,16 @@ export function buildSatPanel(doc) {
     active,
     starlink,
     belt,
+    nakedEye,
+    magLimit,
+    magText,
+    passes,
+    passesTitle,
+    passesStatus,
+    passesList,
+    passRows: [],
+    nextIss,
+    passGo,
   };
 }
 
@@ -305,7 +504,19 @@ function setAttr(node, name, value) {
  */
 export function renderSatPanel(
   dom,
-  { list, banner, card, status, statusText, selectedIndex, doc },
+  {
+    list,
+    banner,
+    card,
+    status,
+    statusText,
+    selectedIndex,
+    doc,
+    passes = null,
+    selectedPassKey = null,
+    nowMs = Date.now(),
+    nakedEye = null,
+  },
 ) {
   if (!dom) return;
   setText(dom.title, list ? `Overhead now (${list.total})` : 'Overhead now');
@@ -349,9 +560,10 @@ export function renderSatPanel(
         : row.state === STATE.SHADOW
           ? '◦'
           : '○';
+    const mag = row.estMag != null ? `  est ${row.estMag.toFixed(1)}` : '';
     setText(
       button,
-      `${flag} ${row.name}  ${Math.round(row.elDeg)}° ${compass(row.azDeg)}${row.behindTerrain ? ' (behind terrain)' : ''}${row.stale ? ' (old)' : ''}`,
+      `${flag} ${row.name}  ${Math.round(row.elDeg)}° ${compass(row.azDeg)}${mag}${row.behindTerrain ? ' (behind terrain)' : ''}${row.stale ? ' (old)' : ''}`,
     );
     if (button.style)
       button.style.color = row.stale ? '#8a8f96' : skyClassColor(row.klass);
@@ -370,4 +582,60 @@ export function renderSatPanel(
     }
     dom.look.disabled = !card.aboveHorizon;
   }
+  if (nakedEye && dom.nakedEye) {
+    setAttr(dom.nakedEye, 'aria-pressed', nakedEye.on ? 'true' : 'false');
+    setText(dom.magText, `est. mag <= ${Number(nakedEye.limit).toFixed(1)}`);
+    dom.magLimit.disabled = !nakedEye.on;
+  }
+  if (passes && dom.passesList)
+    renderPasses(dom, passes, { doc, selectedPassKey, nowMs });
+}
+
+/** "Next passes" rows, updated in place like the overhead list. */
+function renderPasses(dom, passes, { doc, selectedPassKey, nowMs }) {
+  setText(dom.passesTitle, passes.title);
+  setText(dom.passesStatus, passes.status);
+  const rows = passes.rows || [];
+  for (let i = 0; i < rows.length; i++) {
+    const pass = rows[i];
+    let slot = dom.passRows[i];
+    if (!slot) {
+      const li = doc.createElement('li');
+      const button = doc.createElement('button');
+      button.setAttribute('type', 'button');
+      const name = doc.createElement('span');
+      name.className = 'gev-sky-pass-name';
+      const chip = doc.createElement('span');
+      chip.className = 'gev-sky-pass-chip';
+      chip.textContent = 'VISIBLE';
+      const times = doc.createElement('span');
+      times.className = 'gev-sky-pass-times';
+      const mag = doc.createElement('span');
+      mag.className = 'gev-sky-pass-mag';
+      button.append(name, chip, times, mag);
+      li.append(button);
+      dom.passesList.append(li);
+      slot = { li, button, name, chip, times, mag };
+      dom.passRows.push(slot);
+    }
+    const t = passRowText(pass, nowMs);
+    const key = passKey(pass);
+    setAttr(slot.button, 'data-pass', key);
+    setAttr(
+      slot.button,
+      'aria-current',
+      key === selectedPassKey ? 'true' : 'false',
+    );
+    setAttr(
+      slot.button,
+      'aria-label',
+      `${t.name}: rises ${t.rise}, highest ${t.peak}, sets ${t.set}${t.visible ? ', visible' : ', not visible'}${t.mag ? `, ${t.mag}` : ''}`,
+    );
+    setText(slot.name, t.name);
+    slot.chip.hidden = !t.visible;
+    setText(slot.times, `${t.rise} -> ${t.peak} -> ${t.set}`);
+    setText(slot.mag, t.mag || '');
+  }
+  for (const slot of dom.passRows.splice(rows.length)) slot.li.remove?.();
+  dom.passGo.disabled = !selectedPassKey;
 }
