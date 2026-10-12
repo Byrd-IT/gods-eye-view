@@ -1,0 +1,60 @@
+# Sky view: third-party data and code notices
+
+The Sky view code in this folder is MIT licensed like the rest of God's Eye
+View. The two catalogue files in `data/` are NOT MIT: they are derived from
+Creative Commons Attribution-ShareAlike data and stay under that licence.
+Anyone redistributing those files must keep the attribution below and share
+derived data files under the same licence. (Not legal advice.)
+
+## Star catalogue: `data/stars.json`
+
+- Source: HYG database v4.4, David Nash (astronexus),
+  https://codeberg.org/astronexus/hyg (file `data/hyg/CURRENT/hyg_v44.csv.gz`,
+  repository commit 53e3df311869e813ace5f1ad2ec4ce909f13256c, 2026-07-12,
+  input SHA-256 pinned in `scripts/build-sky-data.mjs`).
+- Licence: Creative Commons Attribution-ShareAlike 4.0 International
+  (CC BY-SA 4.0). Upstream licence statement: `data/LICENSE-HYG.md`; full
+  legal code: `data/CC-BY-SA-4.0.txt`
+  (https://creativecommons.org/licenses/by-sa/4.0/legalcode).
+- Changes made: kept stars with V magnitude <= 6.5 plus every Hipparcos star
+  used by a constellation line; kept only RA/Dec (J2000, degrees, 4 decimals),
+  magnitude, B-V colour, proper motion, Hipparcos id, IAU proper name and the
+  Bayer/Flamsteed field; reordered by magnitude; written as columnar JSON.
+
+## Constellation lines and names: `data/constellations.json`
+
+- Source: Stellarium sky cultures, "western" sky culture, `western/index.json`,
+  https://github.com/Stellarium/stellarium-skycultures (commit
+  92df9e4c48c7a3b21d4b0cfc6ce088dd8ce2f2df, 2024-05-17), authors "Stellarium's
+  team".
+- Licence: "Text and data: CC BY-SA" as stated in `western/description.md`
+  (copied to `data/LICENSE-Stellarium-western.md`; no version number is given
+  upstream). Illustrations are Free Art License and are NOT bundled.
+- Changes made: kept the 88 constellations' IAU abbreviation, English and
+  Latin names and line chains (Hipparcos ids); dropped the "thin" line-style
+  markers, illustrations, boundaries and asterisms; sorted by abbreviation.
+
+## Credits in the app
+
+Both sources are credited in the app's "Data attribution" panel
+(`src/data/dataCredits.js`, key `sky-catalogues`) and in `DATA_SOURCES.md`.
+`src/byrdit/skyView/notice.test.mjs` fails if either credit line, this file or
+a licence file goes missing.
+
+## Code dependency
+
+- astronomy-engine 2.1.19 (Don Cross, MIT), Sun/Moon/planet positions;
+  https://github.com/cosinekitty/astronomy. Pinned exact in `package.json`.
+
+## Rebuilding the data
+
+```
+curl -LO https://codeberg.org/astronexus/hyg/media/branch/main/data/hyg/CURRENT/hyg_v44.csv.gz
+curl -L -o index.json https://raw.githubusercontent.com/Stellarium/stellarium-skycultures/master/western/index.json
+node scripts/build-sky-data.mjs --hyg hyg_v44.csv.gz --western index.json          # write
+node scripts/build-sky-data.mjs --hyg hyg_v44.csv.gz --western index.json --check  # verify
+```
+
+The script refuses inputs whose SHA-256 differs from the pinned values and
+writes byte-identical output for the same inputs; `data/manifest.json`
+records input and output checksums, counts and sizes.
