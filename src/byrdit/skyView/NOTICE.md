@@ -56,6 +56,17 @@ a licence file goes missing.
 
 - astronomy-engine 2.1.19 (Don Cross, MIT), Sun/Moon/planet positions;
   https://github.com/cosinekitty/astronomy. Pinned exact in `package.json`.
+- geomagnetism 0.2.0 (Brandon Reavis / Natural Atlas, Apache-2.0),
+  https://github.com/naturalatlas/geomagnetism, magnetic declination for
+  "Point at the sky" (`declination.js`). It bundles the World Magnetic Model
+  coefficients (WMM2025 used, valid 2024-11-13 to 2029-11-13), produced
+  jointly by NOAA NCEI and the British Geological Survey; NCEI's metadata
+  (gov.noaa.ngdc:WMM2025, read 2026-10-12): "Not subject to copyright
+  protection within the United States", free and publicly available. Cite as:
+  NOAA NCEI Geomagnetic Modeling Team; British Geological Survey. 2024: World
+  Magnetic Model 2025. https://doi.org/10.25921/aqfd-sd83. Pinned exact in
+  `package.json`; `declination.test.mjs` checks it against the NOAA calculator.
+  When WMM2030 is published (late 2029) update the package or the model.
 
 ## Rebuilding the data
 

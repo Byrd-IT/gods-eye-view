@@ -505,8 +505,83 @@ body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
 
 @media (max-width: 900px) {
   .gev-sky-tools {
-    top: 170px;
+    /* below the toolbar's real bottom edge (skyView.js syncSkyLayout) */
+    top: calc(var(--gev-sky-bar-bottom, 162px) + 8px);
     right: 12px;
     width: min(240px, calc(100vw - 24px));
   }
+}
+
+/* ── P4: point at the sky (phones) ───────────────────────────────────────── */
+.gev-sky-orient {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font: 11px/1.35 var(--font-mono);
+  text-align: center;
+}
+.gev-sky-orient[hidden],
+.gev-sky-align[hidden],
+.gev-sky-figure8[hidden],
+.gev-sky-crosshair[hidden],
+.gev-sky-bar button[hidden] {
+  display: none !important;
+}
+.gev-sky-orient-status {
+  flex-basis: 100%;
+}
+.gev-sky-align {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.gev-sky-bar .gev-sky-align button {
+  min-height: 44px;
+}
+.gev-sky-bar button[data-sky='point'] {
+  min-height: 44px;
+}
+.gev-sky-bar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* figure-8 calibration hint: a slowly traced lemniscate glyph */
+.gev-sky-figure8 {
+  font: 700 28px/1 system-ui, sans-serif;
+  color: rgba(255, 210, 120, 0.95);
+  animation: gev-sky-figure8 2.4s ease-in-out infinite;
+}
+@keyframes gev-sky-figure8 {
+  0%,
+  100% {
+    transform: translateX(-10px) rotate(-12deg);
+  }
+  50% {
+    transform: translateX(10px) rotate(12deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gev-sky-figure8 {
+    animation: none;
+  }
+}
+/* centre circle used by Align: the view centre is where the phone points */
+.gev-sky-crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
 }

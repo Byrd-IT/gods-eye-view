@@ -227,7 +227,7 @@ function setup(options = {}) {
     location,
     history,
     CesiumApi: SkyCesium,
-    now: () => Date.parse('2026-10-12T03:30:00Z'),
+    now: options.now ?? (() => Date.parse('2026-10-12T03:30:00Z')),
     showToast: (m) => toasts.push(m),
     geolocation: options.geolocation,
     isSecureContext: options.isSecureContext ?? true,
@@ -238,6 +238,14 @@ function setup(options = {}) {
     fetchCelestrak: options.fetchCelestrak,
     requestFrame: options.requestFrame ?? (() => null),
     reducedMotion: options.reducedMotion,
+    ...(options.orientationWindow
+      ? { orientationWindow: options.orientationWindow }
+      : {}),
+    ...(options.offerPointing ? { offerPointing: options.offerPointing } : {}),
+    ...(options.orientationOptions
+      ? { orientationOptions: options.orientationOptions }
+      : {}),
+    ...(options.declinationAt ? { declinationAt: options.declinationAt } : {}),
   });
   return { doc, viewer, timers, location, history, handle };
 }
@@ -939,3 +947,206 @@ test('a plain redraw reads no layout for the satellite edge-arrow insets; a sele
   handle.redraw();
   assert.ok(reads > 0, 'the selected object arrow reads the insets');
 });
+
+// ── P4: point at the sky (phones) ──────────────────────────────────────────
+function sensorWindow({ ios = false, permission = 'granted', apis = true } = {}) {
+  const listeners = new Map();
+  const win = {
+    screen: { orientation: { angle: 0 } },
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type).add(fn);
+    },
+    removeEventListener(type, fn) {
+      listeners.get(type)?.delete(fn);
+    },
+    fire(type, data) {
+      for (const fn of [...(listeners.get(type) || [])]) fn({ type, ...data });
+    },
+    count: (type) => listeners.get(type)?.size ?? 0,
+  };
+  if (apis) {
+    win.DeviceOrientationEvent = function DeviceOrientationEvent() {};
+    win.ondeviceorientationabsolute = null;
+    if (ios)
+      win.DeviceOrientationEvent.requestPermission = () =>
+        Promise.resolve(permission);
+  }
+  return win;
+}
+/** Portrait pose: back of the phone towards bearing/elevation, gamma = sideways tilt. */
+const portraitPose = (bearingDeg, elDeg, gamma = 0) => ({
+  alpha: (360 - bearingDeg + 360) % 360,
+  beta: 90 + elDeg,
+  gamma,
+  absolute: true,
+});
+let sensorClock = 0;
+const pointingSetup = (win, extra = {}) =>
+  setup({
+    orientationWindow: win,
+    offerPointing: () => true,
+    declinationAt: () => 2,
+    orientationOptions: {
+      // no animation frames: each accepted sample is applied directly
+      requestFrame: () => null,
+      now: () => (sensorClock += 40),
+    },
+    ...extra,
+  });
+
+test('P4: the Point button is offered only where pointing makes sense (touch); hidden on desktop', () => {
+  const desktop = setup();
+  assert.equal(desktop.doc.body.find('point').hidden, true);
+  const phone = pointingSetup(sensorWindow());
+  assert.equal(phone.doc.body.find('point').hidden, false);
+});
+
+test('P4 ACCEPT: sensors absent -> "unsupported" message, drag still turns the camera', async () => {
+  const { doc, viewer, handle } = pointingSetup(sensorWindow({ apis: false }));
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  click(doc.body.find('point'));
+  await settle();
+  assert.equal(handle.orientation.state, 'unsupported');
+  assert.match(doc.body.find('orient-status').textContent, /No orientation sensor/);
+  assert.equal(doc.body.find('orient').hidden, false);
+  assert.equal(viewer.container.find('crosshair').hidden, true);
+  const az0 = handle.view.azDeg;
+  const canvas = viewer.container.find('canvas');
+  canvas.dispatchEvent(pointer('pointerdown', { pointerId: 1, clientX: 600, clientY: 400 }));
+  canvas.dispatchEvent(pointer('pointermove', { pointerId: 1, clientX: 700, clientY: 400 }));
+  canvas.dispatchEvent(pointer('pointerup', { pointerId: 1, clientX: 700, clientY: 400 }));
+  assert.notEqual(handle.view.azDeg, az0, 'drag works');
+});
+
+test('P4 ACCEPT: permission denied (iOS) shows the message and drag still works; LAN http explains the https address', async () => {
+  const { doc, viewer, handle } = pointingSetup(
+    sensorWindow({ ios: true, permission: 'denied' }),
+  );
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  click(doc.body.find('point'));
+  await settle();
+  assert.equal(handle.orientation.state, 'denied');
+  assert.match(doc.body.find('orient-status').textContent, /Motion access is blocked/);
+  const el0 = handle.view.elDeg;
+  const canvas = viewer.container.find('canvas');
+  canvas.dispatchEvent(pointer('pointerdown', { pointerId: 1, clientX: 600, clientY: 400 }));
+  canvas.dispatchEvent(pointer('pointermove', { pointerId: 1, clientX: 600, clientY: 480 }));
+  canvas.dispatchEvent(pointer('pointerup', { pointerId: 1, clientX: 600, clientY: 480 }));
+  assert.ok(handle.view.elDeg > el0, 'drag works');
+
+  const lan = pointingSetup(sensorWindow({ ios: true }), { isSecureContext: false });
+  await lan.handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  click(lan.doc.body.find('point'));
+  await settle();
+  assert.equal(lan.handle.orientation.state, 'insecure');
+  assert.match(
+    lan.doc.body.find('orient-status').textContent,
+    /https:\/\/godseyeview\.byrd-it\.com/,
+  );
+});
+
+test('P4: the phone drives the real Cesium camera (true north via declination, roll in phone mode); a tap keeps pointing, a drag takes over and levels the roll', async () => {
+  const win = sensorWindow();
+  const { doc, viewer, handle } = pointingSetup(win);
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  const point = doc.body.find('point');
+  click(point);
+  await settle();
+  assert.equal(handle.orientation.state, 'asking');
+  // upright, back to MAGNETIC 88 -> true 90 with the injected +2 deg E
+  win.fire('deviceorientationabsolute', portraitPose(88, 0));
+  assert.equal(handle.orientation.state, 'on');
+  assert.equal(point.getAttribute('aria-pressed'), 'true');
+  assert.equal(point.textContent, 'Stop pointing');
+  assert.equal(viewer.container.find('crosshair').hidden, false);
+  assert.ok(Math.abs(handle.view.azDeg - 90) < 1e-6, `az ${handle.view.azDeg}`);
+  assert.ok(Math.abs(handle.view.elDeg) < 1e-6);
+  let look = worldDirectionToAzEl(Cesium, viewer.camera.positionWC, viewer.camera.directionWC);
+  assert.ok(Math.abs(look.azDeg - 90) < 1e-6 && Math.abs(look.elDeg) < 1e-6);
+  const status = doc.body.find('orient-status').textContent;
+  assert.match(status, /declination 2\.0° E/);
+  assert.match(status, /Use my location/, 'a map/manual observer gets the GPS tip');
+  // tilted up 30 deg and rolled sideways: roll reaches the camera
+  win.fire('deviceorientationabsolute', portraitPose(88, 30, 15));
+  assert.ok(Math.abs(handle.view.rollDeg) > 5, `roll ${handle.view.rollDeg}`);
+  assert.ok(
+    Math.abs(viewer.camera.roll - (handle.view.rollDeg * Math.PI) / 180) < 1e-6 ||
+      Math.abs(Math.abs(viewer.camera.roll - (handle.view.rollDeg * Math.PI) / 180) - 2 * Math.PI) < 1e-6,
+  );
+  look = worldDirectionToAzEl(Cesium, viewer.camera.positionWC, viewer.camera.directionWC);
+  assert.ok(Math.abs(look.elDeg - handle.view.elDeg) < 1e-6);
+  // a tap (no movement) does not stop pointing
+  const canvas = viewer.container.find('canvas');
+  canvas.dispatchEvent(pointer('pointerdown', { pointerId: 1, clientX: 600, clientY: 400 }));
+  canvas.dispatchEvent(pointer('pointermove', { pointerId: 1, clientX: 602, clientY: 401 }));
+  canvas.dispatchEvent(pointer('pointerup', { pointerId: 1, clientX: 602, clientY: 401 }));
+  assert.equal(handle.orientation.state, 'on');
+  // a pinch zoom keeps pointing too (fov only)
+  canvas.dispatchEvent(Object.assign(new Event('wheel', { cancelable: true }), { deltaY: -100 }));
+  assert.equal(handle.orientation.state, 'on');
+  // a drag takes over: pointing off, roll back to level, listeners gone
+  canvas.dispatchEvent(pointer('pointerdown', { pointerId: 1, clientX: 600, clientY: 400 }));
+  canvas.dispatchEvent(pointer('pointermove', { pointerId: 1, clientX: 680, clientY: 400 }));
+  canvas.dispatchEvent(pointer('pointerup', { pointerId: 1, clientX: 680, clientY: 400 }));
+  assert.equal(handle.orientation.state, 'off');
+  assert.equal(handle.view.rollDeg, 0);
+  assert.equal(win.count('deviceorientationabsolute'), 0);
+  assert.match(doc.body.find('orient-status').textContent, /Drag took over/);
+  assert.equal(viewer.container.find('crosshair').hidden, true);
+  const az = handle.view.azDeg;
+  win.fire('deviceorientationabsolute', portraitPose(0, 0));
+  assert.equal(handle.view.azDeg, az, 'the phone no longer moves the view');
+  // leaving the sky with pointing on stops it as well
+  click(point);
+  await settle();
+  win.fire('deviceorientationabsolute', portraitPose(10, 10));
+  assert.equal(handle.orientation.state, 'on');
+  click(doc.body.find('back'));
+  assert.equal(handle.orientation.state, 'off');
+  assert.equal(win.count('deviceorientationabsolute'), 0);
+});
+
+test('P4: Align on the Moon fixes a compass offset; refused when the centre is far from it', async () => {
+  // a time when the Moon is comfortably up over Houston
+  const { moonState } = await import('./ephemeris.js');
+  const obs = { latDeg: 29.7604, lonDeg: -95.3698, heightM: 1.7 };
+  let when = null;
+  for (let h = 0; h < 72 && when == null; h += 1) {
+    const t = Date.parse('2026-10-12T00:00:00Z') + h * 3_600_000;
+    const m = moonState(t, obs, { refraction: true });
+    if (m.elDeg > 20 && m.elDeg < 50) when = t;
+  }
+  assert.ok(when, 'found a Moon-up time');
+  const win = sensorWindow();
+  const { doc, handle, timers } = pointingSetup(win, { now: () => when });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'gps' });
+  const moon = handle.content.ephemeris.moon;
+  click(doc.body.find('point'));
+  await settle();
+  // the compass is 6 deg off: the phone "thinks" it points at the Moon's az - 6
+  win.fire('deviceorientationabsolute', portraitPose(moon.azDeg - 2 - 6, moon.elDeg));
+  assert.equal(doc.body.find('align').hidden, false);
+  assert.equal(doc.body.find('align-moon').disabled, false);
+  assert.ok(Math.abs(wrapDeg(handle.view.azDeg - (moon.azDeg - 6))) < 1e-6);
+  assert.doesNotMatch(doc.body.find('orient-status').textContent, /Use my location/, 'GPS observer: no tip');
+  click(doc.body.find('align-moon'));
+  assert.ok(Math.abs(wrapDeg(handle.view.azDeg - moon.azDeg)) < 1e-6, 'centre now on the Moon');
+  assert.match(doc.body.find('orient-status').textContent, /Aligned on the Moon: heading moved \+6\.0°/);
+  assert.match(doc.body.find('orient-status').textContent, /align offset \+6\.0°/);
+  // later samples keep the offset
+  win.fire('deviceorientationabsolute', portraitPose(moon.azDeg - 2 - 6, moon.elDeg + 1));
+  assert.ok(Math.abs(wrapDeg(handle.view.azDeg - moon.azDeg)) < 1e-6);
+  // pointing 40 deg below the Moon: refused with a hint
+  win.fire('deviceorientationabsolute', portraitPose(moon.azDeg - 2 - 6, moon.elDeg - 40));
+  click(doc.body.find('align-moon'));
+  assert.match(doc.body.find('orient-status').textContent, /in the centre circle first/);
+  click(doc.body.find('align-reset'));
+  assert.match(doc.body.find('orient-status').textContent, /Align offset cleared/);
+  timers.flush(); // result lines are transient (8 s)
+  assert.doesNotMatch(doc.body.find('orient-status').textContent, /Align offset cleared/);
+  assert.match(doc.body.find('orient-status').textContent, /declination 2\.0° E/);
+  handle.destroy();
+  globalThis.localStorage?.removeItem?.('gev.sky.headingOffsetDeg');
+});
+const wrapDeg = (d) => ((((d + 180) % 360) + 360) % 360) - 180;

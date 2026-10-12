@@ -61,6 +61,7 @@
     "astronomy-engine": "2.1.19",
     "cesium": "^1.124.0",
     "egm96-universal": "^1.1.1",
+    "geomagnetism": "0.2.0",
     "hls.js": "^1.7.3",
     "mapillary-js": "^4.1.2",
     "mgrs": "^2.1.0",

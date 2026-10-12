@@ -587,6 +587,9 @@
       "src/byrdit/skyView/skySearch.js",
       "src/byrdit/skyView/skyContent.js",
       "src/byrdit/skyView/textSprites.js",
+      "src/byrdit/skyView/declination.js",
+      "src/byrdit/skyView/orientationMath.js",
+      "src/byrdit/skyView/orientation.js",
       "src/keylessGeocoder.js",
       "src/data/satellitePass.js",
       "src/data/satelliteClass.js",
@@ -724,7 +727,7 @@
       "src/ui/localSdrPresentation.js",
       "src/data/cameraArrival.js"
     ],
-    "external": ["cesium", "satellite.js", "astronomy-engine"]
+    "external": ["cesium", "satellite.js", "astronomy-engine", "geomagnetism"]
   },
   "ui-styles": {
     "exports": ["./ui/styles"],
@@ -1502,6 +1505,9 @@
       "src/byrdit/skyView/skySearch.js",
       "src/byrdit/skyView/skyContent.js",
       "src/byrdit/skyView/textSprites.js",
+      "src/byrdit/skyView/declination.js",
+      "src/byrdit/skyView/orientationMath.js",
+      "src/byrdit/skyView/orientation.js",
       "src/cyberSonarScene.js",
       "src/cyberSonar.js",
       "src/hudLayouts.js",
@@ -2299,7 +2305,8 @@
       "satellite.js",
       "mapillary-js",
       "@jtarrio/webrtlsdr",
-      "astronomy-engine"
+      "astronomy-engine",
+      "geomagnetism"
     ]
   },
   "application-catalog": {

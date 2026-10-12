@@ -12,6 +12,9 @@
  * "Overhead now" panel, element-age rules) drawn into the same overlay.
  * P3b: stars, constellations, Sun/Moon/planets, layer switches and search
  * live in skyContent.js and draw into the same overlay after the P1 pass.
+ * P4: "Point at the sky" on phones (orientation.js): the view follows the
+ * phone (true north via the WMM declination), Align on the Sun/Moon/selected
+ * object, calibration hint; a drag always takes over.
  */
 import * as Cesium from 'cesium';
 import { observerSolarElevation } from '../../data/satellitePass.js';
@@ -74,7 +77,14 @@ import {
   wheelZoomFactor,
   zoomView,
 } from './skyMath.js';
-import { satelliteSearchProvider } from './skySearch.js';
+import { resolveTarget, satelliteSearchProvider } from './skySearch.js';
+import { declinationDeg, declinationText } from './declination.js';
+import { createPhoneOrientation, pointingOffered } from './orientation.js';
+import {
+  ALIGN_MAX_EL_DEG,
+  ALIGN_MAX_MISS_EL_DEG,
+  orientationMessage,
+} from './orientationMath.js';
 import { DEFAULT_SKY_FLAGS, readSkyUrl, writeSkyUrl } from './skyUrl.js';
 
 const mounted = new WeakMap();
@@ -271,7 +281,79 @@ function buildDom(doc) {
     role: 'status',
     'aria-live': 'polite',
   });
-  bar.append(back, move, flat, grid, live, time, eyeLabel, info);
+  const point = el(
+    doc,
+    'button',
+    {
+      type: 'button',
+      'data-sky': 'point',
+      'aria-pressed': 'false',
+      title:
+        'Follow the phone: hold it up and the view shows the sky behind it',
+    },
+    'Point at the sky',
+  );
+  point.hidden = true;
+  bar.append(back, move, flat, grid, live, time, eyeLabel, point, info);
+
+  // P4 phone pointing: status, calibration hint, Align on a known object
+  const orient = el(doc, 'div', {
+    className: 'gev-sky-orient',
+    'data-sky': 'orient',
+  });
+  orient.hidden = true;
+  const orientStatus = el(doc, 'div', {
+    className: 'gev-sky-orient-status',
+    'data-sky': 'orient-status',
+    role: 'status',
+    'aria-live': 'polite',
+  });
+  const figure8 = el(
+    doc,
+    'div',
+    {
+      className: 'gev-sky-figure8',
+      'data-sky': 'figure8',
+      'aria-hidden': 'true',
+    },
+    '∞',
+  );
+  figure8.hidden = true;
+  const alignRow = el(doc, 'div', {
+    className: 'gev-sky-align',
+    'data-sky': 'align',
+    role: 'group',
+    'aria-label': 'Align the compass on a sky object in the centre',
+  });
+  alignRow.hidden = true;
+  const alignLabel = el(doc, 'span', {}, 'Align centre on:');
+  const alignSun = el(
+    doc,
+    'button',
+    { type: 'button', 'data-sky': 'align-sun' },
+    'Sun',
+  );
+  const alignMoon = el(
+    doc,
+    'button',
+    { type: 'button', 'data-sky': 'align-moon' },
+    'Moon',
+  );
+  const alignTarget = el(
+    doc,
+    'button',
+    { type: 'button', 'data-sky': 'align-target' },
+    'Selected',
+  );
+  const alignReset = el(
+    doc,
+    'button',
+    { type: 'button', 'data-sky': 'align-reset' },
+    'Reset offset',
+  );
+  alignRow.append(alignLabel, alignSun, alignMoon, alignTarget, alignReset);
+  orient.append(figure8, orientStatus, alignRow);
+  bar.append(orient);
 
   const canvas = el(doc, 'canvas', {
     className: 'gev-sky-canvas',
@@ -281,6 +363,12 @@ function buildDom(doc) {
       'Sky. Drag to look around, wheel or pinch to zoom, arrows and +/- keys, N north, Z zenith',
   });
   canvas.hidden = true;
+  const crosshair = el(doc, 'div', {
+    className: 'gev-sky-crosshair',
+    'data-sky': 'crosshair',
+    'aria-hidden': 'true',
+  });
+  crosshair.hidden = true;
   return {
     button,
     panel,
@@ -292,7 +380,30 @@ function buildDom(doc) {
     canvas,
     time,
     eye,
-    buttons: { pick, here, gps, close, back, move, flat, grid, live, go },
+    crosshair,
+    orient: {
+      root: orient,
+      status: orientStatus,
+      figure8,
+      align: alignRow,
+    },
+    buttons: {
+      pick,
+      here,
+      gps,
+      close,
+      back,
+      move,
+      flat,
+      grid,
+      live,
+      go,
+      point,
+      alignSun,
+      alignMoon,
+      alignTarget,
+      alignReset,
+    },
   };
 }
 
@@ -326,6 +437,14 @@ export function mountSkyView({
   cancelFrame = (id) => globalThis.cancelAnimationFrame?.(id),
   /** Test/harness overrides for createSkyContent (data loaders, frames). */
   skyContentOptions = {},
+  /** P4: the window whose sensors are read, and whether to offer pointing. */
+  orientationWindow = globalThis,
+  offerPointing = () => pointingOffered(globalThis),
+  /** Test/harness overrides for createPhoneOrientation (timers, frames). */
+  orientationOptions = {},
+  /** WMM declination (degrees east) for the observer, now. */
+  declinationAt = (latDeg, lonDeg) =>
+    declinationDeg(latDeg, lonDeg, Date.now()),
 } = {}) {
   if (!viewer?.camera || !viewer?.scene || !doc?.createElement) return null;
   const existing = mounted.get(viewer);
@@ -337,7 +456,7 @@ export function mountSkyView({
   const satDom = buildSatPanel(doc);
   host.append(dom.button, dom.panel, dom.bar, satDom.root);
   const canvasHost = viewer.container || host;
-  canvasHost.append(dom.canvas);
+  canvasHost.append(dom.canvas, dom.crosshair);
   const removers = [];
   const listen = (target, type, handler, options) => {
     if (!target?.addEventListener) return;
@@ -433,6 +552,162 @@ export function mountSkyView({
     },
   });
 
+  // ── phone pointing (P4) ──────────────────────────────────────────────────
+  /** A one-off result line (Align, drag took over), shown for a few seconds. */
+  const NOTE_MS = 8000;
+  let orientNote = '';
+  let noteTimer = null;
+  function setNote(text) {
+    orientNote = text || '';
+    timers.clearTimeout?.(noteTimer);
+    noteTimer = orientNote
+      ? timers.setTimeout?.(() => {
+          noteTimer = null;
+          orientNote = '';
+          syncOrientationUi();
+        }, NOTE_MS)
+      : null;
+  }
+  const orientation = createPhoneOrientation({
+    win: orientationWindow,
+    isSecureContext,
+    onView: (next) => {
+      if (!active) return;
+      applyView({
+        ...view,
+        azDeg: next.azDeg,
+        elDeg: next.elDeg,
+        rollDeg: next.rollDeg,
+      });
+    },
+    onState: () => syncOrientationUi(),
+    ...orientationOptions,
+  });
+  dom.buttons.point.hidden = !offerPointing();
+
+  /** Where an Align target is now: { label, azDeg, elDeg } or null. */
+  function alignTargets() {
+    const eph = content.ephemeris;
+    const sun = eph?.sun
+      ? { label: 'the Sun', azDeg: eph.sun.azDeg, elDeg: eph.sun.elDeg }
+      : null;
+    const moon = eph?.moon
+      ? { label: 'the Moon', azDeg: eph.moon.azDeg, elDeg: eph.moon.elDeg }
+      : null;
+    let selected = null;
+    if (selectedIndex != null) {
+      const at = satellitePosition(selectedIndex);
+      const name = satSky.meta?.[selectedIndex]?.name;
+      if (at) selected = { label: name || 'the selected satellite', ...at };
+    } else if (content.marker) {
+      const at = resolveTarget(content.marker.target, {
+        field: content.field,
+        positioned: content.positioned,
+        ephemeris: eph,
+        satellite: (id) => satellitePosition(id),
+      });
+      if (at) selected = { label: content.marker.label, ...at };
+    }
+    const up = (t) => (t && t.elDeg > 0 ? t : null);
+    return { sun: up(sun), moon: up(moon), selected: up(selected) };
+  }
+
+  function syncOrientationUi() {
+    const state = orientation.state;
+    const running = orientation.running;
+    const o = dom.orient;
+    setPressed(dom.buttons.point, running);
+    dom.buttons.point.textContent = running
+      ? 'Stop pointing'
+      : 'Point at the sky';
+    dom.crosshair.hidden = !(active && running);
+    o.figure8.hidden = !(
+      state === 'calibrating' && orientation.reason === 'accuracy'
+    );
+    const canAlign = active && (state === 'on' || state === 'calibrating');
+    o.align.hidden = !canAlign;
+    if (canAlign) {
+      const targets = alignTargets();
+      dom.buttons.alignSun.disabled = !targets.sun;
+      dom.buttons.alignMoon.disabled = !targets.moon;
+      dom.buttons.alignTarget.disabled = !targets.selected;
+      dom.buttons.alignTarget.textContent = targets.selected
+        ? `Selected (${targets.selected.label})`
+        : 'Selected';
+      dom.buttons.alignReset.hidden = !orientation.info.offsetDeg;
+    }
+    const parts = [];
+    if (orientNote) parts.push(orientNote);
+    const message = orientationMessage(state, orientation.reason);
+    if (message) parts.push(message);
+    if (running && orientation.source !== 'relative') {
+      const { declinationDeg: decl, offsetDeg, accuracyDeg } = orientation.info;
+      parts.push(declinationText(decl));
+      if (offsetDeg)
+        parts.push(
+          `align offset ${offsetDeg > 0 ? '+' : ''}${offsetDeg.toFixed(1)}°`,
+        );
+      if (Number.isFinite(accuracyDeg) && accuracyDeg >= 0)
+        parts.push(`compass ±${Math.round(accuracyDeg)}°`);
+      if (observer && observer.source !== 'gps')
+        parts.push("tip: 'Use my location' so the sky matches where you stand");
+    }
+    // runs every second while pointing: touch the live region (and the
+    // layout) only when something changed; the toolbar's ResizeObserver
+    // re-syncs the panel positions when the extra row appears or wraps
+    const text = parts.join(' · ');
+    if (o.status.textContent !== text) o.status.textContent = text;
+    const hidden = !(active && parts.length);
+    if (o.root.hidden !== hidden) o.root.hidden = hidden;
+  }
+
+  /** Point at the sky / Stop pointing: start() runs inside the tap (iOS). */
+  function togglePointing() {
+    setNote('');
+    if (orientation.running) {
+      stopPointing();
+      return;
+    }
+    if (observer)
+      orientation.setDeclination(
+        declinationAt(observer.latDeg, observer.lonDeg),
+      );
+    cancelInertia();
+    cancelLook();
+    orientation.start();
+    syncOrientationUi();
+  }
+  /** Back to drag control: roll goes back to level (phone mode only). */
+  function stopPointing(note = '') {
+    const was = orientation.running;
+    orientation.stop();
+    setNote(note);
+    if (was && active) applyView({ ...view, rollDeg: 0 });
+    syncOrientationUi();
+  }
+
+  function alignOn(which) {
+    const target = alignTargets()[which];
+    if (!target || !orientation.running) return;
+    if (target.elDeg > ALIGN_MAX_EL_DEG) {
+      setNote(
+        `${target.label} is too high to align on (the compass direction is unclear near the zenith). Pick a lower object.`,
+      );
+    } else if (Math.abs(view.elDeg - target.elDeg) > ALIGN_MAX_MISS_EL_DEG) {
+      setNote(
+        `Put ${target.label} in the centre circle first (it is ${target.elDeg.toFixed(0)}° up, the centre is at ${view.elDeg.toFixed(0)}°).`,
+      );
+    } else {
+      const delta = orientation.alignTo(target.azDeg, view.azDeg);
+      setNote(
+        delta == null
+          ? ''
+          : `Aligned on ${target.label}: heading moved ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}°.`,
+      );
+    }
+    syncOrientationUi();
+  }
+
   // ── rendering ────────────────────────────────────────────────────────────
   // Reading clientWidth/clientHeight forces a synchronous layout whenever
   // anything else (HUD text, URL chip) dirtied the page since the last frame;
@@ -524,17 +799,19 @@ export function mountSkyView({
   // ── satellites ───────────────────────────────────────────────────────────
   /**
    * Narrow layouts (skyView.css, max-width 900px) size the satellite panel
-   * from the toolbar's real bottom edge, because the toolbar wraps to a
-   * different height at every width: --gev-sky-bar-bottom on the panel.
+   * and place the search/Layers tools from the toolbar's real bottom edge,
+   * because the toolbar wraps to a different height at every width:
+   * --gev-sky-bar-bottom on both.
    */
   function syncSkyLayout() {
     if (dom.bar.hidden) return;
     const bar = dom.bar.getBoundingClientRect?.();
     if (!bar || !(bar.height > 0)) return;
-    satDom.root.style?.setProperty?.(
-      '--gev-sky-bar-bottom',
-      `${Math.ceil(bar.bottom)}px`,
-    );
+    const bottom = `${Math.ceil(bar.bottom)}px`;
+    satDom.root.style?.setProperty?.('--gev-sky-bar-bottom', bottom);
+    // P4: the toolbar gains a row on phones; the search/Layers tools hang
+    // below it instead of over it
+    content.root?.style?.setProperty?.('--gev-sky-bar-bottom', bottom);
   }
 
   /** Scroll the panel so the newly selected object's card is in view. */
@@ -664,6 +941,7 @@ export function mountSkyView({
     if (clock.mode === 'live') dom.time.value = toLocalInputValue(t);
     const lim = limMag(lastSunAlt);
     dom.info.textContent = `${describeObserver(observer, { sunAltDeg: lastSunAlt })} · faintest drawn mag ${fmt(lim, 1)}`;
+    if (orientation.running) syncOrientationUi();
     redraw();
   }
 
@@ -763,6 +1041,11 @@ export function mountSkyView({
       beltPoints = geoBeltPoints(observer.latDeg, observer.lonDeg);
       satSky.start(observer);
       updateSatPanel();
+      if (orientation.running)
+        orientation.setDeclination(
+          declinationAt(observer.latDeg, observer.lonDeg),
+        );
+      syncOrientationUi();
       dom.canvas.focus?.();
     });
     if (!entered) setStatus('Sky view is not available in this mode.');
@@ -775,7 +1058,11 @@ export function mountSkyView({
    */
   function exit({ keepCamera = false } = {}) {
     if (!active) return;
+    if (orientation.running) orientation.stop();
+    setNote('');
+    view = makeView({ ...view, rollDeg: 0 });
     active = false;
+    syncOrientationUi();
     stopTicking();
     cancelInertia();
     content.stop();
@@ -1019,6 +1306,20 @@ export function mountSkyView({
         applyView(pinchView(view, pinch.view, pinch.distance, distance()));
       return;
     }
+    if (orientation.running) {
+      // a real drag (not a tap on a satellite) hands control back
+      if (
+        !press ||
+        Math.hypot(event.clientX - press.x, event.clientY - press.y) < CLICK_PX
+      )
+        return;
+      stopPointing(
+        'Drag took over. Tap Point at the sky to follow the phone again.',
+      );
+      p.x = event.clientX;
+      p.y = event.clientY;
+      p.t = now();
+    }
     const { width, height } = canvasSize();
     const dx = event.clientX - p.x;
     const dy = event.clientY - p.y;
@@ -1055,7 +1356,11 @@ export function mountSkyView({
     press = null;
     if (pointers.size < 2) pinch = null;
     if (!active || !p || pointers.size) return;
-    if (now() - p.t < 80 && Math.abs(p.vAz) + Math.abs(p.vEl) > 0.005)
+    if (
+      !orientation.running &&
+      now() - p.t < 80 &&
+      Math.abs(p.vAz) + Math.abs(p.vEl) > 0.005
+    )
       startInertia({ az: p.vAz, el: p.vEl });
   }
   function onWheel(event) {
@@ -1072,6 +1377,14 @@ export function mountSkyView({
     const next = keyView(view, event.key);
     if (next) {
       event.preventDefault?.();
+      const turns = next.azDeg !== view.azDeg || next.elDeg !== view.elDeg;
+      if (turns && orientation.running) {
+        stopPointing(
+          'Keys took over. Tap Point at the sky to follow the phone again.',
+        );
+        applyView(keyView(view, event.key));
+        return;
+      }
       applyView(next);
     }
   }
@@ -1095,6 +1408,15 @@ export function mountSkyView({
     submitQuery();
   });
   listen(dom.buttons.back, 'click', () => exit());
+  listen(dom.buttons.point, 'click', () => togglePointing());
+  listen(dom.buttons.alignSun, 'click', () => alignOn('sun'));
+  listen(dom.buttons.alignMoon, 'click', () => alignOn('moon'));
+  listen(dom.buttons.alignTarget, 'click', () => alignOn('selected'));
+  listen(dom.buttons.alignReset, 'click', () => {
+    orientation.resetOffset();
+    setNote('Align offset cleared.');
+    syncOrientationUi();
+  });
   listen(dom.buttons.move, 'click', () => {
     exit();
     togglePanel(true);
@@ -1276,6 +1598,12 @@ export function mountSkyView({
     get geolocator() {
       return geolocator;
     },
+    /** Phone pointing controller (P4). */
+    get orientation() {
+      return orientation;
+    },
+    togglePointing: () => togglePointing(),
+    alignOn: (which) => alignOn(which),
     /** Stars, constellations, bodies, layers and search (P3b). */
     get content() {
       return content;
@@ -1322,6 +1650,8 @@ export function mountSkyView({
       exit();
       stopPicking();
       content.destroy();
+      orientation.destroy();
+      timers.clearTimeout?.(noteTimer);
       destroyed = true;
       timers.clearTimeout?.(autoTimer);
       timers.clearTimeout?.(urlTimer);
@@ -1331,6 +1661,7 @@ export function mountSkyView({
       dom.bar.remove?.();
       satDom.root.remove?.();
       dom.canvas.remove?.();
+      dom.crosshair.remove?.();
       mounted.delete(viewer);
     },
   };
