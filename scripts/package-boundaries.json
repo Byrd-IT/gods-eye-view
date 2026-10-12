@@ -67,7 +67,14 @@
       "src/byrdit/history/index.js",
       "src/byrdit/history/collectorBridge.js",
       "src/byrdit/history/feeds.js",
-      "src/byrdit/history/staleness.js"
+      "src/byrdit/history/staleness.js",
+      "src/byrdit/history/feedsC.js",
+      "src/data/transitFeeds.js",
+      "src/data/gbfsSource.js",
+      "src/layers/bikeshare/registry.js",
+      "src/sources/transitHistoryStore.js",
+      "src/sources/transitHistory.js",
+      "src/sources/rateLimit.js"
     ],
     "external": []
   },

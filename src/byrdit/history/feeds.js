@@ -1,3 +1,14 @@
+import {
+  GBFS_STATUS_CADENCE_MS,
+  TRANSIT_CADENCE_MS,
+  WEATHER_CADENCE_MS,
+  gbfsHeaders,
+  resolveGbfs,
+  resolveTransit,
+  resolveWeather,
+  transitHeaders,
+} from './feedsC.js';
+
 /**
  * Feeds the collector bridge can answer (gev-history DESIGN 4.2).
  *
@@ -67,6 +78,40 @@ export const BRIDGE_FEEDS = Object.freeze({
     source: 'NOAA NHC / CPHC',
     flag: 'GEV_BRIDGE_CYCLONES',
     forwardQuery: false,
+  }),
+  // B15 feeds C (feedsC.js): resolver entries, one collector snapshot per
+  // transit feed / GBFS system / weather product. cadenceMs here is the
+  // default; each resolved target carries its own.
+  transit: Object.freeze({
+    route: '/api/transit',
+    collectorFeed: null,
+    cadenceMs: TRANSIT_CADENCE_MS,
+    source: 'GTFS-RT',
+    flag: 'GEV_BRIDGE_TRANSIT',
+    forwardQuery: false,
+    resolve: resolveTransit,
+    decorate: transitHeaders,
+    trails: true,
+  }),
+  gbfs: Object.freeze({
+    route: '/api/gbfs',
+    collectorFeed: null,
+    cadenceMs: GBFS_STATUS_CADENCE_MS,
+    source: 'GBFS',
+    flag: 'GEV_BRIDGE_GBFS',
+    forwardQuery: false,
+    resolve: resolveGbfs,
+    decorate: gbfsHeaders,
+  }),
+  // only /api/weather/manifest (imagery METADATA); tile/image stay live
+  weather: Object.freeze({
+    route: '/api/weather',
+    collectorFeed: null,
+    cadenceMs: WEATHER_CADENCE_MS,
+    source: 'NOAA nowCOAST',
+    flag: 'GEV_BRIDGE_WEATHER',
+    forwardQuery: false,
+    resolve: resolveWeather,
   }),
 });
 

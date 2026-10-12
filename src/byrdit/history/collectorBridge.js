@@ -1,4 +1,5 @@
 import { BRIDGE_FEEDS, enabledBridgeFeeds } from './feeds.js';
+import { createTransitTrails } from './feedsC.js';
 import {
   DEFAULT_STALE_GREY_MS,
   parseGreyMs,
@@ -132,29 +133,36 @@ export function createCollectorBridge({
 }) {
   const feed = BRIDGE_FEEDS[name];
   if (!feed) throw new Error(`unknown bridge feed: ${name}`);
-  const threshold = staleThresholdMs(feed.cadenceMs);
-  /** Last good copy: { body: Uint8Array, contentType, lastOkAt }. */
-  let cache = null;
-  /** 'collector' | 'cache' | 'none' — last served answer, for transitions. */
-  let state = null;
-  /** In-flight collector read shared by concurrent requests, keyed by query. */
+  /**
+   * Per collector snapshot (B15: one route can resolve to many, e.g. one per
+   * transit feed or GBFS system): last good copy { body: Uint8Array,
+   * contentType, lastOkAt } and the last served answer ('collector' |
+   * 'cache' | 'none') for transition logging. Keys are bounded by the
+   * resolvers (registry ids only).
+   */
+  const caches = new Map();
+  const states = new Map();
+  /** In-flight collector read shared by concurrent requests, keyed by feed+query. */
   const inflight = new Map();
+  const trails = feed.trails ? createTransitTrails({ now }) : null;
 
-  function transition(next, detail) {
+  function transition(key, next, detail) {
+    const state = states.get(key) ?? null;
     if (next === state) return;
     const previous = state ?? 'start';
-    state = next;
+    states.set(key, next);
+    const label = key === feed.collectorFeed ? name : `${name}/${key}`;
     log(
-      `[gev-history bridge] ${name}: ${previous} -> ${next}${detail ? ` (${detail})` : ''}`,
+      `[gev-history bridge] ${label}: ${previous} -> ${next}${detail ? ` (${detail})` : ''}`,
     );
   }
 
-  async function readCollector(search) {
+  async function readCollector(collectorFeed, search) {
     let reason = 'collector_down';
     for (const base of urls) {
       try {
         const response = await fetchImpl(
-          `${base}/v1/latest/${feed.collectorFeed}${search}`,
+          `${base}/v1/latest/${collectorFeed}${search}`,
           {
             headers: { Accept: 'application/json' },
             redirect: 'error',
@@ -181,11 +189,14 @@ export function createCollectorBridge({
     return { ok: false, reason };
   }
 
-  function sharedRead(search) {
-    let pending = inflight.get(search);
+  function sharedRead(collectorFeed, search) {
+    const key = `${collectorFeed}${search}`;
+    let pending = inflight.get(key);
     if (!pending) {
-      pending = readCollector(search).finally(() => inflight.delete(search));
-      inflight.set(search, pending);
+      pending = readCollector(collectorFeed, search).finally(() =>
+        inflight.delete(key),
+      );
+      inflight.set(key, pending);
     }
     return pending;
   }
@@ -201,10 +212,16 @@ export function createCollectorBridge({
     res.end(req.method === 'HEAD' ? undefined : body);
   }
 
-  function serveCache(req, res, reason) {
+  function decorate(headers, target) {
+    return feed.decorate ? feed.decorate(headers, target) : headers;
+  }
+
+  function serveCache(req, res, reason, target) {
+    const key = target.collectorFeed;
+    const cache = caches.get(key);
     const t = now();
     const age = Math.max(0, t - cache.lastOkAt);
-    const stale = age > threshold;
+    const stale = age > staleThresholdMs(target.cadenceMs);
     const headers = {
       'Content-Type': cache.contentType,
       'Cache-Control': 'no-store',
@@ -215,15 +232,17 @@ export function createCollectorBridge({
       'X-Feed-Bridge': 'cache',
     };
     if (stale) {
-      headers['X-Feed-Stale-Since'] = String(cache.lastOkAt + threshold);
+      headers['X-Feed-Stale-Since'] = String(
+        cache.lastOkAt + staleThresholdMs(target.cadenceMs),
+      );
       headers['X-Feed-Reason'] = reason;
     }
-    transition('cache', reason);
-    send(req, res, 200, withGrey(headers), cache.body);
+    transition(key, 'cache', reason);
+    send(req, res, 200, decorate(withGrey(headers), target), cache.body);
   }
 
-  function serveNone(req, res, reason) {
-    transition('none', reason);
+  function serveNone(req, res, reason, target) {
+    transition(target.collectorFeed, 'none', reason);
     send(
       req,
       res,
@@ -248,7 +267,15 @@ export function createCollectorBridge({
     }
     // The mount also matches sub-routes (/api/military/track,
     // /api/fire-perimeters/inciweb/*): only the entry's own path is bridged.
-    if (url.pathname !== (feed.path ?? '/')) return next();
+    // Resolver entries (B15) map the path to one collector snapshot.
+    let target;
+    if (feed.resolve) {
+      target = feed.resolve(url);
+      if (!target) return next();
+    } else {
+      if (url.pathname !== (feed.path ?? '/')) return next();
+      target = { collectorFeed: feed.collectorFeed, cadenceMs: feed.cadenceMs };
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, {
         'Content-Type': 'application/json',
@@ -257,32 +284,50 @@ export function createCollectorBridge({
       res.end(JSON.stringify({ error: 'method not allowed' }));
       return;
     }
+    if (target.reply) {
+      send(
+        req,
+        res,
+        target.reply.status,
+        target.reply.headers,
+        target.reply.body,
+      );
+      return;
+    }
+    if (target.local === 'trail') {
+      const r = trails.answer(target.transitFeed, target.vehicleId);
+      send(req, res, r.status, r.headers, r.body);
+      return;
+    }
+    const key = target.collectorFeed;
     try {
-      const result = await sharedRead(feed.forwardQuery ? url.search : '');
+      const result = await sharedRead(key, feed.forwardQuery ? url.search : '');
       if (result.ok) {
         const headers = withGrey({ ...result.headers });
         headers['X-Feed-Bridge'] = 'collector';
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
-        cache = {
+        caches.set(key, {
           body: result.body,
           contentType: headers['Content-Type'] ?? 'application/json',
           lastOkAt: lastOk ?? now() - (age ?? 0),
-        };
-        transition('collector');
-        send(req, res, 200, headers, result.body);
+        });
+        if (trails && target.transitFeed)
+          trails.ingest(target.transitFeed, result.body);
+        transition(key, 'collector');
+        send(req, res, 200, decorate(headers, target), result.body);
         return;
       }
-      if (cache) serveCache(req, res, result.reason);
-      else serveNone(req, res, result.reason);
+      if (caches.has(key)) serveCache(req, res, result.reason, target);
+      else serveNone(req, res, result.reason, target);
     } catch {
       // Never fall through to the upstream plugin, whatever failed here.
       if (res.headersSent) {
         res.end();
         return;
       }
-      if (cache) serveCache(req, res, 'bridge_error');
-      else serveNone(req, res, 'bridge_error');
+      if (caches.has(key)) serveCache(req, res, 'bridge_error', target);
+      else serveNone(req, res, 'bridge_error', target);
     }
   };
 }
