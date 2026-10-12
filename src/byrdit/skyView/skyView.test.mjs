@@ -630,7 +630,7 @@ function satSetup(extra = {}) {
       fetched.push(path);
       return path === 'active'
         ? SAT_FIXTURE
-        : SAT_FIXTURE.split('\r\n')[0] + '\r\n';
+        : SAT_FIXTURE.split(/\r?\n/)[0] + '\r\n';
     },
     reducedMotion: () => true,
     ...extra,

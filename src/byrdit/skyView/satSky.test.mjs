@@ -14,7 +14,7 @@ const FIXTURE = readFileSync(
   new URL('./reference/satFixture200.csv', import.meta.url),
   'utf8',
 );
-const LINES = FIXTURE.trim().split('\r\n');
+const LINES = FIXTURE.trim().split(/\r?\n/);
 const HEADER = LINES[0];
 const ISS_ROW = LINES.find((l) => l.includes(',25544,'));
 const STARLINK_ROWS = LINES.filter((l) => l.startsWith('STARLINK'));

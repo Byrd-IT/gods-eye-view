@@ -118,8 +118,8 @@ test('dedupe: a core group upgrades an active row in place (index kept)', () => 
   const iss = engine.byNorad(ISS_NORAD);
   const index = iss.index;
   assert.equal(iss.set, 'active');
-  const header = FIXTURE.split('\r\n')[0];
-  const issRow = FIXTURE.split('\r\n').find((l) => l.includes(',25544,'));
+  const header = FIXTURE.split(/\r?\n/)[0];
+  const issRow = FIXTURE.split(/\r?\n/).find((l) => l.includes(',25544,'));
   const second = engine.loadGroup('stations', `${header}\r\n${issRow}\r\n`);
   assert.deepEqual(
     { added: second.added, updated: second.updated },
