@@ -507,7 +507,10 @@ export function mountSkyView({
         classesOn,
         selectedIndex,
         geoBelt: geoBelt ? beltPoints : null,
-        insets: arrowInsets(width, height),
+        // only the selected object's edge arrow uses the insets, and they
+        // read layout (getBoundingClientRect): skip them otherwise, so a
+        // plain redraw never forces a synchronous layout
+        insets: selectedIndex != null ? arrowInsets(width, height) : {},
       });
       drawSatellites(ctx, satModel);
     } else satModel = null;

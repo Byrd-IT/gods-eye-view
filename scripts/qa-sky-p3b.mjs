@@ -261,11 +261,21 @@ async function orionChecks(page) {
 
 async function timings(
   page,
-  { fovDeg, steps = 200, pauseCesium = true, warmup = 30, layers = 'all' },
+  {
+    fovDeg,
+    steps = 200,
+    pauseCesium = true,
+    warmup = 30,
+    layers = 'all',
+    satellites = true,
+  },
 ) {
   return page.evaluate(
-    async (handleSrc, fov, n, pause, warm, layerSet) => {
+    async (handleSrc, fov, n, pause, warm, layerSet, sats) => {
       const h = await eval(handleSrc);
+      // P2a satellites draw in the same overlay; `satellites: false` stops
+      // them (info run: the P3b share of the redraw)
+      if (!sats && h.satellites?.running) h.satellites.stop();
       const viewer = window.__godsEyeView.viewer;
       // 'all' = every layer incl. the off-by-default boundaries and grid
       // (worst case); 'default' = the layers a first-time visitor sees.
@@ -356,6 +366,11 @@ async function timings(
           segments: stats.segments,
           boundaries: stats.boundaries,
           labels: stats.labels.length,
+          satellitesRunning: Boolean(h.satellites?.running),
+          satelliteObjects: h.satellites?.running
+            ? h.satellites.objectsAt(h.clock.getTime()).length
+            : 0,
+          satelliteDots: h.satelliteModel?.dots?.length ?? 0,
         },
       };
     },
@@ -365,6 +380,7 @@ async function timings(
     pauseCesium,
     warmup,
     layers,
+    satellites,
   );
 }
 
@@ -516,6 +532,8 @@ for (const profile of profiles.filter((p) => !only || p.name === only)) {
     ...(profile.name === 'desktop'
       ? [{ fovDeg: 60, pauseCesium: false, info: true }]
       : []),
+    // info only, last (it stops the satellite worker): P3b alone
+    { fovDeg: 60, satellites: false, info: true },
   ];
   for (const run of runs) {
     const t = await timings(page, run);

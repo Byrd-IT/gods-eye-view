@@ -913,3 +913,29 @@ test('R2: the search box finds satellites from the P2a engine; look-at + marker 
   handle.exit();
   assert.ok(!handle.content.search('ISS').some((r) => r.kind === 'satellite'));
 });
+
+test('a plain redraw reads no layout for the satellite edge-arrow insets; a selection does', async () => {
+  const { doc, handle, worker } = satSetup();
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  let reads = 0;
+  const rect = () => {
+    reads += 1;
+    return {
+      left: 0,
+      right: 300,
+      top: 0,
+      bottom: 120,
+      width: 300,
+      height: 120,
+    };
+  };
+  doc.body.find('sats').getBoundingClientRect = rect;
+  handle.elements.bar.getBoundingClientRect = rect;
+  for (let i = 0; i < 5; i++) handle.setView({ azDeg: 100 + i });
+  assert.equal(reads, 0, 'no layout reads without a selection');
+  const index = handle.satellites.objectsAt(handle.clock.getTime())[0].index;
+  handle.selectSatellite(index);
+  handle.redraw();
+  assert.ok(reads > 0, 'the selected object arrow reads the insets');
+});
