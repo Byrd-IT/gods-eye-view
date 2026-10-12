@@ -14,6 +14,12 @@
  * to the next middleware (e.g. /api/fire-perimeters/inciweb/* stays live:
  * InciWeb catalog links, not a recorded feed). Both firms entries share
  * GEV_BRIDGE_FIRMS, so the FIRMS route can never be half bridged.
+ * `terminal: true` makes the whole route namespace terminal while the flag
+ * is on: a sub-path or method no entry answers gets 404/405 from the bridge
+ * instead of next(). FIRMS needs it because GEV's firmsProxy answers EVERY
+ * non-/status sub-path (/api/firms/x, /status/, //) with a full four-source
+ * area poll (D7). Routes whose sub-paths are live GEV routes
+ * (/api/military/track, /api/fire-perimeters/inciweb/*) stay non-terminal.
  * Hook for B20: /api/flights is answered from the OpenSky viewport poller's
  * tile cache; that entry sets forwardQuery: true so `view=w,s,e,n` reaches
  * the collector. It is deliberately NOT registered in B4.
@@ -37,6 +43,7 @@ export const BRIDGE_FEEDS = Object.freeze({
     source: 'NASA FIRMS',
     flag: 'GEV_BRIDGE_FIRMS',
     forwardQuery: false,
+    terminal: true,
   }),
   // GET /api/firms/status: derived by the collector from the firms snapshot.
   firmsStatus: Object.freeze({
@@ -47,6 +54,7 @@ export const BRIDGE_FEEDS = Object.freeze({
     source: 'NASA FIRMS',
     flag: 'GEV_BRIDGE_FIRMS',
     forwardQuery: false,
+    terminal: true,
   }),
   // gev-history src/feeds/perimeters.js (NIFC WFIGS, 15 min).
   firePerimeters: Object.freeze({

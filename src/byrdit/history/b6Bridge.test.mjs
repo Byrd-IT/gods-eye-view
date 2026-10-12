@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { historyPlugins } from './index.js';
 import { BRIDGE_FEEDS, enabledBridgeFeeds } from './feeds.js';
 import { firmsProxy } from '../../../server/providers/firms.js';
@@ -408,4 +410,181 @@ test('all B6 flags off: historyPlugins installs nothing (byte-identical GEV)', (
     }),
     [],
   );
+});
+
+// ------------------------------------------------- R1: terminal FIRMS route
+/**
+ * firmsProxy keeps its disk cache under process.cwd()/.gev-cache: run it in
+ * an empty directory so a cached firms.json can never hide an upstream poll.
+ */
+function freshCwd(t) {
+  const before = process.cwd();
+  const dir = mkdtempSync(join(tmpdir(), 'gev-b6-r1-'));
+  process.chdir(dir);
+  t.after(() => {
+    process.chdir(before);
+    rmSync(dir, { recursive: true, force: true });
+  });
+}
+
+const FIRMS_ORIGIN = 'https://firms.modaps.eosdis.nasa.gov';
+/** Sub-paths and methods firmsProxy would answer with a four-source poll. */
+const FIRMS_BYPASS = [
+  ['GET', '/api/firms/status/'],
+  ['GET', '/api/firms/x'],
+  ['GET', '/api/firms//'],
+  ['POST', '/api/firms/x'],
+  ['HEAD', '/api/firms/x'],
+  ['GET', '/api/firms/status/x'],
+  ['GET', '/api/firms/./status'],
+  ['GET', '/api/firms/%73tatus'],
+  ['DELETE', '/api/firms/status/'],
+];
+
+test('R1: GEV_BRIDGE_FIRMS=1 makes /api/firms terminal, zero FIRMS upstream attempts on any sub-path or method', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  withFirmsKey(t);
+  freshCwd(t);
+  const blocked = blockNetwork(t, 'http://127.0.0.1:9');
+  const request = chain([
+    ...historyPlugins({
+      env: {
+        GEV_BRIDGE_FIRMS: '1',
+        GEV_BRIDGE_FIRE_PERIMETERS: '1',
+        GEV_BRIDGE_CYCLONES: '1',
+        GEV_COLLECTOR_URLS: 'http://127.0.0.1:9',
+        GEV_COLLECTOR_TIMEOUT_MS: '300',
+      },
+    }),
+    firmsProxy(),
+    firePerimetersProxy(),
+    cycloneProxy(),
+  ]);
+  for (const [method, path] of FIRMS_BYPASS) {
+    const r = await request(path, method);
+    assert.equal(r.statusCode, 404, `${method} ${path}`);
+    assert.equal(r.headers['x-feed-bridge'], 'unrouted', `${method} ${path}`);
+    assert.equal(r.headers['x-feed-source'], 'NASA FIRMS', `${method} ${path}`);
+    if (method === 'HEAD') assert.equal(r.body, undefined);
+    else assert.deepEqual(JSON.parse(r.body), { error: 'not found' });
+  }
+  // canonical paths (and the mount's own trailing slash / query) still bridge
+  for (const path of [
+    '/api/firms',
+    '/api/firms/',
+    '/api/firms?x=1',
+    '/api/firms/status',
+    '/api/firms/status?x=1',
+  ]) {
+    const r = await request(path);
+    assert.equal(r.statusCode, 503, path);
+    assert.equal(r.headers['x-feed-bridge'], 'none', path);
+  }
+  // supported methods on the canonical paths: HEAD bridged, others 405
+  const head = await request('/api/firms/status', 'HEAD');
+  assert.equal(head.statusCode, 503);
+  assert.equal(head.body, undefined);
+  for (const path of ['/api/firms', '/api/firms/status']) {
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const r = await request(path, method);
+      assert.equal(r.statusCode, 405, `${method} ${path}`);
+      assert.equal(r.headers.allow, 'GET, HEAD');
+    }
+  }
+  // the InciWeb exception is untouched with every B6 flag on
+  const inci = await request('/api/fire-perimeters/inciweb/index');
+  assert.equal(inci.statusCode, 502);
+  assert.equal(inci.headers['x-feed-bridge'], undefined);
+  assert.deepEqual(blocked, ['https://inciweb.wildfire.gov']);
+  assert.ok(!blocked.includes(FIRMS_ORIGIN), 'no FIRMS upstream attempt');
+});
+
+test('R1: terminal FIRMS route answers the collector bytes on /status with a live collector', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  withFirmsKey(t);
+  freshCwd(t);
+  const collector = await startCollector(t, { lastOk: T });
+  const blocked = blockNetwork(t, collector.url);
+  const request = chain([
+    ...historyPlugins({
+      env: { GEV_BRIDGE_FIRMS: '1', GEV_COLLECTOR_URLS: collector.url },
+      now: () => T + 1_000,
+    }),
+    firmsProxy(),
+  ]);
+  const status = await request('/api/firms/status');
+  assert.equal(status.statusCode, 200);
+  assert.ok(status.body.equals(BODIES['firms-status']));
+  assert.equal(status.headers['x-feed-bridge'], 'collector');
+  const firms = await request('/api/firms');
+  assert.ok(firms.body.equals(BODIES.firms));
+  for (const [method, path] of FIRMS_BYPASS) {
+    assert.equal((await request(path, method)).statusCode, 404, path);
+  }
+  assert.deepEqual(collector.seen, [
+    '/v1/latest/firms-status',
+    '/v1/latest/firms',
+  ]);
+  assert.deepEqual(blocked, []);
+});
+
+test('R1: terminal routing mounts one /api/firms middleware; other routes unchanged', () => {
+  const routes = [];
+  const server = { middlewares: { use: (route) => routes.push(route) } };
+  const [plugin] = historyPlugins({
+    env: {
+      GEV_BRIDGE_MILITARY: '1',
+      GEV_BRIDGE_FIRMS: '1',
+      GEV_BRIDGE_FIRE_PERIMETERS: '1',
+      GEV_BRIDGE_CYCLONES: '1',
+    },
+  });
+  plugin.configureServer(server);
+  assert.deepEqual(routes, [
+    '/api/military',
+    '/api/firms',
+    '/api/fire-perimeters',
+    '/api/cyclones',
+  ]);
+  assert.equal(BRIDGE_FEEDS.firms.terminal, true);
+  assert.equal(BRIDGE_FEEDS.firmsStatus.terminal, true);
+  for (const name of ['military', 'firePerimeters', 'cyclones']) {
+    assert.ok(!BRIDGE_FEEDS[name].terminal, `${name} keeps live sub-routes`);
+  }
+});
+
+test('R1: GEV_BRIDGE_FIRMS off leaves every /api/firms path to firmsProxy (unchanged)', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  withFirmsKey(t);
+  freshCwd(t);
+  const blocked = blockNetwork(t, 'http://127.0.0.1:9');
+  // another feed's flag is on, so the bridge plugin exists but owns no FIRMS
+  const plugins = historyPlugins({
+    env: {
+      GEV_BRIDGE_FIRMS: '0',
+      GEV_BRIDGE_CYCLONES: '1',
+      GEV_COLLECTOR_URLS: 'http://127.0.0.1:9',
+    },
+  });
+  assert.equal(plugins.length, 1);
+  const request = chain([...plugins, firmsProxy()]);
+  // the area poll path: firmsProxy tries all four sources (network mocked)
+  for (const [method, path] of [
+    ['GET', '/api/firms'],
+    ['GET', '/api/firms/x'],
+    ['POST', '/api/firms/x'],
+  ]) {
+    blocked.length = 0;
+    const r = await request(path, method);
+    assert.equal(r.statusCode, 502, `${method} ${path}`);
+    assert.equal(r.headers['x-feed-bridge'], undefined);
+    assert.deepEqual(blocked, Array(4).fill(FIRMS_ORIGIN), `${method} ${path}`);
+  }
+  blocked.length = 0;
+  const status = await request('/api/firms/status');
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.headers['x-feed-bridge'], undefined);
+  assert.equal(JSON.parse(status.body).hasKey, true);
+  // with no flag at all the history plugin list is empty: byte-identical GEV
+  assert.deepEqual(historyPlugins({ env: { GEV_BRIDGE_FIRMS: '' } }), []);
 });
