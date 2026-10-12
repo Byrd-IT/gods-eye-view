@@ -9,6 +9,7 @@
  *   { type: 'tick', seq, timeMs, sets, ageSets } compute one tick
  * Messages out:
  *   { type: 'catalog', version, load, meta }    after every 'gp'
+ *     (load.warmUp = { calls, durationMs } of the JIT warm-up that ran)
  *   { type: 'observer', ok }
  *   { type: 'tick', seq, timeMs, records, count, sets, sunAltDeg, dark,
  *     computed, culled, dropped, failed, durationMs, age }
@@ -26,6 +27,9 @@ export function createSatWorkerHandler(
     try {
       if (type === 'gp') {
         const load = engine.loadGroup(String(data.path || ''), data.text);
+        // Compile the tick's code on the new entries now, not inside the
+        // first 1 Hz tick (satCore warmUp; reported, not hidden).
+        load.warmUp = engine.warmUp();
         post({
           type: 'catalog',
           version: engine.version,

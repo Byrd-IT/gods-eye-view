@@ -42,6 +42,27 @@ export function overheadList(
   return { total: rows.length, rows: rows.slice(0, limit) };
 }
 
+/**
+ * The catalogue index a click on the "Overhead now" list refers to, or null.
+ * Only a row button inside `list` whose data-index is a plain decimal below
+ * `size` counts; a click on the list's padding, an <li> gap or anything
+ * outside the list selects nothing (Number(null) would be satellite 0).
+ */
+export function listIndexFromTarget(list, target, size = Infinity) {
+  let node = target ?? null;
+  let button = null;
+  while (node && node !== list) {
+    if (!button && String(node.tagName || '').toUpperCase() === 'BUTTON')
+      button = node;
+    node = node.parentNode ?? null;
+  }
+  if (!list || node !== list || !button) return null;
+  const raw = button.getAttribute?.('data-index');
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null;
+  const index = Number(raw);
+  return Number.isSafeInteger(index) && index < size ? index : null;
+}
+
 const fmtUtc = (ms) =>
   new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 

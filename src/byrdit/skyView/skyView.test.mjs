@@ -678,6 +678,12 @@ test('satellites: canvas click selects (card), list click selects + looks at it,
   const { doc, viewer, handle, worker } = satSetup();
   await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
   await pumpSats(worker);
+  // clicks on the list background or a row gap select nothing (not index 0)
+  const listNode = doc.body.find('sats-list');
+  clickWithTarget(listNode, listNode);
+  clickWithTarget(listNode, listNode.children[0]);
+  assert.equal(handle.selectedSatellite, null, 'background click: no select');
+  assert.equal(doc.body.find('sats-card').hidden, true);
   // look at the highest object so it is on screen, then click it
   const first = doc.body.find('sats-list').children[0].children[0];
   const index = Number(first.getAttribute('data-index'));
@@ -702,6 +708,17 @@ test('satellites: canvas click selects (card), list click selects + looks at it,
   await pumpSats(worker);
   assert.equal(doc.body.find('sats-look'), lookButton);
   assert.equal(doc.body.find('sats-list').children[0].children[0], rowButton);
+  // a nested element inside a row button selects that row
+  handle.selectSatellite(null);
+  const inner = doc.createElement('span');
+  rowButton.append(inner);
+  clickWithTarget(doc.body.find('sats-list'), inner);
+  assert.equal(
+    handle.selectedSatellite,
+    Number(rowButton.getAttribute('data-index')),
+  );
+  inner.remove();
+  handle.selectSatellite(index);
   handle.setView({ azDeg: (row.azDeg + 180) % 360 });
   click(lookButton);
   assert.ok(Math.abs(((handle.view.azDeg - row.azDeg + 540) % 360) - 180) < 1);

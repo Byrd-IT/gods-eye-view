@@ -48,6 +48,7 @@ import {
   ageBanner,
   buildSatPanel,
   cardData,
+  listIndexFromTarget,
   overheadList,
   renderSatPanel,
 } from './satPanel.js';
@@ -439,6 +440,34 @@ export function mountSkyView({
   }
 
   // ── satellites ───────────────────────────────────────────────────────────
+  /**
+   * Narrow layouts (skyView.css, max-width 900px) size the satellite panel
+   * from the toolbar's real bottom edge, because the toolbar wraps to a
+   * different height at every width: --gev-sky-bar-bottom on the panel.
+   */
+  function syncSkyLayout() {
+    if (dom.bar.hidden) return;
+    const bar = dom.bar.getBoundingClientRect?.();
+    if (!bar || !(bar.height > 0)) return;
+    satDom.root.style?.setProperty?.(
+      '--gev-sky-bar-bottom',
+      `${Math.ceil(bar.bottom)}px`,
+    );
+  }
+
+  /** Scroll the panel so the newly selected object's card is in view. */
+  function revealCard() {
+    const { body, card } = satDom;
+    if (card.hidden || body.hidden || typeof body.scrollTop !== 'number')
+      return;
+    const b = body.getBoundingClientRect?.();
+    const c = card.getBoundingClientRect?.();
+    if (!b || !c) return;
+    if (c.bottom > b.bottom)
+      body.scrollTop += Math.min(c.bottom - b.bottom, c.top - b.top);
+    else if (c.top < b.top) body.scrollTop -= b.top - c.top;
+  }
+
   /** Keep the edge arrow clear of the satellite panel and the toolbar. */
   function arrowInsets(width, height) {
     const pad = 28;
@@ -532,8 +561,10 @@ export function mountSkyView({
     return true;
   }
   function selectSatellite(index, { look = false } = {}) {
+    const previous = selectedIndex;
     selectedIndex = Number.isInteger(index) ? index : null;
     updateSatPanel();
+    if (selectedIndex != null && selectedIndex !== previous) revealCard();
     redraw();
     if (look && selectedIndex != null) lookAtSatellite(selectedIndex);
   }
@@ -643,6 +674,7 @@ export function mountSkyView({
       startTicking();
       refreshProfile();
       satDom.root.hidden = false;
+      syncSkyLayout();
       beltPoints = geoBeltPoints(observer.latDeg, observer.lonDeg);
       satSky.start(observer);
       updateSatPanel();
@@ -1048,10 +1080,12 @@ export function mountSkyView({
     redraw();
   });
   listen(satDom.list, 'click', (event) => {
-    const button =
-      event.target?.closest?.('button[data-index]') ?? event.target;
-    const index = Number(button?.getAttribute?.('data-index'));
-    if (Number.isInteger(index)) selectSatellite(index, { look: true });
+    const index = listIndexFromTarget(
+      satDom.list,
+      event.target,
+      satSky.meta.length,
+    );
+    if (index != null) selectSatellite(index, { look: true });
   });
   listen(satDom.look, 'click', () => {
     if (selectedIndex != null) lookAtSatellite(selectedIndex);
@@ -1073,7 +1107,16 @@ export function mountSkyView({
       setStatus('');
     }
   });
-  listen(globalThis.window, 'resize', () => redraw());
+  listen(globalThis.window, 'resize', () => {
+    syncSkyLayout();
+    redraw();
+  });
+  // The toolbar also changes height when its info line rewraps.
+  if (typeof globalThis.ResizeObserver === 'function') {
+    const barObserver = new globalThis.ResizeObserver(() => syncSkyLayout());
+    barObserver.observe(dom.bar);
+    removers.push(() => barObserver.disconnect());
+  }
 
   // Hidden while the camera follows an entity (CSS hides it in cockpit,
   // playback, recording and clean-view modes, like the nav control).

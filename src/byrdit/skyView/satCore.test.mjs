@@ -15,6 +15,7 @@ import {
   SKY_CORE_GROUPS,
   STATE,
   STALE_DAYS,
+  WARM_CALLS,
   createSatEngine,
   cullBounds,
   decodeFlags,
@@ -36,9 +37,13 @@ const REF = JSON.parse(
 const D2R = Math.PI / 180;
 const DAY = 86_400_000;
 
-function fixtureEngine(path = 'active') {
+// Warmed like the worker does after every load (satWorker.js), so the
+// accuracy tests below run on the warmed engine; the warm-up test compares
+// it with an engine that never warmed.
+function fixtureEngine(path = 'active', { warm = true } = {}) {
   const engine = createSatEngine();
   engine.loadGroup(path, FIXTURE);
+  if (warm) engine.warmUp();
   engine.setObserver(REF.observer.latDeg, REF.observer.lonDeg);
   return engine;
 }
@@ -407,4 +412,41 @@ test('observer validation and an engine without an observer returns nothing', ()
   engine.loadGroup('active', FIXTURE);
   assert.equal(engine.setObserver(NaN, 0), false);
   assert.equal(engine.tick({ timeMs: Date.now() }).count, 0);
+});
+
+test('JIT warm-up changes no answer and no cull state; bounded; only new entries', () => {
+  const cold = fixtureEngine('active', { warm: false });
+  const warm = createSatEngine();
+  warm.loadGroup('active', FIXTURE);
+  const first = warm.warmUp();
+  assert.ok(first.calls > 0 && first.calls <= 200 * 4, `calls ${first.calls}`);
+  assert.ok(Number.isFinite(first.durationMs));
+  // nothing new loaded -> nothing to warm
+  assert.deepEqual(warm.warmUp(), { calls: 0, durationMs: 0 });
+  // warming before the observer is set, and again after it, is harmless
+  warm.setObserver(REF.observer.latDeg, REF.observer.lonDeg);
+  const sets = ['core', 'active', 'starlink'];
+  const start = Date.parse(REF.times[0]);
+  const times = [...REF.times.map(Date.parse)];
+  for (let k = 0; k < 90; k++) times.push(start + k * 20_000);
+  times.push(start + 86_400_000, start - 3_600_000);
+  for (const t of times) {
+    for (const cull of [true, false]) {
+      const a = cold.tick({ timeMs: t, sets, cull });
+      const b = warm.tick({ timeMs: t, sets, cull });
+      assert.deepEqual(
+        Array.from(b.records),
+        Array.from(a.records),
+        `records at ${new Date(t).toISOString()} cull ${cull}`,
+      );
+      assert.equal(b.computed, a.computed, 'same cull state');
+      assert.equal(b.culled, a.culled, 'same cull state');
+    }
+  }
+  // a large catalogue: about WARM_CALLS propagations, not one per object
+  const big = createSatEngine();
+  big.loadGroup('active', FIXTURE);
+  const many = big.warmUp({ calls: 40 });
+  assert.ok(many.calls <= 40 + 4, `calls ${many.calls}`);
+  assert.ok(WARM_CALLS >= 1000 && WARM_CALLS <= 5000);
 });

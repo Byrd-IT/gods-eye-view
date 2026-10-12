@@ -7,6 +7,7 @@ import {
   STATE_TEXT,
   ageBanner,
   cardData,
+  listIndexFromTarget,
   overheadList,
 } from './satPanel.js';
 
@@ -129,5 +130,43 @@ test('chips cover every sky class', () => {
   assert.deepEqual(
     CLASS_CHIPS.map((c) => c.klass),
     ['station', 'nav', 'geo', 'visual', 'comms', 'other'],
+  );
+});
+
+test('list click target: only a row button inside the list with a valid data-index selects', () => {
+  const node = (tagName, attrs = {}, parentNode = null) => ({
+    tagName,
+    parentNode,
+    getAttribute: (name) => (name in attrs ? attrs[name] : null),
+  });
+  const list = node('UL');
+  const li = node('LI', {}, list);
+  const button = node('BUTTON', { 'data-index': '7' }, li);
+  const span = node('SPAN', {}, button);
+  // legitimate: the button itself and a nested element inside it
+  assert.equal(listIndexFromTarget(list, button, 100), 7);
+  assert.equal(listIndexFromTarget(list, span, 100), 7);
+  // background: the list itself, an <li> gap, null, a node outside the list
+  assert.equal(listIndexFromTarget(list, list, 100), null);
+  assert.equal(listIndexFromTarget(list, li, 100), null);
+  assert.equal(listIndexFromTarget(list, null, 100), null);
+  const outside = node('BUTTON', { 'data-index': '3' }, node('DIV'));
+  assert.equal(listIndexFromTarget(list, outside, 100), null);
+  // a button in the list without / with a bad data-index
+  for (const bad of [undefined, '', ' 1', '-1', '1.5', '1e2', 'x', '100']) {
+    const attrs = bad === undefined ? {} : { 'data-index': bad };
+    assert.equal(
+      listIndexFromTarget(
+        list,
+        node('BUTTON', attrs, node('LI', {}, list)),
+        100,
+      ),
+      null,
+      `data-index ${JSON.stringify(bad)}`,
+    );
+  }
+  assert.equal(
+    listIndexFromTarget(list, node('BUTTON', { 'data-index': '0' }, li), 1),
+    0,
   );
 });

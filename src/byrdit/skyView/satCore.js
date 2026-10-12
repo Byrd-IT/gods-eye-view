@@ -193,6 +193,9 @@ const RATE_SAFETY = 1.25;
 /** Never trust a cull window longer than this (sim time). */
 export const MAX_CULL_MS = 30 * 60_000;
 const MIN_CULL_MS = 1500;
+/** JIT warm-up after a load: about this many propagations, in passes. */
+export const WARM_CALLS = 2400;
+const WARM_PASSES = 4;
 
 /**
  * Culling bounds for one satrec: the largest central angle at which it can be
@@ -235,6 +238,9 @@ export function makeObserver(latDeg, lonDeg) {
   });
   return { latDeg: lat, lonDeg: lon, ecf, up: unit(ecf), key: `${lat},${lon}` };
 }
+
+/** Fixed observer for warmUp() (any valid site exercises the same code). */
+const WARM_OBSERVER = makeObserver(30, -90);
 
 /** Epoch of a satrec in UTC ms. */
 export function satrecEpochMs(satrec) {
@@ -466,6 +472,92 @@ export function createSatEngine({
   }
 
   /**
+   * The per-object work of a tick for entries[from..to) every `stride`:
+   * ONE SGP4 propagation, the central-angle cull, lookAnglesAt() for the
+   * candidates, packed into `scratch`. tick() and warmUp() both run this one
+   * function, so the warm-up compiles exactly the code the first tick uses.
+   * `ctx.track` false leaves the cull state untouched (warm-up).
+   */
+  function computeRange(ctx, from, to, stride) {
+    const { t, want, cull, track, latDeg, lonDeg, up, dark, obs, at } = ctx;
+    for (let i = from; i < to; i += stride) {
+      const entry = entries[i];
+      if (want && !want.has(entry.set)) continue;
+      if (Math.abs(t - entry.epochMs) > DROP_DAYS * DAY_MS) {
+        ctx.dropped += 1;
+        continue;
+      }
+      if (cull && cullSlack[i] > 0 && Math.abs(t - cullT[i]) < cullSlack[i]) {
+        ctx.culled += 1;
+        continue;
+      }
+      ctx.computed += 1;
+      const pv = propagateEci(entry.satrec, t);
+      if (track) cullSlack[i] = 0;
+      if (!pv) {
+        ctx.failed += 1;
+        continue;
+      }
+      // Central angle observer -> sub-satellite point (same in ECI and ECF).
+      const p = pv.position;
+      const cos =
+        (p.x * up.x + p.y * up.y + p.z * up.z) / Math.hypot(p.x, p.y, p.z);
+      const lambda = Math.acos(Math.max(-1, Math.min(1, cos)));
+      if (lambda > entry.lambdaMaxRad) {
+        // Certainly below MIN_EL_DEG now; skip it until it could be back.
+        if (cull && track) {
+          const slackMs =
+            ((lambda - entry.lambdaMaxRad) / entry.maxRateRadS) * 1000;
+          if (slackMs > MIN_CULL_MS) {
+            cullT[i] = t;
+            cullSlack[i] = Math.min(slackMs, MAX_CULL_MS);
+          }
+        }
+        continue;
+      }
+      const look = lookAnglesAt(entry.satrec, t, latDeg, lonDeg);
+      if (!look) {
+        ctx.failed += 1;
+        continue;
+      }
+      if (look.elevDeg <= MIN_EL_DEG) continue;
+      const d = describeLook(entry, t, at, { dark, look, pv, obs });
+      const o = ctx.n * RECORD_FIELDS;
+      scratch[o] = entry.index;
+      scratch[o + 1] = d.azDeg;
+      scratch[o + 2] = d.elDeg;
+      scratch[o + 3] = d.rangeKm;
+      scratch[o + 4] = d.rangeRateKmS;
+      scratch[o + 5] = d.flags;
+      ctx.n += 1;
+    }
+  }
+
+  /** Per-tick constants for computeRange() at time `t` for observer `at`. */
+  function rangeContext(t, at, { want = null, cull = false, track = true }) {
+    const obs = observerEci(at, gstime(new Date(t)));
+    if (scratch.length < entries.length * RECORD_FIELDS)
+      scratch = new Float32Array(entries.length * RECORD_FIELDS);
+    return {
+      t,
+      want,
+      cull,
+      track,
+      latDeg: at.latDeg,
+      lonDeg: at.lonDeg,
+      up: obs.up,
+      dark: isObserverDark(at.latDeg, at.lonDeg, t),
+      obs,
+      at,
+      n: 0,
+      computed: 0,
+      culled: 0,
+      dropped: 0,
+      failed: 0,
+    };
+  }
+
+  /**
    * One tick at Sky time `timeMs` for the given sets.
    * @returns {{timeMs:number, records:Float32Array, count:number, sets:string[],
    *   sunAltDeg:number, dark:boolean, computed:number, culled:number,
@@ -488,84 +580,57 @@ export function createSatEngine({
       durationMs: 0,
     };
     if (!observer || !Number.isFinite(t)) return empty;
-    const want = new Set(sets);
-    const { latDeg, lonDeg } = observer;
-    const sunAltDeg = observerSolarElevation(latDeg, lonDeg, t);
-    const dark = isObserverDark(latDeg, lonDeg, t);
-    const gmst = gstime(new Date(t));
-    const obs = observerEci(observer, gmst);
-    const up = obs.up;
-    if (scratch.length < entries.length * RECORD_FIELDS)
-      scratch = new Float32Array(entries.length * RECORD_FIELDS);
-    let n = 0;
-    let computed = 0;
-    let culled = 0;
-    let dropped = 0;
-    let failed = 0;
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      if (!want.has(entry.set)) continue;
-      if (Math.abs(t - entry.epochMs) > DROP_DAYS * DAY_MS) {
-        dropped += 1;
-        continue;
-      }
-      if (cull && cullSlack[i] > 0 && Math.abs(t - cullT[i]) < cullSlack[i]) {
-        culled += 1;
-        continue;
-      }
-      computed += 1;
-      const pv = propagateEci(entry.satrec, t);
-      if (!pv) {
-        failed += 1;
-        cullSlack[i] = 0;
-        continue;
-      }
-      cullSlack[i] = 0;
-      // Central angle observer -> sub-satellite point (same in ECI and ECF).
-      const p = pv.position;
-      const cos =
-        (p.x * up.x + p.y * up.y + p.z * up.z) / Math.hypot(p.x, p.y, p.z);
-      const lambda = Math.acos(Math.max(-1, Math.min(1, cos)));
-      if (lambda > entry.lambdaMaxRad) {
-        // Certainly below MIN_EL_DEG now; skip it until it could be back.
-        if (cull) {
-          const slackMs =
-            ((lambda - entry.lambdaMaxRad) / entry.maxRateRadS) * 1000;
-          if (slackMs > MIN_CULL_MS) {
-            cullT[i] = t;
-            cullSlack[i] = Math.min(slackMs, MAX_CULL_MS);
-          }
-        }
-        continue;
-      }
-      const look = lookAnglesAt(entry.satrec, t, latDeg, lonDeg);
-      if (!look) {
-        failed += 1;
-        continue;
-      }
-      if (look.elevDeg <= MIN_EL_DEG) continue;
-      const d = describeLook(entry, t, observer, { dark, look, pv, obs });
-      const o = n * RECORD_FIELDS;
-      scratch[o] = entry.index;
-      scratch[o + 1] = d.azDeg;
-      scratch[o + 2] = d.elDeg;
-      scratch[o + 3] = d.rangeKm;
-      scratch[o + 4] = d.rangeRateKmS;
-      scratch[o + 5] = d.flags;
-      n += 1;
-    }
+    const sunAltDeg = observerSolarElevation(
+      observer.latDeg,
+      observer.lonDeg,
+      t,
+    );
+    const ctx = rangeContext(t, observer, { want: new Set(sets), cull });
+    computeRange(ctx, 0, entries.length, 1);
     return {
       ...empty,
-      records: scratch.slice(0, n * RECORD_FIELDS),
-      count: n,
+      records: scratch.slice(0, ctx.n * RECORD_FIELDS),
+      count: ctx.n,
       sunAltDeg,
-      dark,
-      computed,
-      culled,
-      dropped,
-      failed,
+      dark: ctx.dark,
+      computed: ctx.computed,
+      culled: ctx.culled,
+      dropped: ctx.dropped,
+      failed: ctx.failed,
       durationMs: now() - started,
     };
+  }
+
+  /**
+   * JIT warm-up (SKYVIEW.md 8, tick budget): run computeRange() over a
+   * strided sample of the entries loaded since the last warm-up, at their own
+   * epoch plus a few offsets, for a fixed observer, and discard the output.
+   * It changes nothing a tick reads: cull state untouched, scratch is
+   * rewritten by every tick, and an SGP4 result does not depend on call
+   * order (satellite.js restarts its deep-space integrator as needed; the
+   * accuracy tests run after a warm-up). The first real tick then runs
+   * compiled code instead of paying the compile cost inside the 1 Hz budget.
+   * Bounded: at most about `calls` propagations per call.
+   */
+  let warmedUpTo = 0;
+  function warmUp({ calls = WARM_CALLS } = {}) {
+    const started = now();
+    const from = warmedUpTo;
+    const to = entries.length;
+    warmedUpTo = to;
+    if (to <= from || !(calls > 0)) return { calls: 0, durationMs: 0 };
+    const stride = Math.max(1, Math.ceil(((to - from) * WARM_PASSES) / calls));
+    let done = 0;
+    for (let pass = 0; pass < WARM_PASSES; pass++) {
+      // a different start per pass, so a large group samples more entries
+      const start = from + (pass % Math.min(stride, to - from));
+      const t = entries[start].epochMs + (pass + 1) * 37 * 60_000;
+      if (!Number.isFinite(t)) continue;
+      const ctx = rangeContext(t, WARM_OBSERVER, { track: false });
+      computeRange(ctx, start, to, stride);
+      done += ctx.computed;
+    }
+    return { calls: done, durationMs: now() - started };
   }
 
   /** Per-object metadata for the main thread (index order). */
@@ -621,6 +686,7 @@ export function createSatEngine({
     loadGroup,
     setObserver,
     tick,
+    warmUp,
     meta,
     ageSummary,
     resetCull: () => resetCull(),

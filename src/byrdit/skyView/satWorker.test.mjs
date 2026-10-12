@@ -23,6 +23,9 @@ test('gp -> catalog meta; observer; tick -> packed Float32Array, transferred', (
   const catalog = out.at(-1).message;
   assert.equal(catalog.type, 'catalog');
   assert.equal(catalog.load.added, 200);
+  // the JIT warm-up ran on the new entries and is reported, not hidden
+  assert.ok(catalog.load.warmUp.calls > 0, 'warm-up ran');
+  assert.ok(Number.isFinite(catalog.load.warmUp.durationMs));
   assert.equal(catalog.meta.length, 200);
   assert.deepEqual(Object.keys(catalog.meta[0]).sort(), [
     'epochMs',
