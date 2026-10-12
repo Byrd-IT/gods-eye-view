@@ -76,6 +76,10 @@ function frames() {
     cancelFrame(id) {
       queue = queue.filter((f) => f.id !== id);
     },
+    /** Animation frames still requested (a dead source must leave none). */
+    get queued() {
+      return queue.length;
+    },
     timers: {
       setTimeout(fn, ms) {
         const h = { fn, at: t + ms, done: false };
@@ -327,6 +331,174 @@ test('Android: sensor blocked (NotAllowedError) falls back to deviceorientationa
   f.advance(NO_SAMPLE_TIMEOUT_MS + 100);
   assert.equal(c.state, 'denied');
   assert.equal(win.count('deviceorientationabsolute'), 0, 'listeners removed');
+});
+
+// ── R1 (review t_3c38b33d): freshness is per source attempt ──────────────
+const EAST = quatFromAxes([0, -1, 0], [0, 0, 1], [-1, 0, 0]); // portrait, back east
+
+/** Sensor + absolute event; the sensor has produced readings and is 'on'. */
+async function sensorThatWorked(extra) {
+  FakeSensor.instances = [];
+  const win = fakeWindow({ sensor: FakeSensor, absoluteEvent: true });
+  const rig = controller(win, extra);
+  rig.c.setDeclination(0);
+  await rig.c.start();
+  const s = FakeSensor.instances[0];
+  rig.f.advance(500, 1000 / 30, () => s.read(EAST));
+  assert.equal(rig.c.state, 'on');
+  assert.equal(rig.c.source, 'sensor');
+  return { win, s, ...rig };
+}
+
+for (const [errorName, expected] of [
+  ['NotAllowedError', 'denied'],
+  ['NotReadableError', 'unsupported'],
+]) {
+  test(`R1: sensor read, then ${errorName}, fallback event silent -> ${expected} after the timeout, all torn down (old reading not counted)`, async () => {
+    const { win, s, c, f, views } = await sensorThatWorked();
+    s.fail(errorName);
+    assert.equal(s.started, false, 'failed sensor stopped');
+    assert.equal(win.count('deviceorientationabsolute'), 1, 'fallback tried');
+    assert.equal(c.sensor, null);
+    f.advance(NO_SAMPLE_TIMEOUT_MS - 100);
+    assert.ok(c.running, 'still waiting within the timeout');
+    const seen = views.length;
+    f.advance(200);
+    assert.equal(c.state, expected);
+    assert.equal(c.running, false);
+    assert.doesNotMatch(c.info.message, /follows/);
+    assert.equal(win.count('deviceorientationabsolute'), 0, 'listener removed');
+    assert.equal(f.queued, 0, 'no animation frames left');
+    // late callbacks from the dead sensor change nothing
+    s.read(EAST);
+    s.fail('NotReadableError');
+    f.advance(NO_SAMPLE_TIMEOUT_MS * 2);
+    assert.equal(c.state, expected);
+    assert.equal(views.length, seen, 'no view applied after the failure');
+    assert.equal(win.count('deviceorientationabsolute'), 0);
+  });
+}
+
+test('R1: sensor read, then fails; the fallback event delivers its own reading -> stays on with the event as source', async () => {
+  const { win, s, c, f, views } = await sensorThatWorked();
+  s.fail('NotAllowedError');
+  f.advance(2000, 1000 / 30, () =>
+    win.fire('deviceorientationabsolute', {
+      ...portrait(200, 20),
+      absolute: true,
+    }),
+  );
+  assert.equal(c.state, 'on');
+  assert.equal(c.source, 'absolute-event');
+  azClose(views.at(-1).azDeg, 200, 0.5, 'view follows the event');
+  close(views.at(-1).elDeg, 20, 0.5);
+  f.advance(NO_SAMPLE_TIMEOUT_MS * 2);
+  assert.equal(c.state, 'on', 'the watchdog accepted the fallback');
+  assert.equal(win.count('deviceorientationabsolute'), 1);
+  // a late reading from the failed sensor does not move the view
+  s.read(EAST);
+  f.advance(500);
+  azClose(views.at(-1).azDeg, 200, 0.5);
+  c.stop();
+  assert.equal(win.count('deviceorientationabsolute'), 0);
+});
+
+test('R1: sensor starts but never reads -> the event fallback is tried (own timeout) and used when it delivers', async () => {
+  FakeSensor.instances = [];
+  const win = fakeWindow({ sensor: FakeSensor, absoluteEvent: true });
+  const { c, f, views } = controller(win);
+  c.setDeclination(0);
+  await c.start();
+  const s = FakeSensor.instances[0];
+  assert.equal(win.count('deviceorientationabsolute'), 0);
+  f.advance(NO_SAMPLE_TIMEOUT_MS + 50);
+  assert.ok(c.running, 'not unsupported yet: the events get their turn');
+  assert.equal(s.started, false, 'silent sensor stopped');
+  assert.equal(win.count('deviceorientationabsolute'), 1);
+  f.advance(NO_SAMPLE_TIMEOUT_MS - 200, 1000 / 30, (t) => {
+    if (t > NO_SAMPLE_TIMEOUT_MS + 2000)
+      win.fire('deviceorientationabsolute', {
+        ...portrait(90, 0),
+        absolute: true,
+      });
+  });
+  assert.equal(c.state, 'on');
+  assert.equal(c.source, 'absolute-event');
+  azClose(views.at(-1).azDeg, 90, 1);
+  f.advance(NO_SAMPLE_TIMEOUT_MS * 2);
+  assert.equal(c.state, 'on');
+});
+
+test('R1: sensor silent and the events silent too -> unsupported after one timeout per attempt; sensor-only browser -> unsupported', async () => {
+  FakeSensor.instances = [];
+  const win = fakeWindow({ sensor: FakeSensor, absoluteEvent: true });
+  const { c, f } = controller(win);
+  await c.start();
+  f.advance(NO_SAMPLE_TIMEOUT_MS + 50);
+  assert.ok(c.running);
+  f.advance(NO_SAMPLE_TIMEOUT_MS);
+  assert.equal(c.state, 'unsupported');
+  assert.equal(win.count('deviceorientationabsolute'), 0);
+  assert.equal(FakeSensor.instances[0].started, false);
+
+  FakeSensor.instances = [];
+  const only = fakeWindow({ sensor: FakeSensor, noApis: true });
+  const o = controller(only);
+  await o.c.start();
+  o.f.advance(NO_SAMPLE_TIMEOUT_MS + 50);
+  assert.equal(o.c.state, 'unsupported');
+  assert.equal(FakeSensor.instances[0].started, false);
+  assert.equal(only.count('deviceorientation'), 0);
+});
+
+test('R1: stop/start cancels the old attempt: its readings, errors and timer are ignored', async () => {
+  FakeSensor.instances = [];
+  const win = fakeWindow({ sensor: FakeSensor, absoluteEvent: true });
+  const { c, f, views } = controller(win);
+  c.setDeclination(0);
+  await c.start();
+  const old = FakeSensor.instances[0];
+  f.advance(NO_SAMPLE_TIMEOUT_MS - 1000);
+  c.stop();
+  await c.start();
+  const fresh = FakeSensor.instances[1];
+  assert.ok(fresh && fresh !== old);
+  old.read(EAST);
+  old.fail('NotAllowedError');
+  assert.equal(views.length, 0, 'old reading ignored');
+  assert.equal(win.count('deviceorientationabsolute'), 0, 'old error ignored');
+  assert.equal(c.state, 'asking');
+  f.advance(1500); // past the OLD watchdog's due time
+  assert.ok(c.running, 'old watchdog ignored');
+  assert.equal(fresh.started, true);
+  f.advance(500, 1000 / 30, () => fresh.read(EAST));
+  assert.equal(c.state, 'on');
+  // a stop during the fallback wait cancels the fallback's watchdog too
+  fresh.fail('NotReadableError');
+  c.stop();
+  f.advance(NO_SAMPLE_TIMEOUT_MS * 2);
+  assert.equal(c.state, 'off');
+  assert.equal(win.count('deviceorientationabsolute'), 0);
+  assert.equal(f.queued, 0);
+});
+
+test('R1: a permission answer for an earlier start is ignored after stop/start', async () => {
+  FakeSensor.instances = [];
+  const win = fakeWindow({ ios: true, sensor: FakeSensor, absoluteEvent: true });
+  const answers = [];
+  win.DeviceOrientationEvent.requestPermission = () =>
+    new Promise((resolve) => answers.push(resolve));
+  const { c } = controller(win);
+  const first = c.start();
+  c.stop();
+  const second = c.start();
+  answers[0]('denied');
+  await first;
+  assert.equal(c.state, 'asking', 'old answer ignored');
+  answers[1]('granted');
+  await second;
+  assert.equal(FakeSensor.instances.length, 1, 'one sensor, for the live start');
+  c.stop();
 });
 
 test('Android Chrome deviceorientationabsolute: upright facing true 90 (declination 0) -> az 90 el 0', async () => {

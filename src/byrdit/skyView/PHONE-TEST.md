@@ -10,8 +10,28 @@ What this checks on REAL phones (the synthetic part is in
 2. the permission-denied path shows the message and dragging still works;
 3. the LAN http address explains that the https address is needed.
 
+None of these real-device checks has been done yet: they are the device
+card (t_d0655670), after the deploy.
+
 Record a screenshot for every numbered step marked SHOT and attach them to the
 kanban card with the phone model, OS version and browser version.
+
+## Which way the view looks (authoritative for P4 acceptance)
+
+The view follows the BACK of the phone, like its camera: you look at the
+screen and the sky behind it is what is drawn.
+
+- Upright in portrait, back facing east: azimuth 90, elevation 0.
+- Flat, SCREEN DOWN / back up (phone held overhead, you look up at the
+  screen from below): the zenith, elevation +90.
+- Flat, SCREEN UP / back down (lying on a table): the back points at the
+  ground, the nadir (elevation -90). The sky view does not draw below its
+  existing -10 degree floor (unchanged, the same as when dragging), so a
+  phone lying screen-up shows the view held at -10 degrees, not the sky
+  overhead. That is expected, not a fault.
+
+The synthetic tests check these poses; whether real phones report them this
+way is what the steps below check (not yet done: see the device card).
 
 ## Before you start
 
@@ -48,8 +68,10 @@ kanban card with the phone model, OS version and browser version.
    PASS: within 5 degrees.
 4. Turn to landscape (both ways) and repeat 3: the view must not roll by 90
    degrees and the target stays put. SHOT.
-5. Tilt back to look at the zenith, then down at the horizon: the view
-   follows smoothly, without jumps of 180 degrees. Note any jump.
+5. Raise the phone overhead, screen down / back up, to look at the zenith,
+   then lower it back to the horizon: the view follows smoothly, without
+   jumps of 180 degrees. Note any jump. (Screen up would point the back at
+   the ground: see "Which way the view looks".)
 6. If 3 failed by more than 5 degrees: with the Moon in the circle tap
    "Align centre on: Moon"; the status shows the change. Then point away
    and back: the Moon should now line up. Record the offset shown.
@@ -76,7 +98,9 @@ kanban card with the phone model, OS version and browser version.
 
 11. Chrome: lock icon > Permissions (or Site settings) > Motion sensors >
     Block, reload, Sky, "Point at the sky". Expected: "Motion access is
-    blocked..." after about 3 seconds (or "No orientation sensor found" on
+    blocked..." after about 3 seconds (up to about 6 if the sensor
+    stays silent instead of reporting the block: the events then get their
+    own 3 seconds) (or "No orientation sensor found" on
     Chrome versions that report a block as no data), and drag works. SHOT.
     Reset the permission afterwards.
 

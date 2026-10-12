@@ -10,7 +10,8 @@
  *     corrected by webkitCompassHeading (magnetic) / webkitCompassAccuracy;
  *     recognised by the webkitCompassHeading field, not by sniffing.
  *  2. Generic Sensor AbsoluteOrientationSensor (Chromium): a quaternion
- *     against magnetic north, 30 Hz; any error falls back to 3.
+ *     against magnetic north, 30 Hz; an error (at start or after readings)
+ *     or no reading within NO_SAMPLE_TIMEOUT_MS falls back to 3/4.
  *  3. `deviceorientationabsolute` (Chrome Android), or `deviceorientation`
  *     with absolute === true.
  *  4. `deviceorientation` with absolute false (e.g. Firefox Android): a
@@ -19,6 +20,14 @@
  * Align offset. Samples are limited to 30 Hz, smoothed (slerp) per frame and
  * applied at <= 30 fps while moving, <= 5 fps when still (orientationMath).
  * Nothing here stops dragging: the sky view stops this controller on a drag.
+ *
+ * Each source is one "attempt" with its own listeners and its own
+ * no-sample watchdog (NO_SAMPLE_TIMEOUT_MS). Only a reading from the CURRENT
+ * attempt counts: when a source fails, its last reading is dropped, so a
+ * silent fallback ends as denied/unsupported (everything torn down) instead
+ * of staying "on" with a stale view. Callbacks from a superseded attempt
+ * (late sensor readings/errors, old timers, a stop/start in between) are
+ * ignored.
  */
 import {
   addHeading,
@@ -40,7 +49,7 @@ import {
 } from './orientationMath.js';
 
 export const OFFSET_STORAGE_KEY = 'gev.sky.headingOffsetDeg';
-/** No usable sample this long after start = no sensor. */
+/** No usable sample this long after a source starts = that source is dead. */
 export const NO_SAMPLE_TIMEOUT_MS = 3000;
 /** iOS accuracy hysteresis: poor above 25 deg, good again at <= 20 deg. */
 const ACCURACY_RECOVER_DEG = 20;
@@ -105,8 +114,11 @@ export function createPhoneOrientation({
   let timeout = null;
   let sensor = null;
   let sensorDenied = false;
-  let token = 0;
-  const removers = [];
+  let eventsAvailable = false;
+  let token = 0; // one per start()/stop(): guards the permission answer
+  let attempt = 0; // one per source attempt: guards its callbacks + watchdog
+  let attemptSampled = false;
+  const removers = []; // the current attempt's listeners
   const limiter = createRateLimiter(SENSOR_HZ);
 
   const info = () => ({
@@ -143,6 +155,7 @@ export function createPhoneOrientation({
     target = addHeading(lastRaw.q, headingTotal(lastRaw.magnetic));
   }
   function sample(q, { magnetic }) {
+    attemptSampled = true;
     lastRaw = { q: quatNormalize(q), magnetic };
     retarget();
     timers.clearTimeout?.(timeout);
@@ -196,25 +209,64 @@ export function createPhoneOrientation({
     sample(q, { magnetic: absolute });
   }
 
+  /** End the current source attempt (listeners, watchdog); start a new one. */
+  function newAttempt() {
+    for (const remove of removers.splice(0)) remove();
+    sensor = null;
+    timers.clearTimeout?.(timeout);
+    timeout = null;
+    attempt += 1;
+    attemptSampled = false;
+    return attempt;
+  }
+
+  /** Watchdog for the current attempt: no reading of ITS OWN in time. */
+  function armTimeout(onSilent) {
+    timers.clearTimeout?.(timeout);
+    const mine = attempt;
+    timeout = timers.setTimeout?.(() => {
+      if (mine !== attempt) return; // superseded: not our timer any more
+      timeout = null;
+      if (attemptSampled || !running()) return;
+      onSilent();
+    }, noSampleTimeoutMs);
+  }
+
+  function giveUp() {
+    teardown();
+    setState(sensorDenied ? 'denied' : 'unsupported');
+  }
+
   function listenEvents() {
+    const mine = newAttempt();
     const type =
       win && 'ondeviceorientationabsolute' in win
         ? 'deviceorientationabsolute'
         : 'deviceorientation';
-    win.addEventListener?.(type, onEvent);
-    removers.push(() => win.removeEventListener?.(type, onEvent));
-    armTimeout();
+    const handler = (event) => {
+      if (mine === attempt) onEvent(event);
+    };
+    win.addEventListener?.(type, handler);
+    removers.push(() => win.removeEventListener?.(type, handler));
+    armTimeout(giveUp);
   }
 
-  function armTimeout() {
-    timers.clearTimeout?.(timeout);
-    const mine = token;
-    timeout = timers.setTimeout?.(() => {
-      timeout = null;
-      if (mine !== token || lastRaw) return;
-      teardown();
-      setState(sensorDenied ? 'denied' : 'unsupported');
-    }, noSampleTimeoutMs);
+  /**
+   * The sensor failed or stayed silent: drop its reading (it is no longer
+   * live), stop drawing it, and try the events, which must deliver a reading
+   * of their own within the timeout.
+   */
+  function fallBackFromSensor() {
+    newAttempt();
+    source = null; // the events name their own source on their first reading
+    lastRaw = null;
+    target = null;
+    if (frame != null) cancelFrame(frame);
+    frame = null;
+    lastFrameAt = null;
+    limiter.reset();
+    if (eventsAvailable) listenEvents();
+    else giveUp();
   }
 
   function startSensor(Sensor) {
@@ -224,9 +276,9 @@ export function createPhoneOrientation({
     } catch {
       return false; // SecurityError / ReferenceError: use the events
     }
-    const mine = token;
+    const mine = newAttempt();
     const onReading = () => {
-      if (mine !== token || !running()) return;
+      if (mine !== attempt || !running()) return;
       const q = s.quaternion;
       if (!q || q.length !== 4 || !q.every(isNum)) return;
       if (!limiter.accept(now())) return;
@@ -234,16 +286,10 @@ export function createPhoneOrientation({
       sample([q[0], q[1], q[2], q[3]], { magnetic: true });
     };
     const onError = (event) => {
-      if (mine !== token) return;
+      if (mine !== attempt || !running()) return;
       const name = event?.error?.name;
       if (name === 'NotAllowedError') sensorDenied = true;
-      try {
-        s.stop?.();
-      } catch {
-        /* already stopped */
-      }
-      sensor = null;
-      if (running()) listenEvents(); // also when it fails after readings
+      fallBackFromSensor(); // also when it fails after readings
     };
     s.addEventListener?.('reading', onReading);
     s.addEventListener?.('error', onError);
@@ -259,10 +305,12 @@ export function createPhoneOrientation({
     try {
       s.start();
     } catch {
+      newAttempt(); // remove what was attached; the caller uses the events
       return false;
     }
+    if (mine !== attempt) return true; // an error fired inside start()
     sensor = s;
-    armTimeout();
+    armTimeout(fallBackFromSensor); // started but silent: try the events
     return true;
   }
 
@@ -304,10 +352,7 @@ export function createPhoneOrientation({
 
   function teardown() {
     token += 1;
-    for (const remove of removers.splice(0)) remove();
-    sensor = null;
-    timers.clearTimeout?.(timeout);
-    timeout = null;
+    newAttempt(); // invalidates every callback and timer of the old attempt
     if (frame != null) cancelFrame(frame);
     frame = null;
     lastFrameAt = null;
@@ -334,6 +379,7 @@ export function createPhoneOrientation({
     source = null;
     sensorDenied = false;
     relativeOffset = null;
+    eventsAvailable = false;
     if (!isSecureContext) {
       setState('insecure');
       return Promise.resolve(state);
@@ -344,6 +390,7 @@ export function createPhoneOrientation({
       setState('unsupported');
       return Promise.resolve(state);
     }
+    eventsAvailable = typeof DOE === 'function';
     setState('asking');
     // Pick the best source once access is settled (feature detection, not
     // browser sniffing: Chrome now has requestPermission() too).
