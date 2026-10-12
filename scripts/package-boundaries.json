@@ -60,6 +60,17 @@
     ],
     "external": ["ws"]
   },
+  "byrdit-history": {
+    "runtime": "node",
+    "exports": ["./server/byrdit/history"],
+    "modules": [
+      "src/byrdit/history/index.js",
+      "src/byrdit/history/collectorBridge.js",
+      "src/byrdit/history/feeds.js",
+      "src/byrdit/history/staleness.js"
+    ],
+    "external": []
+  },
   "adsb-lol-source": {
     "exports": ["./sources/adsb-lol"],
     "modules": ["src/data/adsbLolFallback.js"],

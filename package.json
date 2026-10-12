@@ -86,6 +86,9 @@
     "./server/providers/live": {
       "node": "./server/providers/live.js"
     },
+    "./server/byrdit/history": {
+      "node": "./src/byrdit/history/index.js"
+    },
     "./sources/adsb-lol": "./src/data/adsbLolFallback.js",
     "./server/providers/places": {
       "node": "./server/providers/places.js"
