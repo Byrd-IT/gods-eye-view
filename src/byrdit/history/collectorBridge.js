@@ -30,6 +30,12 @@ import {
  * (createTerminalRoute), because the upstream FIRMS plugin polls on any
  * sub-path.
  *
+ * Pattern routes (feed.pathPattern, B7 CelesTrak): one entry answers a family
+ * of sub-paths, /api/celestrak/<group> -> /v1/latest/celestrak-<group>; each
+ * group has its own last-good copy and state (capped at MAX_PATTERN_SLOTS).
+ * The group set is not listed here: the collector discovers groups from
+ * these requests.
+ *
  * Owner N5: the server never clears a layer. It adds X-Feed-Grey-Until
  * (X-Feed-Stale-Since + GEV_STALE_GREY_MS) so the client decides grey vs
  * cleared on the server clock (staleness.js feedDisplayState).
@@ -44,6 +50,8 @@ import {
 
 export const DEFAULT_COLLECTOR_URLS = Object.freeze(['http://127.0.0.1:4180']);
 export const DEFAULT_COLLECTOR_TIMEOUT_MS = 2_000;
+/** Most per-path copies one pattern route keeps (CelesTrak groups). */
+export const MAX_PATTERN_SLOTS = 32;
 
 /** Collector response headers relayed to the browser. */
 export const RELAYED_HEADERS = Object.freeze([
@@ -141,28 +149,56 @@ export function createCollectorBridge({
   const feed = BRIDGE_FEEDS[name];
   if (!feed) throw new Error(`unknown bridge feed: ${name}`);
   const threshold = staleThresholdMs(feed.cadenceMs);
-  /** Last good copy: { body: Uint8Array, contentType, lastOkAt }. */
-  let cache = null;
-  /** 'collector' | 'cache' | 'none' — last served answer, for transitions. */
-  let state = null;
-  /** In-flight collector read shared by concurrent requests, keyed by query. */
-  const inflight = new Map();
+  const pattern = feed.pathPattern ? new RegExp(feed.pathPattern) : null;
+  /**
+   * Per collector feed: last good copy { body: Uint8Array, contentType,
+   * lastOkAt }, last served answer ('collector' | 'cache' | 'none', for
+   * transitions) and the in-flight collector read shared by concurrent
+   * requests, keyed by query. A plain entry has exactly one slot.
+   */
+  const slots = new Map();
 
-  function transition(next, detail) {
-    if (next === state) return;
-    const previous = state ?? 'start';
-    state = next;
+  function slotFor(pathname) {
+    let key;
+    if (pattern) {
+      const m = pattern.exec(pathname);
+      if (!m) return null;
+      key = `${feed.collectorFeedPrefix}${m[1].toLowerCase()}`;
+    } else {
+      if (pathname !== (feed.path ?? '/')) return null;
+      key = feed.collectorFeed;
+    }
+    let slot = slots.get(key);
+    if (!slot) {
+      slot = {
+        collectorFeed: key,
+        cache: null,
+        state: null,
+        inflight: new Map(),
+      };
+      // a pattern route never keeps more than MAX_PATTERN_SLOTS copies; an
+      // extra key is still answered, just not remembered
+      if (!pattern || slots.size < MAX_PATTERN_SLOTS) slots.set(key, slot);
+    }
+    return slot;
+  }
+
+  function transition(slot, next, detail) {
+    if (next === slot.state) return;
+    const previous = slot.state ?? 'start';
+    slot.state = next;
+    const label = pattern ? `${name}/${slot.collectorFeed}` : name;
     log(
-      `[gev-history bridge] ${name}: ${previous} -> ${next}${detail ? ` (${detail})` : ''}`,
+      `[gev-history bridge] ${label}: ${previous} -> ${next}${detail ? ` (${detail})` : ''}`,
     );
   }
 
-  async function readCollector(search) {
+  async function readCollector(slot, search) {
     let reason = 'collector_down';
     for (const base of urls) {
       try {
         const response = await fetchImpl(
-          `${base}/v1/latest/${feed.collectorFeed}${search}`,
+          `${base}/v1/latest/${slot.collectorFeed}${search}`,
           {
             headers: { Accept: 'application/json' },
             redirect: 'error',
@@ -189,11 +225,13 @@ export function createCollectorBridge({
     return { ok: false, reason };
   }
 
-  function sharedRead(search) {
-    let pending = inflight.get(search);
+  function sharedRead(slot, search) {
+    let pending = slot.inflight.get(search);
     if (!pending) {
-      pending = readCollector(search).finally(() => inflight.delete(search));
-      inflight.set(search, pending);
+      pending = readCollector(slot, search).finally(() =>
+        slot.inflight.delete(search),
+      );
+      slot.inflight.set(search, pending);
     }
     return pending;
   }
@@ -209,7 +247,8 @@ export function createCollectorBridge({
     res.end(req.method === 'HEAD' ? undefined : body);
   }
 
-  function serveCache(req, res, reason) {
+  function serveCache(slot, req, res, reason) {
+    const { cache } = slot;
     const t = now();
     const age = Math.max(0, t - cache.lastOkAt);
     const stale = age > threshold;
@@ -226,12 +265,12 @@ export function createCollectorBridge({
       headers['X-Feed-Stale-Since'] = String(cache.lastOkAt + threshold);
       headers['X-Feed-Reason'] = reason;
     }
-    transition('cache', reason);
+    transition(slot, 'cache', reason);
     send(req, res, 200, withGrey(headers), cache.body);
   }
 
-  function serveNone(req, res, reason) {
-    transition('none', reason);
+  function serveNone(slot, req, res, reason) {
+    transition(slot, 'none', reason);
     send(
       req,
       res,
@@ -255,8 +294,10 @@ export function createCollectorBridge({
       return next();
     }
     // The mount also matches sub-routes (/api/military/track,
-    // /api/fire-perimeters/inciweb/*): only the entry's own path is bridged.
-    if (url.pathname !== (feed.path ?? '/')) return next();
+    // /api/fire-perimeters/inciweb/*): only the entry's own path (or, for a
+    // pattern route, the paths its pattern matches) is bridged.
+    const slot = slotFor(url.pathname);
+    if (!slot) return next();
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, {
         'Content-Type': 'application/json',
@@ -266,31 +307,34 @@ export function createCollectorBridge({
       return;
     }
     try {
-      const result = await sharedRead(feed.forwardQuery ? url.search : '');
+      const result = await sharedRead(
+        slot,
+        feed.forwardQuery ? url.search : '',
+      );
       if (result.ok) {
         const headers = withGrey({ ...result.headers });
         headers['X-Feed-Bridge'] = 'collector';
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
-        cache = {
+        slot.cache = {
           body: result.body,
           contentType: headers['Content-Type'] ?? 'application/json',
           lastOkAt: lastOk ?? now() - (age ?? 0),
         };
-        transition('collector');
+        transition(slot, 'collector');
         send(req, res, 200, headers, result.body);
         return;
       }
-      if (cache) serveCache(req, res, result.reason);
-      else serveNone(req, res, result.reason);
+      if (slot.cache) serveCache(slot, req, res, result.reason);
+      else serveNone(slot, req, res, result.reason);
     } catch {
       // Never fall through to the upstream plugin, whatever failed here.
       if (res.headersSent) {
         res.end();
         return;
       }
-      if (cache) serveCache(req, res, 'bridge_error');
-      else serveNone(req, res, 'bridge_error');
+      if (slot.cache) serveCache(slot, req, res, 'bridge_error');
+      else serveNone(slot, req, res, 'bridge_error');
     }
   };
 }
@@ -305,7 +349,9 @@ export function createCollectorBridge({
  *
  * @param {object} options
  * @param {string} options.source X-Feed-Source of the namespace
- * @param {{path: string, handler: Function}[]} options.entries
+ * @param {{path?: string, pattern?: RegExp, handler: Function}[]} options.entries
+ *   an entry with `pattern` (pattern route, B7) owns every raw sub-path the
+ *   pattern matches
  */
 export function createTerminalRoute({ source, entries }) {
   const notFound = (req, res) => {
@@ -327,7 +373,9 @@ export function createTerminalRoute({ source, entries }) {
   };
   return function terminalRoute(req, res) {
     const subPath = String(req.url || '/').split('?')[0];
-    const entry = entries.find((e) => e.path === subPath);
+    const entry = entries.find((e) =>
+      e.pattern ? e.pattern.test(subPath) : e.path === subPath,
+    );
     if (!entry) {
       notFound(req, res);
       return undefined;
@@ -372,6 +420,9 @@ export function collectorBridgePlugin({
         .filter((other) => BRIDGE_FEEDS[other].route === route)
         .map((other) => ({
           path: BRIDGE_FEEDS[other].path ?? '/',
+          pattern: BRIDGE_FEEDS[other].pathPattern
+            ? new RegExp(BRIDGE_FEEDS[other].pathPattern)
+            : null,
           handler: make(other),
         }));
       server.middlewares.use(

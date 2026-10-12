@@ -110,7 +110,8 @@ test('contract: GEV cyclone describe() == collector /v1/latest/cyclones bytes (p
 });
 
 test('registry: B6 entries, cadences match the collector, FIRMS status shares the FIRMS flag', () => {
-  assert.deepEqual(Object.keys(BRIDGE_FEEDS), [
+  // B7 appends launches and celestrak after the B6 entries
+  assert.deepEqual(Object.keys(BRIDGE_FEEDS).slice(0, 5), [
     'military',
     'firms',
     'firmsStatus',
