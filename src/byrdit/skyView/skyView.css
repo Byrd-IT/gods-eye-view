@@ -403,7 +403,8 @@ body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
 /* P3b: Layers + search tools (skyContent.js) */
 .gev-sky-tools {
   position: fixed;
-  top: 190px;
+  /* below the toolbar (skyView.js writes its real bottom edge) */
+  top: calc(var(--gev-sky-bar-bottom, 182px) + 8px);
   right: 16px;
   z-index: 97;
   display: flex;
@@ -547,10 +548,6 @@ body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
 .gev-sky-bar button[data-sky='point'] {
   min-height: 44px;
 }
-.gev-sky-bar button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
 /* figure-8 calibration hint: a slowly traced lemniscate glyph */
 .gev-sky-figure8 {
   font:
@@ -621,5 +618,162 @@ body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
   /* wider-than-900 px landscape phones: tools still hang below the toolbar */
   .gev-sky-tools {
     top: calc(var(--gev-sky-bar-bottom, 162px) + 8px);
+  }
+}
+
+/* ── Sky time (P5, skyTimeControl.js): its own row(s) inside the toolbar ── */
+.gev-sky-time {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.gev-sky-time-body,
+.gev-sky-time-scrub,
+.gev-sky-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.gev-sky-time-scrub[hidden],
+.gev-sky-time-chip[hidden],
+.gev-sky-banners[hidden] {
+  display: none !important;
+}
+
+.gev-sky-bar select {
+  min-height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-primary, #e8f4ff);
+  font: 12px var(--font-mono);
+}
+
+.gev-sky-bar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.gev-sky-time-chip {
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 196, 92, 0.6);
+  border-radius: 999px;
+  background: rgba(255, 196, 92, 0.14);
+  color: #ffd28a;
+  font-weight: 600;
+}
+
+.gev-sky-zone {
+  opacity: 0.8;
+  font-size: 11px;
+}
+
+.gev-sky-time-status {
+  color: var(--text-primary, #e8f4ff);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.gev-sky-time-status:empty {
+  display: none;
+}
+
+.gev-sky-banners {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gev-sky-banner {
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.gev-sky-banner-info {
+  background: rgba(120, 200, 255, 0.12);
+}
+
+.gev-sky-banner-warn {
+  background: rgba(255, 196, 92, 0.16);
+  color: #ffd28a;
+}
+
+.gev-sky-banner-error {
+  background: rgba(255, 99, 99, 0.18);
+  color: #ffb3b3;
+}
+
+/* Keyboard focus is always visible on every Sky control and the sky itself. */
+.gev-sky-bar :focus-visible,
+.gev-sky-panel :focus-visible,
+.gev-sky-sats :focus-visible,
+.gev-sky-canvas:focus-visible {
+  outline: 2px solid #78c8ff;
+  outline-offset: 2px;
+}
+
+/* Touch: every Sky control is at least 44 x 44 px (WCAG 2.5.5 target size). */
+@media (pointer: coarse) {
+  .gev-sky-btn,
+  .gev-sky-panel button,
+  .gev-sky-bar button,
+  .gev-sky-bar select,
+  .gev-sky-bar input,
+  .gev-sky-sats button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Reduced motion: no animated transitions (look-at jumps are instant in JS). */
+@media (prefers-reduced-motion: reduce) {
+  .gev-sky-btn,
+  .gev-sky-panel *,
+  .gev-sky-bar *,
+  .gev-sky-sats * {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The one-line time summary only exists on narrow screens. */
+.gev-sky-time-fold {
+  display: none;
+}
+
+/* Narrow screens: the time rows fold behind the summary button (open with
+   it), and the satellite panel leaves room for the Layers/search tools that
+   hang below the toolbar on the right. */
+@media (max-width: 900px) {
+  .gev-sky-time-fold {
+    display: inline-flex;
+    align-items: center;
+  }
+  .gev-sky-time:not([data-open='true']) .gev-sky-time-body {
+    display: none;
+  }
+  .gev-sky-time-body {
+    flex-basis: 100%;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 900px) and (min-height: 521px) {
+  .gev-sky-sats {
+    max-height: calc(
+      100vh - 2vh - 7.5rem - var(--gev-sky-bar-bottom, 200px) - 108px
+    );
   }
 }

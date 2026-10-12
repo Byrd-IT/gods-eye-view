@@ -16,6 +16,9 @@ import { makeView } from './skyMath.js';
 
 export const SV_PARAM = 'sv';
 export const SVF_PARAM = 'svf';
+/** The History time slider's parameter (DESIGN.md 4.5); read, never written. */
+export const HT_PARAM = 'ht';
+const ISO_UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?Z$/;
 /** name -> [bit, default value]. Append only: never reuse or renumber a bit. */
 export const SKY_FLAG_BITS = Object.freeze({
   flatHorizon: [1, false],
@@ -104,8 +107,7 @@ export function decodeSkyState(sv, svf) {
   if (Math.abs(latDeg) > 90 || Math.abs(lonDeg) > 180) return null;
   let timeMs = null;
   if (parts.length === 6) {
-    if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?Z$/.test(parts[5]))
-      return null;
+    if (!ISO_UTC.test(parts[5])) return null;
     timeMs = Date.parse(parts[5]);
     if (!Number.isFinite(timeMs)) return null;
   }
@@ -122,10 +124,34 @@ export function decodeSkyState(sv, svf) {
 export function readSkyUrl(href) {
   try {
     const url = new URL(href);
-    return decodeSkyState(
+    const state = decodeSkyState(
       url.searchParams.get(SV_PARAM),
       url.searchParams.get(SVF_PARAM),
     );
+    if (!state) return null;
+    // `ht` (the History time, DESIGN.md 4.5) wins over the sv time
+    const ht = parseHistoryTime(url.searchParams.get(HT_PARAM));
+    if (Number.isFinite(ht)) return { ...state, timeMs: ht, timeSource: 'ht' };
+    return {
+      ...state,
+      timeSource: Number.isFinite(state.timeMs) ? 'sv' : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** `ht=<ISO UTC>` value -> ms, or null (same strict form as the sv time). */
+export function parseHistoryTime(value) {
+  if (typeof value !== 'string' || !ISO_UTC.test(value)) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** The History time in a URL (ms) or null. */
+export function readHistoryTime(href) {
+  try {
+    return parseHistoryTime(new URL(href).searchParams.get(HT_PARAM));
   } catch {
     return null;
   }
@@ -134,11 +160,18 @@ export function readSkyUrl(href) {
 /**
  * New href with the sky parameters set (state) or removed (null). The hash
  * (ShareLinkManager's camera/layer state) and other query parameters are kept.
+ * `ht` belongs to the History control and is never written here; while it
+ * is in the URL it is THE shared time, so `sv` is written without a time.
  */
 export function writeSkyUrl(href, state) {
   const url = new URL(href);
   if (state) {
-    const { sv, svf } = encodeSkyState(state);
+    const hasHt = Number.isFinite(
+      parseHistoryTime(url.searchParams.get(HT_PARAM)),
+    );
+    const { sv, svf } = encodeSkyState(
+      hasHt ? { ...state, timeMs: null } : state,
+    );
     url.searchParams.set(SV_PARAM, sv);
     if (svf === '0') url.searchParams.delete(SVF_PARAM);
     else url.searchParams.set(SVF_PARAM, svf);

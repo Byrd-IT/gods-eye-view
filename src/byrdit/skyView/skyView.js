@@ -15,6 +15,10 @@
  * P4: "Point at the sky" on phones (orientation.js): the view follows the
  * phone (true north via the WMM declination), Align on the Sun/Moon/selected
  * object, calibration hint; a drag always takes over.
+ * P5: the Sky time source (skyClock.js: live/fixed/play + the History-bound
+ * provider of historyTime.js) is the ONLY time for the overlay, the worker
+ * ticks, the ephemeris and viewer.clock; the time control, presets and
+ * validity banners live in skyTimeControl.js.
  */
 import * as Cesium from 'cesium';
 import { observerSolarElevation } from '../../data/satellitePass.js';
@@ -46,7 +50,7 @@ import {
   snapshotCamera,
   snapshotScene,
 } from './skyCamera.js';
-import { createSatSky } from './satSky.js';
+import { createSatSky, fetchCelestrakText } from './satSky.js';
 import {
   drawSatellites,
   geoBeltPoints,
@@ -63,7 +67,11 @@ import {
   renderSatPanel,
 } from './satPanel.js';
 import { SKY_CLASSES } from './satCore.js';
-import { createSkyClock } from './skyClock.js';
+import { createHistoryProvider } from './historyTime.js';
+import { createSkyClock, createSkyTimeSource } from './skyClock.js';
+import { createIssPassFinder } from './skyPresets.js';
+import { createTimeControl, toLocalInputValue } from './skyTimeControl.js';
+import { validityBanners } from './skyValidity.js';
 import {
   clampEl,
   dragView,
@@ -98,6 +106,10 @@ const PHASE_TEXT = {
 };
 /** Satellite redraw cap while objects move (frames per second). */
 const SAT_FPS = 15;
+/** Time-driven redraw cap while the Sky clock plays (frames per second). */
+const PLAY_FPS = 30;
+/** Satellite tick period while the clock runs faster than real time. */
+const FAST_TICK_MS = 250;
 const LOOK_AT_MS = 600;
 /** A press that moves less than this and ends sooner than CLICK_MS is a click. */
 const CLICK_PX = 5;
@@ -106,6 +118,19 @@ const CLICK_MS = 400;
 const PLAUSIBLE_GROUND_M = [-500, 9000];
 
 const fmt = (value, digits) => Number(value).toFixed(digits);
+
+/**
+ * Sky label boxes ({x0, y0, x1, y1}: cardinals + skyContent labels) as the
+ * {x, y, w, h} boxes the satellite label pass checks against.
+ */
+export function takenBoxes(cardinals = [], skyLabels = []) {
+  const out = [];
+  for (const b of cardinals)
+    out.push({ x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 });
+  for (const { box: b } of skyLabels || [])
+    if (b) out.push({ x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 });
+  return out;
+}
 
 /** Observer + view caption for the status line. */
 export function describeObserver(observer, { sunAltDeg = null } = {}) {
@@ -125,12 +150,8 @@ export function describeObserver(observer, { sunAltDeg = null } = {}) {
   return parts.join(' · ');
 }
 
-/** `datetime-local` value in the browser's zone for a UTC instant. */
-export function toLocalInputValue(ms) {
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+/** `datetime-local` value in the browser's zone (moved to skyTimeControl). */
+export { toLocalInputValue };
 
 function el(doc, tag, attrs = {}, text) {
   const node = doc.createElement(tag);
@@ -253,17 +274,6 @@ function buildDom(doc) {
     { type: 'button', 'data-sky': 'grid', 'aria-pressed': 'false' },
     'Grid',
   );
-  const live = el(
-    doc,
-    'button',
-    { type: 'button', 'data-sky': 'live', 'aria-pressed': 'true' },
-    'Live',
-  );
-  const time = el(doc, 'input', {
-    type: 'datetime-local',
-    'data-sky': 'time',
-    'aria-label': 'Sky time (your browser time zone)',
-  });
   const eyeLabel = el(doc, 'label', { className: 'gev-sky-eye' }, 'Eye m ');
   const eye = el(doc, 'input', {
     type: 'number',
@@ -294,7 +304,8 @@ function buildDom(doc) {
     'Point at the sky',
   );
   point.hidden = true;
-  bar.append(back, move, flat, grid, live, time, eyeLabel, point, info);
+  // the time control (skyTimeControl.js) is inserted after `grid`
+  bar.append(back, move, flat, grid, eyeLabel, point, info);
 
   // P4 phone pointing: status, calibration hint, Align on a known object
   const orient = el(doc, 'div', {
@@ -378,7 +389,6 @@ function buildDom(doc) {
     bar,
     info,
     canvas,
-    time,
     eye,
     crosshair,
     orient: {
@@ -396,7 +406,6 @@ function buildDom(doc) {
       move,
       flat,
       grid,
-      live,
       go,
       point,
       alignSun,
@@ -445,6 +454,14 @@ export function mountSkyView({
   /** WMM declination (degrees east) for the observer, now. */
   declinationAt = (latDeg, lonDeg) =>
     declinationDeg(latDeg, lonDeg, Date.now()),
+  /**
+   * History time slider (B11): an object control or the window event
+   * (historyTime.js); default listens for the event on window.
+   */
+  historyControl = null,
+  historyTarget = globalThis.window ?? null,
+  /** Next ISS pass for the preset (P2b passes engine when merged). */
+  nextIssPass = null,
 } = {}) {
   if (!viewer?.camera || !viewer?.scene || !doc?.createElement) return null;
   const existing = mounted.get(viewer);
@@ -465,6 +482,12 @@ export function mountSkyView({
   };
 
   const clock = createSkyClock({ now });
+  const historyTime = createHistoryProvider({
+    control: historyControl,
+    target: historyTarget,
+    now,
+  });
+  const time = createSkyTimeSource({ clock, history: historyTime });
   let active = false;
   let observer = null;
   let view = makeView();
@@ -496,11 +519,12 @@ export function mountSkyView({
     ...(createSatWorker ? { createWorker: createSatWorker } : {}),
     ...(fetchCelestrak ? { fetchText: fetchCelestrak } : {}),
     timers,
-    getTime: () => clock.getTime(),
+    getTime: () => time.getTime(),
     onChange: (what) => {
       if (!active) return;
       updateSatPanel();
-      if (what === 'tick' && satFrame == null) redraw();
+      if (what === 'tick') renderValidity(time.getTime());
+      if (what === 'tick' && satFrame == null && playFrame == null) redraw();
       if (what === 'tick') startSatAnimation();
     },
   });
@@ -534,6 +558,23 @@ export function mountSkyView({
     ...skyContentOptions,
   });
   if (content.root) host.append(content.root);
+
+  const timeControl = createTimeControl({
+    doc,
+    clock,
+    source: time,
+    history: historyTime,
+    getObserver: () => observer,
+    nextIssPass:
+      nextIssPass ||
+      createIssPassFinder({ fetchText: fetchCelestrak || fetchCelestrakText }),
+  });
+  if (typeof dom.buttons.grid.after === 'function')
+    dom.buttons.grid.after(timeControl.root);
+  else dom.bar.append(timeControl.root);
+  // P1 names kept for callers of handle.elements
+  dom.time = timeControl.dom.time;
+  dom.buttons.live = timeControl.dom.live;
 
   const setStatus = (text) => {
     dom.status.textContent = text || '';
@@ -585,8 +626,16 @@ export function mountSkyView({
   });
   dom.buttons.point.hidden = !offerPointing();
 
+  /**
+   * Align corrects the compass from where the drawn object is, so it is only
+   * offered while the Sky shows the present (P5 time travel: a past/future or
+   * History sky would put a wrong offset on the real compass).
+   */
+  const alignTimeOk = () => time.mode === 'live';
+
   /** Where an Align target is now: { label, azDeg, elDeg } or null. */
   function alignTargets() {
+    if (!alignTimeOk()) return { sun: null, moon: null, selected: null };
     const eph = content.ephemeris;
     const sun = eph?.sun
       ? { label: 'the Sun', azDeg: eph.sun.azDeg, elDeg: eph.sun.elDeg }
@@ -643,6 +692,7 @@ export function mountSkyView({
     if (orientNote) parts.push(orientNote);
     const message = orientationMessage(state, orientation.reason);
     if (message) parts.push(message);
+    if (canAlign && !alignTimeOk()) parts.push('Align needs Live time');
     if (running && orientation.source !== 'relative') {
       const { declinationDeg: decl, offsetDeg, accuracyDeg } = orientation.info;
       parts.push(declinationText(decl));
@@ -770,14 +820,15 @@ export function mountSkyView({
       text: content.textSprites,
       ratio,
     });
-    satObjects = satSky.running ? satSky.objectsAt(clock.getTime()) : null;
-    content.draw(ctx, {
+    satObjects = satSky.running ? satSky.objectsAt(time.getTime()) : null;
+    const reserved = cardinalBoxes(model.cardinals);
+    const skyStats = content.draw(ctx, {
       view,
       width,
       height,
       sunAltDeg: lastSunAlt,
       occlusion: (azDeg, elDeg) => profileOcclusion(profile, azDeg, elDeg),
-      reserved: cardinalBoxes(model.cardinals),
+      reserved,
       ratio,
     });
     if (satSky.running) {
@@ -794,6 +845,9 @@ export function mountSkyView({
         // read layout (getBoundingClientRect): skip them otherwise, so a
         // plain redraw never forces a synchronous layout
         insets: selectedIndex != null ? arrowInsets(width, height) : {},
+        // one collision space: satellite labels keep off the cardinals and
+        // the star/planet/constellation labels placed just before (P5)
+        reserved: takenBoxes(reserved, skyStats?.labels),
       });
       drawSatellites(ctx, satModel, { text: content.textSprites, ratio });
     } else satModel = null;
@@ -802,9 +856,10 @@ export function mountSkyView({
   // ── satellites ───────────────────────────────────────────────────────────
   /**
    * Narrow layouts (skyView.css, max-width 900px) size the satellite panel
-   * and place the search/Layers tools from the toolbar's real bottom edge,
-   * because the toolbar wraps to a different height at every width:
-   * --gev-sky-bar-bottom on both.
+   * from the toolbar's real bottom edge, because the toolbar wraps to a
+   * different height at every width: --gev-sky-bar-bottom on the panel.
+   * The Layers/search tools hang below the toolbar at every width (P5: the
+   * time rows made the toolbar taller), so they get the same variable.
    */
   function syncSkyLayout() {
     if (dom.bar.hidden) return;
@@ -812,8 +867,6 @@ export function mountSkyView({
     if (!bar || !(bar.height > 0)) return;
     const bottom = `${Math.ceil(bar.bottom)}px`;
     satDom.root.style?.setProperty?.('--gev-sky-bar-bottom', bottom);
-    // P4: the toolbar gains a row on phones; the search/Layers tools hang
-    // below it instead of over it
     content.root?.style?.setProperty?.('--gev-sky-bar-bottom', bottom);
   }
 
@@ -847,7 +900,7 @@ export function mountSkyView({
 
   function updateSatPanel() {
     if (!active) return;
-    const t = clock.getTime();
+    const t = time.getTime();
     const objects = satSky.objectsAt(t);
     const occlusion = (az, elDeg) => profileOcclusion(profile, az, elDeg);
     const stats = satSky.stats;
@@ -885,7 +938,7 @@ export function mountSkyView({
         satFrameAt = t;
         redraw();
       }
-      if (clock.mode === 'live') satFrame = requestFrame(step);
+      if (time.mode === 'live') satFrame = requestFrame(step);
     };
     satFrame = requestFrame(step);
   }
@@ -931,9 +984,14 @@ export function mountSkyView({
     if (look && selectedIndex != null) lookAtSatellite(selectedIndex);
   }
 
+  /**
+   * The one place Sky time is applied: viewer.clock (Cesium sun lighting and
+   * atmosphere), Sun altitude / magnitude limit, stars + ephemeris, picker,
+   * banners, then a redraw. Satellites read the same time source.
+   */
   function applyTime() {
     if (!active || !observer) return;
-    const t = clock.getTime();
+    const t = time.getTime();
     applySkyTime(CesiumApi, viewer, t);
     lastSunAlt = observerSolarElevation(observer.latDeg, observer.lonDeg, t);
     content.update(t, observer);
@@ -941,11 +999,67 @@ export function mountSkyView({
       flatHorizon: flags.flatHorizon,
       skyBox: skyBoxVisible(lastSunAlt),
     });
-    if (clock.mode === 'live') dom.time.value = toLocalInputValue(t);
+    if (time.provider === 'history')
+      satSky.setSource(historyTime.satelliteSourceAt(t));
+    else if (satSky.sourceKey != null) satSky.setSource(null);
+    timeControl.tick(t);
+    renderValidity(t);
     const lim = limMag(lastSunAlt);
-    dom.info.textContent = `${describeObserver(observer, { sunAltDeg: lastSunAlt })} · faintest drawn mag ${fmt(lim, 1)}`;
+    const info = `${describeObserver(observer, { sunAltDeg: lastSunAlt })} · faintest drawn mag ${fmt(lim, 1)}`;
+    // write only on change: a DOM write per frame while playing would dirty
+    // the page style before every canvas text/font use
+    if (dom.info.textContent !== info) dom.info.textContent = info;
     if (orientation.running) syncOrientationUi();
     redraw();
+  }
+
+  function renderValidity(t) {
+    timeControl.renderBanners(
+      validityBanners({
+        timeMs: t,
+        satAge: satSky.running ? satSky.stats.age : null,
+        historyActive: time.provider === 'history',
+        historyElements: satSky.sourceKey != null,
+      }),
+    );
+  }
+
+  // ── Sky time ─────────────────────────────────────────────────────────────
+  let playFrame = null;
+  let playFrameAt = -Infinity;
+  /** Frame loop while the time plays (built-in play or History playing). */
+  function syncPlayLoop() {
+    const playing = active && time.moving && time.mode !== 'live';
+    if (!playing) {
+      if (playFrame != null) cancelFrame(playFrame);
+      playFrame = null;
+      return;
+    }
+    if (playFrame != null) return;
+    const step = () => {
+      playFrame = null;
+      if (!active || !time.moving || time.mode === 'live') return;
+      const wall = now();
+      if (wall - playFrameAt >= 1000 / PLAY_FPS - 1) {
+        playFrameAt = wall;
+        applyTime();
+      }
+      playFrame = requestFrame(step);
+    };
+    playFrame = requestFrame(step);
+  }
+
+  /** Every time change (mode, jump, speed, History) goes through here. */
+  function onTimeChange() {
+    timeControl.sync();
+    if (!active) return;
+    satSky.setTickMs(
+      time.moving && Math.abs(time.rate) > 1 ? FAST_TICK_MS : 1000,
+    );
+    applyTime();
+    satSky.timeChanged();
+    syncPlayLoop();
+    scheduleUrl();
   }
 
   function applyView(next) {
@@ -973,7 +1087,11 @@ export function mountSkyView({
             latDeg: observer.latDeg,
             lonDeg: observer.lonDeg,
             view,
-            timeMs: clock.mode === 'fixed' ? clock.getTime() : null,
+            // History owns a shared time (`ht`); live has none
+            timeMs:
+              time.provider === 'history' || clock.mode === 'live'
+                ? null
+                : clock.getTime(),
             flags,
           }
         : null;
@@ -1034,7 +1152,8 @@ export function mountSkyView({
       dom.panel.hidden = true;
       dom.button.setAttribute('aria-expanded', 'false');
       doc.body?.classList?.add('gev-sky-active');
-      content.start(observer, clock.getTime());
+      content.start(observer, time.getTime());
+      timeControl.sync();
       applyTime();
       applyView(view);
       startTicking();
@@ -1049,6 +1168,10 @@ export function mountSkyView({
           declinationAt(observer.latDeg, observer.lonDeg),
         );
       syncOrientationUi();
+      satSky.setTickMs(
+        time.moving && Math.abs(time.rate) > 1 ? FAST_TICK_MS : 1000,
+      );
+      syncPlayLoop();
       dom.canvas.focus?.();
     });
     if (!entered) setStatus('Sky view is not available in this mode.');
@@ -1071,6 +1194,7 @@ export function mountSkyView({
     content.stop();
     cancelLook();
     stopSatAnimation();
+    syncPlayLoop();
     satSky.stop();
     satModel = null;
     satObjects = null;
@@ -1116,7 +1240,9 @@ export function mountSkyView({
         exit({ keepCamera: true });
         return;
       }
-      if (clock.mode === 'live') applyTime();
+      // live: once a second; playing: the frame loop does it, this is the
+      // fallback when frames do not run (background tab, no rAF)
+      if (time.moving) applyTime();
     }, 1000);
   }
   /** True when something else (search, fly-to, voice) moved the camera away. */
@@ -1377,6 +1503,10 @@ export function mountSkyView({
       exit();
       return;
     }
+    if (timeControl.onKey(event)) {
+      event.preventDefault?.();
+      return;
+    }
     const next = keyView(view, event.key);
     if (next) {
       event.preventDefault?.();
@@ -1439,20 +1569,6 @@ export function mountSkyView({
     redraw();
     scheduleUrl();
   });
-  listen(dom.buttons.live, 'click', () => {
-    clock.setLive();
-    setPressed(dom.buttons.live, true);
-    applyTime();
-    scheduleUrl();
-  });
-  listen(dom.time, 'change', () => {
-    const ms = new Date(dom.time.value).getTime();
-    if (clock.setFixed(ms)) {
-      setPressed(dom.buttons.live, false);
-      applyTime();
-      scheduleUrl();
-    }
-  });
   listen(dom.eye, 'change', () => {
     if (!observer) return;
     observer =
@@ -1505,9 +1621,7 @@ export function mountSkyView({
     if (selectedIndex != null) lookAtSatellite(selectedIndex);
   });
   listen(satDom.clear, 'click', () => selectSatellite(null));
-  clock.subscribe(() => {
-    if (active) satSky.timeChanged();
-  });
+  time.subscribe(() => onTimeChange());
 
   listen(dom.canvas, 'pointerdown', onPointerDown);
   listen(dom.canvas, 'pointermove', onPointerMove);
@@ -1561,11 +1675,8 @@ export function mountSkyView({
     setPressed(dom.buttons.flat, flags.flatHorizon);
     setPressed(dom.buttons.grid, flags.grid);
     content.setFlags(flags);
-    if (Number.isFinite(fromUrl.timeMs)) {
-      clock.setFixed(fromUrl.timeMs);
-      setPressed(dom.buttons.live, false);
-      dom.time.value = toLocalInputValue(fromUrl.timeMs);
-    }
+    // readSkyUrl already applied the precedence: `ht` wins over the sv time
+    if (Number.isFinite(fromUrl.timeMs)) clock.setFixed(fromUrl.timeMs);
     autoTimer = timers.setTimeout?.(() => {
       autoTimer = null;
       enterAt({
@@ -1575,6 +1686,8 @@ export function mountSkyView({
       });
     }, autoEnterDelayMs);
   }
+
+  timeControl.sync();
 
   const handle = {
     get destroyed() {
@@ -1595,9 +1708,23 @@ export function mountSkyView({
     get profile() {
       return profile;
     },
+    /** Built-in Sky clock (live/fixed/play). */
     get clock() {
       return clock;
     },
+    /** The time source everything reads (built-in or History-bound). */
+    get time() {
+      return time;
+    },
+    /** History-bound time provider (historyTime.js). */
+    get historyTime() {
+      return historyTime;
+    },
+    get timeControl() {
+      return timeControl;
+    },
+    /** Jump to a preset ('sunset' | 'dusk' | 'midnight' | 'moonrise' | 'iss'). */
+    applyPreset: (id) => timeControl.applyPreset(id),
     get geolocator() {
       return geolocator;
     },
@@ -1655,6 +1782,9 @@ export function mountSkyView({
       content.destroy();
       orientation.destroy();
       timers.clearTimeout?.(noteTimer);
+      timeControl.destroy();
+      time.destroy();
+      historyTime.destroy();
       destroyed = true;
       timers.clearTimeout?.(autoTimer);
       timers.clearTimeout?.(urlTimer);

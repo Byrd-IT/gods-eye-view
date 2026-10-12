@@ -72,8 +72,11 @@ export const boxesOverlap = (a, b) =>
  * Greedy label placement: candidates in priority order, each tries right,
  * left, above, below its dot; the first spot inside the canvas (above the
  * compass band) that overlaps no placed label wins, otherwise it is dropped.
+ * `reserved` ({x, y, w, h}) are boxes already taken by the star/planet/
+ * constellation labels and the horizon cardinals (one collision space for
+ * the whole sky, P5); only the SELECTED object's label may sit on them.
  */
-export function placeLabels(candidates, width, height) {
+export function placeLabels(candidates, width, height, reserved = []) {
   const placed = [];
   const maxY = height - COMPASS_BAND_PX;
   for (const c of candidates) {
@@ -89,6 +92,7 @@ export function placeLabels(candidates, width, height) {
       const box = { x, y, w: probe.w, h: probe.h };
       if (x < 0 || y < 0 || x + box.w > width || y + box.h > maxY) continue;
       if (placed.some((p) => boxesOverlap(p.box, box))) continue;
+      if (!c.selected && reserved.some((r) => boxesOverlap(r, box))) continue;
       placed.push({ index: c.index, text: c.text, box, color: c.color });
       break;
     }
@@ -199,6 +203,7 @@ export function satelliteModel({
   labelBudget = LABEL_BUDGET,
   geoBelt = null,
   insets = {},
+  reserved = [],
 }) {
   const dots = [];
   const core = [];
@@ -270,6 +275,7 @@ export function satelliteModel({
       color,
       elDeg: o.elDeg,
       klass: o.klass,
+      selected: isSelected,
     };
     if (isSelected) selected = candidate;
     else if (o.state === STATE.VISIBLE && !dimmed) {
@@ -288,7 +294,7 @@ export function satelliteModel({
   ];
   return {
     dots,
-    labels: placeLabels(candidates, width, height),
+    labels: placeLabels(candidates, width, height, reserved),
     arrow,
     belt: geoBelt ? projectRuns(geoBelt, view, width, height) : [],
   };

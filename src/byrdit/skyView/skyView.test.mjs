@@ -1151,4 +1151,43 @@ test('P4: Align on the Moon fixes a compass offset; refused when the centre is f
   handle.destroy();
   globalThis.localStorage?.removeItem?.('gev.sky.headingOffsetDeg');
 });
+test('P4+P5: Align is offered only at Live time (a past/future sky would put a wrong offset on the real compass)', async () => {
+  const { moonState } = await import('./ephemeris.js');
+  const obs = { latDeg: 29.7604, lonDeg: -95.3698, heightM: 1.7 };
+  let when = null;
+  for (let h = 0; h < 72 && when == null; h += 1) {
+    const t = Date.parse('2026-10-12T00:00:00Z') + h * 3_600_000;
+    const m = moonState(t, obs, { refraction: true });
+    if (m.elDeg > 20 && m.elDeg < 50) when = t;
+  }
+  assert.ok(when, 'found a Moon-up time');
+  const win = sensorWindow();
+  const { doc, handle } = pointingSetup(win, { now: () => when });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'gps' });
+  const moon = handle.content.ephemeris.moon;
+  click(doc.body.find('point'));
+  await settle();
+  win.fire('deviceorientationabsolute', portraitPose(moon.azDeg - 2 - 6, moon.elDeg));
+  assert.equal(doc.body.find('align-moon').disabled, false, 'Live: Align offered');
+  assert.doesNotMatch(doc.body.find('orient-status').textContent, /Align needs Live time/);
+
+  // Sky time moved off the present: every Align target is refused
+  handle.clock.setFixed(when + 2 * 3_600_000);
+  assert.equal(doc.body.find('align-moon').disabled, true);
+  assert.equal(doc.body.find('align-sun').disabled, true);
+  assert.equal(doc.body.find('align-target').disabled, true);
+  assert.match(doc.body.find('orient-status').textContent, /Align needs Live time/);
+  const before = handle.view.azDeg;
+  handle.alignOn('moon');
+  assert.equal(handle.view.azDeg, before, 'no offset applied off Live');
+  assert.doesNotMatch(doc.body.find('orient-status').textContent, /align offset/);
+
+  // back to Live: Align returns
+  click(doc.body.find('live'));
+  win.fire('deviceorientationabsolute', portraitPose(moon.azDeg - 2 - 6, moon.elDeg));
+  assert.equal(doc.body.find('align-moon').disabled, false);
+  assert.doesNotMatch(doc.body.find('orient-status').textContent, /Align needs Live time/);
+  handle.destroy();
+  globalThis.localStorage?.removeItem?.('gev.sky.headingOffsetDeg');
+});
 const wrapDeg = (d) => ((((d + 180) % 360) + 360) % 360) - 180;

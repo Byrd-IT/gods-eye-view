@@ -39,7 +39,8 @@ function defaultCreateWorker() {
   });
 }
 
-async function defaultFetchText(path) {
+/** GP CSV text of a group from the same-origin CelesTrak proxy. */
+export async function fetchCelestrakText(path) {
   const response = await globalThis.fetch(`/api/celestrak/${path}`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.text();
@@ -52,9 +53,12 @@ async function defaultFetchText(path) {
 export function extrapolateAzEl(prev, cur, timeMs) {
   const base = { azDeg: cur.azDeg, elDeg: cur.elDeg };
   if (!prev) return base;
+  // dt < 0 when the Sky clock plays backwards: extrapolate in the direction
+  // the clock moves, never back towards (or past) the older sample
   const dt = cur.timeMs - prev.timeMs;
-  if (!(dt > 0) || dt > MAX_RATE_BASE_MS) return base;
-  const h = Math.min(Math.max(timeMs - cur.timeMs, 0), MAX_EXTRAPOLATE_MS);
+  if (!dt || Math.abs(dt) > MAX_RATE_BASE_MS) return base;
+  const ahead = (timeMs - cur.timeMs) * Math.sign(dt);
+  const h = Math.min(Math.max(ahead, 0), MAX_EXTRAPOLATE_MS) * Math.sign(dt);
   if (!h) return base;
   let dAz = cur.azDeg - prev.azDeg;
   if (dAz > 180) dAz -= 360;
@@ -91,7 +95,7 @@ export function unpackRecords(records, timeMs) {
 
 export function createSatSky({
   createWorker = defaultCreateWorker,
-  fetchText = defaultFetchText,
+  fetchText = fetchCelestrakText,
   timers = globalThis,
   getTime = () => Date.now(),
   onChange = () => {},
@@ -99,6 +103,9 @@ export function createSatSky({
   starlinkOn = false,
   tickMs = TICK_MS,
 } = {}) {
+  /** History mode (B12): GP elements with the epoch nearest Sky time. */
+  let source = null;
+  const fetchGp = (path) => (source ? source.fetchText(path) : fetchText(path));
   let worker = null;
   let removeListener = null;
   let observer = null;
@@ -145,7 +152,7 @@ export function createSatSky({
     loads.set(path, 'loading');
     const target = worker;
     Promise.resolve()
-      .then(() => fetchText(path))
+      .then(() => fetchGp(path))
       .then((text) => {
         if (worker !== target) return;
         target.postMessage({ type: 'gp', path, text });
@@ -196,8 +203,8 @@ export function createSatSky({
       const old = frames.get(set);
       const keepPrev =
         old &&
-        msg.timeMs > old.timeMs &&
-        msg.timeMs - old.timeMs <= MAX_RATE_BASE_MS;
+        msg.timeMs !== old.timeMs &&
+        Math.abs(msg.timeMs - old.timeMs) <= MAX_RATE_BASE_MS;
       frames.set(set, {
         cur: rows,
         prev: keepPrev ? old.cur : null,
@@ -362,6 +369,41 @@ export function createSatSky({
       notify('sets');
     },
     requestTick,
+    get tickMs() {
+      return tickMs;
+    },
+    /**
+     * Tick period in wall ms (faster while the Sky clock plays, so the
+     * extrapolation base stays within MAX_RATE_BASE_MS of sky time).
+     */
+    setTickMs(ms) {
+      const next = Math.max(100, Math.min(TICK_MS, Number(ms) || TICK_MS));
+      if (next === tickMs) return;
+      tickMs = next;
+      if (timer != null) startTimer();
+    },
+    get sourceKey() {
+      return source ? source.key : null;
+    },
+    /**
+     * Use another GP source ({ key, fetchText(path) }, History mode) or the
+     * live one (null). A different key reloads the catalogue in a fresh
+     * worker; the same key is a no-op.
+     */
+    setSource(next) {
+      const key = next ? String(next.key ?? '') : null;
+      if (key === (source ? source.key : null)) return false;
+      source =
+        next && typeof next.fetchText === 'function'
+          ? { key, fetchText: next.fetchText }
+          : null;
+      if (worker && observer) {
+        const at = observer;
+        api.stop();
+        api.start(at);
+      }
+      return true;
+    },
     /** Drawable objects at Sky time `timeMs` (extrapolated between ticks). */
     objectsAt(timeMs) {
       const out = [];
