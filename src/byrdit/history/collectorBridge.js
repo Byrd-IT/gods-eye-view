@@ -32,6 +32,12 @@ import {
  * (createTerminalRoute), because the upstream FIRMS plugin polls on any
  * sub-path.
  *
+ * Pattern routes (feed.pathPattern, B7 CelesTrak): one entry answers a family
+ * of sub-paths, /api/celestrak/<group> -> /v1/latest/celestrak-<group>; each
+ * group has its own last-good copy and state (capped at MAX_PATTERN_SLOTS).
+ * The group set is not listed here: the collector discovers groups from
+ * these requests.
+ *
  * Owner N5: the server never clears a layer. It adds X-Feed-Grey-Until
  * (X-Feed-Stale-Since + GEV_STALE_GREY_MS) so the client decides grey vs
  * cleared on the server clock (staleness.js feedDisplayState).
@@ -46,6 +52,8 @@ import {
 
 export const DEFAULT_COLLECTOR_URLS = Object.freeze(['http://127.0.0.1:4180']);
 export const DEFAULT_COLLECTOR_TIMEOUT_MS = 2_000;
+/** Most per-path copies one pattern route keeps (CelesTrak groups). */
+export const MAX_PATTERN_SLOTS = 32;
 
 /** Collector response headers relayed to the browser. */
 export const RELAYED_HEADERS = Object.freeze([
@@ -171,11 +179,24 @@ export function createCollectorBridge({
       })
     : null;
 
+  // B7 pattern route (CelesTrak): one entry, one collector snapshot per
+  // group (/api/celestrak/<group> -> celestrak-<group>)
+  const pattern = feed.pathPattern ? new RegExp(feed.pathPattern) : null;
+
+  /**
+   * A pattern route never keeps more than MAX_PATTERN_SLOTS copies/states; an
+   * extra key is still answered, just not remembered. Every answered key gets
+   * a state, so the state keys are the remembered set.
+   */
+  function remembers(key) {
+    return !pattern || states.has(key) || states.size < MAX_PATTERN_SLOTS;
+  }
+
   function transition(key, next, detail) {
     const state = states.get(key) ?? null;
     if (next === state) return;
     const previous = state ?? 'start';
-    states.set(key, next);
+    if (remembers(key)) states.set(key, next);
     const label = key === feed.collectorFeed ? name : `${name}/${key}`;
     log(
       `[gev-history bridge] ${label}: ${previous} -> ${next}${detail ? ` (${detail})` : ''}`,
@@ -291,12 +312,21 @@ export function createCollectorBridge({
       return next();
     }
     // The mount also matches sub-routes (/api/military/track,
-    // /api/fire-perimeters/inciweb/*): only the entry's own path is bridged.
-    // Resolver entries (B15) map the path to one collector snapshot.
+    // /api/fire-perimeters/inciweb/*): only the entry's own path (or, for a
+    // pattern route, the paths its pattern matches) is bridged. Resolver
+    // entries (B15) map the path to one collector snapshot.
     let target;
     if (feed.resolve) {
       target = feed.resolve(url);
       if (!target) return next();
+    } else if (pattern) {
+      // B7 pattern route: the paths its pattern matches
+      const m = pattern.exec(url.pathname);
+      if (!m) return next();
+      target = {
+        collectorFeed: `${feed.collectorFeedPrefix}${m[1].toLowerCase()}`,
+        cadenceMs: feed.cadenceMs,
+      };
     } else {
       if (url.pathname !== (feed.path ?? '/')) return next();
       target = { collectorFeed: feed.collectorFeed, cadenceMs: feed.cadenceMs };
@@ -337,11 +367,13 @@ export function createCollectorBridge({
         headers['X-Feed-Bridge'] = 'collector';
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
-        caches.set(key, {
-          body: result.body,
-          contentType: headers['Content-Type'] ?? 'application/json',
-          lastOkAt: lastOk ?? now() - (age ?? 0),
-        });
+        if (remembers(key)) {
+          caches.set(key, {
+            body: result.body,
+            contentType: headers['Content-Type'] ?? 'application/json',
+            lastOkAt: lastOk ?? now() - (age ?? 0),
+          });
+        }
         if (trails && target.transitFeed)
           trails.ingest(target.transitFeed, result.body);
         transition(key, 'collector');
@@ -372,7 +404,9 @@ export function createCollectorBridge({
  *
  * @param {object} options
  * @param {string} options.source X-Feed-Source of the namespace
- * @param {{path: string, handler: Function}[]} options.entries
+ * @param {{path?: string, pattern?: RegExp, handler: Function}[]} options.entries
+ *   an entry with `pattern` (pattern route, B7) owns every raw sub-path the
+ *   pattern matches
  */
 export function createTerminalRoute({ source, entries }) {
   const notFound = (req, res) => {
@@ -394,7 +428,9 @@ export function createTerminalRoute({ source, entries }) {
   };
   return function terminalRoute(req, res) {
     const subPath = String(req.url || '/').split('?')[0];
-    const entry = entries.find((e) => e.path === subPath);
+    const entry = entries.find((e) =>
+      e.pattern ? e.pattern.test(subPath) : e.path === subPath,
+    );
     if (!entry) {
       notFound(req, res);
       return undefined;
@@ -443,6 +479,9 @@ export function collectorBridgePlugin({
         .filter((other) => BRIDGE_FEEDS[other].route === route)
         .map((other) => ({
           path: BRIDGE_FEEDS[other].path ?? '/',
+          pattern: BRIDGE_FEEDS[other].pathPattern
+            ? new RegExp(BRIDGE_FEEDS[other].pathPattern)
+            : null,
           handler: make(other),
         }));
       server.middlewares.use(

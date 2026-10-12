@@ -110,16 +110,19 @@ test('contract: GEV cyclone describe() == collector /v1/latest/cyclones bytes (p
 });
 
 test('registry: B6 entries, cadences match the collector, FIRMS status shares the FIRMS flag', () => {
+  // B15 (t_112ad6e3) resolver entries follow the B6 ones, then B7
+  // (t_fa373645) launches and celestrak (integration t_40ebce63)
   assert.deepEqual(Object.keys(BRIDGE_FEEDS), [
     'military',
     'firms',
     'firmsStatus',
     'firePerimeters',
     'cyclones',
-    // B15 (t_112ad6e3) resolver entries follow the B6 ones
     'transit',
     'gbfs',
     'weather',
+    'launches',
+    'celestrak',
   ]);
   assert.equal(BRIDGE_FEEDS.firms.cadenceMs, 1_800_000);
   assert.equal(BRIDGE_FEEDS.firePerimeters.cadenceMs, 900_000);

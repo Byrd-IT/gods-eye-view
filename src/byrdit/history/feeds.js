@@ -31,6 +31,14 @@ import {
  * non-/status sub-path (/api/firms/x, /status/, //) with a full four-source
  * area poll (D7). Routes whose sub-paths are live GEV routes
  * (/api/military/track, /api/fire-perimeters/inciweb/*) stay non-terminal.
+ * B7 added launches (terminal: GEV's launch proxy polls Launch Library 2 on
+ * ANY sub-path) and celestrak, a pattern route: `pathPattern` (one capture
+ * group = the CelesTrak GROUP) maps /api/celestrak/<group> to the collector
+ * feed `collectorFeedPrefix + group` (lower case). No group list is kept in
+ * GEV or the collector: the collector discovers each group from these
+ * requests (gev-history src/feeds/celestrak.js); celestrak is terminal too, so
+ * an invalid group, an extra path segment or another method can never reach
+ * GEV's own CelesTrak proxy (it would fetch and could trip its halt latch).
  * Hook for B20: /api/flights is answered from the OpenSky viewport poller's
  * tile cache; that entry sets forwardQuery: true so `view=w,s,e,n` reaches
  * the collector. It is deliberately NOT registered in B4.
@@ -123,6 +131,28 @@ export const BRIDGE_FEEDS = Object.freeze({
     forwardQuery: false,
     resolve: resolveWeather,
     imagery: true,
+  }),
+  // gev-history src/feeds/launches.js (Launch Library 2, 15 min, <= 6/h).
+  launches: Object.freeze({
+    route: '/api/launches',
+    path: '/',
+    collectorFeed: 'launches',
+    cadenceMs: 900_000,
+    source: 'Launch Library 2',
+    flag: 'GEV_BRIDGE_LAUNCHES',
+    forwardQuery: false,
+    terminal: true,
+  }),
+  // gev-history src/feeds/celestrak.js (GP CSV per group, 6 h, halt latch).
+  celestrak: Object.freeze({
+    route: '/api/celestrak',
+    pathPattern: '^/([a-z0-9-]{1,40})$',
+    collectorFeedPrefix: 'celestrak-',
+    cadenceMs: 21_600_000,
+    source: 'CelesTrak',
+    flag: 'GEV_BRIDGE_CELESTRAK',
+    forwardQuery: false,
+    terminal: true,
   }),
 });
 
