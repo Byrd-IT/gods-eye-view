@@ -125,6 +125,12 @@ const LOOK_AT_MS = 600;
 /** A press that moves less than this and ends sooner than CLICK_MS is a click. */
 const CLICK_PX = 5;
 const CLICK_MS = 400;
+/**
+ * After a pass tap, later panel refreshes (the card's "Next pass" line once
+ * the worker answers, a rescan after a time jump) keep the tapped control in
+ * place for this long, or until the user scrolls/touches the panel.
+ */
+const PASS_ANCHOR_MS = 5000;
 /** A pick this far from the ellipsoid is a streaming-tile glitch, not ground. */
 const PLAUSIBLE_GROUND_M = [-500, 9000];
 
@@ -532,6 +538,8 @@ export function mountSkyView({
   let nakedEyeOn = Boolean(nakedEyeDefault);
   let magLimit = MAG_LIMIT_DEFAULT;
   let selectedPass = null;
+  /** {node, top, until} while a tapped pass control is held in place. */
+  let passAnchor = null;
   const satSky = createSatSky({
     ...(createSatWorker ? { createWorker: createSatWorker } : {}),
     ...(fetchCelestrak ? { fetchText: fetchCelestrak } : {}),
@@ -920,6 +928,91 @@ export function mountSkyView({
     else if (c.top < b.top) body.scrollTop -= b.top - c.top;
   }
 
+  /**
+   * Run `render` without moving `anchor` (the control just tapped: a "Next
+   * passes" row or Next ISS pass) on screen, then scroll "Go to peak time"
+   * into view when that keeps the anchor in view. Selecting a pass shows the
+   * object card ABOVE the passes block; Chromium's own scroll anchoring picks
+   * the first visible node, which on tall panels sits above the card, so the
+   * tapped row and its action slid out of the panel. Unlike revealCard this
+   * never scrolls towards the card: on short panels the card is reached by
+   * scrolling up. No-op without layout (getBoundingClientRect/scrollTop).
+   * The final position is then held through later refreshes (holdPassAnchor).
+   */
+  function keepPassAnchored(anchor, render) {
+    const { body } = satDom;
+    passAnchor = null;
+    const usable =
+      anchor?.getBoundingClientRect &&
+      !body.hidden &&
+      typeof body.scrollTop === 'number';
+    const before = usable ? anchor.getBoundingClientRect() : null;
+    const result = render();
+    if (!before || anchor.isConnected === false) return result;
+    const shift = anchor.getBoundingClientRect().top - before.top;
+    if (Math.abs(shift) >= 0.5) body.scrollTop += shift;
+    revealPassGo(anchor);
+    passAnchor = {
+      node: anchor,
+      top: anchor.getBoundingClientRect().top,
+      until: now() + PASS_ANCHOR_MS,
+    };
+    return result;
+  }
+
+  /**
+   * Scroll "Go to peak time" up into view as far as `anchor` stays in view:
+   * first the body (the anchor may rise to the top edge), then, for a row
+   * inside the nested passes list, slide the row down in that list while the
+   * body scrolls on, so the row stays put and the action rises. A row tapped
+   * while clipped at the top edge is first scrolled fully into view.
+   */
+  function revealPassGo(anchor) {
+    const { body, passGo, passesList } = satDom;
+    const b = body.getBoundingClientRect?.();
+    if (!b) return;
+    const l = passesList.getBoundingClientRect?.();
+    const inList = Boolean(l) && passesList.contains?.(anchor);
+    let a = anchor.getBoundingClientRect();
+    if (inList && a.top < l.top && typeof passesList.scrollTop === 'number')
+      passesList.scrollTop -= l.top - a.top;
+    a = anchor.getBoundingClientRect();
+    if (a.top < b.top) body.scrollTop -= b.top - a.top;
+    if (passGo.disabled || !passGo.getBoundingClientRect) return;
+    a = anchor.getBoundingClientRect();
+    const g = passGo.getBoundingClientRect();
+    if (!(g.bottom > b.bottom)) return;
+    let need = g.bottom - b.bottom;
+    const s0 = body.scrollTop;
+    body.scrollTop += Math.min(need, Math.max(0, a.top - b.top));
+    need -= body.scrollTop - s0; // what the browser applied (max clamps)
+    if (need > 0.5 && inList && typeof passesList.scrollTop === 'number') {
+      const lb = passesList.getBoundingClientRect().bottom;
+      const s1 = body.scrollTop;
+      body.scrollTop += Math.min(
+        need,
+        passesList.scrollTop,
+        Math.max(0, lb - anchor.getBoundingClientRect().bottom),
+      );
+      passesList.scrollTop -= body.scrollTop - s1;
+    }
+  }
+
+  /** Re-pin a just-tapped pass control after a panel refresh moved it. */
+  function holdPassAnchor() {
+    if (!passAnchor) return;
+    const { node, top, until } = passAnchor;
+    if (now() > until || satDom.body.hidden || node.isConnected === false) {
+      passAnchor = null;
+      return;
+    }
+    const shift = node.getBoundingClientRect().top - top;
+    if (Math.abs(shift) >= 0.5) satDom.body.scrollTop += shift;
+  }
+  function releasePassAnchor() {
+    passAnchor = null;
+  }
+
   /** Keep the edge arrow clear of the satellite panel and the toolbar. */
   function arrowInsets(width, height) {
     const pad = 28;
@@ -978,6 +1071,7 @@ export function mountSkyView({
       nowMs: t,
       nakedEye: { on: nakedEyeOn, limit: magLimit },
     });
+    holdPassAnchor();
   }
 
   /** The pass a "Next passes" row stands for (by key), or null. */
@@ -986,8 +1080,9 @@ export function mountSkyView({
   }
 
   /** Select a pass: its object, its arc, and look at its peak. */
-  function selectPass(pass, { look = true } = {}) {
+  function selectPass(pass, { look = true, anchor = null } = {}) {
     selectedPass = pass || null;
+    if (!anchor) releasePassAnchor();
     if (!pass) {
       updateSatPanel();
       redraw();
@@ -995,7 +1090,10 @@ export function mountSkyView({
     }
     selectedIndex = Number.isInteger(pass.index) ? pass.index : null;
     satSky.arcFor(pass);
-    updateSatPanel();
+    // a tapped control stays put (the card appears above it); the hook and
+    // P5 callers pass no anchor and keep the plain behaviour
+    if (anchor) keepPassAnchored(anchor, updateSatPanel);
+    else updateSatPanel();
     redraw();
     if (look && Number.isFinite(pass.peakAzDeg))
       lookAtDirection({ azDeg: pass.peakAzDeg, elDeg: pass.peakElevDeg });
@@ -1007,10 +1105,14 @@ export function mountSkyView({
    * syncs the picker/Live/URL, a playing clock keeps playing from the peak,
    * and History mode seeks (or refuses when its slider takes no jumps).
    */
-  function goToPass(pass) {
+  function goToPass(pass, { anchor = null } = {}) {
     if (!active || !pass || !Number.isFinite(pass.peakMs)) return false;
-    selectPass(pass, { look: false });
-    const moved = timeControl.jumpTo(pass.peakMs);
+    // the jump re-renders the card and list too: anchor across both steps
+    const jump = () => {
+      selectPass(pass, { look: false });
+      return timeControl.jumpTo(pass.peakMs);
+    };
+    const moved = anchor ? keepPassAnchored(anchor, jump) : jump();
     if (!moved)
       timeControl.setStatus(
         'The History slider sets the time; it does not accept jumps',
@@ -1084,6 +1186,7 @@ export function mountSkyView({
     return true;
   }
   function selectSatellite(index, { look = false } = {}) {
+    releasePassAnchor();
     const previous = selectedIndex;
     selectedIndex = Number.isInteger(index) ? index : null;
     if (selectedPass && selectedPass.index !== selectedIndex)
@@ -1748,14 +1851,17 @@ export function mountSkyView({
   listen(satDom.passesList, 'click', (event) => {
     const button = event.target?.closest?.('button[data-pass]') ?? event.target;
     const pass = passByKey(button?.getAttribute?.('data-pass'));
-    if (pass) selectPass(pass);
+    if (pass) selectPass(pass, { anchor: button });
   });
+  // the user taking over the panel ends the hold on a tapped pass control
+  for (const type of ['wheel', 'touchstart', 'pointerdown', 'keydown'])
+    listen(satDom.body, type, releasePassAnchor, { passive: true });
   listen(satDom.passGo, 'click', () => {
-    if (selectedPass) goToPass(selectedPass);
+    if (selectedPass) goToPass(selectedPass, { anchor: satDom.passGo });
   });
   listen(satDom.nextIss, 'click', () => {
     const pass = nextScannedIssPass();
-    if (pass) goToPass(pass);
+    if (pass) goToPass(pass, { anchor: satDom.nextIss });
     else showToast('No visible ISS pass found in the next 48 hours yet.');
   });
   time.subscribe(() => onTimeChange());
