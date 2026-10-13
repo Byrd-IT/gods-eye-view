@@ -1,4 +1,6 @@
 import { admitSameSiteRequest } from '../../../src/localRequestGate.mjs';
+// Byrd-IT: opt-in trusted reverse proxy (GEV_TRUSTED_PROXIES); unset = upstream.
+import { sameSiteTransport } from '../../byrdit/trustedProxy.js';
 
 /**
  * Cross-site request gate for cost-bearing and log endpoints. Feeds the
@@ -15,10 +17,9 @@ import { admitSameSiteRequest } from '../../../src/localRequestGate.mjs';
 export function admitSameSite(req, res) {
   const verdict = admitSameSiteRequest({
     hostHeader: req.headers?.host,
-    protocol: req.socket?.encrypted ? 'https:' : 'http:',
     origin: req.headers?.origin,
     secFetchSite: req.headers?.['sec-fetch-site'],
-    proxyHeaders: req.headers || {},
+    ...sameSiteTransport(req),
   });
   if (verdict.ok) return false;
   res.statusCode = verdict.status;

@@ -85,6 +85,8 @@
   "src/data/placeProviderPayloads.js",
   "src/tooling/placeProviders.test.mjs",
   "server/providers/common/same-site.js",
+  "server/byrdit/trustedProxy.js",
+  "src/byrdit/trustedProxy.test.mjs",
   "server/providers/space.js",
   "server/providers/space/celestrak.js",
   "server/providers/space/launch-library.js",
