@@ -429,6 +429,19 @@ body.gev-sky-active #right-context-rail {
   outline: 1px solid rgba(255, 210, 120, 0.8);
 }
 
+/* With a pass selected, "Go to peak time" sticks to the bottom edge of the
+   panel body while the passes block runs past it, so the action stays in
+   view next to the selected row however short the panel is (otherwise it
+   sits below the whole nested list). Opaque, as it may cover list rows below
+   the selection; skyView.js (revealPassGo) keeps it off the selected row. */
+.gev-sky-passes > [data-sky='pass-go']:not(:disabled) {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: rgb(22, 24, 34);
+  box-shadow: 0 -6px 8px rgba(8, 9, 14, 0.85);
+}
+
 .gev-sky-pass-name {
   overflow: hidden;
   color: var(--text-primary, #e8f4ff);
