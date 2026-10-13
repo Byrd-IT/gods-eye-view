@@ -1152,3 +1152,115 @@ test('P4: Align on the Moon fixes a compass offset; refused when the centre is f
   globalThis.localStorage?.removeItem?.('gev.sky.headingOffsetDeg');
 });
 const wrapDeg = (d) => ((((d + 180) % 360) + 360) % 360) - 180;
+
+test('P4 R2: iOS before its first compass reference hides Align (and the handle refuses it); once the reference arrives Align on the Moon works and is stored once', async () => {
+  const { moonState } = await import('./ephemeris.js');
+  const obs = { latDeg: 29.7604, lonDeg: -95.3698, heightM: 1.7 };
+  let when = null;
+  for (let h = 0; h < 72 && when == null; h += 1) {
+    const t = Date.parse('2026-10-12T00:00:00Z') + h * 3_600_000;
+    const m = moonState(t, obs, { refraction: true });
+    if (m.elDeg > 20 && m.elDeg < 50) when = t;
+  }
+  assert.ok(when, 'found a Moon-up time');
+  const win = sensorWindow({ ios: true });
+  delete win.ondeviceorientationabsolute; // iOS Safari has no absolute event
+  const store = new Map();
+  const { doc, handle } = pointingSetup(win, {
+    now: () => when,
+    orientationOptions: {
+      requestFrame: () => null,
+      now: () => (sensorClock += 40),
+      storage: {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+      },
+    },
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'gps' });
+  const moon = handle.content.ephemeris.moon;
+  click(doc.body.find('point'));
+  await settle();
+  // iOS event: alpha in a frame 40 deg off; heading = magnetic (decl +2 E)
+  const ios = (bearing, el, accuracy) => {
+    const p = portraitPose(bearing, el);
+    return {
+      alpha: (p.alpha + 40) % 360,
+      beta: p.beta,
+      gamma: p.gamma,
+      webkitCompassHeading: (((bearing - 2) % 360) + 360) % 360,
+      webkitCompassAccuracy: accuracy,
+    };
+  };
+  // looking up at the Moon straight away: no compass reference yet
+  win.fire('deviceorientation', ios(moon.azDeg, moon.elDeg, 5));
+  assert.equal(handle.orientation.state, 'calibrating');
+  assert.equal(handle.orientation.reason, 'heading');
+  assert.equal(doc.body.find('align').hidden, true, 'no Align without a reference');
+  handle.alignOn('moon');
+  assert.match(doc.body.find('orient-status').textContent, /Align waits for the first compass reading/);
+  assert.equal(store.size, 0, 'nothing stored');
+  assert.equal(handle.orientation.info.offsetDeg, 0);
+  // uncalibrated (-1) and upright: "accuracy", still no reference, still hidden
+  win.fire('deviceorientation', ios(moon.azDeg, 0, -1));
+  assert.equal(handle.orientation.reason, 'accuracy');
+  assert.equal(doc.body.find('align').hidden, true);
+  assert.equal(doc.body.find('figure8').hidden, false);
+  // a real (poor, 40 deg) reading upright: reference exists -> Align shown
+  win.fire('deviceorientation', ios(moon.azDeg, 0, 40));
+  assert.equal(handle.orientation.reason, 'accuracy');
+  assert.equal(handle.orientation.alignReady, true);
+  assert.equal(doc.body.find('align').hidden, false, 'shown although still calibrating');
+  // good again, then up to the Moon: the view is on the Moon's TRUE azimuth
+  for (let i = 0; i < 40; i += 1) win.fire('deviceorientation', ios(moon.azDeg, 0, 5));
+  win.fire('deviceorientation', ios(moon.azDeg, moon.elDeg, 5));
+  assert.equal(handle.orientation.state, 'on');
+  assert.ok(Math.abs(wrapDeg(handle.view.azDeg - moon.azDeg)) < 0.5, `az ${handle.view.azDeg} vs ${moon.azDeg}`);
+  const miss = wrapDeg(moon.azDeg - handle.view.azDeg);
+  click(doc.body.find('align-moon'));
+  assert.match(doc.body.find('orient-status').textContent, /Aligned on the Moon/);
+  assert.ok(Math.abs(wrapDeg(handle.view.azDeg - moon.azDeg)) < 1e-6, 'centre on the Moon');
+  assert.ok(Math.abs(Number(store.get('gev.sky.headingOffsetDeg')) - miss) < 1e-6, 'only the small residual is stored');
+  handle.destroy();
+});
+
+test('P4 R2: a relative-only browser (no compass) can still Align from the UI; the offset is not stored', async () => {
+  const { moonState } = await import('./ephemeris.js');
+  const obs = { latDeg: 29.7604, lonDeg: -95.3698, heightM: 1.7 };
+  let when = null;
+  for (let h = 0; h < 72 && when == null; h += 1) {
+    const t = Date.parse('2026-10-12T00:00:00Z') + h * 3_600_000;
+    const m = moonState(t, obs, { refraction: true });
+    if (m.elDeg > 20 && m.elDeg < 50) when = t;
+  }
+  const win = sensorWindow();
+  delete win.ondeviceorientationabsolute; // Firefox Android: relative only
+  const store = new Map();
+  const { doc, handle } = pointingSetup(win, {
+    now: () => when,
+    orientationOptions: {
+      requestFrame: () => null,
+      now: () => (sensorClock += 40),
+      storage: {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+      },
+    },
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'gps' });
+  const moon = handle.content.ephemeris.moon;
+  click(doc.body.find('point'));
+  await settle();
+  win.fire('deviceorientation', { ...portraitPose(10, moon.elDeg), absolute: false });
+  assert.equal(handle.orientation.reason, 'relative');
+  assert.equal(doc.body.find('align').hidden, false);
+  click(doc.body.find('align-moon'));
+  assert.match(doc.body.find('orient-status').textContent, /Aligned on the Moon/);
+  assert.ok(Math.abs(wrapDeg(handle.view.azDeg - moon.azDeg)) < 1e-6);
+  win.fire('deviceorientation', { ...portraitPose(10, moon.elDeg + 1), absolute: false });
+  assert.equal(handle.orientation.state, 'on');
+  assert.equal(store.size, 0, 'session-only');
+  handle.destroy();
+});

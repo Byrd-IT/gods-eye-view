@@ -682,3 +682,132 @@ test('stop removes every listener; start again works; pointingOffered follows a 
   const q = quatFromEuler(portrait(90, 0).alpha, 90, 0);
   assert.ok(Math.hypot(...q) > 0.999);
 });
+
+// ── P4 R2: no persistent Align before the iOS compass reference exists ────
+/** iOS event: pose in a yaw frame 40 deg off, with a compass heading. */
+const iosEvent = (bearingDeg, elDeg, heading, accuracy) => {
+  const pose = portrait(bearingDeg, elDeg);
+  return {
+    ...pose,
+    alpha: (pose.alpha + 40) % 360,
+    webkitCompassHeading: heading,
+    webkitCompassAccuracy: accuracy,
+  };
+};
+
+test('R2: iOS tilted up before any compass reference -> Align refused, nothing stored; the first reference gives the true view; stop/start keeps it right', async () => {
+  const win = fakeWindow({ ios: true });
+  const { c, f, views, store, states } = controller(win);
+  c.setDeclination(0);
+  assert.equal(c.alignReady, false, 'off: not ready');
+  assert.equal(c.alignTo(90, 0), null);
+  await c.start();
+  assert.equal(c.alignReady, false, 'asking, no reading: not ready');
+  const fire = (ev, ms = 200) =>
+    f.advance(ms, 1000 / 30, () => win.fire('deviceorientation', ev));
+  // looking 30 deg up, back really towards 90: back and top disagree, so no
+  // compass reference is taken; the view is in the arbitrary iOS frame
+  fire(iosEvent(90, 30, 90, 5));
+  assert.equal(c.state, 'calibrating');
+  assert.equal(c.reason, 'heading');
+  assert.equal(c.alignReady, false);
+  assert.equal(c.info.alignReady, false);
+  assert.equal(states.at(-1).alignReady, false);
+  azClose(views.at(-1).azDeg, 50, 1e-6, 'arbitrary frame (40 deg off)');
+  // the user "aligns" on something really at az 90: refused, nothing stored
+  assert.equal(c.alignTo(90, views.at(-1).azDeg), null);
+  assert.equal(store.has(OFFSET_STORAGE_KEY), false);
+  assert.equal(c.info.offsetDeg, 0);
+  azClose(views.at(-1).azDeg, 50, 1e-6, 'view not moved by a refused Align');
+  // upright: first unambiguous reference -> the TRUE bearing, not 90 + 40
+  fire(iosEvent(90, 0, 90, 5), 1500);
+  assert.equal(c.state, 'on');
+  assert.equal(c.alignReady, true);
+  assert.equal(states.at(-1).alignReady, true, 'onState reported it');
+  azClose(views.at(-1).azDeg, 90, 0.05);
+  // looking up again keeps the reference (gyro yaw): still right, still ready
+  fire(iosEvent(90, 30, 90, 5), 1500);
+  azClose(views.at(-1).azDeg, 90, 0.05);
+  close(views.at(-1).elDeg, 30, 0.05);
+  assert.equal(c.alignReady, true);
+  // stop/start: no stored offset, the reference must be found again
+  c.stop();
+  assert.equal(c.alignReady, false);
+  await c.start();
+  fire(iosEvent(90, 30, 90, 5));
+  assert.equal(c.alignReady, false, 'a new start needs its own reference');
+  assert.equal(c.alignTo(90, views.at(-1).azDeg), null);
+  fire(iosEvent(90, 0, 90, 5), 1500);
+  azClose(views.at(-1).azDeg, 90, 0.05, 'right after restart');
+  assert.equal(store.has(OFFSET_STORAGE_KEY), false);
+  // with the reference a normal Align works and persists
+  const delta = c.alignTo(93, views.at(-1).azDeg);
+  close(delta, 3, 0.06);
+  close(Number(store.get(OFFSET_STORAGE_KEY)), delta, 1e-9);
+  azClose(views.at(-1).azDeg, 93, 0.1);
+  c.destroy();
+});
+
+test('R2: iOS negative accuracy (no reference) -> "accuracy" but Align refused; a later reference while still poor allows Align (reported via onState)', async () => {
+  const win = fakeWindow({ ios: true });
+  const { c, f, views, store, states } = controller(win);
+  c.setDeclination(0);
+  await c.start();
+  const fire = (ev, ms = 200) =>
+    f.advance(ms, 1000 / 30, () => win.fire('deviceorientation', ev));
+  // upright but uncalibrated (-1): the heading is not used as a reference
+  fire(iosEvent(200, 0, 200, -1));
+  assert.equal(c.state, 'calibrating');
+  assert.equal(c.reason, 'accuracy');
+  assert.equal(c.alignReady, false, 'reason "accuracy" alone is no reference');
+  assert.equal(c.alignTo(200, views.at(-1).azDeg), null);
+  assert.equal(store.has(OFFSET_STORAGE_KEY), false);
+  const before = states.length;
+  // a real but poor (40 deg) reading: reference exists, still "accuracy"
+  fire(iosEvent(200, 0, 200, 40), 1500);
+  assert.equal(c.state, 'calibrating');
+  assert.equal(c.reason, 'accuracy');
+  assert.equal(c.alignReady, true);
+  assert.ok(
+    states.slice(before).some((s) => s.alignReady === true),
+    'onState fired although state and reason did not change',
+  );
+  azClose(views.at(-1).azDeg, 200, 0.1);
+  // Align with poor accuracy but a reference: allowed and stored
+  const delta = c.alignTo(205, views.at(-1).azDeg);
+  close(delta, 5, 0.06);
+  close(Number(store.get(OFFSET_STORAGE_KEY)), delta, 1e-9);
+  fire(iosEvent(200, 0, 200, 40), 500);
+  azClose(views.at(-1).azDeg, 200 + delta, 0.05, 'offset counted once');
+  c.destroy();
+});
+
+test('R2: relative source is Align-ready from its first reading; magnetic sources too; nothing before a reading', async () => {
+  const rel = controller(fakeWindow());
+  await rel.c.start();
+  assert.equal(rel.c.alignReady, false, 'no reading yet');
+  assert.equal(rel.c.alignTo(10, 0), null);
+  const rwin = fakeWindow();
+  const r = controller(rwin);
+  await r.c.start();
+  r.f.advance(300, 1000 / 30, () =>
+    rwin.fire('deviceorientation', { ...portrait(10, 30), absolute: false }),
+  );
+  assert.equal(r.c.reason, 'relative');
+  assert.equal(r.c.alignReady, true);
+  close(r.c.alignTo(135, r.views.at(-1).azDeg), 125, 1e-6);
+  assert.equal(r.store.has(OFFSET_STORAGE_KEY), false, 'session-only');
+  const awin = fakeWindow({ absoluteEvent: true });
+  const a = controller(awin);
+  a.c.setDeclination(0);
+  await a.c.start();
+  a.f.advance(300, 1000 / 30, () =>
+    awin.fire('deviceorientationabsolute', { ...portrait(200, 20), absolute: true }),
+  );
+  assert.equal(a.c.alignReady, true);
+  assert.notEqual(a.c.alignTo(204, a.views.at(-1).azDeg), null);
+  assert.equal(a.store.has(OFFSET_STORAGE_KEY), true);
+  rel.c.destroy();
+  r.c.destroy();
+  a.c.destroy();
+});

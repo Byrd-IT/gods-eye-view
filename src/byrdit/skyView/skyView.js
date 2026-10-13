@@ -627,7 +627,12 @@ export function mountSkyView({
     o.figure8.hidden = !(
       state === 'calibrating' && orientation.reason === 'accuracy'
     );
-    const canAlign = active && (state === 'on' || state === 'calibrating');
+    // only with a heading reference: an iOS phone still waiting for its
+    // first compass reading has no frame an offset could correct (P4 R2)
+    const canAlign =
+      active &&
+      (state === 'on' || state === 'calibrating') &&
+      orientation.alignReady;
     o.align.hidden = !canAlign;
     if (canAlign) {
       const targets = alignTargets();
@@ -692,7 +697,11 @@ export function mountSkyView({
   function alignOn(which) {
     const target = alignTargets()[which];
     if (!target || !orientation.running) return;
-    if (target.elDeg > ALIGN_MAX_EL_DEG) {
+    if (!orientation.alignReady) {
+      setNote(
+        'Align waits for the first compass reading: hold the phone upright for a moment.',
+      );
+    } else if (target.elDeg > ALIGN_MAX_EL_DEG) {
       setNote(
         `${target.label} is too high to align on (the compass direction is unclear near the zenith). Pick a lower object.`,
       );
