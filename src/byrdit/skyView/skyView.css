@@ -364,6 +364,104 @@ body.gev-sky-active #right-context-rail {
   gap: 6px;
 }
 
+/* P2b: naked-eye filter and "Next passes". */
+.gev-sky-naked {
+  align-items: center;
+}
+
+.gev-sky-naked input[type='range'] {
+  width: 84px;
+  accent-color: #ffd278;
+}
+
+.gev-sky-naked input[type='range']:disabled {
+  opacity: 0.45;
+}
+
+.gev-sky-passes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.gev-sky-passes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.gev-sky-passes-head h3 {
+  margin: 0;
+  color: var(--text-primary, #e8f4ff);
+  font: 600 12px/1.2 var(--font-mono);
+}
+
+.gev-sky-passes-status {
+  opacity: 0.75;
+}
+
+.gev-sky-passes-list {
+  min-height: 0;
+  max-height: 28vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.gev-sky-passes-list button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1px 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 3px 6px;
+  border: 0;
+  background: none;
+  font-weight: 500;
+  text-align: left;
+}
+
+.gev-sky-passes-list button[aria-current='true'] {
+  outline: 1px solid rgba(255, 210, 120, 0.8);
+}
+
+.gev-sky-pass-name {
+  overflow: hidden;
+  color: var(--text-primary, #e8f4ff);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.gev-sky-pass-chip {
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(255, 210, 120, 0.18);
+  color: #ffd278;
+  font-size: 9px;
+}
+
+.gev-sky-pass-chip[hidden] {
+  display: none;
+}
+
+.gev-sky-pass-times {
+  opacity: 0.85;
+}
+
+.gev-sky-pass-mag {
+  opacity: 0.75;
+  text-align: right;
+}
+
+.gev-sky-sats button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* Narrow screens: above the command dock, clear of the Sky button on the
    right (12 + 52 + 8 px) and below the toolbar, whose real bottom edge
    skyView.js writes to --gev-sky-bar-bottom (it wraps differently at every

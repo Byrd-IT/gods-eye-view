@@ -1,6 +1,80 @@
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
-import { celestrakTleUrl } from '../../../src/data/spaceProviderRequests.js';
+import {
+  celestrakSatcatUrl,
+  celestrakTleUrl,
+} from '../../../src/data/spaceProviderRequests.js';
+
+/** SATCAT RCS cache lifetime (SKYVIEW.md 4.4: one polite fetch per week). */
+export const RCS_TTL_MS = 7 * 24 * 3600_000;
+
+/** RFC 4180 CSV text -> rows of fields (quotes, doubled quotes, CRLF). */
+export function parseCsvRows(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  const s = String(text);
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quoted) {
+      if (c === '"') {
+        if (s[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else quoted = false;
+      } else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') {
+      row.push(field);
+      field = '';
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && s[i + 1] === '\n') i += 1;
+      row.push(field);
+      field = '';
+      if (row.length > 1 || row[0] !== '') rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if (field !== '' || row.length) {
+    row.push(field);
+    if (row.length > 1 || row[0] !== '') rows.push(row);
+  }
+  return rows;
+}
+
+const SATCAT_HEADER = /^OBJECT_NAME,OBJECT_ID,NORAD_CAT_ID,/;
+
+/**
+ * CelesTrak SATCAT CSV -> { rows, withRcs, rcs: { noradId: rcsM2 } } with
+ * only the objects that HAVE a positive RCS (SATCAT leaves it empty for most
+ * new objects; the client treats a missing id as "no estimate"). Returns null
+ * when the text is not SATCAT CSV (an error page, an HTML body, ...).
+ */
+export function parseSatcatRcs(text) {
+  if (typeof text !== 'string' || !SATCAT_HEADER.test(text)) return null;
+  const rows = parseCsvRows(text);
+  const header = rows.shift() || [];
+  const idCol = header.indexOf('NORAD_CAT_ID');
+  const rcsCol = header.indexOf('RCS');
+  if (idCol < 0 || rcsCol < 0) return null;
+  const rcs = {};
+  let count = 0;
+  let withRcs = 0;
+  for (const r of rows) {
+    if (r.length !== header.length) continue;
+    const id = Number(r[idCol]);
+    if (!Number.isSafeInteger(id) || id <= 0) continue;
+    count += 1;
+    const raw = r[rcsCol].trim();
+    const value = raw === '' ? NaN : Number(raw);
+    if (Number.isFinite(value) && value > 0) {
+      rcs[id] = value;
+      withRcs += 1;
+    }
+  }
+  return count ? { rows: count, withRcs, rcs } : null;
+}
 
 /**
  * Vite plugin: CelesTrak TLE proxy.
@@ -21,6 +95,10 @@ import { celestrakTleUrl } from '../../../src/data/spaceProviderRequests.js';
  * cache+serve-stale. Adapted from skylight's TleStore (MIT).
  */
 export function celestrakProxy() {
+  // Kept inside the plugin: src/proxyErrorResponses.test.mjs evaluates this
+  // function body on its own.
+  const USER_AGENT =
+    'gods-eye-view-celestrak-proxy/1.0 (+https://github.com/bilawalsidhu/gods-eye-view)';
   const TLE_TTL_MS = 6 * 3600_000;
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
   const mem = new Map(); // group -> { at: epochMs, body: string }
@@ -141,10 +219,7 @@ export function celestrakProxy() {
       signal: AbortSignal.timeout(20000),
       // CelesTrak 403s bulk groups (e.g. `active`) unless the request carries a
       // descriptive User-Agent with a contact point.
-      headers: {
-        'User-Agent':
-          'gods-eye-view-celestrak-proxy/1.0 (+https://github.com/bilawalsidhu/gods-eye-view)',
-      },
+      headers: { 'User-Agent': USER_AGENT },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.text();
@@ -154,7 +229,136 @@ export function celestrakProxy() {
     return { at: Date.now(), body };
   }
 
+  // --- SATCAT radar cross-sections (Byrd-IT, Sky view P2b) ----------------
+  // Same rules as the GP groups: fetched on demand only, cached on disk,
+  // single-flight, and behind the SAME halt latch (any failure halts every
+  // CelesTrak request, GP included; while halted nothing is fetched). Cached
+  // for RCS_TTL_MS (7 days): one ~1.5 MB request per week at most. Served as
+  // compact JSON { fetchedAt, rows, withRcs, rcs: { noradId: rcsM2 } }.
+  const RCS_FILE = path.join(CACHE_DIR, 'celestrak-satcat-rcs.json');
+  let rcsMem = null; // { at, rows, withRcs, rcs }
+  let rcsInflight = null;
+
+  async function readRcsDisk() {
+    try {
+      const parsed = JSON.parse(await fsp.readFile(RCS_FILE, 'utf8'));
+      if (
+        Number.isFinite(parsed?.at) &&
+        parsed.rcs &&
+        typeof parsed.rcs === 'object'
+      )
+        return parsed;
+    } catch {
+      /* no RCS cache yet */
+    }
+    return null;
+  }
+
+  async function fetchRcsUpstream() {
+    const res = await fetch(celestrakSatcatUrl().toString(), {
+      signal: AbortSignal.timeout(60000),
+      headers: { 'User-Agent': USER_AGENT },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const parsed = parseSatcatRcs(await res.text());
+    if (!parsed) throw new Error('no SATCAT CSV rows in response');
+    return { at: Date.now(), ...parsed };
+  }
+
+  const rcsPayload = (entry) =>
+    JSON.stringify({
+      fetchedAt: entry.at,
+      source: 'celestrak satcat GROUP=ACTIVE',
+      rows: entry.rows ?? null,
+      withRcs: entry.withRcs ?? Object.keys(entry.rcs).length,
+      rcs: entry.rcs,
+    });
+
+  async function handleRcs(req, res) {
+    const send = (status, body, cacheStatus) => {
+      if (res.headersSent) return;
+      res.writeHead(status, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'x-rcs-cache': cacheStatus,
+      });
+      res.end(body);
+    };
+    const rest = String(req.url || '').split('?')[0];
+    if (rest !== '' && rest !== '/') {
+      send(404, JSON.stringify({ error: 'unknown rcs path' }), 'NONE');
+      return;
+    }
+    try {
+      const now = Date.now();
+      let entry = rcsMem;
+      if (!entry || now - entry.at >= RCS_TTL_MS) {
+        const fromDisk = await readRcsDisk();
+        if (fromDisk && (!entry || fromDisk.at > entry.at)) entry = fromDisk;
+        rcsMem = entry;
+      }
+      if (entry && now - entry.at < RCS_TTL_MS) {
+        send(200, rcsPayload(entry), 'HIT');
+        return;
+      }
+      if (await isHalted()) {
+        if (entry) send(200, rcsPayload(entry), 'STALE-HALTED');
+        else
+          send(
+            503,
+            JSON.stringify({
+              error:
+                'celestrak requests halted after an upstream error; operator must clear it',
+            }),
+            'HALTED',
+          );
+        return;
+      }
+      if (!rcsInflight) {
+        rcsInflight = fetchRcsUpstream()
+          .then(async (fresh) => {
+            rcsMem = fresh;
+            try {
+              await fsp.mkdir(CACHE_DIR, { recursive: true });
+              await fsp.writeFile(RCS_FILE, JSON.stringify(fresh), 'utf8');
+            } catch {
+              console.warn('[celestrak-proxy] rcs cache write failed');
+            }
+            return fresh;
+          })
+          .catch(async (err) => {
+            await haltOnFailure('satcat', err);
+            return null;
+          })
+          .finally(() => {
+            rcsInflight = null;
+          });
+      }
+      const fresh = await rcsInflight;
+      if (fresh) send(200, rcsPayload(fresh), 'MISS');
+      else if (entry) send(200, rcsPayload(entry), 'STALE-ERROR');
+      else
+        send(
+          502,
+          JSON.stringify({
+            error: 'satcat fetch failed and no cache available',
+          }),
+          'NONE',
+        );
+    } catch {
+      console.error('[celestrak-proxy] rcs request failed');
+      send(
+        500,
+        JSON.stringify({ error: 'celestrak rcs proxy error' }),
+        'ERROR',
+      );
+    }
+  }
+
   const installMiddleware = (server) => {
+    // Registered before /api/celestrak (connect would not route
+    // "/api/celestrak-rcs" there anyway: the next character is not "/").
+    server.middlewares.use('/api/celestrak-rcs', handleRcs);
     server.middlewares.use('/api/celestrak', async (req, res) => {
       const group = String(req.url || '')
         .replace(/^\//, '')
