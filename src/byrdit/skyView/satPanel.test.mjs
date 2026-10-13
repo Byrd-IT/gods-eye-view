@@ -329,3 +329,32 @@ test('overhead list include filter; card brightness wording and next pass', () =
     '21:14 SW -> 73° 21:17 -> 21:20 NE (visible)',
   );
 });
+
+test('passes view: before the scanned window no rows and no count; past the cache rule no count', () => {
+  const H = 3600_000;
+  const done = {
+    scanId: 2,
+    fromMs: NOW,
+    done: true,
+    processed: 10,
+    total: 10,
+    list: [pass({ riseMs: NOW + H, setMs: NOW + H + 300_000 })],
+  };
+  const ok = passesView(done, NOW, { upcoming: upcomingPasses });
+  assert.equal(ok.title, 'Next passes (1)');
+  const gap = passesView(done, NOW - 1, { upcoming: upcomingPasses });
+  assert.equal(gap.rows.length, 0, 'a pass before the window could be missing');
+  assert.equal(gap.title, 'Next passes');
+  assert.match(gap.status, /^Updating passes/);
+  const short = passesView(done, NOW + 25 * H, {
+    visibleOnly: false,
+    upcoming: upcomingPasses,
+  });
+  assert.equal(short.title, 'Next passes');
+  assert.match(short.status, /^Updating passes/);
+  const scanningGap = passesView({ ...done, done: false }, NOW - 1, {
+    upcoming: upcomingPasses,
+  });
+  assert.equal(scanningGap.rows.length, 0);
+  assert.equal(scanningGap.title, 'Next passes');
+});

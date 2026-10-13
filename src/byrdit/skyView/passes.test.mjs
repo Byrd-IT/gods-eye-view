@@ -14,7 +14,9 @@ import {
   observerDistanceKm,
   passArc,
   passCacheValid,
+  passCoverage,
   passesForEntry,
+  passScanStart,
   passReachable,
   PASS_MIN_ELEV_DEG,
   RESCAN_AFTER_MS,
@@ -416,4 +418,103 @@ test('worker: pass arc samples every 10 s from rise to set; unknown object -> em
   assert.ok(Math.abs(top - ref.peakElevDeg) < 0.5);
   handle({ type: 'passArc', requestId: 8, noradId: 1, riseMs, setMs });
   assert.deepEqual(out.at(-1).arc, []);
+});
+
+test('reverse play: scan windows anchor 24 h back; coverage gap/short/ok', () => {
+  assert.equal(passScanStart(start), start);
+  assert.equal(
+    passScanStart(start, { backward: true }),
+    start - RESCAN_AFTER_MS,
+  );
+  const cache = {
+    key: '1:1',
+    observer: makeObserver(29.76, -95.37),
+    fromMs: passScanStart(start, { backward: true }),
+  };
+  // the request time and the next 24 h of reverse play are inside the rule
+  for (const t of [start, start - 12 * 3600_000, start - RESCAN_AFTER_MS])
+    assert.equal(
+      passCacheValid(cache, {
+        key: '1:1',
+        observer: cache.observer,
+        timeMs: t,
+      }),
+      true,
+    );
+  assert.equal(passCoverage(null, start), 'none');
+  assert.equal(passCoverage(start, start - 1), 'gap');
+  assert.equal(passCoverage(start, start), 'ok');
+  assert.equal(passCoverage(start, start + RESCAN_AFTER_MS), 'ok');
+  assert.equal(passCoverage(start, start + RESCAN_AFTER_MS + 1), 'short');
+});
+
+test('worker: playback (defer) requests never cancel a running scan; the newest runs after it; jumps, GP and observer changes still replace at once', () => {
+  const out = [];
+  const queue = [];
+  let clock = 0;
+  const handle = createSatWorkerHandler((m) => out.push(m), {
+    schedule: (fn) => queue.push(fn),
+    clock: () => (clock += 10),
+    sliceMs: 1,
+  });
+  const visual = LINES.slice(1)
+    .filter((l) => l.split(',')[11] !== String(ISS_NORAD))
+    .slice(0, 6);
+  handle({ type: 'gp', path: 'stations', text: csv(ISS_ROW) });
+  handle({ type: 'gp', path: 'visual', text: csv(...visual) });
+  handle({ type: 'observer', latDeg: 29.7604, lonDeg: -95.3698 });
+  const passMsgs = () => out.filter((m) => m.type === 'passes');
+  const ids = () => [...new Set(passMsgs().map((m) => m.scanId))];
+  handle({ type: 'passes', timeMs: start });
+  const first = passMsgs()[0].scanId;
+  assert.equal(passMsgs()[0].done, false);
+  // eight reverse playback requests while it runs: no new scan
+  let t = start;
+  for (let i = 0; i < 8; i++) {
+    t -= 900_000;
+    handle({ type: 'passes', timeMs: t, defer: true, backward: true });
+  }
+  assert.deepEqual(ids(), [first], 'still the one scan');
+  while (queue.length) queue.shift()();
+  const firstDone = passMsgs().find((m) => m.scanId === first && m.done);
+  assert.ok(firstDone, 'the running scan completed');
+  assert.equal(firstDone.processed, firstDone.total);
+  // ...then exactly one scan for the NEWEST deferred request, 24 h back
+  assert.equal(ids().length, 2);
+  const second = ids()[1];
+  const secondDone = passMsgs().find((m) => m.scanId === second && m.done);
+  assert.ok(secondDone, 'deferred scan completed');
+  assert.equal(secondDone.fromMs, t - RESCAN_AFTER_MS);
+  assert.ok(
+    secondDone.passes.every((p) => p.setMs > secondDone.fromMs),
+    'window from the anchored start',
+  );
+  // a request back inside the window drops a pending one
+  handle({ type: 'passes', timeMs: start + 30 * 3600_000 }); // jump: replace
+  const third = ids()[2];
+  assert.ok(third > second);
+  handle({ type: 'passes', timeMs: start - 72 * 3600_000, defer: true });
+  handle({ type: 'passes', timeMs: start + 31 * 3600_000, defer: true }); // inside
+  while (queue.length) queue.shift()();
+  assert.equal(ids().length, 3, 'pending dropped: back inside the window');
+  // jump (no defer) while running: replaced at once (unchanged)
+  handle({ type: 'passes', timeMs: start - 100 * 3600_000 });
+  const fourth = ids()[3];
+  assert.ok(queue.length > 0, 'running');
+  handle({ type: 'passes', timeMs: start + 200 * 3600_000 });
+  assert.ok(ids()[4] > fourth, 'jump replaced the running scan');
+  // defer, but the GP data changed: replaced at once (invalidation)
+  const fifth = ids()[4];
+  handle({ type: 'gp', path: 'visual', text: csv(LINES[40]) });
+  handle({ type: 'passes', timeMs: start + 300 * 3600_000, defer: true });
+  assert.ok(ids()[5] > fifth, 'GP refresh beats defer');
+  // defer, but the observer moved 60 km: replaced at once
+  const sixth = ids()[5];
+  handle({ type: 'observer', latDeg: 29.7604 + 0.54, lonDeg: -95.3698 });
+  handle({ type: 'passes', timeMs: start + 400 * 3600_000, defer: true });
+  assert.ok(ids()[6] > sixth, 'observer move beats defer');
+  // no scan id ever reported done before all its objects were scanned
+  for (const m of passMsgs())
+    if (m.done) assert.equal(m.processed, m.total, `scan ${m.scanId}`);
+  while (queue.length) queue.shift()();
 });

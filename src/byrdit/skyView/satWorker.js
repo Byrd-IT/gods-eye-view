@@ -9,7 +9,10 @@
  *   { type: 'rcs', rcs }                        SATCAT { noradId: rcsM2 } (P2b)
  *   { type: 'observer', latDeg, lonDeg }        set the observer (resets culling)
  *   { type: 'tick', seq, timeMs, sets, ageSets } compute one tick
- *   { type: 'passes', timeMs }                  48 h "Next passes" scan (P2b)
+ *   { type: 'passes', timeMs, backward, defer } 48 h "Next passes" scan (P2b)
+ *     backward: the window starts 24 h before timeMs (reverse play);
+ *     defer: playback request, never cancels a running scan of the same
+ *     data/observer (the newest one runs when that scan finishes).
  *   { type: 'passArc', requestId, noradId, riseMs, setMs } arc of one pass
  * Messages out:
  *   { type: 'catalog', version, load, meta }    after every 'gp'
@@ -31,7 +34,15 @@
  * slices and the sky keeps moving while the list fills in.
  */
 import { createSatEngine } from './satCore.js';
-import { createPassScan, packArc, passArc, passCacheValid } from './passes.js';
+import {
+  createPassScan,
+  OBSERVER_MOVE_KM,
+  observerDistanceKm,
+  packArc,
+  passArc,
+  passCacheValid,
+  passScanStart,
+} from './passes.js';
 
 export const PASS_SLICE_MS = 25;
 
@@ -46,6 +57,7 @@ export function createSatWorkerHandler(
 ) {
   let scan = null; // { id, key, fromMs, observer, job, done, passes }
   let scanSeq = 0;
+  let pending = null; // newest deferred playback request (see startPasses)
 
   const passKey = () => `${engine.passVersion}:${engine.rcsVersion}`;
 
@@ -77,6 +89,13 @@ export function createSatWorkerHandler(
       state.done = true;
       state.passes = state.job.passes();
       postPasses(state, { done: true, added, passes: state.passes });
+      // A playback request deferred while this scan ran: re-evaluate it now
+      // (answered from this cache when still inside, else the next scan).
+      if (pending) {
+        const next = pending;
+        pending = null;
+        startPasses({ ...next, defer: false });
+      }
     } else {
       postPasses(state, { done: false, added });
       schedule(() => {
@@ -103,7 +122,8 @@ export function createSatWorkerHandler(
     if (scan && passCacheValid(scan, { key, observer, timeMs })) {
       // Same GP data and RCS, observer within 50 km, time inside the window:
       // a running scan keeps going (its messages follow), a finished one
-      // answers from the cache.
+      // answers from the cache. An older deferred request is now moot.
+      pending = null;
       if (scan.done)
         postPasses(scan, {
           done: true,
@@ -113,17 +133,35 @@ export function createSatWorkerHandler(
         });
       return;
     }
+    if (
+      data.defer &&
+      scan &&
+      !scan.done &&
+      scan.key === key &&
+      observerDistanceKm(scan.observer, observer) <= OBSERVER_MOVE_KM
+    ) {
+      // Playback moved Sky time out of a scan that is still running, with
+      // the same data and observer. Restarting on every tick would cancel
+      // each scan before it finishes (reverse play starved the list), so
+      // the running scan completes and only the NEWEST such request runs
+      // after it. Data/observer changes and jumps (no `defer`) still
+      // replace the scan at once.
+      pending = { ...data };
+      return;
+    }
+    pending = null;
+    const fromMs = passScanStart(timeMs, { backward: Boolean(data.backward) });
     const state = {
       id: ++scanSeq,
       key,
-      fromMs: timeMs,
+      fromMs,
       observer,
       done: false,
       passes: null,
       job: createPassScan({
         entries: engine.entries,
         observer,
-        fromMs: timeMs,
+        fromMs,
       }),
     };
     scan = state;

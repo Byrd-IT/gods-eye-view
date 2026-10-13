@@ -9,6 +9,8 @@ import {
   unpackRecords,
 } from './satSky.js';
 import { createSatWorkerHandler } from './satWorker.js';
+import { passCoverage, RESCAN_AFTER_MS } from './passes.js';
+import { passesView } from './satPanel.js';
 
 const FIXTURE = readFileSync(
   new URL('./reference/satFixture200.csv', import.meta.url),
@@ -326,4 +328,201 @@ test('P2b: RCS failure only drops the estimates (status error), satellites still
   assert.equal(sky.status, 'ready');
   assert.ok(sky.objectsAt(T0).every((o) => o.estMag == null));
   assert.ok(!worker.posted.some((m) => m.type === 'rcs'));
+});
+
+/**
+ * The real worker handler with its pass scan driven slice by slice (one
+ * object per slice), so a test decides how fast the scan runs against how
+ * fast Sky time moves. Ticks and the other messages answer at once.
+ */
+class SlicedWorker extends EventTarget {
+  constructor() {
+    super();
+    this.slices = [];
+    this.posted = [];
+    this.passMsgs = [];
+    let clock = 0;
+    this.handle = createSatWorkerHandler(
+      (message) => {
+        if (message.type === 'passes') this.passMsgs.push(message);
+        queueMicrotask(() =>
+          this.dispatchEvent(
+            Object.assign(new Event('message'), { data: message }),
+          ),
+        );
+      },
+      {
+        schedule: (fn) => this.slices.push(fn),
+        clock: () => (clock += 10), // every object "takes" 10 ms
+        sliceMs: 1,
+      },
+    );
+  }
+  postMessage(message) {
+    this.posted.push(message);
+    this.handle(message);
+  }
+  /** Run up to `n` scan slices (each one object). */
+  runSlices(n = 1) {
+    for (let i = 0; i < n && this.slices.length; i++) this.slices.shift()();
+  }
+  terminate() {}
+  scansStarted() {
+    return [...new Set(this.passMsgs.map((m) => m.scanId))];
+  }
+}
+
+test('P2b x P5 reverse play: a running pass scan is never restarted by playback ticks; every scan completes, reverse windows keep 24 h, pause and direction change recover coverage', async () => {
+  // 40 stations-group objects: the scan takes many slices (progressive)
+  const stations = [HEADER, ...LINES.slice(1, 41), ISS_ROW, ''].join('\r\n');
+  const worker = new SlicedWorker();
+  const timers = fakeTimers();
+  let time = T0;
+  const sky = createSatSky({
+    createWorker: () => worker,
+    fetchText: async (path) =>
+      path === 'stations' ? stations : `${HEADER}\r\n`,
+    fetchRcs: async () => ({ rcs: { 25544: 399.0524 }, withRcs: 1 }),
+    timers,
+    getTime: () => time,
+  });
+  const flush = async () => {
+    for (let i = 0; i < 4; i++) await settle();
+  };
+  const drain = async () => {
+    for (let i = 0; i < 10_000 && worker.slices.length; i++) {
+      worker.runSlices(1);
+      await flush();
+    }
+    await flush();
+  };
+  // the panel/handle never show a partial or uncovered list as complete
+  const checkHonest = () => {
+    const state = sky.passes;
+    if (state.done) assert.equal(state.processed, state.total);
+    const view = passesView(state, time);
+    if (/\(\d+\)/.test(view.title)) {
+      assert.equal(state.done, true, 'count only on a finished scan');
+      assert.equal(passCoverage(state.fromMs, time), 'ok');
+    }
+    if (passCoverage(state.fromMs, time) === 'gap') {
+      assert.equal(view.rows.length, 0, 'no rows before the window');
+      assert.equal(sky.nextPass(25544, time), null);
+    }
+  };
+  const completed = () =>
+    new Set(worker.passMsgs.filter((m) => m.done).map((m) => m.scanId));
+
+  sky.start(OBS);
+  await flush();
+  await drain();
+  assert.equal(sky.passes.done, true, 'baseline scan completes');
+  assert.equal(sky.passes.fromMs, T0);
+  const total = sky.passes.total;
+  assert.ok(total >= 10, `progressive scan over ${total} objects`);
+  assert.ok(
+    worker.passMsgs.filter((m) => m.scanId === sky.passes.scanId && !m.done)
+      .length >= 5,
+    'scan arrives in several progressive messages',
+  );
+  const baselineScans = worker.scansStarted().length;
+
+  // REVERSE at -3600 (900 s of Sky time per 250 ms tick) with a scan SLOWER
+  // than playback: one object per 4 ticks, i.e. far more than the 24 h of
+  // reverse coverage per scan. The old code restarted the scan on every
+  // tick out of the window and never finished one.
+  for (let i = 1; i <= 320; i++) {
+    time -= 900_000;
+    timers.fire();
+    await flush();
+    if (i % 4 === 0) {
+      worker.runSlices(1);
+      await flush();
+    }
+    checkHonest();
+  }
+  const newScans = worker.scansStarted().slice(baselineScans);
+  assert.ok(newScans.length >= 2, 'reverse play rescans as it leaves windows');
+  // 320 ticks with one rescan per tick would be ~300 scans; each scan of
+  // `total` objects needs 4*total ticks here, so at most 320/(4*total)+1
+  assert.ok(
+    newScans.length <= Math.ceil(320 / (4 * total)) + 1,
+    `no restart storm: ${newScans.length} scans for 320 reverse ticks`,
+  );
+  const done = completed();
+  for (const id of newScans.slice(0, -1))
+    assert.ok(done.has(id), `scan ${id} ran to completion, not cancelled`);
+  for (const m of worker.passMsgs.filter((x) => newScans.includes(x.scanId)))
+    assert.ok(m.fromMs < T0, 'reverse scans start before the anchor');
+  // a reverse-anchored scan covers 24 h BEFORE its request time
+  const reverseReqs = worker.posted.filter(
+    (m) => m.type === 'passes' && m.backward,
+  );
+  assert.ok(reverseReqs.length >= 1 && reverseReqs.every((m) => m.defer));
+
+  // PAUSE (P5 clock pause emits a time change -> timeChanged): the list
+  // recovers full coverage at the paused time.
+  sky.timeChanged();
+  await flush();
+  await drain();
+  checkHonest();
+  let state = sky.passes;
+  assert.equal(state.done, true, 'complete after pause');
+  assert.equal(state.processed, state.total);
+  assert.equal(passCoverage(state.fromMs, time), 'ok', 'paused time covered');
+  const pausedAt = time;
+  const iss = sky.nextPass(25544, pausedAt, { visibleOnly: false });
+  assert.ok(iss && iss.setMs > pausedAt, 'next ISS pass known after pause');
+  // same answer as a fresh forward scan at the paused time (within the 5 s
+  // fine step: different coarse grids)
+  const fresh = new SlicedWorker();
+  const sky2 = createSatSky({
+    createWorker: () => fresh,
+    fetchText: async (path) =>
+      path === 'stations' ? stations : `${HEADER}\r\n`,
+    fetchRcs: async () => ({ rcs: { 25544: 399.0524 }, withRcs: 1 }),
+    timers: fakeTimers(),
+    getTime: () => pausedAt,
+  });
+  sky2.start(OBS);
+  for (let i = 0; i < 4; i++) await settle();
+  for (let i = 0; i < 10_000 && fresh.slices.length; i++) {
+    fresh.runSlices(1);
+    for (let j = 0; j < 4; j++) await settle();
+  }
+  for (let j = 0; j < 4; j++) await settle();
+  assert.equal(sky2.passes.done, true);
+  const ref = sky2.nextPass(25544, pausedAt, { visibleOnly: false });
+  assert.ok(ref);
+  assert.ok(Math.abs(ref.riseMs - iss.riseMs) <= 10_000, 'same next ISS pass');
+  sky2.stop();
+
+  // DIRECTION CHANGE: forward again past the window; scans still complete
+  const forwardStart = worker.scansStarted().length;
+  for (let i = 1; i <= 240; i++) {
+    time += 900_000;
+    timers.fire();
+    await flush();
+    if (i % 4 === 0) {
+      worker.runSlices(1);
+      await flush();
+    }
+    checkHonest();
+  }
+  await drain();
+  // the last playback tick before the drain may still be out of the window:
+  // one more tick re-requests, then the list covers the time
+  timers.fire();
+  await flush();
+  await drain();
+  checkHonest();
+  const fwdScans = worker.scansStarted().slice(forwardStart);
+  assert.ok(fwdScans.length >= 1, 'forward play rescans');
+  const done2 = completed();
+  for (const id of fwdScans) assert.ok(done2.has(id), `scan ${id} completed`);
+  state = sky.passes;
+  assert.equal(state.done, true);
+  assert.equal(passCoverage(state.fromMs, time), 'ok');
+  assert.ok(state.fromMs <= time && time - state.fromMs <= RESCAN_AFTER_MS);
+  sky.stop();
 });

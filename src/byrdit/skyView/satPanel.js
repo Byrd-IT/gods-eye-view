@@ -13,6 +13,7 @@ import {
   MAG_LIMIT_MIN,
 } from './brightness.js';
 import { DROP_DAYS, SKY_CLASSES, STALE_DAYS, STATE } from './satCore.js';
+import { passCoverage } from './passes.js';
 import { skyClassColor, skyClassLabel } from './satOverlay.js';
 
 const DAY_MS = 86_400_000;
@@ -152,17 +153,30 @@ export function passRowText(pass, nowMs) {
   };
 }
 
-/** Title, status line and rows of the "Next passes" section. */
+/**
+ * Title, status line and rows of the "Next passes" section. A list never
+ * claims to be complete for a Sky time it does not cover: before the scanned
+ * window (reverse play ran ahead of the scan) it shows no rows, past the
+ * 24 h cache rule it keeps the rows but no count, until the rescan answers.
+ */
 export function passesView(
   state,
   timeMs,
   { visibleOnly = true, limit = PASS_LIMIT, upcoming } = {},
 ) {
-  const list = upcoming
-    ? upcoming(state?.list || [], timeMs, { visibleOnly, limit })
-    : (state?.list || []).slice(0, limit);
+  const coverage = passCoverage(state?.fromMs, timeMs);
+  const gap = coverage === 'gap';
+  const list = gap
+    ? []
+    : upcoming
+      ? upcoming(state?.list || [], timeMs, { visibleOnly, limit })
+      : (state?.list || []).slice(0, limit);
+  const complete =
+    Boolean(state?.done) && (coverage === 'ok' || coverage === 'none');
   let status = '';
   if (!state || state.scanId == null) status = 'Finding passes...';
+  else if (gap || (state.done && !complete))
+    status = 'Updating passes for this Sky time...';
   else if (!state.done)
     status = `Scanning ${state.processed} of ${state.total} (stations + bright objects, next 48 h)...`;
   else if (!list.length)
@@ -172,7 +186,7 @@ export function passesView(
   else
     status = `Stations + bright objects, next 48 h${visibleOnly ? ', visible only' : ''}. Magnitudes are estimates.`;
   return {
-    title: `Next passes${state?.done ? ` (${list.length})` : ''}`,
+    title: `Next passes${complete ? ` (${list.length})` : ''}`,
     status,
     rows: list,
   };

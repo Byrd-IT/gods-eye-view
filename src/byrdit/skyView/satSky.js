@@ -25,7 +25,7 @@ import {
   decodeFlags,
   planTick,
 } from './satCore.js';
-import { nextPassOf, RESCAN_AFTER_MS } from './passes.js';
+import { nextPassOf, passCoverage, RESCAN_AFTER_MS } from './passes.js';
 import { normalizeAz } from './skyMath.js';
 
 export const TICK_MS = 1000;
@@ -226,7 +226,16 @@ export function createSatSky({
       });
   }
 
-  function requestPasses(force = false) {
+  /**
+   * Ask the worker for the "Next passes" scan at Sky time. `defer` (playback
+   * ticks) lets a running scan finish instead of being replaced; `backward`
+   * (Sky time ran back out of the window) anchors the new window 24 h
+   * earlier so reverse play keeps one scan for 24 h of Sky time.
+   */
+  function requestPasses(
+    force = false,
+    { defer = false, backward = false } = {},
+  ) {
     if (!worker || !observer || status !== 'ready') return false;
     const timeMs = getTime();
     if (
@@ -236,7 +245,10 @@ export function createSatSky({
     )
       return false;
     lastPassRequestMs = timeMs;
-    worker.postMessage({ type: 'passes', timeMs });
+    const message = { type: 'passes', timeMs };
+    if (defer) message.defer = true;
+    if (backward) message.backward = true;
+    worker.postMessage(message);
     return true;
   }
 
@@ -335,7 +347,11 @@ export function createSatSky({
       timeMs: msg.timeMs,
     });
     notify('tick');
-    if (passesStale(msg.timeMs)) requestPasses(false);
+    if (passesStale(msg.timeMs))
+      requestPasses(false, {
+        defer: true,
+        backward: msg.timeMs < passes.fromMs,
+      });
   }
 
   function requestTick(force = false) {
@@ -533,8 +549,14 @@ export function createSatSky({
     get passes() {
       return { ...passes, list: passes.list };
     },
-    /** Next pass of an object not over at `timeMs` (null if none known). */
+    /**
+     * Next pass of an object not over at `timeMs` (null if none known). Null
+     * too while `timeMs` is before the scanned window (reverse play ahead of
+     * the scan): a pass between the two would be missed, so a later one is
+     * not "the next".
+     */
     nextPass(noradId, timeMs = getTime(), options = {}) {
+      if (passCoverage(passes.fromMs, timeMs) === 'gap') return null;
       return nextPassOf(passes.list, Number(noradId), timeMs, options);
     },
     /**

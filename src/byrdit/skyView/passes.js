@@ -111,6 +111,34 @@ export function passCacheValid(cache, { key, observer, timeMs }) {
   return t >= cache.fromMs && t <= cache.fromMs + RESCAN_AFTER_MS;
 }
 
+/**
+ * Start of the 48 h window a scan asked at `timeMs` covers. Forward (live,
+ * jumps, forward play) starts at `timeMs`. While Sky time runs BACKWARDS the
+ * window starts RESCAN_AFTER_MS earlier, so `timeMs` sits at the late edge
+ * of the cache rule: the scan stays valid for the next 24 h of reverse play
+ * and still lists >= 24 h ahead of every time in that span (the same
+ * guarantee a forward scan gives). A forward-anchored window would be left
+ * by the very next reverse tick.
+ */
+export function passScanStart(timeMs, { backward = false } = {}) {
+  const t = Number(timeMs);
+  return backward ? t - RESCAN_AFTER_MS : t;
+}
+
+/**
+ * How well a pass list scanned from `fromMs` answers "next passes" at
+ * `timeMs`: 'none' (no scan yet), 'gap' (time is before the window: passes
+ * between it and the window start are unknown), 'short' (past the cache
+ * rule: under 24 h ahead is known, a rescan is due) or 'ok'.
+ */
+export function passCoverage(fromMs, timeMs) {
+  if (fromMs == null || !Number.isFinite(fromMs)) return 'none';
+  const t = Number(timeMs);
+  if (t < fromMs) return 'gap';
+  if (t > fromMs + RESCAN_AFTER_MS) return 'short';
+  return 'ok';
+}
+
 /** One sample of a pass: look angles, sunlit, dark sky, estimate. */
 export function passSample(entry, timeMs, observer) {
   const look = lookAnglesAt(
