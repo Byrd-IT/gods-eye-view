@@ -1611,3 +1611,97 @@ test('P4 R2: a relative-only browser (no compass) can still Align from the UI; t
   assert.equal(store.size, 0, 'session-only');
   handle.destroy();
 });
+
+test('P4 R2 + P5 integration: iOS Align needs both the compass reference and Live time; refused combinations store nothing, Live after the reference stores once', async () => {
+  const { moonState } = await import('./ephemeris.js');
+  const obs = { latDeg: 29.7604, lonDeg: -95.3698, heightM: 1.7 };
+  let when = null;
+  for (let h = 0; h < 72 && when == null; h += 1) {
+    const t = Date.parse('2026-10-12T00:00:00Z') + h * 3_600_000;
+    const m = moonState(t, obs, { refraction: true });
+    if (m.elDeg > 20 && m.elDeg < 50) when = t;
+  }
+  assert.ok(when, 'found a Moon-up time');
+  const win = sensorWindow({ ios: true });
+  delete win.ondeviceorientationabsolute; // iOS Safari has no absolute event
+  const store = new Map();
+  const writes = [];
+  const { doc, handle } = pointingSetup(win, {
+    now: () => when,
+    orientationOptions: {
+      requestFrame: () => null,
+      now: () => (sensorClock += 40),
+      storage: {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => {
+          writes.push(k);
+          store.set(k, String(v));
+        },
+        removeItem: (k) => store.delete(k),
+      },
+    },
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'gps' });
+  const moon = handle.content.ephemeris.moon;
+  click(doc.body.find('point'));
+  await settle();
+  const ios = (bearing, el, accuracy) => {
+    const p = portraitPose(bearing, el);
+    return {
+      alpha: (p.alpha + 40) % 360,
+      beta: p.beta,
+      gamma: p.gamma,
+      webkitCompassHeading: (((bearing - 2) % 360) + 360) % 360,
+      webkitCompassAccuracy: accuracy,
+    };
+  };
+  const status = () => doc.body.find('orient-status').textContent;
+
+  // 1. no reference AND off Live: Align hidden, both refusals store nothing
+  win.fire('deviceorientation', ios(moon.azDeg, moon.elDeg, 5));
+  assert.equal(handle.orientation.alignReady, false);
+  handle.clock.setFixed(when + 2 * 3_600_000);
+  win.fire('deviceorientation', ios(moon.azDeg, moon.elDeg, 5));
+  assert.equal(doc.body.find('align').hidden, true, 'hidden: no reference');
+  assert.doesNotMatch(status(), /Align needs Live time/, 'no Live hint while Align is not offered at all');
+  handle.alignOn('moon');
+  assert.equal(store.size, 0);
+  assert.equal(handle.orientation.alignTo(moon.azDeg, handle.view.azDeg), null, 'controller refuses before the reference');
+
+  // 2. negative accuracy upright: still no reference, still hidden
+  win.fire('deviceorientation', ios(moon.azDeg, 0, -1));
+  assert.equal(handle.orientation.reason, 'accuracy');
+  assert.equal(handle.orientation.alignReady, false);
+  assert.equal(doc.body.find('align').hidden, true);
+
+  // 3. reference arrives (poor accuracy, same state/reason) while off Live:
+  //    the row appears (readiness notified) but every target is disabled
+  win.fire('deviceorientation', ios(moon.azDeg, 0, 40));
+  assert.equal(handle.orientation.reason, 'accuracy');
+  assert.equal(handle.orientation.alignReady, true);
+  assert.equal(doc.body.find('align').hidden, false, 'readiness flip reached the UI');
+  assert.equal(doc.body.find('align-moon').disabled, true);
+  assert.equal(doc.body.find('align-sun').disabled, true);
+  assert.equal(doc.body.find('align-target').disabled, true);
+  assert.match(status(), /Align needs Live time/);
+  const before = handle.view.azDeg;
+  handle.alignOn('moon');
+  assert.equal(handle.view.azDeg, before, 'no offset off Live');
+  assert.equal(store.size, 0, 'nothing stored off Live');
+
+  // 4. back to Live, upright then up at the Moon: Align works, stored once
+  click(doc.body.find('live'));
+  for (let i = 0; i < 40; i += 1) win.fire('deviceorientation', ios(moon.azDeg, 0, 5));
+  win.fire('deviceorientation', ios(moon.azDeg, moon.elDeg, 5));
+  assert.equal(handle.orientation.state, 'on');
+  assert.equal(doc.body.find('align-moon').disabled, false);
+  assert.doesNotMatch(status(), /Align needs Live time/);
+  const miss = wrapDeg(moon.azDeg - handle.view.azDeg);
+  assert.ok(Math.abs(miss) < 0.5, `no double-counted frame: miss ${miss}`);
+  click(doc.body.find('align-moon'));
+  assert.match(status(), /Aligned on the Moon/);
+  assert.ok(Math.abs(wrapDeg(handle.view.azDeg - moon.azDeg)) < 1e-6);
+  assert.deepEqual(writes, ['gev.sky.headingOffsetDeg'], 'exactly one write');
+  assert.ok(Math.abs(Number(store.get('gev.sky.headingOffsetDeg')) - miss) < 1e-6);
+  handle.destroy();
+});
