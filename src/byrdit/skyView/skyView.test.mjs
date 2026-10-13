@@ -1475,6 +1475,19 @@ test('pass row tap keeps the tapped row and Go to peak time in the panel when th
   layout({ H: 180, rowAt: 20, goAt: 200 });
   clickWithTarget(doc.body.find('passes-list'), row);
   assert.equal(row.getBoundingClientRect().top, 0, 'row kept at the top edge');
+  // review round 1 (844x390): row + rest of the list + action taller than the
+  // panel. In a browser the enabled action sticks to the body bottom (a fixed
+  // box here); the tapped row is lifted just clear of it, both stay in view
+  click(doc.body.find('sats-clear'));
+  body.scrollTop = 0;
+  layout({ H: 104, rowAt: 60, goAt: 400 });
+  go.getBoundingClientRect = () => box(76, 28); // sticky once enabled
+  clickWithTarget(doc.body.find('passes-list'), row);
+  const r2 = row.getBoundingClientRect();
+  assert.ok(r2.top >= 0, 'row not pushed off the top');
+  assert.ok(r2.bottom <= 76, 'row clear of the sticky Go to peak');
+  assert.equal(r2.top, 38, 'lifted by the overlap plus a 4 px gap');
+  layout({ H: 180, rowAt: 20, goAt: 200 });
   // selection semantics are unchanged: Go to peak jumps to the selected peak
   const selected = handle.selectedPass;
   handle.clock.setFixed(selected.riseMs - 3_600_000);

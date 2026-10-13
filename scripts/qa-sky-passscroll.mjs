@@ -14,6 +14,11 @@
  *  B. nothing selected, body at the top, row scrolled in with block:nearest,
  *     tap: same checks.
  *  C. with a pass selected, tap a different row: same checks.
+ *  In A-C "Go to peak time" must be fully in the body's scrollport and
+ *  hit-testable at every size (no allowance for an action below the panel)
+ *  and must not cover the selected row.
+ *  G. with a pass selected, sweep the body scroll: wherever the selected row
+ *     is in view, Go to peak is fully in view and hit-testable too.
  *  D. tap "Go to peak time": selection unchanged, Sky time = pass peak.
  *  E. "Next ISS pass" from the bottom (nothing selected): that button stays
  *     in view (it is the anchor).
@@ -180,19 +185,34 @@ for (const [w, h] of SIZES) {
       await sleep(500);
     }
   };
-  // centre of the n-th pass row that is hit-testable right now
-  const rowPt = (n) =>
-    page.evaluate((k) => {
+  // centre of the n-th pass row that is hit-testable right now; with `other`,
+  // only rows that are not selected and whose peak is not the start time (so
+  // "Go to peak" in step D visibly moves the clock)
+  const T_MS = Date.parse(T);
+  const rowPt = (n, other = false) =>
+    page.evaluate((k, oth, tMs) => {
       const body = document
         .querySelector('[data-sky=sats-body]')
         .getBoundingClientRect();
       const list = document.querySelector('[data-sky=passes-list]');
       const lb = list.getBoundingClientRect();
+      const hitOk = (b) => {
+        if (
+          oth &&
+          (b.getAttribute('aria-current') === 'true' ||
+            Math.abs(Number(b.getAttribute('data-pass').split('@')[1]) - tMs) < 120000)
+        )
+          return false;
+        const e = b.getBoundingClientRect();
+        const h = document.elementFromPoint(e.left + e.width / 2, e.top + e.height / 2);
+        return !!h && (h === b || b.contains(h)); // not under Go to peak
+      };
       const ok = [...list.querySelectorAll('button[data-pass]')].filter((b) => {
         const e = b.getBoundingClientRect();
         return (
           e.top >= Math.max(body.top, lb.top) - 0.5 &&
-          e.bottom <= Math.min(body.bottom, lb.bottom) + 0.5
+          e.bottom <= Math.min(body.bottom, lb.bottom) + 0.5 &&
+          hitOk(b)
         );
       });
       // a short panel may clip every row a little: fall back to rows whose
@@ -203,7 +223,9 @@ for (const [w, h] of SIZES) {
             const e = b.getBoundingClientRect();
             const c = e.top + e.height / 2;
             return (
-              c > Math.max(body.top, lb.top) && c < Math.min(body.bottom, lb.bottom)
+              c > Math.max(body.top, lb.top) &&
+              c < Math.min(body.bottom, lb.bottom) &&
+              hitOk(b)
             );
           });
       const b = pool[Math.min(k, pool.length - 1)];
@@ -214,7 +236,7 @@ for (const [w, h] of SIZES) {
         y: e.top + e.height / 2,
         key: b.getAttribute('data-pass'),
       };
-    }, n);
+    }, n, other, T_MS);
   const afterTap = async (name, key) => {
     await sleep(1500);
     const s = await state();
@@ -241,16 +263,41 @@ for (const [w, h] of SIZES) {
       return cy > body.top && cy < body.bottom && hit === g;
     });
     const canFit = fit.span <= fit.bodyH + 0.5;
-    res.steps[name] = { state: s, row, go, fit, goHit, canFit };
+    // the action must not cover the selected row (it sticks to the body
+    // bottom and may overlay list rows below the selection)
+    const clear = row.bottom <= go.top + 0.5 || row.top >= go.bottom - 0.5;
+    res.steps[name] = { state: s, row, go, fit, goHit, canFit, clear };
     await snap(name);
     check(tag, s.selectedKey === key && !s.cardHidden, `${name}: tapped pass selected, card shown`, { key, sel: s.selectedKey });
     check(tag, row.ok, `${name}: tapped row fully in view + hit-testable`, row);
-    // when the row, the rest of the list and the action cannot all fit, Go
-    // to peak must be tappable or start within half a panel height below the
-    // panel (one short scroll away); the row itself is always fully visible
-    const nearBelow = go.top - go.bodyBottom <= fit.bodyH / 2;
-    res.steps[name].nearBelow = nearBelow;
-    check(tag, !s.goDisabled && (canFit ? go.ok : goHit || nearBelow), `${name}: Go to peak ${canFit ? 'fully in view' : 'tappable or one short scroll away (row + list + action taller than the panel)'}`, { go, fit });
+    // review round 1: no allowance for an action below the panel, whatever
+    // the list length or panel height (canFit is recorded for information)
+    check(tag, !s.goDisabled && go.ok && goHit, `${name}: Go to peak fully in view + hit-testable`, { go, fit });
+    check(tag, clear, `${name}: Go to peak does not cover the selected row`, { row, go });
+  };
+
+  // G. with a pass selected, scroll the body through every position where the
+  // selected row is fully visible: Go to peak stays fully visible and
+  // hit-testable at each one (the user can always see the action next to
+  // the row), and never covers the row.
+  const sweep = async (name) => {
+    const max = (await state()).maxScroll;
+    const seen = [];
+    let bad = null;
+    for (let y = 0; y <= max + 8; y += 8) {
+      await setBody(Math.min(y, max));
+      await sleep(40);
+      const row = await reachSelectedRow();
+      if (!row.inView) continue;
+      const go = await reach('[data-sky=pass-go]');
+      const covered = !(row.bottom <= go.top + 0.5 || row.top >= go.bottom - 0.5);
+      seen.push([Math.min(y, max), go.ok, covered]);
+      if (!go.ok && !bad) bad = { y, row, go };
+    }
+    // while the user scrolls, the sticky action may pass over the row at the
+    // bottom edge (recorded, not a failure); it must never be out of view
+    res.steps[name] = { positions: seen.length, covered: seen.filter((p) => p[2]).length, bad };
+    check(tag, seen.length > 0 && !bad, `${name}: Go to peak visible + hit-testable at every scroll position showing the selected row`, { positions: seen.length, bad });
   };
 
   try {
@@ -276,9 +323,19 @@ for (const [w, h] of SIZES) {
     await afterTap('B-nearest-nosel', pt.key);
 
     // C. switch to another row while a pass is selected
-    pt = await rowPt(2);
+    // (rows under the sticky action are not tappable: slide the nested list
+    // until another, later-peaking row is)
+    pt = await rowPt(0, true);
+    for (let i = 0; !pt && i < 15; i++) {
+      await page.evaluate(() => {
+        document.querySelector('[data-sky=passes-list]').scrollTop += 34;
+      });
+      await sleep(150);
+      pt = await rowPt(0, true);
+    }
     await page.mouse.click(pt.x, pt.y);
     await afterTap('C-switch', pt.key);
+    await sweep('G-sweep');
 
     // D. Go to peak time: same selection, time = that pass peak
     const before = await state();

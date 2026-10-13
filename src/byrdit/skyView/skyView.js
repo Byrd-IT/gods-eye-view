@@ -965,7 +965,10 @@ export function mountSkyView({
    * first the body (the anchor may rise to the top edge), then, for a row
    * inside the nested passes list, slide the row down in that list while the
    * body scrolls on, so the row stays put and the action rises. A row tapped
-   * while clipped at the top edge is first scrolled fully into view.
+   * while clipped at the top edge is first scrolled fully into view. When the
+   * row, the rest of the list and the action are taller than the panel, the
+   * action's sticky bottom edge (skyView.css) keeps it in view; the row is
+   * then lifted just clear of it.
    */
   function revealPassGo(anchor) {
     const { body, passGo, passesList } = satDom;
@@ -981,11 +984,12 @@ export function mountSkyView({
     if (passGo.disabled || !passGo.getBoundingClientRect) return;
     a = anchor.getBoundingClientRect();
     const g = passGo.getBoundingClientRect();
-    if (!(g.bottom > b.bottom)) return;
     let need = g.bottom - b.bottom;
-    const s0 = body.scrollTop;
-    body.scrollTop += Math.min(need, Math.max(0, a.top - b.top));
-    need -= body.scrollTop - s0; // what the browser applied (max clamps)
+    if (need > 0.5) {
+      const s0 = body.scrollTop;
+      body.scrollTop += Math.min(need, Math.max(0, a.top - b.top));
+      need -= body.scrollTop - s0; // what the browser applied (max clamps)
+    }
     if (need > 0.5 && inList && typeof passesList.scrollTop === 'number') {
       const lb = passesList.getBoundingClientRect().bottom;
       const s1 = body.scrollTop;
@@ -996,6 +1000,14 @@ export function mountSkyView({
       );
       passesList.scrollTop -= body.scrollTop - s1;
     }
+    // in a browser the enabled action sticks to the body bottom (skyView.css),
+    // so it is in view but may cover the tapped row: lift the row clear of it
+    if (anchor === passGo) return;
+    a = anchor.getBoundingClientRect();
+    const over = passGo.getBoundingClientRect();
+    const cover = a.bottom - over.top;
+    if (cover > 0.5 && over.bottom > a.top)
+      body.scrollTop += Math.min(cover + 4, Math.max(0, a.top - b.top));
   }
 
   /** Re-pin a just-tapped pass control after a panel refresh moved it. */
