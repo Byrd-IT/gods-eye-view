@@ -10,6 +10,9 @@
  * P1 scope: observer, camera, horizon, sky brightness, `sv` URL.
  * P2a: satellites above the horizon (module worker, states, labels, the
  * "Overhead now" panel, element-age rules) drawn into the same overlay.
+ * P2b: brightness ESTIMATE (SATCAT RCS), the naked-eye filter (est. mag
+ * slider), "Next passes" (48 h, stations + visual) with the pass arc and the
+ * "Next ISS pass" hook (handle.nextIssPass / goToPass, for P5's presets).
  * P3b: stars, constellations, Sun/Moon/planets, layer switches and search
  * live in skyContent.js and draw into the same overlay after the P1 pass.
  * P4: "Point at the sky" on phones (orientation.js): the view follows the
@@ -64,9 +67,17 @@ import {
   cardData,
   listIndexFromTarget,
   overheadList,
+  passesView,
+  passKey,
   renderSatPanel,
 } from './satPanel.js';
-import { SKY_CLASSES } from './satCore.js';
+import { ISS_NORAD, SKY_CLASSES, STATE } from './satCore.js';
+import {
+  clampMagLimit,
+  isNakedEyeCandidate,
+  MAG_LIMIT_DEFAULT,
+} from './brightness.js';
+import { upcomingPasses } from './passes.js';
 import { createHistoryProvider } from './historyTime.js';
 import { createSkyClock, createSkyTimeSource } from './skyClock.js';
 import { createIssPassFinder } from './skyPresets.js';
@@ -438,6 +449,8 @@ export function mountSkyView({
   autoEnterDelayMs = 2500,
   createSatWorker,
   fetchCelestrak,
+  fetchRcs,
+  nakedEyeDefault = true,
   reducedMotion = () =>
     Boolean(
       globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches,
@@ -515,16 +528,26 @@ export function mountSkyView({
   let satFrameAt = 0;
   let lookFrame = null;
   let press = null;
+  // brightness + passes (P2b)
+  let nakedEyeOn = Boolean(nakedEyeDefault);
+  let magLimit = MAG_LIMIT_DEFAULT;
+  let selectedPass = null;
   const satSky = createSatSky({
     ...(createSatWorker ? { createWorker: createSatWorker } : {}),
     ...(fetchCelestrak ? { fetchText: fetchCelestrak } : {}),
+    ...(fetchRcs ? { fetchRcs } : {}),
     timers,
     getTime: () => time.getTime(),
     onChange: (what) => {
       if (!active) return;
       updateSatPanel();
       if (what === 'tick') renderValidity(time.getTime());
-      if (what === 'tick' && satFrame == null && playFrame == null) redraw();
+      if (
+        (what === 'tick' || what === 'arc') &&
+        satFrame == null &&
+        playFrame == null
+      )
+        redraw();
       if (what === 'tick') startSatAnimation();
     },
   });
@@ -575,6 +598,18 @@ export function mountSkyView({
   // P1 names kept for callers of handle.elements
   dom.time = timeControl.dom.time;
   dom.buttons.live = timeControl.dom.live;
+
+  /** Naked-eye filter (SKYVIEW.md 4.4) as an object predicate, or null. */
+  const nakedEyeFilter = () =>
+    nakedEyeOn
+      ? (o) =>
+          isNakedEyeCandidate({
+            visible: o.state === STATE.VISIBLE,
+            klass: o.klass,
+            estMag: o.estMag,
+            limit: magLimit,
+          })
+      : null;
 
   const setStatus = (text) => {
     dom.status.textContent = text || '';
@@ -848,6 +883,8 @@ export function mountSkyView({
         // one collision space: satellite labels keep off the cardinals and
         // the star/planet/constellation labels placed just before (P5)
         reserved: takenBoxes(reserved, skyStats?.labels),
+        include: nakedEyeFilter(),
+        passArc: selectedPass ? satSky.arcFor(selectedPass) : null,
       });
       drawSatellites(ctx, satModel, { text: content.textSprites, ratio });
     } else satModel = null;
@@ -913,18 +950,83 @@ export function mountSkyView({
     if (loads.get('active') === 'error')
       statusText =
         `${statusText} All-active list unavailable; showing the core groups.`.trim();
+    const found = selectedIndex == null ? null : satSky.lookup(selectedIndex);
     renderSatPanel(satDom, {
       doc,
-      list: overheadList(objects, { classesOn, occlusion }),
+      list: overheadList(objects, {
+        classesOn,
+        occlusion,
+        include: nakedEyeFilter(),
+      }),
       banner: ageBanner(stats.age, t),
-      card:
-        selectedIndex == null
-          ? null
-          : cardData(satSky.lookup(selectedIndex), t),
+      card: found
+        ? cardData(found, t, {
+            nextPass: found.meta
+              ? satSky.nextPass(found.meta.noradId, t)
+              : null,
+            rcsStatus: satSky.rcs.status,
+          })
+        : null,
       status: satSky.status,
       statusText,
       selectedIndex,
+      passes: passesView(satSky.passes, t, {
+        visibleOnly: nakedEyeOn,
+        upcoming: upcomingPasses,
+      }),
+      selectedPassKey: passKey(selectedPass),
+      nowMs: t,
+      nakedEye: { on: nakedEyeOn, limit: magLimit },
     });
+  }
+
+  /** The pass a "Next passes" row stands for (by key), or null. */
+  function passByKey(key) {
+    return satSky.passes.list.find((p) => passKey(p) === key) ?? null;
+  }
+
+  /** Select a pass: its object, its arc, and look at its peak. */
+  function selectPass(pass, { look = true } = {}) {
+    selectedPass = pass || null;
+    if (!pass) {
+      updateSatPanel();
+      redraw();
+      return;
+    }
+    selectedIndex = Number.isInteger(pass.index) ? pass.index : null;
+    satSky.arcFor(pass);
+    updateSatPanel();
+    redraw();
+    if (look && Number.isFinite(pass.peakAzDeg))
+      lookAtDirection({ azDeg: pass.peakAzDeg, elDeg: pass.peakElevDeg });
+  }
+
+  /**
+   * Set the Sky time to a pass peak ("Go to peak", "Next ISS pass"). The jump
+   * goes through the P5 time control like a preset: the one onTimeChange path
+   * syncs the picker/Live/URL, a playing clock keeps playing from the peak,
+   * and History mode seeks (or refuses when its slider takes no jumps).
+   */
+  function goToPass(pass) {
+    if (!active || !pass || !Number.isFinite(pass.peakMs)) return false;
+    selectPass(pass, { look: false });
+    const moved = timeControl.jumpTo(pass.peakMs);
+    if (!moved)
+      timeControl.setStatus(
+        'The History slider sets the time; it does not accept jumps',
+      );
+    lookAtDirection({ azDeg: pass.peakAzDeg, elDeg: pass.peakElevDeg });
+    return Boolean(moved);
+  }
+
+  /**
+   * Next ISS pass not over at Sky time (VISIBLE ones by default), from the
+   * P2b "Next passes" scan. Named apart from the `nextIssPass` mount option
+   * (P5 preset finder): a body declaration of that name would shadow the
+   * option and hand this synchronous function to the time control.
+   */
+  function nextScannedIssPass({ visibleOnly = true } = {}) {
+    return satSky.nextPass(ISS_NORAD, time.getTime(), { visibleOnly });
   }
 
   /** Redraw at <= SAT_FPS while satellites move (extrapolated between ticks). */
@@ -951,13 +1053,19 @@ export function mountSkyView({
     if (lookFrame != null) cancelFrame(lookFrame);
     lookFrame = null;
   }
-  /** Animated look-at (instant with reduced motion). */
+  /** Animated look-at a satellite (instant with reduced motion). */
   function lookAtSatellite(index) {
     const row = satSky.lookup(index)?.row;
     if (!row || !(row.elDeg > 0)) return false;
+    return lookAtDirection(row);
+  }
+  /** Animated look-at a sky direction (instant with reduced motion). */
+  function lookAtDirection({ azDeg, elDeg }) {
+    if (!active || !Number.isFinite(azDeg) || !Number.isFinite(elDeg))
+      return false;
     cancelLook();
     cancelInertia();
-    const target = { azDeg: row.azDeg, elDeg: clampEl(row.elDeg) };
+    const target = { azDeg, elDeg: clampEl(elDeg) };
     if (reducedMotion()) {
       applyView({ ...view, ...target });
       return true;
@@ -978,6 +1086,8 @@ export function mountSkyView({
   function selectSatellite(index, { look = false } = {}) {
     const previous = selectedIndex;
     selectedIndex = Number.isInteger(index) ? index : null;
+    if (selectedPass && selectedPass.index !== selectedIndex)
+      selectedPass = null;
     updateSatPanel();
     if (selectedIndex != null && selectedIndex !== previous) revealCard();
     redraw();
@@ -1199,6 +1309,7 @@ export function mountSkyView({
     satModel = null;
     satObjects = null;
     selectedIndex = null;
+    selectedPass = null;
     press = null;
     satDom.root.hidden = true;
     if (!keepCamera) restoreCamera(CesiumApi, viewer.camera, cameraSnap);
@@ -1620,7 +1731,33 @@ export function mountSkyView({
   listen(satDom.look, 'click', () => {
     if (selectedIndex != null) lookAtSatellite(selectedIndex);
   });
-  listen(satDom.clear, 'click', () => selectSatellite(null));
+  listen(satDom.clear, 'click', () => {
+    selectedPass = null;
+    selectSatellite(null);
+  });
+  listen(satDom.nakedEye, 'click', () => {
+    nakedEyeOn = !nakedEyeOn;
+    updateSatPanel();
+    redraw();
+  });
+  listen(satDom.magLimit, 'input', () => {
+    magLimit = clampMagLimit(satDom.magLimit.value);
+    updateSatPanel();
+    redraw();
+  });
+  listen(satDom.passesList, 'click', (event) => {
+    const button = event.target?.closest?.('button[data-pass]') ?? event.target;
+    const pass = passByKey(button?.getAttribute?.('data-pass'));
+    if (pass) selectPass(pass);
+  });
+  listen(satDom.passGo, 'click', () => {
+    if (selectedPass) goToPass(selectedPass);
+  });
+  listen(satDom.nextIss, 'click', () => {
+    const pass = nextScannedIssPass();
+    if (pass) goToPass(pass);
+    else showToast('No visible ISS pass found in the next 48 hours yet.');
+  });
   time.subscribe(() => onTimeChange());
 
   listen(dom.canvas, 'pointerdown', onPointerDown);
@@ -1749,6 +1886,24 @@ export function mountSkyView({
       return selectedIndex;
     },
     selectSatellite: (index, options) => selectSatellite(index, options),
+    /** P2b: naked-eye filter state and setters. */
+    get nakedEye() {
+      return { on: nakedEyeOn, limit: magLimit };
+    },
+    setNakedEye({ on = nakedEyeOn, limit = magLimit } = {}) {
+      nakedEyeOn = Boolean(on);
+      magLimit = clampMagLimit(limit);
+      satDom.magLimit.value = String(magLimit);
+      updateSatPanel();
+      redraw();
+    },
+    get selectedPass() {
+      return selectedPass;
+    },
+    selectPass: (pass, options) => selectPass(pass, options),
+    /** Hook for P5's "Next ISS pass" time preset. */
+    nextIssPass: (options) => nextScannedIssPass(options),
+    goToPass: (pass) => goToPass(pass),
     lookAtSatellite: (index) => lookAtSatellite(index),
     satelliteElements: satDom,
     elements: dom,

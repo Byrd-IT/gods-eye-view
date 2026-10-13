@@ -11,6 +11,8 @@ import { worldDirectionToAzEl } from './skyCamera.js';
 import { createObserver } from './observer.js';
 import { readFileSync } from 'node:fs';
 import { createSatWorkerHandler } from './satWorker.js';
+import { isNakedEyeCandidate } from './brightness.js';
+import { ISS_NORAD, STATE } from './satCore.js';
 
 // ── a very small DOM ───────────────────────────────────────────────────────
 class FakeElement extends EventTarget {
@@ -236,6 +238,8 @@ function setup(options = {}) {
     lifetime: options.lifetime,
     createSatWorker: options.createSatWorker,
     fetchCelestrak: options.fetchCelestrak,
+    fetchRcs: options.fetchRcs ?? (async () => ({ rcs: {} })),
+    nakedEyeDefault: options.nakedEyeDefault,
     requestFrame: options.requestFrame ?? (() => null),
     reducedMotion: options.reducedMotion,
     ...(options.orientationWindow
@@ -636,11 +640,14 @@ function satSetup(extra = {}) {
     createSatWorker: () => worker,
     fetchCelestrak: async (path) => {
       fetched.push(path);
+      if (extra.groups?.[path]) return extra.groups[path];
       return path === 'active'
         ? SAT_FIXTURE
         : SAT_FIXTURE.split(/\r?\n/)[0] + '\r\n';
     },
     reducedMotion: () => true,
+    // the P2a tests below look at every object above the horizon
+    nakedEyeDefault: false,
     ...extra,
   });
   return { ...env, worker, fetched };
@@ -1191,3 +1198,216 @@ test('P4+P5: Align is offered only at Live time (a past/future sky would put a w
   globalThis.localStorage?.removeItem?.('gev.sky.headingOffsetDeg');
 });
 const wrapDeg = (d) => ((((d + 180) % 360) + 360) % 360) - 180;
+
+// ── brightness, naked-eye filter, passes (P2b) ────────────────────────────
+const FIXTURE_LINES = SAT_FIXTURE.split(/\r?\n/).filter(Boolean);
+const ISS_STATIONS =
+  FIXTURE_LINES[0] +
+  '\r\n' +
+  FIXTURE_LINES.find((l) => l.split(',')[11] === String(ISS_NORAD)) +
+  '\r\n';
+/** Every fixture object gets RCS 5 m2 (so many have estimates), ISS real. */
+const FIXTURE_RCS = Object.fromEntries(
+  FIXTURE_LINES.slice(1).map((l) => [l.split(',')[11], 5]),
+);
+FIXTURE_RCS[ISS_NORAD] = 399.0524;
+
+async function waitFor(predicate, worker, tries = 400) {
+  for (let i = 0; i < tries && !predicate(); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    worker.deliver();
+  }
+  assert.ok(predicate(), 'condition reached');
+}
+
+test('naked-eye filter: on by default (estimate wording), only candidates listed/drawn; slider and "all" switch', async () => {
+  const fetchedRcs = [];
+  const { doc, handle, worker } = satSetup({
+    nakedEyeDefault: undefined, // the real default
+    groups: { stations: ISS_STATIONS },
+    fetchRcs: async () => {
+      fetchedRcs.push(1);
+      return { rcs: FIXTURE_RCS, withRcs: Object.keys(FIXTURE_RCS).length };
+    },
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  assert.equal(
+    fetchedRcs.length,
+    1,
+    'RCS fetched once from the same-origin cache',
+  );
+  assert.equal(handle.satellites.rcs.status, 'ready');
+  assert.deepEqual(handle.nakedEye, { on: true, limit: 5.5 });
+  const button = doc.body.find('naked-eye');
+  assert.equal(button.getAttribute('aria-pressed'), 'true');
+  assert.match(button.getAttribute('title'), /estimate/i);
+  assert.match(
+    doc.body.find('sat-mag-limit-text').textContent,
+    /^est\. mag <= 5\.5$/,
+  );
+  const objects = handle.satellites.objectsAt(handle.clock.getTime());
+  assert.ok(
+    objects.some((o) => o.estMag != null),
+    'worker sent estimates',
+  );
+  const candidate = (o, limit = 5.5) =>
+    isNakedEyeCandidate({
+      visible: o.state === STATE.VISIBLE,
+      klass: o.klass,
+      estMag: o.estMag,
+      limit,
+    });
+  handle.redraw();
+  const drawn = new Set(handle.satelliteModel.dots.map((d) => d.index));
+  for (const o of objects)
+    if (drawn.has(o.index))
+      assert.ok(candidate(o), `${o.name} drawn but not a candidate`);
+  const onCount = Number(
+    /\((\d+)\)/.exec(doc.body.find('sats-title').textContent)[1],
+  );
+  const above = objects.filter((o) => o.elDeg > 0);
+  assert.ok(onCount < above.length, 'filter hides objects');
+  // slider to 7: at least as many candidates
+  const slider = doc.body.find('sat-mag-limit');
+  slider.value = '7';
+  slider.dispatchEvent(new Event('input'));
+  assert.equal(handle.nakedEye.limit, 7);
+  const at7 = Number(
+    /\((\d+)\)/.exec(doc.body.find('sats-title').textContent)[1],
+  );
+  assert.ok(at7 >= onCount);
+  // "Naked-eye only" off: every object above the horizon
+  click(button);
+  assert.equal(button.getAttribute('aria-pressed'), 'false');
+  assert.equal(slider.disabled, true);
+  const all = Number(
+    /\((\d+)\)/.exec(doc.body.find('sats-title').textContent)[1],
+  );
+  assert.ok(all > at7, `${all} > ${at7}`);
+  // card: estimate wording, never a bare number
+  const withMag = objects.find((o) => o.elDeg > 0 && o.estMag != null);
+  handle.selectSatellite(withMag.index);
+  const lines = doc.body
+    .find('sats-card')
+    .children[1].children.map((n) => n.textContent);
+  const k = lines.indexOf('Brightness');
+  assert.ok(k >= 0);
+  assert.match(lines[k + 1], /^est\. mag -?\d+\.\d \(estimate/);
+});
+
+test('RCS unavailable: no estimates, filter falls back to stations/visual, card says why', async () => {
+  const { doc, handle, worker } = satSetup({
+    nakedEyeDefault: true,
+    groups: { stations: ISS_STATIONS },
+    fetchRcs: async () => {
+      throw new Error('HTTP 503');
+    },
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  assert.equal(handle.satellites.rcs.status, 'error');
+  const objects = handle.satellites.objectsAt(handle.clock.getTime());
+  assert.ok(objects.every((o) => o.estMag == null));
+  handle.redraw();
+  for (const d of handle.satelliteModel.dots) {
+    const o = objects.find((x) => x.index === d.index);
+    assert.ok(
+      ['station', 'visual'].includes(o.klass) && o.state === STATE.VISIBLE,
+    );
+  }
+  const other = objects.find((o) => o.elDeg > 0 && o.klass === 'other');
+  handle.selectSatellite(other.index);
+  const lines = doc.body
+    .find('sats-card')
+    .children[1].children.map((n) => n.textContent);
+  assert.match(
+    lines[lines.indexOf('Brightness') + 1],
+    /no estimate \(catalogue sizes unavailable\)/,
+  );
+});
+
+test('Next passes: progressive scan fills the panel, VISIBLE chip and est. mag; row draws the arc; Next ISS pass jumps the time', async () => {
+  const { doc, handle, worker } = satSetup({
+    nakedEyeDefault: true,
+    groups: { stations: ISS_STATIONS },
+    fetchRcs: async () => ({ rcs: FIXTURE_RCS }),
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  await waitFor(() => handle.satellites.passes.done, worker);
+  const state = handle.satellites.passes;
+  assert.ok(state.list.length > 0);
+  assert.ok(state.list.every((p) => p.peakElevDeg >= 10));
+  const rows = doc.body.find('passes-list').children;
+  assert.ok(rows.length > 0, 'rows rendered');
+  const first = rows[0].children[0];
+  // visible only by default (naked-eye on): every row has the VISIBLE chip
+  for (const li of rows) assert.equal(li.children[0].children[1].hidden, false);
+  assert.match(first.children[3].textContent, /^est\. mag -?\d\.\d$/);
+  assert.match(doc.body.find('passes-status').textContent, /estimates/);
+  // row click: pass selected, its object selected, arc requested then drawn
+  clickWithTarget(doc.body.find('passes-list'), first);
+  const pass = handle.selectedPass;
+  assert.ok(pass && pass.noradId === ISS_NORAD);
+  assert.equal(handle.selectedSatellite, pass.index);
+  assert.ok(
+    Math.abs(handle.view.elDeg - pass.peakElevDeg) < 1e-6,
+    'looked at the peak',
+  );
+  await waitFor(() => Array.isArray(handle.satellites.arcFor(pass)), worker);
+  handle.redraw();
+  assert.ok(handle.satelliteModel.arc.length > 0, 'arc drawn');
+  assert.equal(doc.body.find('pass-go').disabled, false);
+  // Next ISS pass: the P5 hook and the one-tap button
+  const next = handle.nextIssPass();
+  assert.equal(next.noradId, ISS_NORAD);
+  assert.equal(next.visible, true);
+  click(doc.body.find('next-iss'));
+  assert.equal(handle.clock.mode, 'fixed');
+  assert.equal(handle.clock.getTime(), next.peakMs);
+  assert.equal(doc.body.find('time').value, toLocalInputValue(next.peakMs));
+  // the card shows that object's next pass
+  await pumpSats(worker);
+  const lines = doc.body
+    .find('sats-card')
+    .children[1].children.map((n) => n.textContent);
+  assert.ok(lines.includes('Next pass'));
+});
+
+test('P2b x P5: Next ISS pass / Go to peak jump through the time control; the P5 ISS preset finder is not shadowed', async () => {
+  const { doc, handle, worker } = satSetup({
+    nakedEyeDefault: true,
+    groups: { stations: ISS_STATIONS },
+    fetchRcs: async () => ({ rcs: FIXTURE_RCS }),
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  await waitFor(() => handle.satellites.passes.done, worker);
+  // the scan hook is synchronous and returns a pass, not a preset result
+  const next = handle.nextIssPass();
+  assert.equal(next.noradId, ISS_NORAD);
+  // a playing clock keeps playing from the peak (same rule as P5 presets)
+  handle.clock.play({ rate: 60 });
+  assert.equal(handle.clock.mode, 'play');
+  click(doc.body.find('next-iss'));
+  assert.equal(handle.clock.mode, 'play', 'still playing');
+  assert.ok(
+    Math.abs(handle.clock.getTime() - next.peakMs) < 1000,
+    'jumped to the peak',
+  );
+  assert.equal(doc.body.find('time').value, toLocalInputValue(next.peakMs));
+  // Go to peak from a fixed time lands exactly on the peak, Live off
+  handle.clock.setFixed(next.riseMs - 3_600_000);
+  handle.selectPass(next, { look: false });
+  click(doc.body.find('pass-go'));
+  assert.equal(handle.clock.mode, 'fixed');
+  assert.equal(handle.clock.getTime(), next.peakMs);
+  assert.equal(doc.body.find('live').getAttribute('aria-pressed'), 'false');
+  // the P5 ISS preset still gets its own async finder (pass start)
+  const preset = await handle.applyPreset('iss');
+  assert.equal(preset.ok, true, preset.reason);
+  assert.ok(Number.isFinite(preset.timeMs));
+  assert.equal(handle.clock.getTime(), preset.timeMs);
+  assert.match(doc.body.find('time-status').textContent, /^ISS pass: /);
+});

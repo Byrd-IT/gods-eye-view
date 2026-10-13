@@ -35,6 +35,7 @@ test('gp -> catalog meta; observer; tick -> packed Float32Array, transferred', (
     'name',
     'noradId',
     'objectId',
+    'rcsM2',
     'set',
   ]);
   handle({ type: 'observer', latDeg: 29.7604, lonDeg: -95.3698 });

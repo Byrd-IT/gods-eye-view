@@ -6,6 +6,12 @@
  * tick policy, and turns packed tick results into drawable objects with
  * az/el extrapolated between ticks.
  *
+ * P2b: also fetches the SATCAT radar cross-sections from the same-origin
+ * /api/celestrak-rcs cache (brightness estimates; on failure brightness is
+ * simply omitted), and drives the worker's "Next passes" scan (progressive
+ * results, cached in the worker; re-requested on a new catalogue, a time
+ * jump or when Sky time leaves the scanned window).
+ *
  * Backlog rule: at most ONE tick is in flight; a timer tick that finds the
  * worker busy is skipped and counted (stats.skipped), a forced tick (time
  * jump, observer move, switch) is remembered and sent as soon as the worker
@@ -19,6 +25,7 @@ import {
   decodeFlags,
   planTick,
 } from './satCore.js';
+import { nextPassOf, RESCAN_AFTER_MS } from './passes.js';
 import { normalizeAz } from './skyMath.js';
 
 export const TICK_MS = 1000;
@@ -37,6 +44,14 @@ function defaultCreateWorker() {
     type: 'module',
     name: 'gev-sky-satellites',
   });
+}
+
+async function defaultFetchRcs() {
+  const response = await globalThis.fetch('/api/celestrak-rcs');
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = await response.json();
+  if (!body || typeof body.rcs !== 'object') throw new Error('bad rcs body');
+  return body;
 }
 
 /** GP CSV text of a group from the same-origin CelesTrak proxy. */
@@ -87,6 +102,7 @@ export function unpackRecords(records, timeMs) {
       elDeg: records[o + 2],
       rangeKm: records[o + 3],
       rangeRateKmS: records[o + 4],
+      estMag: Number.isFinite(records[o + 6]) ? records[o + 6] : null,
       ...flags,
     });
   }
@@ -96,6 +112,7 @@ export function unpackRecords(records, timeMs) {
 export function createSatSky({
   createWorker = defaultCreateWorker,
   fetchText = fetchCelestrakText,
+  fetchRcs = defaultFetchRcs,
   timers = globalThis,
   getTime = () => Date.now(),
   onChange = () => {},
@@ -136,6 +153,23 @@ export function createSatSky({
     timeMs: null,
   };
   const sets = { active: activeOn, starlink: starlinkOn };
+  // P2b: brightness (SATCAT RCS) and passes
+  let rcs = { status: 'idle', withRcs: 0, matched: 0, fetchedAt: null };
+  let passes = emptyPasses();
+  let lastPassRequestMs = null;
+  const arcs = new Map(); // `${noradId}@${riseMs}` -> arc rows | 'loading'
+  let arcSeq = 0;
+  function emptyPasses() {
+    return {
+      scanId: null,
+      fromMs: null,
+      done: false,
+      processed: 0,
+      total: 0,
+      prefiltered: 0,
+      list: [],
+    };
+  }
   const enabledSets = () =>
     ['core', 'active', 'starlink'].filter((s) => s === 'core' || sets[s]);
 
@@ -168,6 +202,65 @@ export function createSatSky({
       });
   }
 
+  function loadRcs() {
+    if (!worker || rcs.status === 'loading' || rcs.status === 'ready') return;
+    rcs = { ...rcs, status: 'loading' };
+    const target = worker;
+    Promise.resolve()
+      .then(() => fetchRcs())
+      .then((body) => {
+        if (worker !== target) return;
+        target.postMessage({ type: 'rcs', rcs: body.rcs });
+        rcs = {
+          ...rcs,
+          status: 'ready',
+          withRcs: Number(body.withRcs) || Object.keys(body.rcs).length,
+          fetchedAt: body.fetchedAt ?? null,
+        };
+      })
+      .catch(() => {
+        if (worker !== target) return;
+        // No RCS: no estimates; the naked-eye filter falls back to classes.
+        rcs = { ...rcs, status: 'error' };
+        notify('rcs');
+      });
+  }
+
+  function requestPasses(force = false) {
+    if (!worker || !observer || status !== 'ready') return false;
+    const timeMs = getTime();
+    if (
+      !force &&
+      lastPassRequestMs != null &&
+      Math.abs(timeMs - lastPassRequestMs) < 60_000
+    )
+      return false;
+    lastPassRequestMs = timeMs;
+    worker.postMessage({ type: 'passes', timeMs });
+    return true;
+  }
+
+  /** Sky time left the scanned window: ask again (the worker decides). */
+  function passesStale(timeMs) {
+    if (passes.fromMs == null) return false;
+    return timeMs < passes.fromMs || timeMs > passes.fromMs + RESCAN_AFTER_MS;
+  }
+
+  function acceptPasses(msg) {
+    if (msg.scanId !== passes.scanId) {
+      passes = { ...emptyPasses(), scanId: msg.scanId, fromMs: msg.fromMs };
+      arcs.clear();
+    }
+    passes.processed = msg.processed;
+    passes.total = msg.total;
+    passes.prefiltered = msg.prefiltered;
+    passes.done = Boolean(msg.done);
+    if (msg.done && Array.isArray(msg.passes)) passes.list = msg.passes;
+    else if (Array.isArray(msg.added) && msg.added.length)
+      passes.list = [...passes.list, ...msg.added];
+    notify('passes');
+  }
+
   function ensureData() {
     for (const group of SKY_CORE_GROUPS) load(group.path);
     if (sets.active) load(ACTIVE_PATH);
@@ -184,6 +277,21 @@ export function createSatSky({
       status = 'ready';
       notify('catalog');
       requestTick(true);
+      requestPasses(true);
+    } else if (msg.type === 'rcs') {
+      meta = msg.meta || meta;
+      rcs = { ...rcs, matched: msg.matched ?? 0 };
+      notify('rcs');
+      requestTick(true);
+      requestPasses(true);
+    } else if (msg.type === 'passes') {
+      acceptPasses(msg);
+    } else if (msg.type === 'passArc') {
+      const key = `${msg.noradId}@${msg.riseMs}`;
+      if (arcs.get(key) === 'loading') {
+        arcs.set(key, msg.arc || []);
+        notify('arc');
+      }
     } else if (msg.type === 'tick') {
       if (msg.seq !== pendingSeq) return;
       pendingSeq = null;
@@ -192,6 +300,7 @@ export function createSatSky({
     } else if (msg.type === 'error') {
       lastError = msg.message;
       if (msg.request === 'tick' && msg.seq === pendingSeq) pendingSeq = null;
+      if (msg.request === 'passes') lastPassRequestMs = null;
       notify('worker-error');
     }
   }
@@ -226,6 +335,7 @@ export function createSatSky({
       timeMs: msg.timeMs,
     });
     notify('tick');
+    if (passesStale(msg.timeMs)) requestPasses(false);
   }
 
   function requestTick(force = false) {
@@ -330,9 +440,14 @@ export function createSatSky({
         latDeg: observer.latDeg,
         lonDeg: observer.lonDeg,
       });
+      passes = emptyPasses();
+      arcs.clear();
+      lastPassRequestMs = null;
       ensureData();
+      loadRcs();
       startTimer();
       requestTick(true);
+      requestPasses(true);
       notify('status');
       return true;
     },
@@ -350,6 +465,10 @@ export function createSatSky({
       pendingSeq = null;
       wantForce = false;
       status = 'idle';
+      rcs = { status: 'idle', withRcs: 0, matched: 0, fetchedAt: null };
+      passes = emptyPasses();
+      arcs.clear();
+      lastPassRequestMs = null;
     },
     /**
      * The Sky clock jumped (picked time, back to live): recompute now. The old
@@ -358,6 +477,7 @@ export function createSatSky({
      */
     timeChanged() {
       requestTick(true);
+      if (passesStale(getTime())) requestPasses(true);
     },
     setSets(next = {}) {
       if ('active' in next) sets.active = Boolean(next.active);
@@ -403,6 +523,39 @@ export function createSatSky({
         api.start(at);
       }
       return true;
+    },
+    requestPasses,
+    /** SATCAT RCS state: status idle|loading|ready|error, counts. */
+    get rcs() {
+      return { ...rcs };
+    },
+    /** "Next passes" scan: { scanId, fromMs, done, processed, total, list }. */
+    get passes() {
+      return { ...passes, list: passes.list };
+    },
+    /** Next pass of an object not over at `timeMs` (null if none known). */
+    nextPass(noradId, timeMs = getTime(), options = {}) {
+      return nextPassOf(passes.list, Number(noradId), timeMs, options);
+    },
+    /**
+     * Arc rows [[azDeg, elDeg, sunlit, timeMs], ...] for a pass: null while
+     * the worker computes it (requested on the first call), [] if unknown.
+     */
+    arcFor(pass) {
+      if (!pass || !worker) return null;
+      const key = `${pass.noradId}@${pass.riseMs}`;
+      const have = arcs.get(key);
+      if (Array.isArray(have)) return have;
+      if (have === 'loading') return null;
+      arcs.set(key, 'loading');
+      worker.postMessage({
+        type: 'passArc',
+        requestId: ++arcSeq,
+        noradId: pass.noradId,
+        riseMs: pass.riseMs,
+        setMs: pass.setMs,
+      });
+      return null;
     },
     /** Drawable objects at Sky time `timeMs` (extrapolated between ticks). */
     objectsAt(timeMs) {

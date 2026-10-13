@@ -14,6 +14,7 @@ import {
   geoBeltPoints,
   hitTest,
   lookAtView,
+  passArcRuns,
   placeLabels,
   satelliteModel,
   skyClassColor,
@@ -276,4 +277,57 @@ test('placeLabels drops what cannot fit; drawSatellites paints without throwing'
   drawSatellites(ctx, null);
   assert.ok(calls.some(([k]) => k === 'arc'));
   assert.ok(calls.some(([k]) => k === 'fillText'));
+});
+
+test('P2b: include filter (selected always drawn) and the pass arc split by lighting', () => {
+  const objects = [
+    obj(1, 180, 45, { estMag: 3 }),
+    obj(2, 185, 45, { estMag: 9, klass: 'other' }),
+  ];
+  const include = (o) => o.estMag <= 5.5;
+  let model = satelliteModel({ objects, view, width: W, height: H, include });
+  assert.deepEqual(
+    model.dots.map((d) => d.index),
+    [1],
+  );
+  model = satelliteModel({
+    objects,
+    view,
+    width: W,
+    height: H,
+    include,
+    selectedIndex: 2,
+  });
+  assert.deepEqual(model.dots.map((d) => d.index).sort(), [1, 2]);
+  // arc: shadow -> sunlit -> shadow, every point in front of the camera
+  const rows = [];
+  for (let k = 0; k <= 30; k++)
+    rows.push([
+      150 + 2 * k,
+      30 + k * 0.5,
+      k >= 10 && k < 20 ? 1 : 0,
+      k * 10_000,
+    ]);
+  const runs = passArcRuns(rows, view, W, H);
+  assert.deepEqual(
+    runs.map((r) => r.sunlit),
+    [false, true, false],
+  );
+  assert.equal(runs[0].points.length, 10);
+  assert.equal(runs[1].points.length, 11, 'joined to the previous run');
+  const p = projectAzEl(170, 35, view, W, H);
+  assert.ok(Math.abs(runs[1].points[1].x - p.x) < 1e-6);
+  model = satelliteModel({ objects, view, width: W, height: H, passArc: rows });
+  assert.equal(model.arc.length, 3);
+  const calls = [];
+  const ctx = new Proxy(
+    {},
+    {
+      get: (_t, k) => (k in _t ? _t[k] : (...a) => calls.push([k, a])),
+      set: (t, k, v) => ((t[k] = v), true),
+    },
+  );
+  drawSatellites(ctx, model);
+  assert.ok(calls.some(([k]) => k === 'lineTo'));
+  assert.deepEqual(passArcRuns(null, view, W, H), []);
 });
