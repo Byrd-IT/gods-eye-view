@@ -279,3 +279,51 @@ test('unpackRecords splits a packed tick by set', () => {
   assert.equal(bySet.get('starlink').get(9).stateName, 'shadow');
   assert.equal(bySet.get('starlink').get(9).timeMs, 1234);
 });
+
+test('P2b: RCS fetched once and sent to the worker; passes requested after the catalogue and filled progressively', async () => {
+  let rcsCalls = 0;
+  const { worker, sky } = setup({
+    fetchRcs: async () => {
+      rcsCalls += 1;
+      return { rcs: { 25544: 399.0524 }, withRcs: 1, fetchedAt: 1 };
+    },
+  });
+  sky.start(OBS);
+  await pump(worker);
+  assert.equal(rcsCalls, 1);
+  assert.equal(sky.rcs.status, 'ready');
+  assert.equal(sky.rcs.matched, 1);
+  assert.ok(worker.posted.some((m) => m.type === 'rcs'));
+  assert.ok(worker.posted.some((m) => m.type === 'passes' && m.timeMs === T0));
+  for (let i = 0; i < 400 && !sky.passes.done; i++) {
+    await new Promise((r) => setTimeout(r, 2));
+    worker.deliver();
+  }
+  assert.equal(sky.passes.done, true);
+  assert.ok(sky.passes.list.some((p) => p.noradId === 25544));
+  assert.equal(sky.passes.fromMs, T0);
+  const next = sky.nextPass(25544, T0);
+  assert.ok(next && next.setMs > T0);
+  assert.equal(sky.arcFor(next), null, 'requested');
+  assert.equal(sky.arcFor(next), null, 'only once');
+  assert.equal(worker.posted.filter((m) => m.type === 'passArc').length, 1);
+  await pump(worker);
+  assert.ok(sky.arcFor(next).length > 3);
+  sky.stop();
+  assert.equal(sky.passes.list.length, 0);
+  assert.equal(sky.rcs.status, 'idle');
+});
+
+test('P2b: RCS failure only drops the estimates (status error), satellites still load', async () => {
+  const { worker, sky } = setup({
+    fetchRcs: async () => {
+      throw new Error('HTTP 503');
+    },
+  });
+  sky.start(OBS);
+  await pump(worker);
+  assert.equal(sky.rcs.status, 'error');
+  assert.equal(sky.status, 'ready');
+  assert.ok(sky.objectsAt(T0).every((o) => o.estMag == null));
+  assert.ok(!worker.posted.some((m) => m.type === 'rcs'));
+});

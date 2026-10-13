@@ -1,8 +1,8 @@
 /**
  * Sky view satellite drawing (SKYVIEW.md 4.2): dots by state and class,
  * labels with greedy collision culling, terrain-profile dimming, the GEO belt
- * guide and an edge arrow pointing at the selected object when it is off
- * screen. satelliteModel() is pure (tested); drawSatellites() only paints it.
+ * guide, an edge arrow pointing at the selected object when it is off
+ * screen, and (P2b) the arc of a selected pass. satelliteModel() is pure (tested); drawSatellites() only paints it.
  * All text is drawn here, never with Cesium labels (noCesiumLabels.test).
  */
 import { ecfToLookAngles } from 'satellite.js';
@@ -186,7 +186,11 @@ function projectRuns(points, view, width, height) {
  *   klass:string,set:string,stale:boolean}>} args.objects current sky objects
  * @param {(az:number, el:number) => 'clear'|'terrain'|'below'} [args.occlusion]
  * @param {Set<string>} [args.classesOn] classes drawn (selected always drawn)
- * @returns {{dots:Array, labels:Array, arrow:?object, belt:Array}}
+ * @param {(o:object) => boolean} [args.include] extra filter (naked-eye),
+ *   selected always drawn
+ * @param {Array<[number, number, number, number]>} [args.passArc] selected
+ *   pass arc rows [azDeg, elDeg, sunlit 0/1, timeMs]
+ * @returns {{dots:Array, labels:Array, arrow:?object, belt:Array, arc:Array}}
  */
 export function satelliteModel({
   objects = [],
@@ -199,6 +203,8 @@ export function satelliteModel({
   labelBudget = LABEL_BUDGET,
   geoBelt = null,
   insets = {},
+  include = null,
+  passArc = null,
 }) {
   const dots = [];
   const core = [];
@@ -208,6 +214,7 @@ export function satelliteModel({
   for (const o of objects) {
     const isSelected = o.index === selectedIndex;
     if (!isSelected && classesOn && !classesOn.has(o.klass)) continue;
+    if (!isSelected && include && !include(o)) continue;
     if (!(o.elDeg > 0)) continue;
     const occ = occlusion(o.azDeg, o.elDeg);
     if (occ === 'below') continue;
@@ -291,7 +298,33 @@ export function satelliteModel({
     labels: placeLabels(candidates, width, height),
     arrow,
     belt: geoBelt ? projectRuns(geoBelt, view, width, height) : [],
+    arc: passArc ? passArcRuns(passArc, view, width, height) : [],
   };
+}
+
+/**
+ * Projected pass arc split into runs of one lighting state (sunlit drawn
+ * solid, shadowed dashed). Pure.
+ */
+export function passArcRuns(rows, view, width, height) {
+  const runs = [];
+  let cur = null;
+  let last = null;
+  for (const [az, el, sunlit] of rows || []) {
+    const lit = Boolean(sunlit);
+    if (!cur || cur.sunlit !== lit) {
+      // a new lighting state starts where the previous one ended
+      cur = { sunlit: lit, src: last ? [last] : [] };
+      runs.push(cur);
+    }
+    last = [az, el];
+    cur.src.push(last);
+  }
+  const out = [];
+  for (const run of runs)
+    for (const points of projectRuns(run.src, view, width, height))
+      out.push({ sunlit: run.sunlit, points });
+  return out;
 }
 
 /** Index of the dot nearest (x, y) within `radius` px, or null. */
@@ -336,6 +369,19 @@ export function drawSatellites(ctx, model, { text = null, ratio = 1 } = {}) {
     }
     ctx.setLineDash?.([]);
   }
+  for (const run of model.arc || []) {
+    ctx.strokeStyle = run.sunlit
+      ? 'rgba(255, 214, 120, 0.85)'
+      : 'rgba(150, 160, 175, 0.6)';
+    ctx.lineWidth = run.sunlit ? 2 : 1.4;
+    ctx.setLineDash?.(run.sunlit ? [] : [3, 5]);
+    ctx.beginPath();
+    run.points.forEach((p, i) =>
+      i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y),
+    );
+    ctx.stroke();
+  }
+  ctx.setLineDash?.([]);
   for (const dot of model.dots) {
     ctx.globalAlpha = dot.alpha;
     ctx.beginPath();
