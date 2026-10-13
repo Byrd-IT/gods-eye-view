@@ -26,7 +26,19 @@ export {
   bridgeConfigFromEnv,
   parseCollectorUrls,
 } from './collectorBridge.js';
-export { BRIDGE_FEEDS, enabledBridgeFeeds } from './feeds.js';
+export {
+  BRIDGE_FEEDS,
+  enabledBridgeFeeds,
+  flightViewLease,
+  parseFlightView,
+} from './feeds.js';
+export {
+  appendFlightView,
+  cameraViewBox,
+  createFlightViewTracker,
+  flightViewQuery,
+  normalizeViewBox,
+} from './flightView.js';
 export {
   feedDisplayState,
   staleThresholdMs,

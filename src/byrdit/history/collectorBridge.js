@@ -76,6 +76,9 @@ export const RELAYED_HEADERS = Object.freeze([
   'x-feed-stale-since',
   'x-feed-reason',
   'x-collector-role',
+  // B20 flights: what the viewport answer covers (GEV's flights source
+  // shows it as the layer coverage)
+  'x-flight-coverage',
 ]);
 
 const CANONICAL = Object.freeze({
@@ -88,6 +91,7 @@ const CANONICAL = Object.freeze({
   'x-feed-stale-since': 'X-Feed-Stale-Since',
   'x-feed-reason': 'X-Feed-Reason',
   'x-collector-role': 'X-Collector-Role',
+  'x-flight-coverage': 'X-Flight-Coverage',
 });
 
 /** Parse GEV_COLLECTOR_URLS (comma separated http(s) base URLs). */
@@ -245,17 +249,35 @@ export function createCollectorBridge({
     );
   }
 
-  async function readCollector(collectorFeed, search) {
+  /**
+   * One collector read, collectors tried in order. `lease` (B20 flights):
+   * POST /v1/aircraft/view {sid, bbox} instead of GET /v1/latest/<feed>;
+   * the answer has the same contract (body + X-Feed-* headers).
+   */
+  async function readCollector(collectorFeed, search, lease = null) {
     let reason = 'collector_down';
     for (const base of urls) {
       try {
         const response = await fetchImpl(
-          `${base}/v1/latest/${collectorFeed}${search}`,
-          {
-            headers: { Accept: 'application/json' },
-            redirect: 'error',
-            signal: AbortSignal.timeout(timeoutMs),
-          },
+          lease
+            ? `${base}/v1/aircraft/view`
+            : `${base}/v1/latest/${collectorFeed}${search}`,
+          lease
+            ? {
+                method: 'POST',
+                headers: {
+                  Accept: 'application/json',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(lease),
+                redirect: 'error',
+                signal: AbortSignal.timeout(timeoutMs),
+              }
+            : {
+                headers: { Accept: 'application/json' },
+                redirect: 'error',
+                signal: AbortSignal.timeout(timeoutMs),
+              },
         );
         const body = new Uint8Array(await response.arrayBuffer());
         if (
@@ -298,11 +320,13 @@ export function createCollectorBridge({
     return feed.forwardQuery ? url.search : '';
   }
 
-  function sharedRead(collectorFeed, search) {
-    const key = `${collectorFeed}${search}`;
+  function sharedRead(collectorFeed, search, lease = null) {
+    const key = lease
+      ? `${collectorFeed} view ${lease.sid} ${lease.bbox}`
+      : `${collectorFeed}${search}`;
     let pending = inflight.get(key);
     if (!pending) {
-      pending = readCollector(collectorFeed, search).finally(() =>
+      pending = readCollector(collectorFeed, search, lease).finally(() =>
         inflight.delete(key),
       );
       inflight.set(key, pending);
@@ -428,7 +452,12 @@ export function createCollectorBridge({
       else serveNone(req, res, reason, target);
     };
     try {
-      const result = await sharedRead(key, forwardedSearch(url));
+      const lease = feed.viewLease ? feed.viewLease(url) : null;
+      const result = await sharedRead(
+        key,
+        lease ? '' : forwardedSearch(url),
+        lease,
+      );
       if (result.ok && result.status !== 200) {
         // relayed client error (vessels track 400): never cached
         transition(key, 'collector');

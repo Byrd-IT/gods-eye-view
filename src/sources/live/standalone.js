@@ -12,6 +12,7 @@ import {
   readsbIdentities,
 } from './aircraft.js';
 import { normalizeVesselTrack, vesselSnapshot } from './vessels.js';
+import { appendFlightView } from '../../byrdit/history/flightView.js';
 
 const defaultFetch = (...args) => globalThis.fetch(...args);
 const header = (response, name) => response.headers?.get?.(name);
@@ -73,6 +74,7 @@ export function createFlightSource({
         params.set('lat', query.latitude.toFixed(4));
         params.set('lon', query.longitude.toFixed(4));
       }
+      appendFlightView(params, query); // Byrd-IT B20: OpenSky view lease
       const { response, payload } = await readResponse(
         fetchImpl,
         `/api/flights${params.size ? '?' + params : ''}`,

@@ -314,7 +314,11 @@ test('flags: every feed is off unless GEV_BRIDGE_<FEED> is exactly 1', () => {
   ]);
   assert.equal(BRIDGE_FEEDS.military.flag, 'GEV_BRIDGE_MILITARY');
   assert.equal(BRIDGE_FEEDS.military.route, '/api/military');
-  assert.equal(BRIDGE_FEEDS.flights, undefined, 'flights is B20, not B4');
+  // B20 (t_1f5bcfa6) registered flights behind its own flag
+  assert.equal(BRIDGE_FEEDS.flights.flag, 'GEV_BRIDGE_FLIGHTS');
+  assert.deepEqual(enabledBridgeFeeds({ GEV_BRIDGE_FLIGHTS: ' 1 ' }), [
+    'flights',
+  ]);
 });
 
 test('bridge OFF installs no middleware at all (dev and preview)', () => {

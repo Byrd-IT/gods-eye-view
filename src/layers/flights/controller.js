@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { flightViewQuery } from '../../byrdit/history/flightView.js';
 
 export function createController({
   flightState,
@@ -19,6 +20,7 @@ export function createController({
       ? {
           latitude: Cesium.Math.toDegrees(cartographic.latitude),
           longitude: Cesium.Math.toDegrees(cartographic.longitude),
+          ...flightViewQuery(viewer), // Byrd-IT B20: OpenSky view lease
         }
       : {};
   }

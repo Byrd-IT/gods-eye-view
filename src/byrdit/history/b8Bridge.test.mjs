@@ -464,7 +464,8 @@ test('R3 last-good copies are bounded: 4 most recently used maxRows values per f
 
 test('R3 other bridged feeds keep one last-good slot whatever the query', () => {
   for (const [name, feed] of Object.entries(BRIDGE_FEEDS)) {
-    if (name === 'vessels') continue;
+    // B20 flights keeps one copy per normalised view (b20Bridge.test.mjs)
+    if (name === 'vessels' || name === 'flights') continue;
     assert.equal(feed.cacheKey, undefined, name);
     assert.equal(feed.cacheEntries, undefined, name);
   }

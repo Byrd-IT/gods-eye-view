@@ -8,6 +8,8 @@ import {
   resolveWeather,
   transitHeaders,
 } from './feedsC.js';
+// B20: `view` / `vsid` exactly as the browser helper sends them
+import { SID_RE, VIEW_PARAM_RE } from './flightView.js';
 
 /**
  * Feeds the collector bridge can answer (gev-history DESIGN 4.2).
@@ -55,10 +57,55 @@ import {
  * different bodies and each keeps its own copy (review t_c4eefd79 R3). The
  * GEV client asks 500 (layer), 12000 (live source default) and the full list
  * (tools), so 4 copies cover real use; the bridge also caps the bytes.
- * Hook for B20: /api/flights is answered from the OpenSky viewport poller's
- * tile cache; that entry sets forwardQuery: true so `view=w,s,e,n` reaches
- * the collector. It is deliberately NOT registered in B4.
+ * B20 flights: /api/flights is answered from the OpenSky viewport poller's
+ * tile cache (gev-history src/opensky/viewportRunner.js). `viewLease`: a
+ * request with a valid `view=w,s,e,n` is sent to the collector as a view
+ * lease, POST /v1/aircraft/view {sid, bbox} (sid = the tab's `vsid`, or a
+ * hash of the view when the tab sent none); a request without a view reads
+ * the cached tiles (GET /v1/latest/aircraft-opensky) and creates no demand.
+ * No query parameter is forwarded otherwise (lat/lon are dropped). Each
+ * normalised view keeps its own last-good copy (flightsCacheKey).
+ * /api/flights/track stays live (OpenSky /tracks bucket, DESIGN 4.2), so
+ * the route is not terminal: GEV's openSkyProxy answers only the exact
+ * path '/', which the bridge owns.
  */
+/** [w,s,e,n] of a `view` parameter, or null unless valid. */
+export function parseFlightView(value) {
+  const text = String(value ?? '').trim();
+  if (!VIEW_PARAM_RE.test(text)) return null;
+  const [w, s, e, n] = text.split(',').map(Number);
+  if (w < -180 || w > 180 || e < -180 || e > 180) return null;
+  if (s < -90 || n > 90 || !(s < n) || w === e) return null;
+  return [w, s, e, n];
+}
+
+/** FNV-1a 32-bit (browser-safe; only names an anonymous view lease). */
+function fnv1a(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/**
+ * The collector view lease for a /api/flights request: {sid, bbox} or null
+ * (no valid view: read the cached tiles, no demand).
+ */
+export function flightViewLease(url) {
+  const box = parseFlightView(url.searchParams.get('view'));
+  if (!box) return null;
+  const bbox = box.join(',');
+  const vsid = String(url.searchParams.get('vsid') ?? '');
+  return { sid: SID_RE.test(vsid) ? vsid : `view-${fnv1a(bbox)}`, bbox };
+}
+
+/** Last-good copy key: the normalised view ('' = no view). */
+export function flightsCacheKey(url) {
+  return parseFlightView(url.searchParams.get('view'))?.join(',') ?? '';
+}
+
 /** GEV server/providers/vessels/ais-store.js AISSTREAM_CACHE_MAX. */
 export const AIS_MAX_ROWS = 50_000;
 
@@ -215,6 +262,21 @@ export const BRIDGE_FEEDS = Object.freeze({
     cache: false,
     relayStatus: Object.freeze([400]),
     terminal: true,
+  }),
+  // B20: gev-history src/opensky/viewportRunner.js (demand-driven, cadence
+  // 15 s .. ~44 s sustainable; the stale rule here uses 45 s -> 135 s).
+  flights: Object.freeze({
+    route: '/api/flights',
+    path: '/',
+    collectorFeed: 'aircraft-opensky',
+    cadenceMs: 45_000,
+    source: 'OpenSky Network',
+    flag: 'GEV_BRIDGE_FLIGHTS',
+    forwardQuery: false,
+    forwardParams: Object.freeze([]),
+    viewLease: flightViewLease,
+    cacheKey: flightsCacheKey,
+    cacheEntries: 8,
   }),
 });
 
