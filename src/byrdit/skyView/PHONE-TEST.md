@@ -11,7 +11,7 @@ What this checks on REAL phones (the synthetic part is in
 3. the LAN http address explains that the https address is needed.
 
 None of these real-device checks has been done yet: they are the device
-card (t_d0655670), after the deploy.
+acceptance card (t_c29cb4db), after the deploy.
 
 Record a screenshot for every numbered step marked SHOT and attach them to the
 kanban card with the phone model, OS version and browser version.
@@ -37,7 +37,7 @@ way is what the steps below check (not yet done: see the device card).
 
 - Use the public HTTPS address: https://godseyeview.byrd-it.com (Basic Auth).
   Sensors need a secure context; the LAN http://10.10.99.104:4173 address
-  cannot read them (that is test 6).
+  cannot read them (that is step 12).
 - Stand outside, away from cars, steel railings and buildings' steel frames
   (they bend the compass by tens of degrees). Take the phone out of a
   magnetic case or mount.
@@ -75,6 +75,13 @@ way is what the steps below check (not yet done: see the device card).
 6. If 3 failed by more than 5 degrees: with the Moon in the circle tap
    "Align centre on: Moon"; the status shows the change. Then point away
    and back: the Moon should now line up. Record the offset shown.
+   The Align buttons appear only once the compass has given a reading
+   (step 2: upright in portrait). Before that the view is in iOS's free
+   yaw frame and an offset would be wrong, so Align is not offered. Check
+   that: right after "Point at the sky", look straight up at the Moon
+   without holding the phone upright first. Expected: no Align buttons and
+   "Reading the compass" in the status. Then hold it upright: the Align
+   buttons appear. Note it on the card.
 7. Drag with one finger: the status says "Drag took over", the view stops
    following the phone and the drag works. Tap "Point at the sky" again: it
    follows again without a new prompt.
@@ -125,7 +132,9 @@ after Align (degrees), the Align offset, which steps passed, every SHOT.
   portrait and flat screen-up, so the correction is taken in those poses and
   kept while you look up. If an iPhone is off by a constant amount, Align
   fixes it; if it is off by ~180 degrees only when looking up, report it
-  (that would mean iOS uses a different reference vector: step 5).
+  (that would mean iOS uses a different reference vector: step 5). Align is
+  offered only after that first compass reading (see step 6). An offset
+  taken before it would be counted twice later.
 - Firefox for Android gives no absolute heading: pointing starts in
   "calibrating" and needs one Align on the Moon/Sun/selected object.
 - In-app browsers (Instagram, Facebook...) often block motion sensors:

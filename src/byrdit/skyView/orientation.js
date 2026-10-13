@@ -121,18 +121,41 @@ export function createPhoneOrientation({
   const removers = []; // the current attempt's listeners
   const limiter = createRateLimiter(SENSOR_HZ);
 
+  /**
+   * Can an Align offset be applied now? Only when the current attempt has a
+   * reading in a known heading frame: magnetic north (sensor, absolute
+   * event, iOS once webkitCompassHeading has given the yaw correction) or a
+   * relative source (whose session-only offset IS its reference). iOS before
+   * its first usable compass reading draws alpha in an arbitrary frame
+   * (reason "heading", or "accuracy" for a negative accuracy): an offset
+   * taken there would be stored and then counted twice once the correction
+   * arrives, so Align waits for the reference (R2).
+   */
+  function alignReady() {
+    if (!running() || !lastRaw || !source) return false;
+    if (source === 'ios') return compassCorrection != null;
+    return true;
+  }
+
   const info = () => ({
     reason,
     source,
+    alignReady: alignReady(),
     accuracyDeg,
     offsetDeg: source === 'relative' ? relativeOffset : offset,
     declinationDeg: declinationKnown ? declination : null,
     message: orientationMessage(state, reason),
   });
+  let readyNotified = false; // alignReady() as last reported via onState
   function setState(next, nextReason = null) {
-    if (state === next && reason === nextReason) return;
+    if (state === next && reason === nextReason) {
+      // e.g. iOS still poor ("accuracy") when its first compass reference
+      // arrives: same state, but Align just became possible
+      if (alignReady() === readyNotified) return;
+    }
     state = next;
     reason = nextReason;
+    readyNotified = alignReady();
     onState(state, info());
   }
   const running = () =>
@@ -438,10 +461,11 @@ export function createPhoneOrientation({
   /**
    * Align: the user has the view centre on a known object (Sun, Moon, the
    * selected object) whose true azimuth is targetAzDeg. Returns the change
-   * in degrees, or null when pointing is not running.
+   * in degrees, or null (nothing stored) when pointing is not running or
+   * has no heading reference yet (alignReady).
    */
   function alignTo(targetAzDeg, viewAzDeg) {
-    if (!running() || !isNum(targetAzDeg) || !isNum(viewAzDeg)) return null;
+    if (!alignReady() || !isNum(targetAzDeg) || !isNum(viewAzDeg)) return null;
     const delta = alignDelta(targetAzDeg, viewAzDeg);
     if (source === 'relative') {
       relativeOffset = wrap180((relativeOffset ?? 0) + delta);
@@ -495,6 +519,10 @@ export function createPhoneOrientation({
     },
     get running() {
       return running();
+    },
+    /** A heading reference exists, so alignTo() applies (see alignReady). */
+    get alignReady() {
+      return alignReady();
     },
     get info() {
       return info();
