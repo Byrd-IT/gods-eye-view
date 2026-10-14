@@ -19,7 +19,7 @@ import { createHistoryService } from './historyService.js';
  *   1. Host allowlist: the same rule as Vite's allowedHosts (injected by
  *      server/byrdit/history.js; build/allowedHosts.js hostCheckPlugin also
  *      runs first for every route) -> 403.
- *   2. GET/HEAD only -> 405.
+ *   2. GET only (DESIGN 4.3; HEAD too) -> 405 Allow: GET.
  *   3. Known route only (/slice, /coverage, /snapshots) -> 404.
  *   4. Per-client rate limit (server/providers/common/rate-limit.js,
  *      GEV_RATELIMIT_HISTORY_PER_MIN, default 60/min) -> 429.
@@ -40,13 +40,13 @@ const JSON_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 };
 
-function send(res, status, body, headers = {}, head = false) {
+function send(res, status, body, headers = {}) {
   const text = JSON.stringify(body);
   res.statusCode = status;
   for (const [k, v] of Object.entries({ ...JSON_HEADERS, ...headers }))
     res.setHeader(k, v);
   res.setHeader('Content-Length', new TextEncoder().encode(text).length);
-  res.end(head ? undefined : text);
+  res.end(text);
 }
 
 /** Socket peer only (a localhost/LAN fallback; the server injects its own). */
@@ -122,11 +122,10 @@ export function createHistoryApi({
     const path = qIndex === -1 ? rawUrl : rawUrl.slice(0, qIndex);
     if (path !== HISTORY_PREFIX && !path.startsWith(HISTORY_PREFIX + '/'))
       return next?.();
-    const head = req.method === 'HEAD';
     if (!isAllowedHost(req.headers?.host))
       return send(res, 403, { error: 'host_not_allowed' });
-    if (req.method !== 'GET' && !head) {
-      res.setHeader('Allow', 'GET, HEAD');
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
       return send(res, 405, { error: 'method_not_allowed' });
     }
     const route = path.slice(HISTORY_PREFIX.length + 1);
@@ -136,49 +135,39 @@ export function createHistoryApi({
       snapshots: parseSnapshotParams,
     };
     const parse = Object.hasOwn(parsers, route) ? parsers[route] : null;
-    if (!parse) return send(res, 404, { error: 'not_found' }, {}, head);
+    if (!parse) return send(res, 404, { error: 'not_found' });
     if (!allow(clientKey(req)))
-      return send(
-        res,
-        429,
-        { error: 'rate_limited' },
-        { 'Retry-After': '60' },
-        head,
-      );
+      return send(res, 429, { error: 'rate_limited' }, { 'Retry-After': '60' });
     const rawQuery = qIndex === -1 ? '' : rawUrl.slice(qIndex + 1);
     let params;
     try {
       params = parse(new URLSearchParams(rawQuery), rawQuery, now());
     } catch (error) {
       if (error instanceof HistoryParamError)
-        return send(
-          res,
-          error.status,
-          { error: error.error, param: error.param },
-          {},
-          head,
-        );
-      return send(res, 400, { error: 'invalid_param', param: null }, {}, head);
+        return send(res, error.status, {
+          error: error.error,
+          param: error.param,
+        });
+      return send(res, 400, { error: 'invalid_param', param: null });
     }
-    if (!service)
-      return send(res, 503, { error: 'history_unavailable' }, {}, head);
+    if (!service) return send(res, 503, { error: 'history_unavailable' });
     if (inFlight >= MAX_IN_FLIGHT)
-      return send(res, 429, { error: 'busy' }, { 'Retry-After': '1' }, head);
+      return send(res, 429, { error: 'busy' }, { 'Retry-After': '1' });
     inFlight += 1;
     try {
       if (route === 'slice') {
         const { body, headers } = await service.slice(params);
-        return send(res, 200, body, headers, head);
+        return send(res, 200, body, headers);
       }
       const body = await service[route](params);
-      return send(res, 200, body, {}, head);
+      return send(res, 200, body);
     } catch (error) {
       logFailure(
         error instanceof HistoryUnavailableError
           ? error.reason
           : `internal ${error?.name ?? 'error'}`,
       );
-      return send(res, 503, { error: 'history_unavailable' }, {}, head);
+      return send(res, 503, { error: 'history_unavailable' });
     } finally {
       inFlight -= 1;
     }

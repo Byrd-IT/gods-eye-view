@@ -81,7 +81,8 @@ export function esConfigFromEnv(env = {}) {
  * @param {string} options.url ES base URL
  * @param {string} options.apiKey reader API key (encoded form)
  * @param {string} [options.readerKeyName]
- * @param {number} [options.timeoutMs]
+ * @param {number} [options.timeoutMs] deadline for the whole request (headers + body)
+ * @param {number} [options.maxBodyBytes] largest body read, enforced while streaming
  * @param {typeof fetch} [options.fetchImpl]
  */
 export function createHistoryEsClient({
@@ -89,45 +90,105 @@ export function createHistoryEsClient({
   apiKey,
   readerKeyName = DEFAULT_READER_KEY_NAME,
   timeoutMs = DEFAULT_ES_TIMEOUT_MS,
+  maxBodyBytes = MAX_ES_BODY_BYTES,
   fetchImpl = (...args) => globalThis.fetch(...args),
 }) {
   let verified = null; // Promise<void> while/after the identity check
 
+  /**
+   * One ES request. The deadline (timeoutMs) covers the WHOLE exchange:
+   * connect, headers AND body. The body is read as a byte stream and
+   * abandoned as soon as it passes maxBodyBytes (no unbounded buffering).
+   */
   async function call(method, path, body) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let response;
+    let timedOut = false;
+    let rejectDeadline;
+    const deadline = new Promise((_, reject) => (rejectDeadline = reject));
+    deadline.catch(() => {});
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      rejectDeadline(new HistoryUnavailableError('es_timeout'));
+    }, timeoutMs);
+    const fail = (reason) =>
+      new HistoryUnavailableError(timedOut ? 'es_timeout' : reason);
     try {
-      response = await fetchImpl(url + path, {
-        method,
-        headers: {
-          Authorization: `ApiKey ${apiKey}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (error) {
-      throw new HistoryUnavailableError(
-        error?.name === 'AbortError' ? 'es_timeout' : 'es_network',
-      );
+      let response;
+      try {
+        response = await Promise.race([
+          fetchImpl(url + path, {
+            method,
+            headers: {
+              Authorization: `ApiKey ${apiKey}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+            signal: controller.signal,
+          }),
+          deadline,
+        ]);
+      } catch (error) {
+        if (error instanceof HistoryUnavailableError) throw error;
+        throw fail(error?.name === 'AbortError' ? 'es_timeout' : 'es_network');
+      }
+      const length = Number(response.headers?.get?.('content-length'));
+      if (Number.isFinite(length) && length > maxBodyBytes) {
+        controller.abort();
+        response.body?.cancel?.().catch(() => {});
+        throw new HistoryUnavailableError('es_body_too_large');
+      }
+      let text;
+      try {
+        text = await Promise.race([readBody(response), deadline]);
+      } catch (error) {
+        controller.abort();
+        if (error instanceof HistoryUnavailableError) throw error;
+        throw fail('es_read');
+      }
+      return parseReply(response, text);
     } finally {
       clearTimeout(timer);
     }
-    const length = Number(response.headers?.get?.('content-length'));
-    if (Number.isFinite(length) && length > MAX_ES_BODY_BYTES) {
-      await response.body?.cancel?.().catch(() => {});
-      throw new HistoryUnavailableError('es_body_too_large');
+  }
+
+  /** Response body as text, at most maxBodyBytes bytes (streamed). */
+  async function readBody(response) {
+    const stream = response.body;
+    if (!stream?.getReader) {
+      // non-stream bodies (test doubles): still bounded by the deadline
+      const text = await response.text();
+      if (new TextEncoder().encode(text).length > maxBodyBytes)
+        throw new HistoryUnavailableError('es_body_too_large');
+      return text;
     }
-    let text;
+    const reader = stream.getReader();
+    const chunks = [];
+    let bytes = 0;
     try {
-      text = await response.text();
-    } catch {
-      throw new HistoryUnavailableError('es_read');
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > maxBodyBytes)
+          throw new HistoryUnavailableError('es_body_too_large');
+        chunks.push(value);
+      }
+    } catch (error) {
+      reader.cancel().catch(() => {});
+      throw error;
     }
-    if (text.length > MAX_ES_BODY_BYTES)
-      throw new HistoryUnavailableError('es_body_too_large');
+    const all = new Uint8Array(bytes);
+    let at = 0;
+    for (const c of chunks) {
+      all.set(c, at);
+      at += c.byteLength;
+    }
+    return new TextDecoder().decode(all);
+  }
+
+  function parseReply(response, text) {
     if (!response.ok)
       throw new HistoryUnavailableError(`es_${response.status}`);
     let json;

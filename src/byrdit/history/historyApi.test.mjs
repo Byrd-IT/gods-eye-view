@@ -32,14 +32,24 @@ function dateOf(v) {
 function get(doc, field) {
   return field.split('.').reduce((o, k) => o?.[k], doc);
 }
-function matches(doc, q) {
+function flatPairs(coords, out = []) {
+  if (typeof coords?.[0] === 'number') out.push(coords);
+  else for (const c of coords ?? []) flatPairs(c, out);
+  return out;
+}
+function matches(doc, q, hit) {
   if (!q || q.match_all) return true;
   if (q.bool) {
+    const should = q.bool.should ?? [];
     return (
-      (q.bool.filter ?? []).every((f) => matches(doc, f)) &&
-      !(q.bool.must_not ?? []).some((f) => matches(doc, f))
+      (q.bool.filter ?? []).every((f) => matches(doc, f, hit)) &&
+      !(q.bool.must_not ?? []).some((f) => matches(doc, f, hit)) &&
+      (should.length === 0 ||
+        should.filter((f) => matches(doc, f, hit)).length >=
+          (q.bool.minimum_should_match ?? 1))
     );
   }
+  if (q.ids) return q.ids.values.includes(hit?._id);
   if (q.term) {
     const [[f, v]] = Object.entries(q.term);
     return get(doc, f) === v;
@@ -68,7 +78,20 @@ function matches(doc, q) {
       p.lon <= b.bottom_right.lon
     );
   }
-  if (q.geo_shape) return true;
+  if (q.geo_shape) {
+    const [[f, spec]] = Object.entries(q.geo_shape);
+    const [[w, n], [e, s]] = spec.shape.coordinates;
+    const pts = flatPairs(get(doc, f)?.coordinates);
+    if (!pts.length) return false;
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    return (
+      Math.min(...xs) <= e &&
+      Math.max(...xs) >= w &&
+      Math.min(...ys) <= n &&
+      Math.max(...ys) >= s
+    );
+  }
   throw new Error('fake ES: unsupported query ' + JSON.stringify(q));
 }
 
@@ -91,18 +114,86 @@ function createFakeEs(data, { keyName = 'gev-history-reader', fail } = {}) {
           docs.map((d, i) => ({ _index: k, _id: `${k}#${i}`, _source: d })),
         ),
     );
-  function run(all, body) {
-    let hits = all.filter((h) => matches(h._source, body.query));
-    for (const s of [...(body.sort ?? [])].reverse()) {
+  function sortHits(hits, sort) {
+    for (const s of [...(sort ?? [])].reverse()) {
       const [[f, dir]] = Object.entries(s);
       if (f === '_shard_doc') continue;
       hits = [...hits].sort((x, y) => {
-        const a = dateOf(get(x._source, f)) ?? 0;
-        const b = dateOf(get(y._source, f)) ?? 0;
+        const a = dateOf(get(x._source, f)) || 0;
+        const b = dateOf(get(y._source, f)) || 0;
         return dir === 'desc' ? b - a : a - b;
       });
     }
-    return hits.map((h, i) => ({ ...h, sort: [i] }));
+    return hits;
+  }
+  function run(all, body) {
+    const hits = all.filter((h) => matches(h._source, body.query, h));
+    return sortHits(hits, body.sort).map((h, i) => ({ ...h, sort: [i] }));
+  }
+  function aggregate(aggs, hits) {
+    const out = {};
+    if (aggs.last)
+      out.last = { value: Math.max(...hits.map((h) => h._source.snap)) };
+    if (aggs.d) {
+      const days = new Map();
+      for (const h of hits) {
+        const day =
+          Math.floor(dateOf(h._source['@timestamp']) / 86400000) * 86400000;
+        days.set(day, (days.get(day) ?? 0) + 1);
+      }
+      out.d = {
+        buckets: [...days]
+          .sort((x, y) => x[0] - y[0])
+          .map(([key, doc_count]) => ({ key, doc_count })),
+      };
+    }
+    if (aggs.b) out.b = { buckets: [] };
+    if (aggs.s) {
+      const { field, size, order } = aggs.s.terms;
+      const keys = [...new Set(hits.map((h) => get(h._source, field)))];
+      keys.sort((x, y) => (order._key === 'desc' ? y - x : x - y));
+      out.s = { buckets: keys.slice(0, size).map((key) => ({ key })) };
+    }
+    if (aggs.e?.composite) {
+      const c = aggs.e.composite;
+      const names = c.sources.map((x) => Object.keys(x)[0]);
+      const fields = c.sources.map((x) => Object.values(x)[0].terms.field);
+      const groups = new Map();
+      for (const h of hits) {
+        const vals = fields.map((f) => get(h._source, f));
+        if (vals.some((v) => v === undefined || v === null)) continue;
+        const k = JSON.stringify(vals);
+        groups.set(k, [...(groups.get(k) ?? []), h]);
+      }
+      const cmp = (x, y) => {
+        for (let i = 0; i < x.length; i += 1)
+          if (x[i] !== y[i]) return String(x[i]) < String(y[i]) ? -1 : 1;
+        return 0;
+      };
+      let keys = [...groups.keys()].map((k) => JSON.parse(k)).sort(cmp);
+      if (c.after) {
+        const a = names.map((n) => c.after[n]);
+        keys = keys.filter((k) => cmp(k, a) > 0);
+      }
+      const page = keys.slice(0, c.size);
+      const top = aggs.e.aggs.v.top_hits;
+      const buckets = page.map((k) => ({
+        key: Object.fromEntries(names.map((n, i) => [n, k[i]])),
+        v: {
+          hits: {
+            hits: sortHits(groups.get(JSON.stringify(k)), top.sort).slice(
+              0,
+              top.size,
+            ),
+          },
+        },
+      }));
+      out.e = {
+        buckets,
+        ...(buckets.length ? { after_key: buckets.at(-1).key } : {}),
+      };
+    }
+    return out;
   }
   async function fetchImpl(url, init) {
     const u = new URL(url);
@@ -148,13 +239,7 @@ function createFakeEs(data, { keyName = 'gev-history-reader', fail } = {}) {
         _shards: { failed: 0 },
         hits: { total: { value: hits.length }, hits: hits.slice(0, body.size) },
       };
-      if (body.aggs) out.aggregations = {};
-      if (body.aggs?.last)
-        out.aggregations.last = {
-          value: Math.max(...hits.map((h) => h._source.snap)),
-        };
-      if (body.aggs?.d) out.aggregations.d = { buckets: [] };
-      if (body.aggs?.b) out.aggregations.b = { buckets: [] };
+      if (body.aggs) out.aggregations = aggregate(body.aggs, hits);
       return reply(200, out);
     }
     return reply(404, { error: 'fake: no route' });
@@ -351,14 +436,15 @@ for (const [name, path, status] of ABUSE) {
   });
 }
 
-test('abuse: non-GET methods -> 405 with Allow', async () => {
+test('abuse: non-GET methods (HEAD too) -> 405 Allow: GET', async () => {
   const { api, fake } = makeApi();
-  for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
+  // DESIGN 4.3 / card item 1: GET only, HEAD included
+  for (const method of ['HEAD', 'POST', 'PUT', 'DELETE', 'PATCH']) {
     const r = await call(api, `/api/history/slice?feed=military&t=${T}`, {
       method,
     });
     assert.equal(r.status, 405);
-    assert.equal(r.headers.allow, 'GET, HEAD');
+    assert.equal(r.headers.allow, 'GET');
   }
   assert.equal(fake.calls.length, 0);
 });
@@ -841,5 +927,473 @@ test('plugin: GEV_HISTORY_API=1 adds byrdit-history-api after the bridge; off = 
       env: { GEV_HISTORY_API: '1', GEV_BRIDGE_MILITARY: '1' },
     }).map((p) => p.name),
     ['byrdit-history-bridge', 'byrdit-history-api'],
+  );
+});
+
+// ------------------------------------------- review round 1 regressions
+// R1: the ES deadline covers the body; slots are released; byte cap streams
+async function stallServer() {
+  const http = await import('node:http');
+  let mode = 'stall';
+  const sockets = new Set();
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (req.url.startsWith('/_security/_authenticate'))
+        return res.end(
+          JSON.stringify({
+            authentication_type: 'api_key',
+            api_key: { name: 'gev-history-reader' },
+          }),
+        );
+      if (mode === 'stall') return void res.write('{'); // never finishes
+      if (mode === 'huge') {
+        // chunked, no Content-Length: 64 KiB pieces until the client quits
+        const piece = ' '.repeat(65_536);
+        const pump = () => {
+          while (res.write(piece)) if (res.destroyed) return;
+          res.once('drain', pump);
+        };
+        res.on('error', () => {});
+        return pump();
+      }
+      return res.end(
+        JSON.stringify({ _shards: { failed: 0 }, hits: { hits: [] } }),
+      );
+    });
+  });
+  server.on('connection', (s) => {
+    sockets.add(s);
+    s.on('close', () => sockets.delete(s));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    setMode: (m) => (mode = m),
+    close: async () => {
+      for (const s of sockets) s.destroy();
+      await new Promise((r) => server.close(r));
+    },
+  };
+}
+
+test('R1: headers then a stalled body -> es_timeout at the deadline (real HTTP)', async () => {
+  const srv = await stallServer();
+  try {
+    const es = createHistoryEsClient({
+      url: srv.url,
+      apiKey: 'k',
+      timeoutMs: 150,
+    });
+    const started = Date.now();
+    await assert.rejects(
+      es.search(HISTORY_INDICES.military, { size: 0 }),
+      (e) => e instanceof HistoryUnavailableError && e.reason === 'es_timeout',
+    );
+    const took = Date.now() - started;
+    assert.ok(took < 1_000, `rejected after ${took} ms`);
+  } finally {
+    await srv.close();
+  }
+});
+
+test('R1: four stalled bodies free their in-flight slots; the API recovers', async () => {
+  const srv = await stallServer();
+  try {
+    const api = createHistoryApi({
+      env: {
+        GEV_HISTORY_ES_URL: srv.url,
+        GEV_HISTORY_ES_API_KEY: 'k',
+        GEV_HISTORY_ES_TIMEOUT_MS: '150',
+      },
+      now: () => NOW,
+      log: () => {},
+      allow: () => true,
+    });
+    const path = `/api/history/snapshots?feed=military&around=${T}`;
+    const stalled = await Promise.all(
+      Array.from({ length: 4 }, () => call(api, path)),
+    );
+    for (const r of stalled) {
+      assert.equal(r.status, 503);
+      assert.deepEqual(r.json, { error: 'history_unavailable' });
+    }
+    srv.setMode('ok');
+    const after = await call(api, path);
+    assert.equal(after.status, 200, after.body);
+  } finally {
+    await srv.close();
+  }
+});
+
+test('R1: an unbounded chunked body stops at the byte cap (streamed)', async () => {
+  const srv = await stallServer();
+  srv.setMode('huge');
+  try {
+    const es = createHistoryEsClient({
+      url: srv.url,
+      apiKey: 'k',
+      timeoutMs: 5_000,
+      maxBodyBytes: 1_000_000,
+    });
+    await assert.rejects(
+      es.search(HISTORY_INDICES.military, { size: 0 }),
+      (e) => e.reason === 'es_body_too_large',
+    );
+  } finally {
+    await srv.close();
+  }
+});
+
+// R2: completeness only from import records; snapshots only real buckets
+const D2 = Date.UTC(2026, 9, 12); // a UTC day
+const adsDoc = (snapS, icao = 'a1') => ({
+  '@timestamp': snapS * 1000 - 5_000,
+  snap: snapS,
+  icao24: icao,
+  location: { lat: 30, lon: -97 },
+  source: 'adsblol',
+});
+const importRecord = (day, docs) => ({
+  feed: 'aircraft-adsblol',
+  kind: 'import',
+  ok: true,
+  snap: day,
+  docs_written: docs,
+  '@timestamp': iso(day + 2 * 86400000),
+});
+
+test('R2: one doc in a day is NOT complete; only an import record proves it', async () => {
+  const at23 = (D2 + 23 * 3600000) / 1000;
+  const cov = async (data) => {
+    const { api } = makeApi(data);
+    const r = await call(
+      api,
+      `/api/history/coverage?feed=aircraft&from=${iso(D2)}&to=${iso(D2 + 2 * 86400000)}&bucket=1d`,
+    );
+    assert.equal(r.status, 200, r.body);
+    return r.json.lanes[0].buckets;
+  };
+  // partial day: a single doc at 23:00, no record -> unverified
+  let days = await cov({ 'gev-history-aircraft-adsblol': [adsDoc(at23)] });
+  assert.deepEqual(
+    days.map((d) => [d.status, d.complete, d.docs]),
+    [
+      ['unverified', false, 1],
+      ['missing', false, 0],
+    ],
+  );
+  // a record whose verified count is above what is stored -> partial
+  days = await cov({
+    'gev-history-aircraft-adsblol': [adsDoc(at23)],
+    'gev-history-ingest-log': [importRecord(D2, 5)],
+  });
+  assert.equal(days[0].status, 'partial');
+  assert.equal(days[0].complete, false);
+  assert.equal(days[0].verifiedDocs, 5);
+  // record + all its docs stored -> complete
+  days = await cov({
+    'gev-history-aircraft-adsblol': [adsDoc(at23), adsDoc(at23, 'a2')],
+    'gev-history-ingest-log': [importRecord(D2, 2)],
+  });
+  assert.equal(days[0].status, 'complete');
+  assert.equal(days[0].complete, true);
+});
+
+test('R2: snapshots list only stored buckets, across a missing minute and a multi-day gap', async () => {
+  const s = (h, m, day = D2) => (day + h * 3600000 + m * 60000) / 1000;
+  const D5 = D2 + 3 * 86400000;
+  const { api } = makeApi({
+    'gev-history-aircraft-adsblol': [
+      adsDoc(s(23, 0)),
+      adsDoc(s(23, 0), 'a2'),
+      adsDoc(s(23, 2)), // 23:01 missing
+      adsDoc(s(0, 5, D5)), // next data three days later
+    ],
+  });
+  const around = D2 + 86400000 + 12 * 3600000; // noon of the gap day
+  const r = await call(
+    api,
+    `/api/history/snapshots?feed=aircraft&around=${iso(around)}&n=3`,
+  );
+  assert.equal(r.status, 200, r.body);
+  assert.deepEqual(
+    r.json.snaps.map((x) => x.epochMs),
+    [s(23, 0) * 1000, s(23, 2) * 1000, s(0, 5, D5) * 1000],
+  );
+  assert.ok(r.json.snaps.every((x) => x.source === 'adsblol'));
+  // nothing stored at all -> no snaps (never generated)
+  const empty = makeApi({}).api;
+  const e = await call(
+    empty,
+    `/api/history/snapshots?feed=aircraft&around=${iso(around)}&n=3`,
+  );
+  assert.deepEqual(e.json.snaps, []);
+});
+
+// R3: latest version per entity first, eligibility second
+const tEv = NOW - 3_600_000;
+test('R3: a storm whose newer advisory left the bbox is not resurrected', async () => {
+  const adv = (n, lon, dt) => ({
+    '@timestamp': iso(tEv - dt),
+    snap: tEv - dt,
+    storm_id: 'AL012026',
+    source: 'noaa-nhc',
+    advisory: String(n),
+    name: 'ALPHA',
+    classification: 'HU',
+    intensity_kt: 80,
+    position: { lat: 20, lon },
+  });
+  const { api } = makeApi({
+    'gev-history-cyclones': [adv(1, -90, 3_600_000), adv(2, -70, 1_800_000)],
+  });
+  const inBox = await call(
+    api,
+    `/api/history/slice?feed=cyclones&t=${iso(tEv)}&bbox=-100,10,-80,30`,
+  );
+  assert.equal(inBox.status, 200, inBox.body);
+  assert.deepEqual(inBox.json.storms, []);
+  assert.deepEqual(inBox.json.bestTrackStorms, []);
+  const world = await call(
+    api,
+    `/api/history/slice?feed=cyclones&t=${iso(tEv)}`,
+  );
+  assert.deepEqual(
+    world.json.storms.map((x) => x.advisoryNumber),
+    ['2'],
+  );
+});
+
+test('R3: a launch whose NET moved out of the window is not shown with its old NET', async () => {
+  const v = (lu, net) => ({
+    '@timestamp': iso(net),
+    snap: lu,
+    launch_id: 'L-1',
+    name: 'Rocket | Sat',
+    net: iso(net),
+    last_updated: iso(lu),
+    status: 'Go',
+    pad_location: { lat: 28.5, lon: -80.6 },
+    source: 'll2',
+  });
+  const { api } = makeApi({
+    'gev-history-launches': [
+      v(tEv - 10 * 86400000, tEv - 2 * 86400000), // v1: NET inside window
+      v(tEv - 86400000, tEv + 5 * 86400000), // v2 (known by t): moved out
+      v(tEv + 3600000, tEv - 86400000), // v3: after t, ignored
+    ],
+  });
+  const r = await call(api, `/api/history/slice?feed=launches&t=${iso(tEv)}`);
+  assert.equal(r.status, 200, r.body);
+  assert.deepEqual(r.json.results, []);
+  // control: as of a time before v2 was known, v1 is the answer
+  const c = await call(
+    api,
+    `/api/history/slice?feed=launches&t=${iso(tEv - 1.5 * 86400000)}`,
+  );
+  assert.equal(c.json.count, 1, c.body);
+  assert.equal(c.json.results[0].net, iso(tEv - 2 * 86400000));
+});
+
+test('R3: a perimeter whose newer version left the bbox is not resurrected', async () => {
+  const poly = (lon) => ({
+    type: 'Polygon',
+    coordinates: [
+      [
+        [lon, 30],
+        [lon + 0.1, 30],
+        [lon + 0.1, 30.1],
+        [lon, 30],
+      ],
+    ],
+  });
+  const v = (dt, lon) => ({
+    '@timestamp': iso(tEv - dt),
+    snap: tEv - dt,
+    fire_id: 'F-1',
+    incident_name: 'TEST',
+    size_acres: 10,
+    containment_pct: 0,
+    geometry: poly(lon),
+    source: 'nifc',
+  });
+  const { api } = makeApi({
+    'gev-history-perimeters': [v(2 * 86400000, -97), v(86400000, -120)],
+  });
+  const r = await call(
+    api,
+    `/api/history/slice?feed=fire-perimeters&t=${iso(tEv)}&bbox=-98,29,-96,31`,
+  );
+  assert.equal(r.status, 200, r.body);
+  assert.deepEqual(r.json.rows, []);
+  // control: the newest version where it is now
+  const w = await call(
+    api,
+    `/api/history/slice?feed=fire-perimeters&t=${iso(tEv)}&bbox=-121,29,-119,31`,
+  );
+  assert.equal(w.json.rows.length, 1, w.body);
+  // and before the move, the old version in the old place
+  const before = await call(
+    api,
+    `/api/history/slice?feed=fire-perimeters&t=${iso(tEv - 1.5 * 86400000)}&bbox=-98,29,-96,31`,
+  );
+  assert.equal(before.json.rows.length, 1, before.body);
+});
+
+test('R3: newest of >20,000 versions wins (no raw-version cap), composite pages', async () => {
+  const versions = Array.from({ length: 20_500 }, (_, i) => ({
+    '@timestamp': iso(tEv - 10 * 3600000 + i * 1000),
+    snap: tEv - 10 * 3600000 + i * 1000,
+    storm_id: 'EP022026',
+    source: 'noaa-nhc',
+    advisory: i === 20_499 ? '77' : '1',
+    name: 'BETA',
+    classification: 'TS',
+    intensity_kt: 50,
+    position: { lat: 15, lon: -110 },
+  }));
+  // 1,200 launches -> two composite pages
+  const launches = Array.from({ length: 1_200 }, (_, i) => ({
+    '@timestamp': iso(tEv - 86400000),
+    snap: tEv - 86400000,
+    launch_id: `L-${String(i).padStart(4, '0')}`,
+    name: `R | ${i}`,
+    net: iso(tEv - 86400000),
+    last_updated: iso(tEv - 2 * 86400000),
+    status: 'Success',
+    pad_location: { lat: 28.5, lon: -80.6 },
+    source: 'll2',
+  }));
+  const { api } = makeApi({
+    'gev-history-cyclones': versions,
+    'gev-history-launches': launches,
+  });
+  const r = await call(api, `/api/history/slice?feed=cyclones&t=${iso(tEv)}`);
+  assert.equal(r.status, 200, r.body);
+  assert.deepEqual(
+    r.json.storms.map((x) => x.advisoryNumber),
+    ['77'],
+  );
+  assert.equal(r.headers['x-history-truncated'], undefined);
+  const l = await call(
+    api,
+    `/api/history/slice?feed=launches&t=${iso(tEv)}&maxRows=15000`,
+  );
+  assert.equal(l.json.count, 1_200);
+  assert.equal(l.headers['x-history-truncated'], undefined);
+});
+
+test('R3: storms + bestTrackStorms share ONE maxRows budget, truncation flagged', async () => {
+  const doc = (id, source, dt) => ({
+    '@timestamp': iso(tEv - dt),
+    snap: tEv - dt,
+    storm_id: id,
+    source,
+    advisory: source === 'noaa-nhc' ? '3' : null,
+    name: id,
+    classification: 'TS',
+    intensity_kt: 40,
+    position: { lat: 15, lon: -60 },
+  });
+  const { api } = makeApi({
+    'gev-history-cyclones': [
+      doc('AL012026', 'noaa-nhc', 1000),
+      doc('AL022026', 'noaa-nhc', 2000),
+      doc('EP012026', 'atcf', 3000),
+      doc('EP022026', 'atcf', 4000),
+    ],
+  });
+  const r = await call(
+    api,
+    `/api/history/slice?feed=cyclones&t=${iso(tEv)}&maxRows=3`,
+  );
+  assert.equal(r.status, 200, r.body);
+  assert.equal(r.json.storms.length + r.json.bestTrackStorms.length, 3);
+  assert.equal(r.json.storms.length, 2);
+  assert.equal(r.headers['x-history-rows'], '3');
+  assert.equal(r.headers['x-history-truncated'], '1');
+  const all = await call(api, `/api/history/slice?feed=cyclones&t=${iso(tEv)}`);
+  assert.equal(all.json.bestTrackStorms.length, 2);
+  assert.equal(all.headers['x-history-truncated'], undefined);
+});
+
+// secondary observations
+test('collector world tile (tile_bbox "world") serves any bbox', async () => {
+  const t = Date.UTC(2026, 9, 13, 19, 46, 40);
+  const poll = t - 8_000;
+  const { api } = makeApi({
+    'gev-history-ingest-log': [
+      {
+        feed: 'aircraft-opensky',
+        kind: 'poll',
+        ok: true,
+        snap: poll,
+        '@timestamp': iso(poll),
+        message: JSON.stringify({ tile_bbox: 'world', cadence_ms: 90_000 }),
+      },
+    ],
+    'gev-history-aircraft-opensky': [
+      {
+        '@timestamp': poll - 1_000,
+        snap: poll,
+        icao24: 'b1',
+        location: { lat: -33.9, lon: 151.2 },
+        source: 'opensky',
+      },
+    ],
+  });
+  const r = await call(
+    api,
+    `/api/history/slice?feed=aircraft&t=${iso(t)}&bbox=150,-35,152,-33`,
+  );
+  assert.equal(r.status, 200, r.body);
+  assert.equal(r.headers['x-history-opensky-tiles'], '1');
+  assert.deepEqual(
+    r.json.states.map((x) => x[0]),
+    ['b1'],
+  );
+});
+
+test('a partial poll (ok=false but docs written) is real data for slice and snapshots', async () => {
+  const P = S + 60_000;
+  const { api } = makeApi({
+    'gev-history-ingest-log': [
+      ...militaryData['gev-history-ingest-log'],
+      {
+        feed: 'military',
+        kind: 'poll',
+        ok: false,
+        docs_written: 1,
+        snap: P,
+        '@timestamp': iso(P),
+      },
+    ],
+    'gev-history-military': [
+      ...militaryData['gev-history-military'],
+      {
+        '@timestamp': iso(P - 1_000),
+        snap: P,
+        hex: 'ae0001',
+        location: { lat: 30.5, lon: -97 },
+        source: 'adsb.lol',
+      },
+    ],
+  });
+  const r = await call(
+    api,
+    `/api/history/slice?feed=military&t=${iso(P + 10_000)}`,
+  );
+  assert.equal(r.headers['x-history-snap'], String(P));
+  assert.equal(r.json.ac.find((a) => a.hex === 'ae0001').lat, 30.5);
+  const snaps = await call(
+    api,
+    `/api/history/snapshots?feed=military&around=${iso(P)}&n=1`,
+  );
+  assert.deepEqual(
+    snaps.json.snaps.map((x) => x.epochMs),
+    [P],
   );
 });

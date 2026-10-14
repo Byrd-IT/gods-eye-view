@@ -32,28 +32,6 @@ export function adsblolSnapAtOrBefore(tMs) {
 }
 
 /**
- * The n bucket ends (epoch ms) nearest to `aroundMs` that are not after
- * `latestMs` (the newest imported bucket), ascending.
- */
-export function nearestAdsblolSnaps(aroundMs, n, latestMs) {
-  const step = ADSBLOL_BUCKET_S * 1000;
-  // anchor at the newest imported bucket when `around` is past it
-  const lo = Math.min(
-    Math.floor(aroundMs / step) * step,
-    Math.floor(latestMs / step) * step,
-  );
-  const candidates = [];
-  for (let k = -n; k <= n; k += 1) {
-    const c = lo + k * step;
-    if (c <= latestMs) candidates.push(c);
-  }
-  return candidates
-    .sort((a, b) => Math.abs(a - aroundMs) - Math.abs(b - aroundMs) || a - b)
-    .slice(0, n)
-    .sort((a, b) => a - b);
-}
-
-/**
  * Pick the n entries nearest to `around` from two sorted lists (before:
  * descending <= around; after: ascending > around). Returns ascending.
  * @param {number[]} before

@@ -5,7 +5,6 @@ import {
   adsblolSnapAtOrBefore,
   boxesIntersect,
   mergeAircraft,
-  nearestAdsblolSnaps,
   nearestSnaps,
   pickPollSnap,
   sourcesPresent,
@@ -113,20 +112,6 @@ test('snap nearest: n nearest of before/after lists, ascending, deduped', () => 
   assert.deepEqual(nearestSnaps([95, 95], [], 100, 5), [95]);
   // equal distance: earlier first
   assert.deepEqual(nearestSnaps([90], [110], 100, 1), [90]);
-});
-
-test('snap nearest: adsb.lol bucket ends never after the newest import', () => {
-  const m = Date.UTC(2026, 9, 13, 23, 59);
-  const latest = Date.UTC(2026, 9, 14, 0, 0);
-  assert.deepEqual(nearestAdsblolSnaps(m + 20_000, 3, latest), [
-    m - 60_000,
-    m,
-    latest,
-  ]);
-  assert.deepEqual(nearestAdsblolSnaps(latest + 3_600_000, 2, latest), [
-    latest - 60_000,
-    latest,
-  ]);
 });
 
 test('stale union: unchanged aircraft come from earlier polls, bounded by age', () => {

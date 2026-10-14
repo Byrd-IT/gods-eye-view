@@ -1,12 +1,12 @@
 import { HISTORY_INDICES as IDX } from './historyEs.js';
 import {
+  ADSBLOL_BUCKET_S,
   MILITARY_MAX_SNAP_AGE_MS,
   STALE_POSITION_MAX_MS,
   STALE_UNION_SPAN_MS,
   adsblolSnapAtOrBefore,
   boxesIntersect,
   mergeAircraft,
-  nearestAdsblolSnaps,
   nearestSnaps,
   newestPerId,
   pickPollSnap,
@@ -64,6 +64,17 @@ export const ADSBLOL_DAYS_TTL_MS = 10 * 60_000;
 export const ADSBLOL_DAYS_CACHE = 32;
 /** Military docs read at most for the stale union (5 polls x ~500). */
 export const STALE_UNION_MAX_DOCS = 15_000;
+/**
+ * Event feeds (perimeters, cyclones, launches): entities resolved per as-of
+ * query (composite pages of EVENT_ENTITY_PAGE). Above EVENT_MAX_ENTITIES the
+ * answer is flagged X-History-Truncated; a version is never chosen by a cap.
+ */
+export const EVENT_ENTITY_PAGE = 1_000;
+export const EVENT_MAX_ENTITIES = 20_000;
+/** Snapshots: at most this many gap jumps per side for adsb.lol buckets. */
+export const ADSBLOL_SNAP_JUMPS = 4;
+/** ingest-log feed of the adsb.lol importer's per-day completion records. */
+export const ADSBLOL_IMPORT_FEED = 'aircraft-adsblol';
 
 const AIRCRAFT_SOURCE = [
   'icao24',
@@ -141,7 +152,11 @@ function parseMessage(text) {
   }
 }
 
+const WORLD_TILE = Object.freeze({ w: -180, s: -90, e: 180, n: 90 });
+
+/** Poll tile from the ingest-log message: [w,s,e,n] or 'world' (collector). */
 function tileOf(bboxArray) {
+  if (bboxArray === 'world') return WORLD_TILE;
   if (!Array.isArray(bboxArray) || bboxArray.length !== 4) return null;
   const [w, s, e, n] = bboxArray.map(Number);
   if (![w, s, e, n].every(Number.isFinite)) return null;
@@ -158,7 +173,13 @@ export function createHistoryService({ es, now = () => Date.now() }) {
   const adsblolDays = new Map();
   let adsblolLast = null;
 
-  /** ok poll snaps of an ingest-log feed in [from, to], newest first. */
+  /**
+   * Poll snaps with recorded data of an ingest-log feed in [from, to].
+   * A poll counts when it was ok OR wrote docs: the collector logs
+   * 'partial' polls (warnings only, served live) and 'degraded' polls
+   * (bulk errors) with ok=false although their docs are stored; the stale
+   * union fills what a degraded poll missed.
+   */
   async function pollSnaps(logFeed, from, to, size, order = 'desc') {
     const json = await es.search(IDX.ingestLog, {
       size,
@@ -169,7 +190,15 @@ export function createHistoryService({ es, now = () => Date.now() }) {
           filter: [
             { term: { feed: logFeed } },
             { term: { kind: 'poll' } },
-            { term: { ok: true } },
+            {
+              bool: {
+                should: [
+                  { term: { ok: true } },
+                  numRange('docs_written', 1, undefined),
+                ],
+                minimum_should_match: 1,
+              },
+            },
             numRange('snap', from, to),
           ],
         },
@@ -208,13 +237,125 @@ export function createHistoryService({ es, now = () => Date.now() }) {
     const days = new Map();
     for (const b of json?.aggregations?.d?.buckets ?? [])
       days.set(b.key, b.doc_count);
-    const latestMs = await adsblolLatest();
-    const entry = { at: t, days, latestMs };
+    const [latestMs, imports] = await Promise.all([
+      adsblolLatest(),
+      adsblolImports(fromDay, toDay),
+    ]);
+    const entry = { at: t, days, imports, latestMs };
     adsblolDays.delete(key);
     adsblolDays.set(key, entry);
     while (adsblolDays.size > ADSBLOL_DAYS_CACHE)
       adsblolDays.delete(adsblolDays.keys().next().value);
     return entry;
+  }
+
+  /**
+   * Per-day import completion records (dayStartMs -> verified doc count):
+   * ingest-log docs {feed: 'aircraft-adsblol', kind: 'import', ok: true,
+   * snap: <UTC day start, epoch ms>, docs_written: <the day's doc count>}
+   * written by the adsb.lol importer once a day passed its audit (DESIGN
+   * 5.3: doc count vs bytes x docs/GB). The ONLY evidence that a day is
+   * complete: doc presence is not (an import loads one aircraft file at a
+   * time, so a half-imported day already has docs in every minute).
+   */
+  async function adsblolImports(fromDay, toDay) {
+    const json = await es.search(IDX.ingestLog, {
+      size: Math.min(Math.ceil((toDay - fromDay) / DAY_MS) + 1, 2_100),
+      _source: ['snap', 'docs_written'],
+      query: {
+        bool: {
+          filter: [
+            { term: { feed: ADSBLOL_IMPORT_FEED } },
+            { term: { kind: 'import' } },
+            { term: { ok: true } },
+            numRange('snap', fromDay, toDay - 1),
+          ],
+        },
+      },
+    });
+    const out = new Map();
+    for (const hit of json?.hits?.hits ?? []) {
+      const { snap, docs_written: docs } = sourceOf(hit);
+      if (!Number.isFinite(snap) || snap % DAY_MS !== 0) continue;
+      if (!Number.isFinite(docs) || docs <= 0) continue;
+      out.set(snap, Math.max(out.get(snap) ?? 0, docs));
+    }
+    return out;
+  }
+
+  /**
+   * Real adsb.lol bucket ends (epoch s) nearest to `aroundS` on one side:
+   * 'before' = <= aroundS (descending), 'after' = > aroundS (ascending).
+   * Round 0 lists the stored buckets in the n minutes next to `around`
+   * (terms on `snap`); each later round first jumps any gap to the nearest
+   * stored bucket (one sorted size-1 query) and lists from there; at most
+   * ADSBLOL_SNAP_JUMPS rounds. Only stored `snap` values are returned.
+   */
+  async function adsblolRealSnaps(aroundS, n, side) {
+    const before = side === 'before';
+    const out = [];
+    const step = ADSBLOL_BUCKET_S;
+    let anchor = before ? aroundS : aroundS + 1;
+    for (let round = 0; round < ADSBLOL_SNAP_JUMPS && out.length < n; round++) {
+      // round 0 looks right next to `around` (the common, gap-free case);
+      // later rounds first jump the gap to the nearest stored bucket
+      let s0;
+      let jumped = false;
+      if (round === 0) {
+        s0 = before
+          ? Math.floor(anchor / step) * step
+          : Math.ceil(anchor / step) * step;
+      } else {
+        const near = await es.search(IDX.adsblol, {
+          size: 1,
+          _source: ['snap'],
+          track_total_hits: false,
+          sort: [{ snap: before ? 'desc' : 'asc' }],
+          query: {
+            bool: {
+              filter: [
+                before
+                  ? numRange('snap', undefined, anchor)
+                  : numRange('snap', anchor, undefined),
+              ],
+            },
+          },
+        });
+        s0 = sourceOf(near?.hits?.hits?.[0]).snap;
+        if (!Number.isFinite(s0)) break;
+        jumped = true;
+      }
+      const need = n - out.length;
+      const lo = before ? s0 - (need - 1) * step : s0;
+      const hi = before ? s0 : s0 + (need - 1) * step;
+      const json = await es.search(IDX.adsblol, {
+        size: 0,
+        query: {
+          bool: {
+            filter: [
+              numRange('snap', lo, hi),
+              range('@timestamp', lo * 1000 - 60_000, hi * 1000),
+            ],
+          },
+        },
+        aggs: {
+          s: {
+            terms: {
+              field: 'snap',
+              size: need,
+              order: { _key: before ? 'desc' : 'asc' },
+            },
+          },
+        },
+      });
+      const keys = (json?.aggregations?.s?.buckets ?? [])
+        .map((b) => Number(b.key))
+        .filter(Number.isFinite);
+      if (jumped && !keys.includes(s0)) keys.unshift(s0); // stored: real
+      for (const k of keys) if (out.length < n && !out.includes(k)) out.push(k);
+      anchor = before ? lo - 1 : hi + 1;
+    }
+    return out;
   }
 
   /** Newest imported adsb.lol bucket end (ms), cached with the day counts. */
@@ -260,7 +401,6 @@ export function createHistoryService({ es, now = () => Date.now() }) {
       tMs,
       OPENSKY_MAX_POLLS,
     );
-    const world = { w: -180, s: -90, e: 180, n: 90 };
     const out = [];
     for (const p of polls) {
       const msg = parseMessage(p.message);
@@ -273,7 +413,7 @@ export function createHistoryService({ es, now = () => Date.now() }) {
           ? Math.min(cadence, OPENSKY_MAX_CADENCE_MS)
           : OPENSKY_MAX_CADENCE_MS);
       if (p.snap < tMs - maxAge || p.snap > tMs) continue;
-      if (!boxesIntersect(tile, bbox ?? world)) continue;
+      if (!boxesIntersect(tile, bbox ?? WORLD_TILE)) continue;
       out.push({ snap: p.snap, tile, cadenceMs: cadence });
     }
     // newest poll per tile only
@@ -415,7 +555,8 @@ export function createHistoryService({ es, now = () => Date.now() }) {
         prior.hits.map(toSample),
         snap,
       );
-      const truncated = primary.truncated || rows.length > maxRows;
+      const truncated =
+        primary.truncated || prior.truncated || rows.length > maxRows;
       rows = rows.slice(0, maxRows);
       const ac = rows.map((s) => readsbRow(s.doc, snap)).filter(Boolean);
       return {
@@ -499,34 +640,106 @@ export function createHistoryService({ es, now = () => Date.now() }) {
     };
   }
 
-  /** Latest version per id as of t (event feeds). */
-  async function latestVersions(index, { t, windowMs, timeField, filter }) {
+  /**
+   * Event feeds, step 1: the newest version per entity as of t. Only the
+   * as-of filter (`versionFilter`: version time <= t, inside the window) is
+   * applied here, NEVER a position/geometry/event-time filter, so a newer
+   * version that moved out of the bbox (or a launch whose NET moved) hides
+   * the older one instead of letting it resurface. Composite pages over the
+   * entity id with top_hits size 1 = exact per entity at any version count.
+   * @returns {Promise<{winners: {index: string, id: string, source: object}[], truncated: boolean}>}
+   */
+  async function latestAsOf(
+    index,
+    { idField, versionFilter, sort, extraSources = [], keep },
+  ) {
+    const winners = [];
+    let after;
+    let truncated = false;
+    for (;;) {
+      const json = await es.search(index, {
+        size: 0,
+        query: { bool: { filter: versionFilter } },
+        aggs: {
+          e: {
+            composite: {
+              size: EVENT_ENTITY_PAGE,
+              sources: [
+                { id: { terms: { field: idField } } },
+                ...extraSources.map((f) => ({ [f]: { terms: { field: f } } })),
+              ],
+              ...(after ? { after } : {}),
+            },
+            aggs: { v: { top_hits: { size: 1, sort, _source: keep } } },
+          },
+        },
+      });
+      const agg = json?.aggregations?.e;
+      for (const b of agg?.buckets ?? []) {
+        const hit = b?.v?.hits?.hits?.[0];
+        if (hit?._id && hit?._index)
+          winners.push({
+            index: hit._index,
+            id: hit._id,
+            source: sourceOf(hit),
+          });
+      }
+      after = agg?.after_key;
+      if (!after || (agg?.buckets ?? []).length < EVENT_ENTITY_PAGE) break;
+      if (winners.length >= EVENT_MAX_ENTITIES) {
+        truncated = true;
+        break;
+      }
+    }
+    return { winners, truncated };
+  }
+
+  /**
+   * Event feeds, step 2: the winning versions that are eligible (bbox,
+   * geometry, event window). Matched by _id and kept only when the
+   * (_index, _id) pair is the winner (a live/archive copy is counted once).
+   */
+  async function eligibleWinners(index, winners, eligibility) {
+    if (!winners.length) return { docs: [], truncated: false };
+    const want = new Set(winners.map((w) => `${w.index}\u0000${w.id}`));
     const res = await es.searchAll(index, {
       query: {
         bool: {
-          filter: [range(timeField, t - windowMs, t), ...filter],
+          filter: [
+            { ids: { values: [...new Set(winners.map((w) => w.id))] } },
+            ...eligibility,
+          ],
         },
       },
-      maxRows: 20_000,
+      maxRows: winners.length * 2,
     });
-    return res;
+    const seen = new Set();
+    const docs = [];
+    for (const hit of res.hits) {
+      const key = `${hit._index}\u0000${hit._id}`;
+      if (!want.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      docs.push(sourceOf(hit));
+    }
+    return { docs, truncated: res.truncated };
   }
 
   async function slicePerimeters({ t, bbox, maxRows, windowMs }) {
-    const res = await latestVersions(IDX.perimeters, {
-      t,
-      windowMs,
-      timeField: '@timestamp',
-      filter: geoShapeBox('geometry', bbox),
+    const latest = await latestAsOf(IDX.perimeters, {
+      idField: 'fire_id',
+      versionFilter: [range('@timestamp', t - windowMs, t)],
+      sort: [{ '@timestamp': 'desc' }, { snap: 'desc' }],
+      keep: ['fire_id', '@timestamp'],
     });
-    const newest = newestPerId(
-      res.hits.map(sourceOf),
-      (d) => d.fire_id,
-      (d) => docTimeMs(d) ?? 0,
+    const eligible = await eligibleWinners(
+      IDX.perimeters,
+      latest.winners,
+      geoShapeBox('geometry', bbox),
     );
-    let rows = [...newest.values()].map(perimeterRow).filter(Boolean);
+    let rows = eligible.docs.map(perimeterRow).filter(Boolean);
     rows.sort((a, b) => a.stableId.localeCompare(b.stableId));
-    const truncated = res.truncated || rows.length > maxRows;
+    const truncated =
+      latest.truncated || eligible.truncated || rows.length > maxRows;
     rows = rows.slice(0, maxRows);
     return {
       body: { fetchedAt: t, rows },
@@ -539,38 +752,50 @@ export function createHistoryService({ es, now = () => Date.now() }) {
   }
 
   async function sliceCyclones({ t, bbox, maxRows, windowMs }) {
-    const res = await latestVersions(IDX.cyclones, {
-      t,
-      windowMs,
-      timeField: '@timestamp',
-      filter: geoBox('position', bbox),
+    const latest = await latestAsOf(IDX.cyclones, {
+      idField: 'storm_id',
+      extraSources: ['source'],
+      versionFilter: [range('@timestamp', t - windowMs, t)],
+      sort: [{ '@timestamp': 'desc' }, { snap: 'desc' }],
+      keep: ['storm_id', 'source', '@timestamp'],
     });
-    const docs = res.hits.map(sourceOf);
-    const advisories = newestPerId(
-      docs.filter((d) => d.source === 'noaa-nhc'),
-      (d) => String(d.storm_id ?? '').toLowerCase(),
-      (d) => docTimeMs(d) ?? 0,
+    // one representative per storm, chosen BEFORE the bbox: the newest NHC
+    // advisory, else (no advisory in the window) the newest ATCF fix
+    const stormKey = (w) => String(w.source.storm_id ?? '').toLowerCase();
+    const time = (w) => docTimeMs(w.source) ?? 0;
+    const nhc = newestPerId(
+      latest.winners.filter((w) => w.source.source === 'noaa-nhc'),
+      stormKey,
+      time,
     );
-    const fixes = newestPerId(
-      docs.filter(
-        (d) =>
-          d.source !== 'noaa-nhc' &&
-          !advisories.has(String(d.storm_id ?? '').toLowerCase()),
+    const fix = newestPerId(
+      latest.winners.filter(
+        (w) => w.source.source !== 'noaa-nhc' && !nhc.has(stormKey(w)),
       ),
-      (d) => String(d.storm_id ?? '').toLowerCase(),
-      (d) => docTimeMs(d) ?? 0,
+      stormKey,
+      time,
+    );
+    const eligible = await eligibleWinners(
+      IDX.cyclones,
+      [...nhc.values(), ...fix.values()],
+      geoBox('position', bbox),
     );
     const order = (a, b) => a.id.localeCompare(b.id);
-    const storms = [...advisories.values()]
+    const storms = eligible.docs
+      .filter((d) => d.source === 'noaa-nhc')
       .map(cycloneStorm)
       .filter((s) => s && s.advisoryNumber !== null)
-      .sort(order)
-      .slice(0, maxRows);
-    const bestTrackStorms = [...fixes.values()]
+      .sort(order);
+    const bestTrack = eligible.docs
+      .filter((d) => d.source !== 'noaa-nhc')
       .map(cycloneStorm)
       .filter(Boolean)
-      .sort(order)
-      .slice(0, maxRows);
+      .sort(order);
+    // ONE maxRows budget for both lists: advisories first
+    const total = storms.length + bestTrack.length;
+    const keptStorms = storms.slice(0, maxRows);
+    const keptBest = bestTrack.slice(0, maxRows - keptStorms.length);
+    const truncated = latest.truncated || eligible.truncated || total > maxRows;
     return {
       body: {
         ...CYCLONE_ENVELOPE,
@@ -578,33 +803,36 @@ export function createHistoryService({ es, now = () => Date.now() }) {
         stale: false,
         unavailable: false,
         reason: null,
-        storms,
-        bestTrackStorms,
+        storms: keptStorms,
+        bestTrackStorms: keptBest,
       },
       headers: {
-        'X-History-Rows': String(storms.length + bestTrackStorms.length),
+        'X-History-Rows': String(keptStorms.length + keptBest.length),
         'X-History-Window-Ms': String(windowMs),
+        ...(truncated ? { 'X-History-Truncated': '1' } : {}),
       },
     };
   }
 
   async function sliceLaunches({ t, bbox, maxRows, windowMs }) {
-    const res = await latestVersions(IDX.launches, {
-      t,
-      windowMs,
-      timeField: 'net',
-      filter: [range('last_updated', 0, t), ...geoBox('pad_location', bbox)],
+    // as of t = newest version known by t (last_updated <= t) per launch;
+    // the NET window and the pad bbox apply to THAT version only
+    const latest = await latestAsOf(IDX.launches, {
+      idField: 'launch_id',
+      versionFilter: [range('last_updated', undefined, t)],
+      sort: [{ last_updated: 'desc' }, { snap: 'desc' }],
+      keep: ['launch_id', 'last_updated'],
     });
-    const newest = newestPerId(
-      res.hits.map(sourceOf),
-      (d) => d.launch_id,
-      (d) => Date.parse(d.last_updated ?? '') || 0,
-    );
-    let results = [...newest.values()]
+    const eligible = await eligibleWinners(IDX.launches, latest.winners, [
+      range('net', t - windowMs, t),
+      ...geoBox('pad_location', bbox),
+    ]);
+    let results = eligible.docs
       .map(launchResult)
       .filter(Boolean)
       .sort((a, b) => Date.parse(a.net) - Date.parse(b.net));
-    const truncated = res.truncated || results.length > maxRows;
+    const truncated =
+      latest.truncated || eligible.truncated || results.length > maxRows;
     results = results.slice(-maxRows);
     return {
       body: { count: results.length, next: null, previous: null, results },
@@ -728,12 +956,27 @@ export function createHistoryService({ es, now = () => Date.now() }) {
       ]);
       const dayLane = [];
       const first = Math.floor(from / DAY_MS) * DAY_MS;
-      for (let d = first; d < to; d += DAY_MS)
+      for (let d = first; d < to; d += DAY_MS) {
+        const docs = days.days.get(d) ?? 0;
+        const verified = days.imports.get(d);
+        // complete ONLY with the importer's record and its docs all present;
+        // docs without a record = unverified (maybe a partial import)
+        const status =
+          docs === 0
+            ? 'missing'
+            : verified === undefined
+              ? 'unverified'
+              : docs >= verified
+                ? 'complete'
+                : 'partial';
         dayLane.push({
           t: new Date(d).toISOString(),
-          docs: days.days.get(d) ?? 0,
-          complete: (days.days.get(d) ?? 0) > 0,
+          docs,
+          verifiedDocs: verified ?? null,
+          status,
+          complete: status === 'complete',
         });
+      }
       return {
         feed,
         from: new Date(from).toISOString(),
@@ -776,13 +1019,18 @@ export function createHistoryService({ es, now = () => Date.now() }) {
       source,
     });
     if (feed === 'aircraft') {
-      const days = await adsblolDayCounts(around - DAY_MS, around + DAY_MS);
-      const ads =
-        days.latestMs === null
-          ? []
-          : nearestAdsblolSnaps(around, n, days.latestMs).filter((ms) =>
-              days.days.has(Math.floor((ms - 1) / DAY_MS) * DAY_MS),
-            );
+      // real stored buckets only (never generated times), across gaps
+      const aroundS = Math.floor(around / 1000);
+      const [adsBefore, adsAfter] = await Promise.all([
+        adsblolRealSnaps(aroundS, n, 'before'),
+        adsblolRealSnaps(aroundS, n, 'after'),
+      ]);
+      const ads = nearestSnaps(
+        adsBefore.map((s) => s * 1000),
+        adsAfter.map((s) => s * 1000),
+        around,
+        n,
+      );
       const [before, after] = await Promise.all([
         pollSnaps(LOG_FEED.opensky, 0, around, n, 'desc'),
         pollSnaps(
