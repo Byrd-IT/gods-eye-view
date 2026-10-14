@@ -26,6 +26,8 @@ import {
   readsbRow,
 } from './historyRows.js';
 import { DAY_MS } from './historyParams.js';
+import { createLatestSlices } from './historyLatest.js';
+import { createTrackService } from './historyTrack.js';
 
 /**
  * /api/history query orchestration (gev-history DESIGN 4.3; card B9).
@@ -869,6 +871,7 @@ export function createHistoryService({ es, now = () => Date.now() }) {
     };
   }
 
+  const latestSlices = createLatestSlices({ es });
   const SLICES = {
     aircraft: sliceAircraft,
     military: sliceMilitary,
@@ -876,6 +879,10 @@ export function createHistoryService({ es, now = () => Date.now() }) {
     'fire-perimeters': slicePerimeters,
     cyclones: sliceCyclones,
     launches: sliceLaunches,
+    // B10
+    vessels: latestSlices.sliceVessels,
+    transit: latestSlices.sliceTransit,
+    bikeshare: latestSlices.sliceBikeshare,
   };
 
   async function slice(params) {
@@ -1103,5 +1110,7 @@ export function createHistoryService({ es, now = () => Date.now() }) {
     };
   }
 
-  return { slice, coverage, snapshots };
+  const { track } = createTrackService({ es });
+
+  return { slice, coverage, snapshots, track };
 }

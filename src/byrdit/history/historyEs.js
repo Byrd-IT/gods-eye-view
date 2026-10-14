@@ -33,6 +33,12 @@ export const HISTORY_INDICES = Object.freeze({
   perimeters: 'gev-history-perimeters,gev-history-perimeters-hist-*',
   cyclones: 'gev-history-cyclones,gev-history-cyclones-hist-*',
   launches: 'gev-history-launches,gev-history-launches-hist-*',
+  // B10: AISStream recorder + the NOAA MarineCadastre archive (B18)
+  vessels: 'gev-history-vessels,gev-history-vessels-noaa',
+  vesselStatic: 'gev-history-vessel-static',
+  transit: 'gev-history-transit',
+  bikeshare: 'gev-history-bikeshare',
+  bikeshareStations: 'gev-history-bikeshare-stations',
 });
 const ALLOWED = new Set(Object.values(HISTORY_INDICES));
 

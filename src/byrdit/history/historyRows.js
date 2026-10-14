@@ -277,3 +277,117 @@ export function launchResult(doc) {
     pad,
   };
 }
+
+// ------------------------------------------------------------- B10 rows
+const text = (v) => (typeof v === 'string' ? v.trim() : '');
+
+/**
+ * Vessel row in the live /api/vessels `rows[i]` shape (GEV
+ * server/providers/vessels/ais-store.js): strings are '' when unknown (as
+ * live stringValue), numbers null. Static fields (name, type, imo,
+ * destination) come from the newest gev-history-vessel-static record at or
+ * before t; position fields from the newest position doc. `source` names
+ * the recorder ('aisstream' or the NOAA MarineCadastre archive).
+ */
+export function vesselRow(pos, stat = null) {
+  const mmsi = str(pos?.mmsi);
+  const la = lat(pos),
+    lo = lon(pos);
+  const tsMs = docTimeMs(pos);
+  if (!mmsi || la === null || lo === null || tsMs === null) return null;
+  const sog = num(pos.sog_kn);
+  const cog = num(pos.cog_deg);
+  const hdg = num(pos.heading_deg);
+  return {
+    lat: la,
+    lon: lo,
+    name: text(stat?.name) || `MMSI ${mmsi}`,
+    mmsi,
+    imo: text(stat?.imo),
+    type: text(stat?.ship_type),
+    destination: text(stat?.destination),
+    speed: sog !== null && sog >= 0 && sog < 102.3 ? sog : null,
+    course: cog !== null && cog >= 0 && cog < 360 ? cog : null,
+    heading: hdg !== null && hdg >= 0 && hdg <= 360 ? hdg : null,
+    last_position_UTC: new Date(tsMs).toISOString(),
+    last_position_epoch: Math.floor(tsMs / 1000),
+    source: str(pos.source),
+  };
+}
+
+/**
+ * GTFS-RT vehicle in the live /api/transit/vehicles/<feedId> `vehicles[i]`
+ * shape (GEV src/data/gtfsRealtime.js + repairVehicleTimestamps).
+ * occupancy is not recorded (null). timestampSource is 'recorded': the
+ * recorder kept the report time but not whether it was the vehicle's own,
+ * the header's or the fetch time, so the layer treats it as a receipt time
+ * (its conservative branch) instead of claiming a vehicle time.
+ */
+export function transitVehicle(doc) {
+  const id = str(doc?.vehicle_id);
+  const la = lat(doc),
+    lo = lon(doc);
+  const tsMs = docTimeMs(doc);
+  if (!id || la === null || lo === null || tsMs === null) return null;
+  const dir = doc.direction_id;
+  return {
+    id,
+    lat: la,
+    lon: lo,
+    bearing: num(doc.bearing_deg),
+    speedMps: num(doc.speed_ms),
+    timestamp: Math.floor(tsMs / 1000),
+    routeId: str(doc.route_id),
+    tripId: str(doc.trip_id),
+    directionId: Number.isInteger(dir) ? dir : null,
+    label: str(doc.label),
+    stopId: str(doc.stop_id),
+    status: str(doc.status),
+    occupancy: null,
+    timestampSource: 'recorded',
+  };
+}
+
+/** GBFS 2.x station_status `data.stations[i]` from a bike share doc. */
+export function gbfsStatusStation(doc) {
+  const id = str(doc?.station_id);
+  if (!id) return null;
+  const lr = docTimeMs({
+    '@timestamp': doc.last_reported ?? doc['@timestamp'],
+  });
+  const out = {
+    station_id: id,
+    num_bikes_available: num(doc.num_bikes_available),
+    num_docks_available: num(doc.num_docks_available),
+    is_installed: doc.is_installed ?? null,
+    is_renting: doc.is_renting ?? null,
+    is_returning: doc.is_returning ?? null,
+    last_reported: lr === null ? null : Math.floor(lr / 1000),
+  };
+  const eb = num(doc.num_ebikes_available);
+  if (eb !== null) out.num_ebikes_available = eb;
+  return out;
+}
+
+/** GBFS 2.x station_information `data.stations[i]` from a stations doc. */
+export function gbfsInfoStation(doc) {
+  const id = str(doc?.station_id);
+  const la = lat(doc),
+    lo = lon(doc);
+  if (!id || la === null || lo === null) return null;
+  const out = { station_id: id, name: str(doc.name) ?? id, lat: la, lon: lo };
+  const cap = num(doc.capacity);
+  if (cap !== null) out.capacity = cap;
+  if (str(doc.region_id)) out.region_id = doc.region_id;
+  return out;
+}
+
+/** GBFS 2.x envelope ({last_updated, ttl, data}) for one feed file. */
+export function gbfsEnvelope(stations, tMs) {
+  return {
+    last_updated: Math.floor(tMs / 1000),
+    ttl: 0,
+    version: '2.3',
+    data: { stations },
+  };
+}
