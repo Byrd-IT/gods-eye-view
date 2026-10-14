@@ -1133,6 +1133,127 @@ test('R2: snapshots list only stored buckets, across a missing minute and a mult
   assert.deepEqual(e.json.snaps, []);
 });
 
+// R2b: snapshots are EXACTLY the n nearest recorded buckets (brute force)
+const osPoll = (ms) => ({
+  feed: 'aircraft-opensky',
+  kind: 'poll',
+  ok: true,
+  snap: ms,
+  '@timestamp': iso(ms),
+  message: JSON.stringify({ tile_bbox: [-100, 20, -80, 35] }),
+});
+/** Reference: n nearest of all recorded buckets, ties to the earlier one. */
+function bruteNearest(adsS, osMs, around, n) {
+  return [
+    ...adsS.map((s) => ({ epochMs: s * 1000, source: 'adsblol' })),
+    ...osMs.map((epochMs) => ({ epochMs, source: 'opensky' })),
+  ]
+    .sort(
+      (a, b) =>
+        Math.abs(a.epochMs - around) - Math.abs(b.epochMs - around) ||
+        a.epochMs - b.epochMs,
+    )
+    .slice(0, n)
+    .sort((a, b) => a.epochMs - b.epochMs);
+}
+async function snapsOf(adsS, osMs, around, n) {
+  const { api, fake } = makeApi({
+    'gev-history-aircraft-adsblol': adsS.map((s) => adsDoc(s)),
+    'gev-history-ingest-log': osMs.map(osPoll),
+  });
+  const r = await call(
+    api,
+    `/api/history/snapshots?feed=aircraft&around=${iso(around)}&n=${n}`,
+  );
+  assert.equal(r.status, 200, r.body);
+  const adsCalls = fake.calls.filter((c) =>
+    c.path.includes('gev-history-aircraft-adsblol'),
+  ).length;
+  return {
+    snaps: r.json.snaps.map(({ epochMs, source }) => ({ epochMs, source })),
+    adsCalls,
+  };
+}
+
+test('R2b: sparse one-source import -> exactly the n nearest stored buckets', async () => {
+  // 288 buckets 10 minutes apart over two days (a partial import)
+  const stored = Array.from({ length: 288 }, (_, i) => D2 / 1000 + i * 600);
+  const arounds = [
+    D2 + 86400000 + 30_000, // the reviewer's case
+    D2 - 7 * 86400000, // before everything
+    D2 + 2 * 86400000 + 3600000, // after everything
+    D2 + 5 * 60_000, // between the first two buckets
+    stored[100] * 1000, // exactly on a bucket
+  ];
+  for (const around of arounds) {
+    for (const n of [1, 10, 50]) {
+      const { snaps, adsCalls } = await snapsOf(stored, [], around, n);
+      assert.deepEqual(
+        snaps,
+        bruteNearest(stored, [], around, n),
+        `around=${iso(around)} n=${n}`,
+      );
+      // bounded: <= 2 queries per round, <= n + 2 rounds per side
+      assert.ok(adsCalls <= 4 * (n + 2), `${adsCalls} adsblol queries`);
+    }
+  }
+});
+
+test('R2b: mixed sources -> farther OpenSky polls never displace nearer adsb.lol buckets', async () => {
+  const stored = Array.from({ length: 288 }, (_, i) => D2 / 1000 + i * 600);
+  const around = D2 + 86400000 + 30_000;
+  // OpenSky polls only from one hour after `around`
+  const far = Array.from(
+    { length: 10 },
+    (_, i) => around + 3600000 + i * 60_000,
+  );
+  let { snaps } = await snapsOf(stored, far, around, 10);
+  assert.deepEqual(snaps, bruteNearest(stored, far, around, 10));
+  assert.ok(snaps.every((s) => s.source === 'adsblol'));
+  // interleaved: some OpenSky polls are nearer than adsb.lol buckets
+  const near = [around - 90_000, around + 200_000, around + 1_000_000];
+  ({ snaps } = await snapsOf(stored, near, around, 10));
+  assert.deepEqual(snaps, bruteNearest(stored, near, around, 10));
+  assert.ok(snaps.some((s) => s.source === 'opensky'));
+  assert.ok(snaps.some((s) => s.source === 'adsblol'));
+});
+
+test('R2b: randomized dense runs + gaps (both sources) equal the brute-force reference', async () => {
+  let seed = 0x5eed1234;
+  const rand = () => {
+    // mulberry32: deterministic
+    seed = (seed + 0x6d2b79f5) | 0;
+    let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+  const base = D2 / 1000; // two days of possible buckets
+  for (let iter = 0; iter < 25; iter++) {
+    const stored = new Set();
+    const runs = 1 + Math.floor(rand() * 6);
+    for (let r = 0; r < runs; r++) {
+      const start = Math.floor(rand() * 2880);
+      const len = 1 + Math.floor(rand() * 80);
+      const stride = 1 + Math.floor(rand() * 4); // 1 = dense, >1 = holes
+      for (let i = 0; i < len; i += stride) {
+        if (start + i < 2880) stored.add(base + (start + i) * 60);
+      }
+    }
+    const adsS = [...stored].sort((a, b) => a - b);
+    const osMs = Array.from({ length: Math.floor(rand() * 12) }, () =>
+      Math.floor(base * 1000 + rand() * 2 * 86400000),
+    );
+    const around = Math.floor(base * 1000 + rand() * 2 * 86400000);
+    const n = 1 + Math.floor(rand() * 50);
+    const { snaps } = await snapsOf(adsS, osMs, around, n);
+    assert.deepEqual(
+      snaps,
+      bruteNearest(adsS, osMs, around, n),
+      `iter=${iter} around=${iso(around)} n=${n} buckets=${adsS.length}`,
+    );
+  }
+});
+
 // R3: latest version per entity first, eligibility second
 const tEv = NOW - 3_600_000;
 test('R3: a storm whose newer advisory left the bbox is not resurrected', async () => {

@@ -71,8 +71,13 @@ export const STALE_UNION_MAX_DOCS = 15_000;
  */
 export const EVENT_ENTITY_PAGE = 1_000;
 export const EVENT_MAX_ENTITIES = 20_000;
-/** Snapshots: at most this many gap jumps per side for adsb.lol buckets. */
-export const ADSBLOL_SNAP_JUMPS = 4;
+/**
+ * Snapshots: the adsb.lol listing window (in buckets) doubles after a round
+ * that found fewer stored buckets than it asked for (sparse/partial imports),
+ * up to this many buckets. Only the cost of a round depends on it; which
+ * buckets are returned never does.
+ */
+export const ADSBLOL_SNAP_WINDOW_MAX = 240;
 /** ingest-log feed of the adsb.lol importer's per-day completion records. */
 export const ADSBLOL_IMPORT_FEED = 'aircraft-adsblol';
 
@@ -288,15 +293,31 @@ export function createHistoryService({ es, now = () => Date.now() }) {
    * 'before' = <= aroundS (descending), 'after' = > aroundS (ascending).
    * Round 0 lists the stored buckets in the n minutes next to `around`
    * (terms on `snap`); each later round first jumps any gap to the nearest
-   * stored bucket (one sorted size-1 query) and lists from there; at most
-   * ADSBLOL_SNAP_JUMPS rounds. Only stored `snap` values are returned.
+   * stored bucket (one sorted size-1 query) and lists from there. Only
+   * stored `snap` values are returned, and they are EXACTLY the n nearest
+   * on that side (or all of them when fewer are stored):
+   * - every round covers the contiguous range from `anchor` outwards, and
+   *   the jump proves (anchor, s0) holds no stored bucket, so nothing nearer
+   *   than a listed bucket is ever skipped;
+   * - there is no round cap that could stop early: every round after round 0
+   *   adds its jump target s0 (<= anchor, so new), hence at most n + 1
+   *   rounds; the loop only ends when n are found or the store has no
+   *   bucket left on that side.
+   * The window starts at n buckets and doubles (to ADSBLOL_SNAP_WINDOW_MAX)
+   * after an under-filled round, so sparse imports need few rounds; the
+   * terms agg still returns only the `need` nearest keys of the window.
    */
   async function adsblolRealSnaps(aroundS, n, side) {
     const before = side === 'before';
     const out = [];
     const step = ADSBLOL_BUCKET_S;
     let anchor = before ? aroundS : aroundS + 1;
-    for (let round = 0; round < ADSBLOL_SNAP_JUMPS && out.length < n; round++) {
+    let span = n; // window width in buckets
+    for (let round = 0; out.length < n; round++) {
+      if (round > n + 1) {
+        // unreachable (see above); fail closed rather than loop forever
+        throw new Error('adsblolRealSnaps: no progress');
+      }
       // round 0 looks right next to `around` (the common, gap-free case);
       // later rounds first jump the gap to the nearest stored bucket
       let s0;
@@ -326,8 +347,9 @@ export function createHistoryService({ es, now = () => Date.now() }) {
         jumped = true;
       }
       const need = n - out.length;
-      const lo = before ? s0 - (need - 1) * step : s0;
-      const hi = before ? s0 : s0 + (need - 1) * step;
+      const width = Math.max(need, span);
+      const lo = before ? s0 - (width - 1) * step : s0;
+      const hi = before ? s0 : s0 + (width - 1) * step;
       const json = await es.search(IDX.adsblol, {
         size: 0,
         query: {
@@ -352,7 +374,10 @@ export function createHistoryService({ es, now = () => Date.now() }) {
         .map((b) => Number(b.key))
         .filter(Number.isFinite);
       if (jumped && !keys.includes(s0)) keys.unshift(s0); // stored: real
+      const had = out.length;
       for (const k of keys) if (out.length < n && !out.includes(k)) out.push(k);
+      if (out.length - had < need)
+        span = Math.min(width * 2, ADSBLOL_SNAP_WINDOW_MAX);
       anchor = before ? lo - 1 : hi + 1;
     }
     return out;
