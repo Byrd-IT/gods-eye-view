@@ -9,12 +9,14 @@ import { SLICE_FEEDS } from './historyParams.js';
 import {
   GP_CSV_COLUMNS,
   GP_UNRECORDED_COLUMNS,
-  NOWCOAST_PIXEL_WINDOW_MS,
+  PIXELS_BASIS,
   QUAKE_ARCHIVE_PREFIX,
   WIND_MAX_CYCLE_AGE_MS,
   collapseNumeric,
   gpCsvRow,
   pickNearestEpoch,
+  pixelAvailability,
+  windGridId,
 } from './historySlicesB12c.js';
 import { parseGP } from '../gpCsv.js';
 import { normalizeEarthquakeSnapshot } from '../../layers/earthquakes/records.js';
@@ -22,10 +24,16 @@ import { validateWeatherSnapshot } from '../../layers/weather/source.js';
 import { createWindSource } from '../../layers/wind/source.js';
 import {
   GFS_ATMOS_FROM_MS,
+  WIND_DEGRADED_HOLD_MS,
   createWindHistoryReader,
   windRetention,
   windStep,
 } from '../../../server/byrdit/historyWind.js';
+import {
+  createWeatherServingTimes,
+  nowcoastCapsUrl,
+} from '../../../server/byrdit/historyImageryTimes.js';
+import { weatherProxy } from '../../../server/providers/weather.js';
 
 const { json2satrec, propagate } = createRequire(import.meta.url)(
   'satellite.js',
@@ -224,10 +232,11 @@ function makeApi(data = {}, opts = {}) {
   const api = createHistoryApi({
     env: ENV,
     fetchImpl: fake.fetchImpl,
-    now: () => opts.now ?? NOW,
+    now: opts.clock ?? (() => opts.now ?? NOW),
     log: () => {},
     allow: () => true,
     windReader: opts.windReader ?? null,
+    weatherTimes: opts.weatherTimes ?? null,
     ...(opts.cache === undefined ? {} : { cache: opts.cache }),
   });
   return { api, fake };
@@ -1034,6 +1043,125 @@ test('wind reader: one byte-range read per cycle+step (decoded grid kept), manif
   assert.equal(gets, before, 'served from the reader cache');
 });
 
+test('wind reader: a transient scalar failure is held briefly, then re-read; the recovered answer is kept (review R2)', async () => {
+  const idx = [
+    '1:0:d=2026101306:UGRD:10 m above ground:3 hour fcst:',
+    '2:100:d=2026101306:VGRD:10 m above ground:3 hour fcst:',
+    '3:200:d=2026101306:TMP:2 m above ground:3 hour fcst:',
+    '4:300:d=2026101306:XXX:surface:3 hour fcst:',
+  ].join('\n');
+  let failTmp = true;
+  let gets = 0;
+  const fetchImpl = async (url, init = {}) => {
+    gets += 1;
+    if (url.endsWith('.idx')) return new Response(idx);
+    const [, a, b] = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
+    if (Number(a) === 200 && failTmp)
+      return new Response('transient', { status: 503 });
+    return new Response(
+      new Uint8Array(Number(b) - Number(a) + 1).fill(Number(a) === 200 ? 3 : 1),
+      { status: 206 },
+    );
+  };
+  const decodeImpl = async (buf) => ({
+    ni: 180,
+    nj: 91,
+    lo1: 0,
+    la1: 90,
+    di: 2,
+    dj: 2,
+    units: buf[0] === 3 ? 'K' : 'm s-1',
+    values: new Float32Array(180 * 91).fill(buf[0] === 3 ? 280 : 2),
+  });
+  let clock = NOW;
+  const reader = createWindHistoryReader({
+    fetchImpl,
+    decodeImpl,
+    now: () => clock,
+  });
+  const req = {
+    model: 'gfs',
+    overlay: 'temperature',
+    runMs: RUN(13, 6),
+    validMs: RUN(13, 9),
+  };
+  const first = await reader.read(req);
+  assert.equal(first.status, 'ok', 'the failing request still gets wind');
+  assert.ok(first.manifest.scalarError);
+  assert.match(first.manifest.gridUrl, /-temperature-wind-only\.bin/);
+  assert.equal(first.bytes.length, 360 * 181 * 8);
+  failTmp = false;
+  // inside the hold: the same answer (manifest and grid stay one read)
+  let n = gets;
+  assert.equal(await reader.read(req), first);
+  assert.equal(gets, n);
+  // after the hold: read again -> the temperature field is back
+  clock += WIND_DEGRADED_HOLD_MS;
+  n = gets;
+  const recovered = await reader.read(req);
+  assert.ok(gets > n, 'the cycle was read again');
+  assert.equal(recovered.manifest.scalarError, undefined);
+  assert.equal(recovered.manifest.scalar.kind, 'temperature');
+  assert.equal(recovered.bytes.length, 360 * 181 * 12);
+  // a full answer is kept (control)
+  clock += 10 * WIND_DEGRADED_HOLD_MS;
+  n = gets;
+  assert.equal(await reader.read(req), recovered);
+  assert.equal(gets, n);
+});
+
+test('wind API: a degraded (wind-only) manifest is never cached; the recovered one is; X-History-Wind-Id ties grid to manifest', async () => {
+  let degraded = true;
+  const base = fakeWindReader();
+  const reader = {
+    ...base,
+    async read(q) {
+      const v = await base.read(q);
+      if (!degraded) return v;
+      const id = `${windGridId(v.manifest.gridUrl)}-temperature-wind-only`;
+      return {
+        ...v,
+        manifest: {
+          ...v.manifest,
+          overlay: 'temperature',
+          scalarError: 'Temperature field unavailable',
+          gridUrl: `/api/wind/grid/${id}.bin?model=gfs&overlay=temperature`,
+        },
+      };
+    },
+  };
+  const { api } = makeApi(
+    { 'gev-history-cycles': CYCLES },
+    { windReader: reader },
+  );
+  const path = slice(`feed=wind&t=${iso(RUN(13, 9))}&overlay=temperature`);
+  const a = await call(api, path);
+  assert.equal(a.status, 200);
+  assert.equal(a.headers['x-history-degraded'], 'scalar_unavailable');
+  assert.equal(a.headers['cache-control'], 'no-store');
+  assert.equal(a.headers.etag, undefined);
+  assert.equal(a.headers['x-history-wind-id'], windGridId(a.json.gridUrl));
+  assert.match(a.headers['x-history-wind-id'], /-wind-only$/);
+  const grid = await call(api, a.headers['x-history-grid']);
+  assert.equal(
+    grid.headers['x-history-wind-id'],
+    a.headers['x-history-wind-id'],
+  );
+  degraded = false;
+  const b = await call(api, path);
+  assert.equal(b.headers['x-history-degraded'], undefined);
+  assert.equal(b.json.scalarError, undefined);
+  assert.equal(b.headers['x-history-cache'], 'MISS');
+  assert.doesNotMatch(b.headers['x-history-wind-id'], /wind-only/);
+  const c = await call(api, path);
+  assert.equal(c.headers['x-history-cache'], 'HIT');
+  assert.equal(
+    windGridId('/api/wind/grid/gfs-20261013-6-f3-1.bin?model=gfs'),
+    'gfs-20261013-6-f3-1',
+  );
+  assert.equal(windGridId('/elsewhere/x.bin'), '');
+});
+
 // ---------------------------------------------------------------- imagery
 const IMAGERY = fixture('b12c-imagery-es-docs.json').docs;
 const LIVE_RADAR = JSON.parse(
@@ -1114,35 +1242,333 @@ test('imagery shape: the recorded time list at t + the live static fields passes
     'imageUrl',
   ])
     assert.ok(Object.hasOwn(LIVE_RADAR, k), k);
-  assert.equal(r.headers['x-history-pixels'], 'available');
-  assert.equal(
-    r.headers['x-history-pixel-window-ms'],
-    String(NOWCOAST_PIXEL_WINDOW_MS.radar),
-  );
+  // no serving-path reader injected: availability is NOT claimed
+  assert.equal(r.headers['x-history-pixels'], 'unknown');
+  assert.equal(r.headers['x-history-pixels-basis'], 'unknown');
+  assert.equal(r.headers['x-history-pixels-frames'], undefined);
+  assert.equal(r.headers['cache-control'], 'no-store');
+  assert.equal(r.headers.etag, undefined);
 });
 
-test('imagery: frames older than the nowCOAST window are said to be unrenderable (header), not blank-as-fact', async () => {
-  const t = Date.UTC(2026, 9, 14, 12);
-  const old = makeApi({ 'gev-history-imagery': IMAGERY }, { now: t + DAY });
-  const r = await call(
-    old.api,
-    slice(`feed=imagery&t=${iso(t)}&product=radar`),
+// ---- imagery pixels vs GEV's REAL pixel route (review R1)
+/** Real nowCOAST GetCapabilities captured 2026-10-14 17:35Z (all 3 services). */
+const CAPS_AT = Date.parse('2026-10-14T17:35:00Z');
+const CAPS = Object.fromEntries(
+  ['weather_radar', 'satellite', 'lightning_detection'].map((s) => [
+    s,
+    readFileSync(new URL(`b12c-caps-${s}.xml`, FIX), 'utf8'),
+  ]),
+);
+const PRODUCT_LAYER = {
+  radar: ['weather_radar', 'conus_base_reflectivity_mosaic'],
+  clouds: ['satellite', 'global_longwave_imagery_mosaic'],
+  'clouds-regional': ['satellite', 'goes_longwave_imagery'],
+  lightning: ['lightning_detection', 'ldn_lightning_strike_density'],
+};
+/** Every time a capabilities document lists for one layer. */
+function capsTimes(xml, layer) {
+  const at = xml.indexOf(`<Name>${layer}</Name>`);
+  const dim = /<Dimension\b[^>]*name="time"[^>]*>([^<]*)</.exec(xml.slice(at));
+  return dim[1].split(',').map((x) => iso(Date.parse(x.trim())));
+}
+/** The collector records each listed time once (snap = 1 min later). */
+function recordedFrames(capsByService) {
+  return Object.entries(PRODUCT_LAYER).flatMap(([product, [service, layer]]) =>
+    capsTimes(capsByService[service], layer).map((time) => ({
+      kind: 'nowcoast-time',
+      product,
+      layer,
+      time_available: time,
+      snap: Date.parse(time) + 60_000,
+    })),
   );
-  assert.equal(r.headers['x-history-pixels'], 'unavailable');
+}
+/** A PNG header weather.js validatePng accepts (signature + IHDR size). */
+function png(width, height) {
+  const b = Buffer.alloc(33);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(b, 0);
+  b.writeUInt32BE(13, 8);
+  b.write('IHDR', 12, 'ascii');
+  b.writeUInt32BE(width, 16);
+  b.writeUInt32BE(height, 20);
+  return b;
+}
+/** A NOAA double: GetCapabilities from `capsOf()`, GetMap -> a valid PNG. */
+function noaa(capsOf) {
+  const seen = { caps: 0, map: 0 };
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    const service = /observations\/([a-z_]+)\/ows$/.exec(u.pathname)[1];
+    const request = [...u.searchParams]
+      .find(([k]) => k.toLowerCase() === 'request')[1]
+      .toLowerCase();
+    if (request === 'getcapabilities') {
+      seen.caps += 1;
+      const xml = capsOf()[service];
+      return xml === undefined
+        ? new Response('', { status: 503 })
+        : new Response(xml, { headers: { 'content-type': 'text/xml' } });
+    }
+    seen.map += 1;
+    return new Response(
+      png(
+        Number(u.searchParams.get('width')),
+        Number(u.searchParams.get('height')),
+      ),
+      { headers: { 'content-type': 'image/png' } },
+    );
+  };
+  return { fetchImpl, seen };
+}
+/** GEV's unchanged weatherProxy route handler (/api/weather/*). */
+function pixelRoute(fetchImpl, now) {
+  let handler;
+  weatherProxy({ fetchImpl, now }).configureServer({
+    middlewares: { use: (_route, h) => (handler = h) },
+  });
+  return async (path) => {
+    const res = {
+      statusCode: 0,
+      headers: {},
+      writeHead(status, headers) {
+        this.statusCode = status;
+        this.headers = headers;
+      },
+      once() {},
+      removeListener() {},
+      end(body) {
+        this.body = body;
+        this.resolve();
+      },
+    };
+    const done = new Promise((r) => (res.resolve = r));
+    handler({ url: path, method: 'GET' }, res);
+    await done;
+    return res;
+  };
+}
+const tileOf = (product, time) =>
+  `/tile?product=${product}&time=${encodeURIComponent(time)}&z=0&x=0&y=0`;
+
+test('imagery pixels: X-History-Pixels-Frames are exactly the frames GEV pixel route renders (real capabilities, real weatherProxy)', async () => {
+  const caps = () => CAPS;
+  const now = () => CAPS_AT;
+  const upstream = noaa(caps);
+  const route = pixelRoute(upstream.fetchImpl, now);
+  const weatherTimes = createWeatherServingTimes({
+    fetchImpl: upstream.fetchImpl,
+    now,
+  });
+  const { api } = makeApi(
+    { 'gev-history-imagery': recordedFrames(CAPS) },
+    { now: CAPS_AT, weatherTimes },
+  );
+  const states = {};
+  for (const product of Object.keys(PRODUCT_LAYER))
+    for (const ageH of [0.5, 1, 1.5, 3, 6]) {
+      const t = CAPS_AT - ageH * HOUR;
+      const r = await call(
+        api,
+        slice(`feed=imagery&t=${iso(t)}&product=${product}`),
+      );
+      assert.equal(r.status, 200);
+      assert.equal(r.headers['cache-control'], 'no-store');
+      assert.equal(r.headers.etag, undefined);
+      assert.equal(r.headers['x-history-pixels-basis'], PIXELS_BASIS);
+      assert.equal(r.headers['x-history-pixels-checked-at'], iso(CAPS_AT));
+      const claimed = (r.headers['x-history-pixels-frames'] ?? '')
+        .split(',')
+        .filter(Boolean);
+      const frames = r.json.times;
+      assert.ok(frames.length > 0, `${product} ${ageH}h`);
+      let accepted = 0;
+      for (const time of frames) {
+        const tile = await route(tileOf(product, time));
+        if (tile.statusCode === 200) accepted += 1;
+        else {
+          assert.equal(tile.statusCode, 400);
+          assert.equal(JSON.parse(tile.body).error, 'unknown_weather_time');
+        }
+        // a claimed frame ALWAYS renders through the real route
+        if (claimed.includes(time))
+          assert.equal(tile.statusCode, 200, `${product} ${time}`);
+      }
+      // conservative only at the drift edges (newest frame of the read)
+      assert.ok(claimed.length <= accepted && accepted - claimed.length <= 2);
+      const state = r.headers['x-history-pixels'];
+      assert.equal(
+        state,
+        claimed.length === 0
+          ? 'unavailable'
+          : claimed.length === frames.length
+            ? 'available'
+            : 'partial',
+      );
+      states[`${product}@${ageH}`] = state;
+    }
+  // the review's cases: radar / GOES regional 3 h back render NOTHING (the
+  // route keeps 26 frames, ~1.7 h); global IR 6 h back renders every frame
+  assert.equal(states['radar@3'], 'unavailable');
+  assert.equal(states['clouds-regional@3'], 'unavailable');
+  assert.equal(states['clouds@6'], 'available');
+  assert.equal(states['radar@0.5'], 'available');
+  // 1-1.5 h back the route's oldest frames are already gone (partial); the
+  // two frames it may push out within one metadata TTL are not claimed
+  assert.equal(states['radar@1'], 'partial');
+  assert.equal(states['radar@1.5'], 'partial');
+  assert.equal(states['lightning@3'], 'available');
+});
+
+test('imagery pixels: the serving source unreadable -> unknown (never available); a newer capabilities read expires frames, never cached', async () => {
+  // unknown: the capabilities source fails (the route 503s too)
+  const down = noaa(() => ({}));
+  const t = CAPS_AT - 30 * 60_000;
+  const a = makeApi(
+    { 'gev-history-imagery': recordedFrames(CAPS) },
+    {
+      now: CAPS_AT,
+      weatherTimes: createWeatherServingTimes({
+        fetchImpl: down.fetchImpl,
+        now: () => CAPS_AT,
+      }),
+    },
+  );
+  const u = await call(a.api, slice(`feed=imagery&t=${iso(t)}&product=radar`));
+  assert.equal(u.headers['x-history-pixels'], 'unknown');
+  assert.equal(u.headers['x-history-pixels-basis'], 'unknown');
+  assert.equal(u.headers['x-history-pixels-frames'], undefined);
+  const route = pixelRoute(down.fetchImpl, () => CAPS_AT);
+  assert.equal((await route(tileOf('radar', u.json.times[0]))).statusCode, 503);
+  // expiry: the same slice URL, later, after the route's capabilities moved
+  // on 3 h (radar frames every 4 min): the earlier 'available' must not
+  // survive in any cache, ETag or 304
+  const grid = Array.from({ length: 136 }, (_, i) =>
+    iso(CAPS_AT - 6 * HOUR + i * 4 * 60_000),
+  );
+  const upTo = (ms) => grid.filter((x) => Date.parse(x) <= ms - 5 * 60_000);
+  let clock = CAPS_AT;
+  const upstream = noaa(() => ({ weather_radar: radarCaps(upTo(clock)) }));
+  const weatherTimes = createWeatherServingTimes({
+    fetchImpl: upstream.fetchImpl,
+    now: () => clock,
+  });
+  const b = makeApi(
+    {
+      'gev-history-imagery': grid.map((time) => ({
+        kind: 'nowcoast-time',
+        product: 'radar',
+        layer: PRODUCT_LAYER.radar[1],
+        time_available: time,
+        snap: Date.parse(time) + 60_000,
+      })),
+    },
+    { clock: () => clock, weatherTimes },
+  );
+  const path = slice(`feed=imagery&t=${iso(t)}&product=radar`);
+  const first = await call(b.api, path);
+  assert.equal(first.headers['x-history-pixels'], 'available');
+  assert.equal(first.headers['x-history-cache'], undefined);
+  clock = CAPS_AT + 3 * HOUR;
+  const second = await call(b.api, path, {
+    headers: { 'if-none-match': '"anything"' },
+  });
+  assert.equal(second.status, 200);
+  assert.equal(second.body, first.body, 'the recorded list itself is fixed');
+  assert.equal(second.headers['x-history-pixels'], 'unavailable');
+  assert.equal(second.headers['x-history-pixels-checked-at'], iso(clock));
+  const route2 = pixelRoute(upstream.fetchImpl, () => clock);
+  for (const time of second.json.times)
+    assert.equal((await route2(tileOf('radar', time))).statusCode, 400);
+});
+
+/** A minimal radar GetCapabilities listing `times` (weather.js parses it). */
+function radarCaps(times) {
+  const box = [
+    ['westBoundLongitude', -130],
+    ['eastBoundLongitude', -60],
+    ['southBoundLatitude', 20],
+    ['northBoundLatitude', 55],
+  ]
+    .map(([k, v]) => `<${k}>${v}</${k}>`)
+    .join('');
+  return `<WMS_Capabilities><Capability><Layer><Title>radar</Title><Layer><Name>${PRODUCT_LAYER.radar[1]}</Name><EX_GeographicBoundingBox>${box}</EX_GeographicBoundingBox><Dimension name="time" default="${times.at(-1)}" units="ISO8601">${times.join(',')}</Dimension></Layer></Layer></Capability></WMS_Capabilities>`;
+}
+
+test('pixelAvailability: frames that can differ between the route read and ours are not claimed', () => {
+  const at = Date.UTC(2026, 9, 14, 12);
+  const step = 4 * 60_000;
+  const list = (n) =>
+    Array.from({ length: n }, (_, i) => iso(at - (n - 1 - i) * step));
+  // a full 26-frame route set, margin 5 min -> 2 frames at each end unsure
+  const allowed = list(26);
+  const serving = { allowedTimes: allowed, fetchedAt: at, marginMs: 300_000 };
+  const p = pixelAvailability(allowed, serving, at);
+  assert.equal(p.state, 'partial');
+  assert.deepEqual(p.renderable, allowed.slice(2, -2));
+  // fewer than 26 (nothing pushed out by count): the oldest are sure
+  const few = list(20);
+  const q = pixelAvailability(
+    few,
+    { allowedTimes: few, fetchedAt: at, marginMs: 300_000 },
+    at,
+  );
+  assert.deepEqual(q.renderable, few.slice(0, -2));
+  // the 24 h limit minus the margin
+  const r = pixelAvailability(
+    few.slice(0, 5),
+    { allowedTimes: few, fetchedAt: at, marginMs: 300_000 },
+    Date.parse(few[2]) + DAY - 300_000,
+  );
+  assert.deepEqual(r.renderable, few.slice(2, 5));
+  // a frame the route does not list is never claimed; nothing read -> unknown
   assert.equal(
-    r.json.times.length,
-    13,
-    'the availability list is still the recorded one',
+    pixelAvailability([iso(at - 3 * HOUR)], serving, at).state,
+    'unavailable',
   );
-  const edge = makeApi(
-    { 'gev-history-imagery': IMAGERY },
-    { now: t + NOWCOAST_PIXEL_WINDOW_MS.radar - 30 * 60_000 },
-  );
-  const p = await call(
-    edge.api,
-    slice(`feed=imagery&t=${iso(t)}&product=radar`),
-  );
-  assert.equal(p.headers['x-history-pixels'], 'partial');
+  assert.equal(pixelAvailability(allowed, null, at).state, 'unknown');
+  assert.equal(pixelAvailability([], null, at).state, 'unavailable');
+});
+
+test('weather serving times: bridged mode reads the collector capabilities snapshot (STALE = unavailable), never NOAA', async () => {
+  const urls = [];
+  let stale = false;
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    if (url.startsWith('http://c1')) return new Response('', { status: 503 });
+    return new Response(CAPS.weather_radar, {
+      headers: stale ? { 'X-Feed-Cache': 'STALE' } : {},
+    });
+  };
+  let clock = CAPS_AT;
+  const reader = createWeatherServingTimes({
+    bridged: true,
+    collectorUrls: ['http://c1:4180', 'http://c2:4180'],
+    fetchImpl,
+    now: () => clock,
+  });
+  const v = await reader.read('radar');
+  assert.equal(v.allowedTimes.length, 26);
+  assert.equal(v.marginMs, 240_000);
+  assert.deepEqual(urls, [
+    'http://c1:4180/v1/latest/nowcoast-caps-weather-radar',
+    'http://c2:4180/v1/latest/nowcoast-caps-weather-radar',
+  ]);
+  assert.equal(await reader.read('radar'), v, 'kept for the route TTL');
+  assert.equal(urls.length, 2);
+  clock += 120_000;
+  stale = true;
+  await assert.rejects(reader.read('radar'));
+  assert.ok(urls.every((u) => !u.includes('noaa.gov')));
+  // unbridged: the same fixed NOAA URL weatherProxy reads
+  const direct = [];
+  await createWeatherServingTimes({
+    fetchImpl: async (url) => {
+      direct.push(url);
+      return new Response(CAPS.lightning_detection);
+    },
+    now: () => CAPS_AT,
+  }).read('lightning');
+  assert.deepEqual(direct, [nowcoastCapsUrl('lightning_detection')]);
 });
 
 test('imagery: before the first record -> an unavailable manifest (valid for the layer) + reason', async () => {

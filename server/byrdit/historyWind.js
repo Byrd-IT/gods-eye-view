@@ -47,6 +47,13 @@ import {
 
 export const GFS_ATMOS_FROM_MS = Date.UTC(2021, 2, 22, 12);
 export const IFS_RETENTION_DAYS = 3;
+/**
+ * A wind-only answer (overlay scalar unavailable) is kept this long, so a
+ * manifest and its grid stay one read, then re-read: a transient upstream
+ * error is retried at most once a minute per cycle+step and never pinned
+ * until LRU eviction (B12c review R2). A full answer is kept (immutable).
+ */
+export const WIND_DEGRADED_HOLD_MS = 60_000;
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 
@@ -82,6 +89,9 @@ const cycleOf = (runMs) => {
  * @param {number} [options.targetDx] same 1 degree as the live reader
  * @param {number} [options.timeoutMs]
  * @param {number} [options.maxEntries] decoded grids kept (LRU)
+ * @param {number} [options.degradedHoldMs] how long a wind-only answer (the
+ *   overlay's scalar read failed, e.g. a transient 503) is reused before the
+ *   next request reads the cycle again
  */
 export function createWindHistoryReader({
   fetchImpl = fetch,
@@ -90,6 +100,7 @@ export function createWindHistoryReader({
   targetDx = 1,
   timeoutMs = 40_000,
   maxEntries = 6,
+  degradedHoldMs = WIND_DEGRADED_HOLD_MS,
 } = {}) {
   const cache = new Map();
 
@@ -256,7 +267,8 @@ export function createWindHistoryReader({
    * @param {{model: 'gfs'|'ifs', overlay: string, runMs: number,
    *   validMs: number}} request
    * @returns {Promise<{status: 'ok', manifest: object, bytes: Buffer}
-   *   | {status: 'upstream_missing'}>}
+   *   | {status: 'upstream_missing'}>} manifest.scalarError set = degraded
+   *   (wind-only), held for degradedHoldMs only
    */
   function read({ model, overlay, runMs, validMs }) {
     const forecastHour = windStep(model, runMs, validMs);
@@ -264,23 +276,28 @@ export function createWindHistoryReader({
     let entry = cache.get(key);
     if (entry) {
       cache.delete(key);
-      cache.set(key, entry);
-      return entry;
+      // a degraded (wind-only) answer is held only until retryAt
+      if (entry.retryAt === undefined || now() < entry.retryAt) {
+        cache.set(key, entry);
+        return entry.promise;
+      }
     }
-    entry = load({ model, overlay, runMs, forecastHour });
+    const promise = load({ model, overlay, runMs, forecastHour });
+    entry = { promise };
     cache.set(key, entry);
-    entry.catch(() => {
-      if (cache.get(key) === entry) cache.delete(key);
-    });
-    entry.then(
+    promise.then(
       (value) => {
-        if (value.status !== 'ok' && cache.get(key) === entry)
-          cache.delete(key);
+        if (cache.get(key) !== entry) return;
+        if (value.status !== 'ok') cache.delete(key);
+        else if (value.manifest.scalarError !== undefined)
+          entry.retryAt = now() + degradedHoldMs;
       },
-      () => {},
+      () => {
+        if (cache.get(key) === entry) cache.delete(key);
+      },
     );
     while (cache.size > maxEntries) cache.delete(cache.keys().next().value);
-    return entry;
+    return promise;
   }
 
   return {

@@ -127,18 +127,17 @@ export const NOWCOAST_PRODUCTS = Object.freeze([
   'lightning',
 ]);
 /**
- * nowCOAST keeps only a rolling window of frames; GetMap for an older time
- * cannot render (DESIGN 1.5). MEASURED 2026-10-14 17:35Z from the three
- * GetCapabilities documents (oldest listed time): radar 09:00Z (8.6 h),
- * goes_longwave_imagery 09:03Z (8.5 h), ldn_lightning_strike_density 11:15Z
- * (6.3 h), global_longwave_imagery_mosaic 10:00Z (7.6 h). Floors used:
+ * Pixels are NOT recorded (DESIGN 1.5 #14). A frame renders only if GEV's
+ * pixel route (/api/weather/tile|image, server/providers/weather.js) accepts
+ * its time NOW: the route serves only the newest 26 times of its CURRENT
+ * GetCapabilities read that are <= 24 h old (allowedTimes), else 400
+ * unknown_weather_time. nowCOAST itself lists ~6-9 h, but the route's 26
+ * frames are ~1.7 h of radar. So availability is judged per frame against
+ * that same time set (weatherTimes, injected server-side: the same
+ * capabilities source as the serving path, parsed by GEV's own
+ * parseWeatherCapabilities), never against a static window.
  */
-export const NOWCOAST_PIXEL_WINDOW_MS = Object.freeze({
-  radar: 8 * 3_600_000,
-  'clouds-regional': 8 * 3_600_000,
-  lightning: 6 * 3_600_000,
-  clouds: 6 * 3_600_000,
-});
+export const PIXELS_BASIS = 'serving-path-capabilities';
 /** server/providers/weather.js parseWeatherCapabilities: 24 h, 26 kept, 13 sent. */
 const WEATHER_MAX_AGE_MS = DAY_MS;
 const WEATHER_KEEP = 26;
@@ -323,7 +322,12 @@ export function gpCsv(docs) {
  *   server-injected byte-range reader (server/byrdit/historyWind.js); src/
  *   may not import server/
  */
-export function createB12cSlices({ es, now = () => Date.now(), windReader }) {
+export function createB12cSlices({
+  es,
+  now = () => Date.now(),
+  windReader,
+  weatherTimes = null,
+}) {
   const firstCache = new Map();
 
   /** Smallest value of `field` among docs matching `filter` (cached). */
@@ -563,18 +567,30 @@ export function createB12cSlices({ es, now = () => Date.now(), windReader }) {
       });
     const value = await windReader.read({ model, overlay, runMs, validMs: t });
     if (value.status !== 'ok') return notRecorded(value.status, cycleHeaders);
+    // A wind-only answer (the overlay's scalar read failed) is degraded: the
+    // reader retries it after a short hold and it is never put in the API
+    // cache. X-History-Wind-Id = the grid id of THIS answer (manifest
+    // gridUrl /api/wind/grid/<id>.bin), sent on both parts so the router
+    // can tell a grid from a different (recovered) read than its manifest.
+    const degraded = value.manifest.scalarError !== undefined;
     const headers = {
       ...cycleHeaders,
       'X-History-Valid-Time': value.manifest.cycle.validIso,
       'X-History-Forecast-Hour': String(value.manifest.cycle.forecastHour),
       'X-History-Grid': gridSliceUrl(t, model, overlay),
+      'X-History-Wind-Id': windGridId(value.manifest.gridUrl),
+      ...(degraded ? { 'X-History-Degraded': 'scalar_unavailable' } : {}),
     };
     if (part === 'grid')
       return {
         bytes: value.bytes,
         headers: { ...headers, 'Content-Type': 'application/octet-stream' },
       };
-    return { body: value.manifest, headers };
+    return {
+      body: value.manifest,
+      headers,
+      ...(degraded ? { noStore: true } : {}),
+    };
   }
 
   // --------------------------------------------------------------- imagery
@@ -587,19 +603,19 @@ export function createB12cSlices({ es, now = () => Date.now(), windReader }) {
       [{ term: { kind: 'nowcoast-time' } }, { term: { product } }],
       'snap',
     );
-    const windowMs = NOWCOAST_PIXEL_WINDOW_MS[product];
-    const base = {
-      'X-History-Pixel-Window-Ms': String(windowMs),
-      ...(first !== null ? { 'X-History-Recording-Start': isoOf(first) } : {}),
-    };
+    const base =
+      first !== null ? { 'X-History-Recording-Start': isoOf(first) } : {};
+    // the pixel headers depend on now(): never cached (noStore), so a cache
+    // hit or a 304 cannot keep an expired 'available'
     if (first === null || t < first)
       return {
+        noStore: true,
         body: weatherTimeList(product, [], null),
         headers: {
           ...base,
           'X-History-Rows': '0',
           'X-History-Empty-Reason': 'before_recording_start',
-          'X-History-Pixels': 'unavailable',
+          ...pixelHeaders(pixelAvailability([], null, now())),
         },
       };
     const json = await es.search(IDX.imagery, {
@@ -629,19 +645,21 @@ export function createB12cSlices({ es, now = () => Date.now(), windReader }) {
         recordedAt = snap;
     }
     const kept = [...times].sort().slice(-WEATHER_KEEP).slice(-WEATHER_SEND);
-    const nowMs = now();
-    const renderable = kept.filter((x) => nowMs - Date.parse(x) <= windowMs);
+    let serving = null;
+    if (weatherTimes && kept.length) {
+      try {
+        serving = await weatherTimes.read(product);
+      } catch {
+        serving = null; // unknown: never claimed renderable
+      }
+    }
     return {
+      noStore: true,
       body: weatherTimeList(product, kept, recordedAt),
       headers: {
         ...base,
         'X-History-Rows': String(kept.length),
-        'X-History-Pixels':
-          renderable.length === 0
-            ? 'unavailable'
-            : renderable.length === kept.length
-              ? 'available'
-              : 'partial',
+        ...pixelHeaders(pixelAvailability(kept, serving, now())),
         ...(kept.length
           ? {}
           : { 'X-History-Empty-Reason': 'no_frames_recorded' }),
@@ -703,6 +721,14 @@ export function gridSliceUrl(t, model, overlay) {
   return `/api/history/slice?feed=wind&t=${encodeURIComponent(isoOf(t))}&model=${model}&overlay=${overlay}&part=grid`;
 }
 
+/** `<id>` of a wind manifest gridUrl `/api/wind/grid/<id>.bin?...`. */
+export function windGridId(gridUrl) {
+  return (
+    /^\/api\/wind\/grid\/([\w.-]+)\.bin(?:\?|$)/.exec(String(gridUrl))?.[1] ??
+    ''
+  );
+}
+
 /** One recorded quake version -> a USGS GeoJSON Feature (recorded fields only). */
 export function quakeFeature(doc) {
   const id = doc?.event_id;
@@ -743,6 +769,63 @@ export function featureCollection(features, t) {
       count: features.length,
     },
     features,
+  };
+}
+
+/**
+ * Which recorded frames GEV's pixel route renders NOW (see PIXELS_BASIS).
+ * `serving` = { allowedTimes (ISO, ascending, as parseWeatherCapabilities
+ * returns them), fetchedAt, marginMs } from the serving path's capabilities
+ * source; null = that source could not be read -> 'unknown', nothing
+ * claimed renderable.
+ *
+ * The route judges with ITS OWN cached read, which can be up to marginMs
+ * older or newer than ours. Frames whose status can differ in that window
+ * are NOT claimed renderable (conservative, never a false 'available'):
+ *  - the newest k frames (k = frames listed within marginMs of the newest):
+ *    an older route read may not list them yet;
+ *  - when the route keeps a full 26, the oldest k: a newer route read may
+ *    already have pushed them out;
+ *  - frames within marginMs of the 24 h age limit.
+ */
+export function pixelAvailability(frames, serving, nowMs) {
+  if (!frames.length)
+    return { state: 'unavailable', renderable: [], serving: serving ?? null };
+  if (!serving || !Array.isArray(serving.allowedTimes))
+    return { state: 'unknown', renderable: [], serving: null };
+  const allowed = serving.allowedTimes;
+  const margin = serving.marginMs ?? 0;
+  const newest = Date.parse(allowed.at(-1));
+  const k = allowed.filter((x) => newest - Date.parse(x) < margin).length;
+  const sure = new Set(
+    allowed.slice(allowed.length >= WEATHER_KEEP ? k : 0, allowed.length - k),
+  );
+  const renderable = frames.filter(
+    (x) => sure.has(x) && nowMs - Date.parse(x) <= WEATHER_MAX_AGE_MS - margin,
+  );
+  return {
+    state:
+      renderable.length === 0
+        ? 'unavailable'
+        : renderable.length === frames.length
+          ? 'available'
+          : 'partial',
+    renderable,
+    serving,
+  };
+}
+
+/** Response headers for pixelAvailability(); the frame list says which. */
+export function pixelHeaders({ state, renderable, serving }) {
+  return {
+    'X-History-Pixels': state,
+    'X-History-Pixels-Basis': serving ? PIXELS_BASIS : 'unknown',
+    ...(serving && Number.isFinite(serving.fetchedAt)
+      ? { 'X-History-Pixels-Checked-At': isoOf(serving.fetchedAt) }
+      : {}),
+    ...(renderable.length
+      ? { 'X-History-Pixels-Frames': renderable.join(',') }
+      : {}),
   };
 }
 

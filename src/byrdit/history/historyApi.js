@@ -158,6 +158,7 @@ export function createHistoryApi({
   cache = createHistoryCache({ now }),
   healthService,
   windReader = null,
+  weatherTimes = null,
 } = {}) {
   if (service === undefined) {
     const config = esConfigFromEnv(env);
@@ -169,6 +170,7 @@ export function createHistoryApi({
           }),
           now,
           windReader,
+          weatherTimes,
         })
       : null;
   }
@@ -269,8 +271,11 @@ export function createHistoryApi({
           ? await service[route](params)
           : { body: await service[route](params), headers: {} };
       // B12c: 'nothing recorded' answers (404 + reason) and binary wind
-      // grids are never cached; CSV (gp) is cached like JSON
+      // grids are never cached; CSV (gp) is cached like JSON. noStore: an
+      // answer that depends on now() (imagery pixel availability) or is
+      // degraded (wind without its scalar field) is never cached either.
       if (out.status || out.bytes) return sendOther(res, out);
+      if (out.noStore) return send(res, 200, out.body, out.headers);
       if (!cacheable)
         return out.text !== undefined
           ? sendOther(res, out)

@@ -6,9 +6,14 @@ import {
   normalizeProxyAddress,
   parseTrustedProxies,
 } from './trustedProxy.js';
-import { historyPlugins as browserSafeHistoryPlugins } from '../../src/byrdit/history/index.js';
+import {
+  enabledBridgeFeeds,
+  historyPlugins as browserSafeHistoryPlugins,
+  parseCollectorUrls,
+} from '../../src/byrdit/history/index.js';
 import { DEFAULT_HISTORY_PER_MIN } from '../../src/byrdit/history/historyApi.js';
 import { createWindHistoryReader } from './historyWind.js';
+import { createWeatherServingTimes } from './historyImageryTimes.js';
 
 /**
  * Server-side composition of the Byrd-IT history plugins (gev-history
@@ -21,6 +26,9 @@ import { createWindHistoryReader } from './historyWind.js';
  *
  * B12c: /api/history/slice?feed=wind reads past GFS/IFS cycles with the
  * injected byte-range reader (./historyWind.js, nothing stored).
+ * feed=imagery judges pixel availability against the time set GEV's weather
+ * pixel route accepts now (./historyImageryTimes.js: the same capabilities
+ * source as that route, collector with GEV_BRIDGE_WEATHER=1, else NOAA).
  *
  * B9 (/api/history/*, GEV_HISTORY_API=1): the per-client rate limit is the
  * common cost limiter (server/providers/common/rate-limit.js,
@@ -51,9 +59,22 @@ export function historyPlugins(options = {}) {
         isAllowedHost(host, allowed, additional),
       // B12c: wind at a past cycle through GEV's byte-range reader pieces
       windReader: createWindHistoryReader(),
+      weatherTimes: createWeatherServingTimes({
+        bridged: enabledBridgeFeeds(env).includes('weather'),
+        collectorUrls: collectorUrlsOf(env),
+      }),
       ...options.historyApi,
     },
   });
+}
+
+/** GEV_COLLECTOR_URLS (an invalid value -> none: imagery pixels 'unknown'). */
+function collectorUrlsOf(env) {
+  try {
+    return parseCollectorUrls(env.GEV_COLLECTOR_URLS);
+  } catch {
+    return [];
+  }
 }
 
 /**

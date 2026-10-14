@@ -196,6 +196,7 @@ export function createHistoryService({
   es,
   now = () => Date.now(),
   windReader = null,
+  weatherTimes = null,
 }) {
   /**
    * B10 performance gate (card t_7d16a765, DESIGN 4.3 benchmark): the
@@ -923,7 +924,7 @@ export function createHistoryService({
   }
 
   const latestSlices = createLatestSlices({ es });
-  const b12c = createB12cSlices({ es, now, windReader });
+  const b12c = createB12cSlices({ es, now, windReader, weatherTimes });
   const SLICES = {
     aircraft: sliceAircraft,
     military: sliceMilitary,
