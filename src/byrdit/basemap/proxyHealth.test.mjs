@@ -355,7 +355,10 @@ LEAKY_WARNINGS.push(
     'upstream sent digest username="fixture", response="sensitive value"',
     'upstream sent Digest [redacted]',
   ],
-  ['upstream sent ntlm fixture-sensitive-value', 'upstream sent NTLM [redacted]'],
+  [
+    'upstream sent ntlm fixture-sensitive-value',
+    'upstream sent NTLM [redacted]',
+  ],
 );
 
 function assertNoSecret(text, label) {
@@ -446,7 +449,7 @@ test('GET /basemap/health.json: no synthetic secret survives in warnings, toolti
   }
 });
 
-test('sanitizeHealthText: escaped quotes and backslashes at any JSON depth never end a value early', () => {
+test('sanitizeHealthText: escaped quotes and backslashes at JSON depths 1-4 never end a value early', () => {
   const secrets = [
     'fixture"sensitive value',
     'fixture\\sensitive value',
@@ -527,6 +530,124 @@ test('GET /basemap/health.json: down chip and tooltip drop escaped-quote and low
         const tooltip = basemapDegradedReason(health);
         assert.ok(tooltip.includes(shown), tooltip);
         assertNoSecret(tooltip, `down tooltip ${secret}`);
+      } finally {
+        await gev.close();
+        await edge.close();
+      }
+    }
+});
+
+/**
+ * JSON depth 5 and deeper (15, 31, 63 ... backslashes before a quote) is not
+ * parsed exactly: the value and everything after it go, so no tail of the
+ * secret survives (R1c). Depth 4 is the last exact level and keeps the rest.
+ */
+const DEEP_SECRETS = [
+  'fixture"sensitive value-tail',
+  'fixture\\sensitive value-tail',
+  'fixture sensitive value-tail\\',
+  '"fixture" sensitive "value-tail"',
+];
+const DEEP_FRAGMENTS = [...SECRET_FRAGMENTS, 'value', 'tail'];
+function assertNoDeepSecret(text, label) {
+  for (const fragment of DEEP_FRAGMENTS)
+    assert.ok(
+      !text.includes(fragment),
+      `${label}: leaked "${fragment}" in ${text}`,
+    );
+}
+/** pre + the encoding up to its first separator + [redacted], 200 max. */
+function failClosed(encoded) {
+  return `pre ${encoded.slice(0, encoded.indexOf(':') + 1)}[redacted]`.slice(
+    0,
+    200,
+  );
+}
+
+test('sanitizeHealthText: JSON deeper than depth 4 fails closed, depth 4 stays exact', () => {
+  for (const secret of DEEP_SECRETS)
+    for (const key of ['password', 'token', 'client_secret']) {
+      // Boundary: depth 4 is parsed exactly, text after the value stays.
+      const exact = jsonAtDepth({ [key]: secret, code: 7 }, 4);
+      const kept = sanitizeHealthText(`pre ${exact} post`);
+      assertNoDeepSecret(kept, `depth 4 ${exact}`);
+      assert.ok(kept.endsWith('7} post'), `depth 4 -> ${kept}`);
+      for (const depth of [5, 6, 7]) {
+        const encoded = jsonAtDepth({ [key]: secret, code: 7 }, depth);
+        const input = `pre ${encoded} post`;
+        const label = `depth ${depth} ${input}`;
+        const out = sanitizeHealthText(input);
+        assertNoDeepSecret(out, label);
+        assert.equal(out, failClosed(encoded), label);
+        const down = composeHealth({
+          state: 'down',
+          gev_chip: `UNAVAILABLE ${input}`,
+          warnings: [input],
+        });
+        assertNoDeepSecret(down.chip, `chip ${label}`);
+        assert.ok(down.chip.startsWith('UNAVAILABLE pre {'), down.chip);
+        assert.ok(down.chip.endsWith('[redacted]'), down.chip);
+        assert.equal(down.warnings[0], failClosed(encoded), label);
+      }
+    }
+  // Any other quoted encoding the exact patterns do not take fails closed
+  // too: odd backslash runs, escaped single quotes, deep Digest params.
+  for (const input of [
+    String.raw`password=\\"fixture sensitive value-tail" x`,
+    String.raw`password=\\\\\"fixture sensitive value-tail\\\\\" x`,
+    String.raw`password=\\'fixture sensitive value-tail' x`,
+    `log ${jsonAtDepth('Digest response="fixture sensitive value-tail", x=1', 6)}`,
+  ]) {
+    const out = sanitizeHealthText(input);
+    assertNoDeepSecret(out, input);
+    assert.ok(out.endsWith('[redacted]'), `${input} -> ${out}`);
+  }
+  // Ordinary health messages, quotes and backslashes included, are untouched.
+  for (const plain of [
+    'job edge-sync failed (3 consecutive failures)',
+    'origin label "mh0.0.13-wm20261011" unreadable',
+    String.raw`path C:\gev\tiles not found`,
+    String.raw`edge said {\"state\":\"down\"}`,
+  ])
+    assert.equal(sanitizeHealthText(plain), plain);
+});
+
+test('GET /basemap/health.json: JSON depth 5+ secrets never reach the body, down chip or tooltip', async () => {
+  for (const depth of [4, 5, 6])
+    for (const warningsOn of [false, true]) {
+      const secret = jsonAtDepth(
+        { password: 'fixture"sensitive value-tail', code: 7 },
+        depth,
+      );
+      const edge = await healthEdge({
+        ...EDGE_OK,
+        state: 'down',
+        gev_chip: `UNAVAILABLE ${secret}`,
+        warnings: warningsOn ? [secret] : [],
+      });
+      const gev = await front({
+        GEV_BASEMAP_HEALTH_URLS: `${edge.url}/health.json`,
+      });
+      const label = `depth ${depth} warnings ${warningsOn}`;
+      try {
+        const res = await fetch(`${gev.url}/basemap/health.json`);
+        assert.equal(res.status, 200);
+        const raw = await res.text();
+        assertNoDeepSecret(raw, `body ${label}`);
+        const body = JSON.parse(raw);
+        assert.equal(body.state, 'down');
+        assert.ok(body.chip.startsWith('UNAVAILABLE {'), body.chip);
+        assert.ok(body.chip.includes('[redacted]'), body.chip);
+        if (depth === 4) assert.ok(body.chip.endsWith('7}'), body.chip);
+        else assert.ok(body.chip.endsWith('[redacted]'), body.chip);
+        assert.equal(body.warnings.length, warningsOn ? 1 : 0);
+        assert.equal(basemapConfigLeakCount(body), 0);
+        const health = await loadBasemapHealth({
+          fetchImpl: (url, init) => fetch(gev.url + url, init),
+        });
+        const tooltip = basemapDegradedReason(health);
+        assert.ok(tooltip.includes('[redacted]'), tooltip);
+        assertNoDeepSecret(tooltip, `tooltip ${label}`);
       } finally {
         await gev.close();
         await edge.close();

@@ -237,7 +237,11 @@ function canonicalAuthScheme(scheme) {
     AUTH_SCHEME_CANONICAL.get(scheme.toLowerCase()) ?? scheme.toUpperCase()
   );
 }
-/** Backslashes in front of a quote: 0 plain, 1 JSON in JSON, 3, 7 deeper. */
+/**
+ * Backslashes in front of a quote that are parsed exactly: 0 plain JSON,
+ * 1 JSON in a JSON string, 3 and 7 the next two levels (JSON depths 1-4).
+ * Any other run (15 or more, or a malformed one) is UNSUPPORTED_QUOTED.
+ */
 const ESCAPE_DEPTHS = [7, 3, 1, 0];
 /**
  * A double-quoted string whose quotes carry `depth` backslashes. Inside, a
@@ -260,7 +264,15 @@ function quotedAtDepth(depth) {
 }
 const DOUBLE_QUOTED = ESCAPE_DEPTHS.map(quotedAtDepth).join('|');
 const SINGLE_QUOTED = String.raw`'(?:[^'\\]|\\.|\\$)*(?:'|$)`;
-const AUTH_PARAM = String.raw`[\w-]+\s*=\s*(?:${DOUBLE_QUOTED}|${SINGLE_QUOTED}|[^\s,;]+)`;
+/**
+ * Fail closed: a value that opens with a quote (any backslashes before it)
+ * that DOUBLE_QUOTED and SINGLE_QUOTED do not take, such as JSON nested 5
+ * or more levels deep, is redacted to the end of the text. Where it ends
+ * cannot be told safely, so no tail of it is kept.
+ */
+const UNSUPPORTED_QUOTED = String.raw`\\*["'][\s\S]*`;
+const QUOTED = `${DOUBLE_QUOTED}|${SINGLE_QUOTED}|${UNSUPPORTED_QUOTED}`;
+const AUTH_PARAM = String.raw`[\w-]+\s*=\s*(?:${QUOTED}|[^\s,;]+)`;
 /**
  * A scheme's credentials: a token68 (Basic, Bearer) or an auth-param list
  * (Digest username="..", response=".."), every param included.
@@ -268,13 +280,13 @@ const AUTH_PARAM = String.raw`[\w-]+\s*=\s*(?:${DOUBLE_QUOTED}|${SINGLE_QUOTED}|
 const AUTH_CREDENTIALS = `(?:${AUTH_PARAM}|[^\\s,;"')\\]}]+)(?:\\s*,\\s*${AUTH_PARAM})*`;
 /**
  * One secret value: a quoted string (double, single or backslash-escaped
- * JSON quotes at any nesting depth, embedded escaped quotes, backslashes
- * and spaces included), an unterminated quote (to the end of the text), an
+ * JSON quotes for JSON depths 1-4, embedded escaped quotes, backslashes and
+ * spaces included), an unterminated quote (to the end of the text), any
+ * other quoted encoding such as deeper JSON (to the end of the text), an
  * authentication scheme with its credentials, or a bare token.
  */
 const SECRET_VALUE = [
-  DOUBLE_QUOTED,
-  SINGLE_QUOTED,
+  QUOTED,
   `${AUTH_SCHEME}\\s+${AUTH_CREDENTIALS}`,
   String.raw`\S+`,
 ].join('|');
