@@ -210,9 +210,51 @@ export function composeBuildings(raw, layer = buildingsSettings({})) {
 }
 
 /**
+ * Secret-bearing names. Matched as a whole word, optionally with a prefix
+ * (x-api-key, client_secret, refresh_token, aws_secret_access_key ...).
+ */
+const SECRET_KEY = String.raw`[\w-]*?(?:api[-_]?key|apikey|key|access[-_]?token|token|secret|passw\w*|passphrase|pass|pwd|auth\w*|sig|signature|cookie|credentials?|session[-_]?id)`;
+/** HTTP authentication schemes (RFC 9110 11.4 plus common vendor ones). */
+const AUTH_SCHEME = String.raw`(?:Basic|Bearer|Digest|Negotiate|NTLM|Token|ApiKey|HOBA|Mutual|AWS4-HMAC-SHA256|SCRAM-SHA-\d+)`;
+const AUTH_PARAM = String.raw`[\w-]+\s*=\s*(?:"(?:[^"\\]|\\.)*(?:"|$)|[^\s,;]+)`;
+/**
+ * A scheme's credentials: a token68 (Basic, Bearer) or an auth-param list
+ * (Digest username="..", response=".."), every param included.
+ */
+const AUTH_CREDENTIALS = `(?:${AUTH_PARAM}|[^\\s,;"')\\]}]+)(?:\\s*,\\s*${AUTH_PARAM})*`;
+/**
+ * One secret value: a quoted string (double, single or backslash-escaped
+ * JSON quotes, spaces and escapes included), an unterminated quote (to the
+ * end of the text), an authentication scheme with its credentials, or a
+ * bare token.
+ */
+const SECRET_VALUE = [
+  String.raw`\\"(?:(?!\\").)*(?:\\"|$)`,
+  String.raw`"(?:[^"\\]|\\.)*(?:"|$)`,
+  String.raw`'(?:[^'\\]|\\.)*(?:'|$)`,
+  `${AUTH_SCHEME}\\s+${AUTH_CREDENTIALS}`,
+  String.raw`\S+`,
+].join('|');
+/**
+ * key=value, key: value, "key": "value", 'key'='value', \"key\":\"value\".
+ * Group 1 keeps the name and separator (quotes included), the value goes.
+ */
+const SECRET_ASSIGNMENT = new RegExp(
+  String.raw`((?:\\?["'])?\b${SECRET_KEY}\b(?:\\?["'])?\s*[=:]\s*)(?:${SECRET_VALUE})`,
+  'gi',
+);
+/** A scheme with credentials outside any key (log line "... Basic dXNl..."). */
+const AUTH_SCHEME_CREDENTIALS = new RegExp(
+  String.raw`\b(${AUTH_SCHEME})\s+(?!\[redacted\])${AUTH_CREDENTIALS}`,
+  'g',
+);
+
+/**
  * One health text for the browser: control characters removed, every
- * absolute URL replaced by [url], key=value / Bearer secrets and key-shaped
- * tokens redacted, at most MAX_HEALTH_TEXT characters.
+ * absolute URL replaced by [url], secret-named values (quoted or not, JSON
+ * included), authentication schemes with their credentials and key-shaped
+ * tokens redacted, at most MAX_HEALTH_TEXT characters. Redaction runs
+ * before truncation, so a cut never exposes part of a secret.
  */
 export function sanitizeHealthText(value) {
   if (typeof value !== 'string') return '';
@@ -220,11 +262,9 @@ export function sanitizeHealthText(value) {
     .replace(/[\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S*/gi, '[url]')
     .replace(/\/\/[^\s/@]+@\S*/g, '[url]')
-    .replace(
-      /\b(api[-_]?key|apikey|key|access_token|token|secret|passw\w*|auth\w*|sig|signature|cookie)(\s*[=:]\s*)\S+/gi,
-      '$1$2[redacted]',
-    )
-    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(SECRET_ASSIGNMENT, '$1[redacted]')
+    .replace(AUTH_SCHEME_CREDENTIALS, '$1 [redacted]')
+    .replace(/\bBearer\s+(?!\[redacted\])\S+/gi, 'Bearer [redacted]')
     .replace(/AIza[0-9A-Za-z_-]{30,}/g, '[redacted]')
     .replace(
       /eyJ[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}(\.[0-9A-Za-z_-]*)?/g,

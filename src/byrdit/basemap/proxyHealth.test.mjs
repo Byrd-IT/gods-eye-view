@@ -173,7 +173,10 @@ test('composeHealth: only state, chip, sanitized warnings (max 5) and generated 
     'upstream update',
   ])
     assert.ok(!all.includes(secret), `leaked ${secret}`);
-  assert.equal(degraded.warnings[1], 'job edge-sync failed: <urlopen error [url]');
+  assert.equal(
+    degraded.warnings[1],
+    'job edge-sync failed: <urlopen error [url]',
+  );
   assert.match(degraded.warnings[2], /token=\[redacted\]/);
   assert.match(degraded.warnings[3], /Bearer \[redacted\]/);
   assert.equal(basemapConfigLeakCount(degraded), 0);
@@ -206,7 +209,10 @@ test('composeHealth: invalid state is unknown; chip text must match the state', 
     }).chip,
     'UNAVAILABLE (GEV falls back to the standby edge, then Esri)',
   );
-  assert.equal(composeHealth({ state: 'ok', generated: 'yesterday' }).generated, null);
+  assert.equal(
+    composeHealth({ state: 'ok', generated: 'yesterday' }).generated,
+    null,
+  );
   assert.equal(
     composeHealth({ state: 'ok', warnings: 'not-a-list' }).warnings.length,
     0,
@@ -222,7 +228,10 @@ test('sanitizeHealthText: plain warnings unchanged, URLs and secrets redacted', 
     'S1 origin unreachable (edge serves its pinned set only)',
   ])
     assert.equal(sanitizeHealthText(plain), plain);
-  assert.equal(sanitizeHealthText('see https://x.example/a?b=c now'), 'see [url] now');
+  assert.equal(
+    sanitizeHealthText('see https://x.example/a?b=c now'),
+    'see [url] now',
+  );
   assert.equal(sanitizeHealthText('//user:pw@host/x'), '[url]');
   assert.equal(sanitizeHealthText('password: hunter2'), 'password: [redacted]');
   assert.equal(sanitizeHealthText('a\u0000\u001f b'), 'a b');
@@ -230,15 +239,173 @@ test('sanitizeHealthText: plain warnings unchanged, URLs and secrets redacted', 
   assert.equal(sanitizeHealthText('x'.repeat(999)).length, 200);
 });
 
+/**
+ * Synthetic credentials (review t_19116187 R1): quoted JSON, assignments
+ * with spaces and authentication schemes. The whole value must disappear,
+ * not just a marker appear, so every check looks for the secret fragments.
+ */
+const SECRET_FRAGMENTS = ['fixture', 'sensitive'];
+const LEAKY_WARNINGS = [
+  [
+    'upstream error: {"token":"fixture-sensitive-value"}',
+    'upstream error: {"token":[redacted]}',
+  ],
+  [
+    'upstream error: {"token": "fixture-sensitive value", "code": 7}',
+    'upstream error: {"token": [redacted], "code": 7}',
+  ],
+  ['Authorization: Basic fixture-sensitive-value', 'Authorization: [redacted]'],
+  [
+    'proxy said 401 for Basic fixture-sensitive-value',
+    'proxy said 401 for Basic [redacted]',
+  ],
+  ['password="fixture-sensitive value"', 'password=[redacted]'],
+  [
+    'password = "fixture-sensitive value" retry later',
+    'password = [redacted] retry later',
+  ],
+  ["password='fixture-sensitive value'", 'password=[redacted]'],
+  ['password="fixture-sensitive value', 'password=[redacted]'],
+  [
+    '{"password":"fixture\\"sensitive value"} rejected',
+    '{"password":[redacted]} rejected',
+  ],
+  [
+    'body {\\"api_key\\":\\"fixture-sensitive value\\"} rejected',
+    'body {\\"api_key\\":[redacted]} rejected',
+  ],
+  [
+    "{'client_secret': 'fixture-sensitive value'}",
+    "{'client_secret': [redacted]}",
+  ],
+  ['"token" : "fixture-sensitive value"', '"token" : [redacted]'],
+  [
+    'authorization=Basic fixture-sensitive-value; retry',
+    'authorization=[redacted]; retry',
+  ],
+  ['Authorization: Token fixture-sensitive-value', 'Authorization: [redacted]'],
+  [
+    'Authorization: Digest username="fixture-sensitive", response="fixture-sensitive value", nonce=fixture1 failed',
+    'Authorization: [redacted] failed',
+  ],
+  [
+    'upstream sent Digest username="fixture", response="sensitive value"',
+    'upstream sent Digest [redacted]',
+  ],
+  ['x-api-key: fixture-sensitive-value', 'x-api-key: [redacted]'],
+  ['refresh_token=fixture-sensitive-value&ok=1', 'refresh_token=[redacted]'],
+  [
+    'cookie: session_id=fixture-sensitive-value; theme=dark',
+    'cookie: [redacted] theme=dark',
+  ],
+  [
+    'failed with bearer fixture-sensitive-value',
+    'failed with Bearer [redacted]',
+  ],
+];
+
+function assertNoSecret(text, label) {
+  for (const fragment of SECRET_FRAGMENTS)
+    assert.ok(
+      !text.includes(fragment),
+      `${label}: leaked "${fragment}" in ${text}`,
+    );
+}
+
+test('sanitizeHealthText: quoted JSON, spaced assignments and auth schemes lose the whole secret', () => {
+  for (const [input, expected] of LEAKY_WARNINGS) {
+    const out = sanitizeHealthText(input);
+    assertNoSecret(out, input);
+    assert.equal(out, expected, input);
+  }
+  // Ordinary warnings keep their words.
+  for (const plain of [
+    'job edge-sync failed (3 consecutive failures)',
+    'sentinel: new scene available, pending next timer run',
+    'terrain cache 28131003 bytes, 365 files',
+    'origin label unreadable (status 503)',
+    'health: 2 of 3 checks active',
+  ])
+    assert.equal(sanitizeHealthText(plain), plain);
+  // Redaction happens before the 200-character cut.
+  const long = `${'x'.repeat(190)} password="fixture-sensitive value"`;
+  assertNoSecret(sanitizeHealthText(long), 'truncated');
+});
+
+test('GET /basemap/health.json: no synthetic secret survives in warnings, tooltip or a down chip', async () => {
+  const cases = LEAKY_WARNINGS.map(([input]) => input);
+  const batches = [];
+  for (let i = 0; i < cases.length; i += 5) batches.push(cases.slice(i, i + 5));
+  for (const warnings of batches) {
+    const edge = await healthEdge({ ...EDGE_DEGRADED, warnings });
+    const gev = await front({
+      GEV_BASEMAP_HEALTH_URLS: `${edge.url}/health.json`,
+    });
+    try {
+      const res = await fetch(`${gev.url}/basemap/health.json`);
+      assert.equal(res.status, 200);
+      const raw = await res.text();
+      assertNoSecret(raw, 'route body');
+      const body = JSON.parse(raw);
+      assert.equal(body.state, 'degraded');
+      assert.equal(body.warnings.length, warnings.length);
+      assert.equal(basemapConfigLeakCount(body), 0);
+      const health = await loadBasemapHealth({
+        fetchImpl: (url, init) => fetch(gev.url + url, init),
+      });
+      assertNoSecret(basemapDegradedReason(health), 'tooltip');
+    } finally {
+      await gev.close();
+      await edge.close();
+    }
+  }
+
+  // down: the chip text itself is served (and shown when there is no warning).
+  const edge = await healthEdge({
+    ...EDGE_OK,
+    state: 'down',
+    gev_chip:
+      'UNAVAILABLE (edge error {"token":"fixture-sensitive value"}, Authorization: Basic fixture-sensitive-value)',
+    warnings: [],
+  });
+  const gev = await front({
+    GEV_BASEMAP_HEALTH_URLS: `${edge.url}/health.json`,
+  });
+  try {
+    const raw = await (await fetch(`${gev.url}/basemap/health.json`)).text();
+    assertNoSecret(raw, 'down body');
+    const body = JSON.parse(raw);
+    assert.equal(body.state, 'down');
+    assert.equal(
+      body.chip,
+      'UNAVAILABLE (edge error {"token":[redacted]}, Authorization: [redacted])',
+    );
+    const health = await loadBasemapHealth({
+      fetchImpl: (url, init) => fetch(gev.url + url, init),
+    });
+    const tooltip = basemapDegradedReason(health);
+    assert.equal(tooltip, body.chip);
+    assertNoSecret(tooltip, 'down tooltip');
+  } finally {
+    await gev.close();
+    await edge.close();
+  }
+});
+
 test('GET /basemap/health.json: composed from the edge, 30 s cache, browser shows the first warning', async () => {
   const edge = await healthEdge(EDGE_DEGRADED);
-  const gev = await front({ GEV_BASEMAP_HEALTH_URLS: `${edge.url}/health.json` });
+  const gev = await front({
+    GEV_BASEMAP_HEALTH_URLS: `${edge.url}/health.json`,
+  });
   try {
     const { res, body } = await getJson(`${gev.url}/basemap/health.json`, {
       headers: { cookie: 'session=1', authorization: 'Basic x' },
     });
     assert.equal(res.status, 200);
-    assert.equal(res.headers.get('cache-control'), 'max-age=30, must-revalidate');
+    assert.equal(
+      res.headers.get('cache-control'),
+      'max-age=30, must-revalidate',
+    );
     assert.match(res.headers.get('content-type'), /^application\/json/);
     assert.equal(res.headers.get('set-cookie'), null);
     assert.equal(body.state, 'degraded');
@@ -255,10 +422,14 @@ test('GET /basemap/health.json: composed from the edge, 30 s cache, browser show
     );
     assert.deepEqual(edge.seen, ['/health.json'], 'second read from cache');
 
-    const head = await fetch(`${gev.url}/basemap/health.json`, { method: 'HEAD' });
+    const head = await fetch(`${gev.url}/basemap/health.json`, {
+      method: 'HEAD',
+    });
     assert.equal(head.status, 200);
     assert.equal(await head.text(), '');
-    const post = await fetch(`${gev.url}/basemap/health.json`, { method: 'POST' });
+    const post = await fetch(`${gev.url}/basemap/health.json`, {
+      method: 'POST',
+    });
     assert.equal(post.status, 405);
   } finally {
     await gev.close();
@@ -295,7 +466,10 @@ test('health cache: 30 s when known, 10 s when unknown; concurrent misses share 
     { now: () => u },
   );
   try {
-    assert.equal((await getJson(`${gev2.url}/basemap/health.json`)).body.state, 'unknown');
+    assert.equal(
+      (await getJson(`${gev2.url}/basemap/health.json`)).body.state,
+      'unknown',
+    );
     u += 9_000;
     await getJson(`${gev2.url}/basemap/health.json`);
     assert.equal(bad.seen.length, 1);
@@ -368,7 +542,9 @@ test('health not configured, or every URL fails: 200 unknown, never an error', a
 
 test('a hung health edge answers unknown inside the health budget', async () => {
   const hung = await healthEdge(null, { hang: true });
-  const gev = await front({ GEV_BASEMAP_HEALTH_URLS: `${hung.url}/health.json` });
+  const gev = await front({
+    GEV_BASEMAP_HEALTH_URLS: `${hung.url}/health.json`,
+  });
   try {
     const started = Date.now();
     const { body } = await getJson(`${gev.url}/basemap/health.json`);

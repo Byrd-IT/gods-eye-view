@@ -161,7 +161,9 @@ test('loadBasemapHealth: same-origin GET, never throws', async () => {
       return json(DEGRADED);
     },
   });
-  assert.deepEqual(seen, [[BASEMAP_HEALTH_URL, 'same-origin', 'application/json']]);
+  assert.deepEqual(seen, [
+    [BASEMAP_HEALTH_URL, 'same-origin', 'application/json'],
+  ]);
   assert.equal(got.state, 'degraded');
 
   for (const fetchImpl of [
@@ -222,7 +224,10 @@ test('monitor: polls every 5 min, onChange only when the reason changes, stop en
     monitor.degradedReason,
     'terrain edge /healthz timed out (service active; busy?)',
   );
-  assert.deepEqual([...timers.pending.values()].map((t) => t.ms), [HEALTH_POLL_MS]);
+  assert.deepEqual(
+    [...timers.pending.values()].map((t) => t.ms),
+    [HEALTH_POLL_MS],
+  );
   await timers.fire(); // same reason again: no change event
   await timers.fire(); // ok
   await timers.fire(); // junk -> unknown: still no badge, no event
@@ -261,6 +266,33 @@ test('monitor: a load that throws, or a listener that throws, never breaks polli
   await timers.fire();
   assert.equal(monitor.health.state, 'degraded');
   assert.equal(timers.pending.size, 1);
+  monitor.stop();
+});
+
+test('monitor: a failed poll after degraded is unknown, so the badge is cleared (by design)', async () => {
+  const timers = fakeTimers();
+  const reasons = [];
+  let n = 0;
+  const monitor = createBasemapHealthMonitor({
+    load: async () => {
+      n += 1;
+      if (n === 1) return normalizeBasemapHealth(DEGRADED);
+      if (n === 2) throw new TypeError('Failed to fetch');
+      return UNKNOWN_HEALTH;
+    },
+    timers,
+    onChange: (reason) => reasons.push(reason),
+  });
+  monitor.start();
+  await settle();
+  assert.equal(monitor.degradedReason, DEGRADED.warnings[0]);
+  await timers.fire();
+  // degraded -> unknown: no stale warning is kept on the chip.
+  assert.equal(monitor.health, UNKNOWN_HEALTH);
+  assert.equal(monitor.degradedReason, null);
+  await timers.fire();
+  // unknown -> unknown: nothing changes, no extra announcement.
+  assert.deepEqual(reasons, [DEGRADED.warnings[0], null]);
   monitor.stop();
 });
 
@@ -324,9 +356,7 @@ function basemapWorld({ health = DEGRADED, healthHangs = false } = {}) {
     if (url === BASEMAP_HEALTH_URL) {
       if (healthHangs)
         return new Promise((r) => (releaseHealth = () => r(json(health))));
-      return health instanceof Error
-        ? Promise.reject(health)
-        : json(health);
+      return health instanceof Error ? Promise.reject(health) : json(health);
     }
     throw new Error(`unexpected ${url}`);
   };

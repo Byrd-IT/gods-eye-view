@@ -7,9 +7,13 @@
  * one thing the UI shows: a "degraded" reason for the Byrd-IT Open chip.
  *
  * Health is advice, never a gate. Availability still comes only from
- * /basemap/config.json. A health fetch that fails, times out, or returns
- * junk leaves the chip exactly as it is ("unknown" = no badge), and nothing
- * here is awaited by the stack.
+ * /basemap/config.json, and nothing here is awaited by the stack. A health
+ * fetch that fails, times out, or returns junk counts as "unknown", and
+ * unknown means no badge: it never greys out, hides or blocks the chip.
+ * Note what that does to a badge already shown: a failed poll after a
+ * degraded one moves degraded -> unknown, so the "(degraded)" badge and its
+ * tooltip are cleared (no stale warning is kept). A failed poll while
+ * healthy or unknown changes nothing.
  */
 
 export const BASEMAP_HEALTH_URL = '/basemap/health.json';

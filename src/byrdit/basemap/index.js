@@ -34,8 +34,10 @@ import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
  *   Health (health.js, P9 follow-up): only when the stack is available,
  *   /basemap/health.json is polled in the background (never awaited). When
  *   the edge reports degraded (or down) the Byrd-IT Open chip reads
- *   "(degraded)" with the first warning as its tooltip; a failed health
- *   fetch changes nothing. Availability still comes only from config.json.
+ *   "(degraded)" with the first warning as its tooltip. A failed health
+ *   fetch counts as unknown (no badge): it never blocks or greys out the
+ *   chip, and after a degraded poll it clears the badge rather than keeping
+ *   a stale warning. Availability still comes only from config.json.
  */
 
 /** Tell the user each distinct status message at most once a minute. */
