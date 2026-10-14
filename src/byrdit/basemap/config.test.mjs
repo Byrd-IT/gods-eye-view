@@ -6,6 +6,7 @@ import {
   normalizeBasemapConfig,
   DEFAULT_SWITCH,
   BASEMAP_CONFIG_URL,
+  CONFIG_BUDGET,
 } from './config.js';
 import { SERVED } from './fixtures/config.mjs';
 
@@ -161,4 +162,32 @@ test('an aborted scene construction still aborts', async () => {
       },
     }),
   );
+});
+
+test('config budget: the browser outwaits a full proxy failover compose', () => {
+  // Active + standby attempts fit inside the proxy compose deadline, and the
+  // browser waits longer than that deadline (review t_d9b79b50 R2).
+  assert.ok(2 * CONFIG_BUDGET.attemptMs < CONFIG_BUDGET.composeMs);
+  assert.ok(CONFIG_BUDGET.composeMs + 1_000 < CONFIG_BUDGET.clientMs);
+});
+
+test('loadBasemapConfig defaults to the shared client budget', async () => {
+  const original = AbortSignal.timeout;
+  const asked = [];
+  AbortSignal.timeout = (ms) => {
+    asked.push(ms);
+    return original.call(AbortSignal, ms);
+  };
+  try {
+    await loadBasemapConfig({
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => SERVED,
+      }),
+    });
+  } finally {
+    AbortSignal.timeout = original;
+  }
+  assert.deepEqual(asked, [CONFIG_BUDGET.clientMs]);
 });

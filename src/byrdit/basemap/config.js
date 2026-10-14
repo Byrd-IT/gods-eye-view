@@ -26,6 +26,27 @@ export const DEFAULT_SWITCH = Object.freeze({
   rootAttemptsPerHour: 3,
 });
 
+/**
+ * Cold /basemap/config.json time budget, shared by the proxy and the browser
+ * so a hung primary upstream still reaches the healthy standby before the
+ * browser gives up (review t_d9b79b50 R2).
+ *
+ *   attemptMs  one config upstream attempt (headers + body). Config files are
+ *              a few hundred bytes, so a primary slower than this is treated
+ *              as down and the next URL is tried.
+ *   composeMs  the whole compose: terrain and imagery configs run in
+ *              parallel, each walking its failover list, all inside this
+ *              deadline. Two attempts (active + standby) fit with margin.
+ *   clientMs   the browser's fetch timeout: composeMs plus a margin for the
+ *              GEV server itself, so the browser always gets the composed
+ *              answer (available or not) instead of aborting first.
+ */
+export const CONFIG_BUDGET = Object.freeze({
+  attemptMs: 2_000,
+  composeMs: 5_000,
+  clientMs: 7_000,
+});
+
 /** True only when the server rendered the page with the basemap flag on. */
 export function basemapFlagOn(doc = globalThis.document) {
   try {
@@ -133,7 +154,7 @@ export function normalizeBasemapConfig(raw) {
 export async function loadBasemapConfig({
   fetchImpl = globalThis.fetch,
   signal,
-  timeoutMs = 4_000,
+  timeoutMs = CONFIG_BUDGET.clientMs,
 } = {}) {
   try {
     const timeout = AbortSignal.timeout?.(timeoutMs);

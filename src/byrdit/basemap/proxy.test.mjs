@@ -15,7 +15,11 @@ import {
   basemapConfigFindings,
   basemapConfigLeakCount,
 } from './configSafety.js';
-import { normalizeBasemapConfig } from './config.js';
+import {
+  CONFIG_BUDGET,
+  loadBasemapConfig,
+  normalizeBasemapConfig,
+} from './config.js';
 
 /** The P2 publish file (S5 /var/lib/gev-basemap/state/imagery-config.json, trimmed). */
 const IMAGERY_PUBLISH = {
@@ -69,7 +73,11 @@ function listen(handler) {
       resolve({
         server,
         url: `http://127.0.0.1:${port}`,
-        close: () => new Promise((r) => server.close(r)),
+        close: () =>
+          new Promise((r) => {
+            server.closeAllConnections?.();
+            server.close(r);
+          }),
       });
     });
   });
@@ -484,4 +492,351 @@ test('check-key-exposure.mjs asserts /basemap/config.json holds no credentials',
   assert.match(source, /'\/basemap\/config\.json'/);
   assert.match(source, /basemapConfigFindings/);
   assert.match(source, /await checkBasemapConfig\(origin\)/);
+});
+
+/** Accepts connections and never answers (a hung primary). */
+async function hung() {
+  const sockets = new Set();
+  const seen = [];
+  const h = await listen((req) => {
+    seen.push(req.url);
+    sockets.add(req.socket);
+  });
+  return {
+    ...h,
+    seen,
+    close: () => {
+      for (const s of sockets) s.destroy();
+      return h.close();
+    },
+  };
+}
+
+/** Sends 200 headers and part of the body, then stalls or resets. */
+async function partialBody({ reset = false, type = 'image/webp' } = {}) {
+  const sockets = new Set();
+  const seen = [];
+  const h = await listen((req, res) => {
+    seen.push(req.url);
+    sockets.add(req.socket);
+    res.writeHead(200, { 'content-type': type, 'content-length': '100' });
+    res.write('{"version":');
+    if (reset) setTimeout(() => req.socket.destroy(), 20);
+  });
+  return {
+    ...h,
+    seen,
+    close: () => {
+      for (const s of sockets) s.destroy();
+      return h.close();
+    },
+  };
+}
+
+/** A healthy standby serving both configs and tiles. */
+async function standby() {
+  const seen = [];
+  const h = await listen((req, res) => {
+    seen.push(req.url);
+    if (req.url === '/config.json') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(TERRAIN_CONFIG));
+    }
+    if (req.url === '/imagery/config.json') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(IMAGERY_PUBLISH));
+    }
+    res.writeHead(200, { 'content-type': 'image/webp' });
+    res.end(Buffer.from('RIFFgoodWEBP'));
+  });
+  return { ...h, seen };
+}
+
+/** The real handler with production default settings (env only). */
+async function gevDefaults(env) {
+  const handler = createBasemapHandler(basemapSettingsFromEnv(env), {
+    log: () => {},
+  });
+  return listen((req, res) => handler(req, res, () => res.end()));
+}
+
+/** The browser's loadBasemapConfig, defaults, against a real GEV front. */
+function browserLoad(front) {
+  return loadBasemapConfig({
+    fetchImpl: (url, init) => fetch(front.url + url, init),
+  });
+}
+
+test('cold config, default budgets: hung primaries fail over before the browser gives up', async () => {
+  const deadTerrain = await hung();
+  const deadImagery = await partialBody(); // headers sent, body stalls
+  const good = await standby();
+  const front = await gevDefaults({
+    GEV_BASEMAP_TERRAIN_URLS: `${deadTerrain.url},${good.url}`,
+    GEV_BASEMAP_IMAGERY_URLS: `${good.url}`,
+    GEV_BASEMAP_IMAGERY_CONFIG: `${deadImagery.url}/imagery/config.json,${good.url}/imagery/config.json`,
+  });
+  try {
+    const t0 = Date.now();
+    const config = await browserLoad(front);
+    const elapsed = Date.now() - t0;
+    assert.equal(config.available, true, config.unavailableReason);
+    assert.equal(config.terrain.version, 'mh0.0.13-wm20261011');
+    assert.equal(config.imagery.baseMaxzoom, 8);
+    assert.deepEqual(deadTerrain.seen, ['/config.json']);
+    assert.deepEqual(deadImagery.seen, ['/imagery/config.json']);
+    assert.ok(good.seen.includes('/config.json'));
+    assert.ok(good.seen.includes('/imagery/config.json'));
+    // Waited out one attempt on the primary, in parallel, well inside the
+    // browser's timeout.
+    assert.ok(elapsed >= CONFIG_BUDGET.attemptMs - 100, `elapsed ${elapsed}`);
+    assert.ok(elapsed < CONFIG_BUDGET.clientMs - 1_000, `elapsed ${elapsed}`);
+  } finally {
+    await front.close();
+    await deadTerrain.close();
+    await deadImagery.close();
+    await good.close();
+  }
+});
+
+test('cold config, every upstream hung: an answer (unavailable) arrives inside the compose deadline', async () => {
+  const a = await hung();
+  const b = await hung();
+  const front = await gevDefaults({
+    GEV_BASEMAP_TERRAIN_URLS: `${a.url},${b.url},${a.url}`,
+    GEV_BASEMAP_IMAGERY_URLS: `${a.url}`,
+    GEV_BASEMAP_IMAGERY_CONFIG: `${a.url}/i.json,${b.url}/i.json,${a.url}/j.json`,
+  });
+  try {
+    const t0 = Date.now();
+    const res = await fetch(`${front.url}/basemap/config.json`);
+    const elapsed = Date.now() - t0;
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.terrain.available, false);
+    assert.equal(body.imagery.available, false);
+    assert.ok(elapsed < CONFIG_BUDGET.composeMs + 500, `elapsed ${elapsed}`);
+  } finally {
+    await front.close();
+    await a.close();
+    await b.close();
+  }
+});
+
+test('cold config: concurrent requests share one compose', async () => {
+  const good = await standby();
+  const front = await gev({
+    terrainUrls: [good.url],
+    imageryUrls: [good.url],
+    imageryConfig: [`${good.url}/imagery/config.json`],
+  });
+  try {
+    const all = await Promise.all(
+      [1, 2, 3].map(() =>
+        fetch(`${front.url}/basemap/config.json`).then((r) => r.json()),
+      ),
+    );
+    assert.ok(all.every((b) => b.terrain.available && b.imagery.available));
+    assert.equal(good.seen.filter((u) => u === '/config.json').length, 1);
+    assert.equal(
+      good.seen.filter((u) => u === '/imagery/config.json').length,
+      1,
+    );
+  } finally {
+    await front.close();
+    await good.close();
+  }
+});
+
+test('config body failures (truncated / bad JSON) fail over to the standby', async () => {
+  const cut = await partialBody({ reset: true, type: 'application/json' });
+  const junk = await listen((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"tile_url": ');
+  });
+  const good = await standby();
+  const front = await gev({
+    terrainUrls: [cut.url, good.url],
+    imageryUrls: [good.url],
+    imageryConfig: [
+      `${junk.url}/imagery/config.json`,
+      `${good.url}/imagery/config.json`,
+    ],
+  });
+  try {
+    const body = await (await fetch(`${front.url}/basemap/config.json`)).json();
+    assert.equal(body.terrain.available, true);
+    assert.equal(body.imagery.available, true);
+    assert.deepEqual(cut.seen, ['/config.json']);
+    assert.equal(basemapConfigLeakCount(body), 0);
+  } finally {
+    await front.close();
+    await cut.close();
+    await junk.close();
+    await good.close();
+  }
+});
+
+test('tile body truncated or reset on the primary: served from the standby', async () => {
+  const good = await standby();
+  for (const reset of [true, false]) {
+    const cut = await partialBody({ reset });
+    const front = await gev({
+      terrainUrls: [cut.url, good.url],
+      imageryUrls: [cut.url, good.url],
+      imageryConfig: [],
+      timeoutMs: 800,
+    });
+    try {
+      const img = await fetch(
+        `${front.url}/basemap/imagery/imagery-2025/14/3743/6745.webp`,
+      );
+      assert.equal(img.status, 200, `reset=${reset}`);
+      assert.equal(await img.text(), 'RIFFgoodWEBP');
+      assert.equal(img.headers.get('content-length'), '12');
+      const ter = await fetch(
+        `${front.url}/basemap/v/x/terrain/cesium-mesh/ellipsoid/1/0/0.terrain`,
+      );
+      assert.equal(ter.status, 200, `reset=${reset}`);
+      assert.equal(await ter.text(), 'RIFFgoodWEBP');
+      assert.equal(cut.seen.length, 2);
+    } finally {
+      await front.close();
+      await cut.close();
+    }
+  }
+  await good.close();
+});
+
+test('injected body failure (review repro): primary 200 + throwing arrayBuffer -> secondary', async () => {
+  for (const brokenAll of [false, true]) {
+    const calls = [];
+    const front = await gev(
+      {
+        terrainUrls: [],
+        imageryUrls: ['http://primary', 'http://secondary'],
+        imageryConfig: [],
+      },
+      {
+        fetchImpl: async (url) => {
+          calls.push(url);
+          if (brokenAll || url.startsWith('http://primary'))
+            return {
+              status: 200,
+              ok: true,
+              headers: new Headers({ 'content-type': 'image/webp' }),
+              arrayBuffer: async () => {
+                throw new Error('truncated body');
+              },
+            };
+          return new Response('ok', {
+            headers: { 'cache-control': 'no-store' },
+          });
+        },
+      },
+    );
+    try {
+      const res = await fetch(
+        `${front.url}/basemap/imagery/imagery-2025/0/0/0.webp`,
+      );
+      assert.deepEqual(calls, [
+        'http://primary/imagery-2025/0/0/0.webp',
+        'http://secondary/imagery-2025/0/0/0.webp',
+      ]);
+      if (brokenAll) {
+        assert.equal(res.status, 502);
+        assert.equal(res.headers.get('cache-control'), 'no-store');
+      } else {
+        assert.equal(res.status, 200);
+        assert.equal(await res.text(), 'ok');
+        assert.equal(
+          res.headers.get('cache-control'),
+          'public, max-age=2592000',
+        );
+      }
+    } finally {
+      await front.close();
+    }
+  }
+});
+
+test('every upstream truncates the body: 502 no-store', async () => {
+  const a = await partialBody({ reset: true });
+  const b = await partialBody({ reset: true });
+  const front = await gev({
+    terrainUrls: [],
+    imageryUrls: [a.url, b.url],
+    imageryConfig: [],
+  });
+  try {
+    const res = await fetch(
+      `${front.url}/basemap/imagery/imagery-2025/1/0/0.webp`,
+    );
+    assert.equal(res.status, 502);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.equal(a.seen.length + b.seen.length, 2);
+  } finally {
+    await front.close();
+    await a.close();
+    await b.close();
+  }
+});
+
+test('route cache policy wins over conflicting upstream Cache-Control (200 and 304)', async () => {
+  const seen = [];
+  const up = await listen((req, res) => {
+    seen.push({ url: req.url, inm: req.headers['if-none-match'] });
+    const meta = req.url.includes('layer.json');
+    if (req.headers['if-none-match'] === '"e1"') {
+      res.writeHead(304, {
+        etag: '"e1"',
+        'cache-control': meta
+          ? 'public, max-age=31536000, immutable'
+          : 'no-cache',
+      });
+      return res.end();
+    }
+    res.writeHead(200, {
+      'content-type': meta ? 'application/json' : 'image/webp',
+      etag: '"e1"',
+      'cache-control': meta
+        ? 'public, max-age=31536000, immutable'
+        : 'no-store',
+    });
+    res.end(meta ? '{}' : 'RIFF');
+  });
+  const front = await gev({
+    terrainUrls: [up.url],
+    imageryUrls: [up.url],
+    imageryConfig: [],
+  });
+  const tile = `${front.url}/basemap/imagery/imagery-2025/3/1/1.webp`;
+  const terrainTile = `${front.url}/basemap/v/x/terrain/cesium-mesh/ellipsoid/3/1/1.terrain`;
+  const layer = `${front.url}/basemap/v/x/terrain/cesium-mesh/ellipsoid/layer.json`;
+  const TILE = 'public, max-age=2592000';
+  const META = 'max-age=60, must-revalidate';
+  try {
+    for (const [url, policy] of [
+      [tile, TILE],
+      [terrainTile, TILE],
+      [layer, META],
+    ]) {
+      const ok = await fetch(url);
+      assert.equal(ok.status, 200, url);
+      assert.equal(ok.headers.get('cache-control'), policy, url);
+      assert.equal(ok.headers.get('etag'), '"e1"');
+      await ok.arrayBuffer();
+      const head = await fetch(url, { method: 'HEAD' });
+      assert.equal(head.status, 200);
+      assert.equal(head.headers.get('cache-control'), policy, `HEAD ${url}`);
+      const again = await fetch(url, { headers: { 'if-none-match': '"e1"' } });
+      assert.equal(again.status, 304, url);
+      assert.equal(again.headers.get('cache-control'), policy, `304 ${url}`);
+      assert.equal(again.headers.get('etag'), '"e1"');
+    }
+    assert.equal(seen.filter((s) => s.inm === '"e1"').length, 3);
+  } finally {
+    await front.close();
+    await up.close();
+  }
 });

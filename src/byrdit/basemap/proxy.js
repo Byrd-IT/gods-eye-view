@@ -1,4 +1,4 @@
-import { DEFAULT_SWITCH } from './config.js';
+import { CONFIG_BUDGET, DEFAULT_SWITCH } from './config.js';
 
 /**
  * Same-origin /basemap/* for the Byrd-IT Open map (BASEMAP.md 3.2, 4.2, 4.5).
@@ -13,13 +13,22 @@ import { DEFAULT_SWITCH } from './config.js';
  *     /config.json and the imagery publish config. It is built field by field
  *     from validated numbers and same-origin paths, so no upstream URL,
  *     header or credential can pass through. Cache-Control is 60 s,
- *     must-revalidate.
+ *     must-revalidate. Terrain and imagery configs are fetched in parallel,
+ *     each attempt capped at CONFIG_BUDGET.attemptMs and the whole compose
+ *     at CONFIG_BUDGET.composeMs, so a hung primary still fails over to the
+ *     standby before the browser's CONFIG_BUDGET.clientMs runs out.
  *   - GET /basemap/v/<ver>/terrain/cesium-mesh/ellipsoid/{layer.json|z/x/y.terrain}
  *     -> GEV_BASEMAP_TERRAIN_URLS (terrain edge, gev-basemap).
  *   - GET /basemap/imagery/<archive>/<z>/<x>/<y>.webp
  *     -> GEV_BASEMAP_IMAGERY_URLS (pmtiles serve; 204 for a missing tile).
  *   - URL lists are tried in order. The next one is tried on a network
- *     error, a timeout or a 5xx (S4 active, then S5 standby).
+ *     error, a timeout, a 5xx or a failure while reading the body
+ *     (truncation, reset) - S4 active, then S5 standby. When every URL
+ *     fails the answer is 502, no-store.
+ *   - Cache-Control is this route's policy, never the upstream's: tiles
+ *     (200/304) public 30 d (versioned by archive/terrain version),
+ *     layer.json and config.json 60 s must-revalidate, missing (204/404)
+ *     1 d, anything else no-store.
  *   - Strict path patterns only, so no open proxy; GET/HEAD only; no keys,
  *     no cookies forwarded.
  *
@@ -30,7 +39,9 @@ import { DEFAULT_SWITCH } from './config.js';
  *   GEV_BASEMAP_IMAGERY_CONFIG=x[,y]   imagery config.json: http(s) URL or absolute file path
  *   GEV_BASEMAP_AUTO=0|1               auto-switch (default 1)
  *   GEV_BASEMAP_ENTER_M, GEV_BASEMAP_LEAVE_M, GEV_BASEMAP_DWELL_MS
- *   GEV_BASEMAP_TIMEOUT_MS             per-upstream timeout (default 10000)
+ *   GEV_BASEMAP_TIMEOUT_MS             per-upstream tile timeout (default 10000;
+ *                                      config attempts use the smaller of this
+ *                                      and CONFIG_BUDGET.attemptMs)
  */
 
 export const BASEMAP_PLUGIN_NAME = 'byrdit-basemap';
@@ -73,6 +84,9 @@ export function basemapSettingsFromEnv(env = process.env) {
       .map((s) => s.trim())
       .filter(Boolean),
     timeoutMs: num(env.GEV_BASEMAP_TIMEOUT_MS, 10_000),
+    // Not env-tunable: the browser's timeout is built from the same numbers.
+    configAttemptMs: CONFIG_BUDGET.attemptMs,
+    configBudgetMs: CONFIG_BUDGET.composeMs,
     switch: {
       auto: String(env.GEV_BASEMAP_AUTO ?? '1').trim() !== '0',
       enterM: num(env.GEV_BASEMAP_ENTER_M, DEFAULT_SWITCH.enterM),
@@ -163,62 +177,136 @@ export function createBasemapHandler(
   } = {},
 ) {
   let cached = null;
+  let pending = null;
+  const budgetMs = Math.min(
+    settings.configBudgetMs ?? CONFIG_BUDGET.composeMs,
+    CONFIG_BUDGET.composeMs,
+  );
+  const configAttemptMs = Math.min(
+    settings.timeoutMs,
+    settings.configAttemptMs ?? CONFIG_BUDGET.attemptMs,
+  );
 
-  async function upstream(bases, path, headers = {}) {
+  /** One attempt's signal: its own timeout, cut short by a shared deadline. */
+  function attemptSignal(ms, deadline) {
+    const own = AbortSignal.timeout(Math.max(1, ms));
+    return deadline ? AbortSignal.any([own, deadline]) : own;
+  }
+
+  /** Reject when the deadline fires (for work that takes no signal). */
+  function beforeDeadline(promise, deadline) {
+    if (!deadline) return promise;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        const fail = () =>
+          reject(deadline.reason ?? new Error('config deadline passed'));
+        if (deadline.aborted) fail();
+        else deadline.addEventListener('abort', fail, { once: true });
+      }),
+    ]);
+  }
+
+  async function discard(response) {
+    try {
+      await response?.body?.cancel?.();
+    } catch {
+      /* already consumed or errored */
+    }
+  }
+
+  /**
+   * Try each base in order and return read(response) from the first that
+   * works. read() runs inside the attempt, so a body that fails mid-read
+   * (truncated, reset, timed out) moves on to the next base exactly like a
+   * connect error, a timeout or a 5xx does. Nothing has been sent to the
+   * client yet at that point, so retrying is safe.
+   */
+  async function upstream(
+    bases,
+    path,
+    { headers = {}, timeoutMs = settings.timeoutMs, deadline = null, read },
+  ) {
     let last = null;
     for (const base of bases) {
+      if (deadline?.aborted) {
+        last = deadline.reason ?? new Error('deadline passed');
+        break;
+      }
+      let response = null;
       try {
-        const response = await fetchImpl(base + path, {
+        response = await fetchImpl(base + path, {
           headers,
           redirect: 'error',
-          signal: AbortSignal.timeout(settings.timeoutMs),
+          signal: attemptSignal(timeoutMs, deadline),
         });
-        if (response.status >= 500) {
-          last = new Error(`HTTP ${response.status}`);
-          await response.body?.cancel?.();
-          continue;
-        }
-        return response;
+        if (response.status >= 500) throw new Error(`HTTP ${response.status}`);
+        return await read(response);
       } catch (error) {
         last = error;
+        await discard(response);
       }
     }
     throw last ?? new Error('no upstream configured');
   }
 
-  async function readJsonSource(source) {
-    if (/^https?:\/\//i.test(source)) {
-      const response = await fetchImpl(source, {
-        redirect: 'error',
-        signal: AbortSignal.timeout(settings.timeoutMs),
+  async function readJson(response) {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+
+  async function terrainConfig(deadline) {
+    try {
+      return await upstream(settings.terrainUrls, '/config.json', {
+        timeoutMs: configAttemptMs,
+        deadline,
+        read: async (response) => {
+          const terrain = composeTerrain(await readJson(response));
+          if (!terrain.available) throw new Error('invalid terrain config');
+          return terrain;
+        },
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
+    } catch (error) {
+      log('[basemap] terrain config unavailable:', error?.message || error);
+      return { available: false };
     }
-    if (!source.startsWith('/'))
-      throw new Error('config path must be absolute');
-    return JSON.parse(await readFileImpl(source, 'utf8'));
+  }
+
+  async function imageryConfig(deadline) {
+    if (!settings.imageryUrls.length) return { available: false };
+    for (const source of settings.imageryConfig) {
+      if (deadline.aborted) break;
+      try {
+        let raw;
+        if (/^https?:\/\//i.test(source)) {
+          raw = await upstream([source], '', {
+            timeoutMs: configAttemptMs,
+            deadline,
+            read: readJson,
+          });
+        } else {
+          if (!source.startsWith('/'))
+            throw new Error('config path must be absolute');
+          raw = JSON.parse(
+            await beforeDeadline(readFileImpl(source, 'utf8'), deadline),
+          );
+        }
+        const imagery = composeImagery(raw);
+        if (imagery.available) return imagery;
+        throw new Error('invalid imagery config');
+      } catch (error) {
+        log('[basemap] imagery config unavailable:', error?.message || error);
+      }
+    }
+    return { available: false };
   }
 
   async function compose() {
-    let terrain = { available: false };
-    try {
-      const response = await upstream(settings.terrainUrls, '/config.json');
-      if (response.ok) terrain = composeTerrain(await response.json());
-      else await response.body?.cancel?.();
-    } catch (error) {
-      log('[basemap] terrain config unavailable:', error?.message || error);
-    }
-    let imagery = { available: false };
-    if (settings.imageryUrls.length)
-      for (const source of settings.imageryConfig) {
-        try {
-          imagery = composeImagery(await readJsonSource(source));
-          if (imagery.available) break;
-        } catch (error) {
-          log('[basemap] imagery config unavailable:', error?.message || error);
-        }
-      }
+    const deadline = AbortSignal.timeout(budgetMs);
+    const [terrain, imagery] = await Promise.all([
+      terrainConfig(deadline),
+      imageryConfig(deadline),
+    ]);
     return {
       schema: 1,
       generated: new Date(now()).toISOString(),
@@ -228,13 +316,19 @@ export function createBasemapHandler(
     };
   }
 
+  /** Cached 60 s when complete, 10 s when not; concurrent cold misses share one compose. */
   async function config() {
-    const t = now();
-    if (cached && t < cached.until) return cached.value;
-    const value = await compose();
-    const ok = value.terrain.available && value.imagery.available;
-    cached = { value, until: t + (ok ? 60_000 : 10_000) };
-    return value;
+    if (cached && now() < cached.until) return cached.value;
+    pending ??= compose()
+      .then((value) => {
+        const ok = value.terrain.available && value.imagery.available;
+        cached = { value, until: now() + (ok ? 60_000 : 10_000) };
+        return value;
+      })
+      .finally(() => {
+        pending = null;
+      });
+    return pending;
   }
 
   function send(res, status, headers, body, head) {
@@ -245,12 +339,34 @@ export function createBasemapHandler(
   }
 
   async function relay(req, res, bases, path, { kind }) {
+    const head = req.method === 'HEAD';
     const headers = {};
     for (const name of ['accept', 'if-none-match', 'if-modified-since'])
       if (req.headers?.[name]) headers[name] = req.headers[name];
-    let response;
+    let got;
     try {
-      response = await upstream(bases, path, headers);
+      got = await upstream(bases, path, {
+        headers,
+        read: async (response) => {
+          const status = response.status;
+          if (status !== 200 || head) {
+            await discard(response);
+            return { status, headers: response.headers, body: undefined };
+          }
+          // fetch() already decoded any content-encoding; send identity
+          // bytes. A truncated or reset body rejects here and the next
+          // upstream is tried.
+          const body = Buffer.from(await response.arrayBuffer());
+          const declared = response.headers.get('content-length');
+          if (
+            declared !== null &&
+            !response.headers.get('content-encoding') &&
+            Number(declared) !== body.length
+          )
+            throw new Error(`short body: ${body.length} of ${declared} bytes`);
+          return { status, headers: response.headers, body };
+        },
+      });
     } catch (error) {
       log(`[basemap] ${kind} upstream failed:`, error?.message || error);
       send(
@@ -258,28 +374,23 @@ export function createBasemapHandler(
         502,
         { 'content-type': 'application/json', 'cache-control': 'no-store' },
         JSON.stringify({ error: `basemap ${kind} unavailable` }),
-        req.method === 'HEAD',
+        head,
       );
       return;
     }
+    const { status, body } = got;
     const out = {};
-    for (const name of PASS_HEADERS) out[name] = response.headers.get(name);
-    const status = response.status;
+    for (const name of PASS_HEADERS) out[name] = got.headers.get(name);
+    // The route decides caching; an upstream no-store/private/max-age is
+    // never passed through (BASEMAP.md 4.5).
     const meta = path.endsWith('layer.json');
     if (status === 200 || status === 304)
-      out['cache-control'] =
-        response.headers.get('cache-control') ??
-        (meta ? META_CACHE : TILE_CACHE);
+      out['cache-control'] = meta ? META_CACHE : TILE_CACHE;
     else if (status === 204 || status === 404)
       out['cache-control'] = MISSING_CACHE;
     else out['cache-control'] = 'no-store';
-    // fetch() already decoded any content-encoding; send identity bytes.
-    const body =
-      status === 200 && req.method !== 'HEAD'
-        ? Buffer.from(await response.arrayBuffer())
-        : (await response.body?.cancel?.(), undefined);
     if (body) out['content-length'] = String(body.length);
-    send(res, status, out, body, req.method === 'HEAD');
+    send(res, status, out, body, head);
   }
 
   return async function basemapMiddleware(req, res, next) {
