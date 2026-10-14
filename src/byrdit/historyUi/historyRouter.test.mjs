@@ -287,16 +287,56 @@ test('D3 failure: a failing slice passes through to live, the feed is not swappe
   }
 });
 
-test('D3: the control reporting history back clears the failures at once', async () => {
-  const { router, sources } = setup({
-    slice: () => jsonResponse({}, { status: 500 }),
+test('D3: the control reporting history back makes failed feeds retry at once; they stay failed until served', async () => {
+  let ok = false;
+  const { router, sources, srv } = setup({
+    slice: (q) => (ok ? defaultSlice(q) : jsonResponse({}, { status: 500 })),
   });
   router.install();
   router.setHistory({ active: true, timeMs: T, error: 'history unavailable' });
   await sources.flights.getSnapshot({});
   assert.equal(router.isFailed('flights'), true);
   router.setHistory({ active: true, timeMs: T });
+  // still failed (LIVE chip) until a history answer is actually served
+  assert.equal(router.isFailed('flights'), true);
+  assert.equal(router.isSwapped('flights'), false);
+  ok = true;
+  const n = sliceCalls(srv).length;
+  const snap = await sources.flights.getSnapshot({});
+  assert.equal(sliceCalls(srv).length, n + 1); // retried without waiting
+  assert.equal(snap.source, 'History: OpenSky');
   assert.equal(router.isFailed('flights'), false);
+  assert.equal(router.isSwapped('flights'), true);
+});
+
+test('R4 latch: retry expiry alone never flips a failed feed back to swapped', async () => {
+  let ok = false;
+  const { router, sources, clock, srv } = setup({
+    slice: (q) => (ok ? defaultSlice(q) : jsonResponse({}, { status: 503 })),
+    router: { retryMs: 15_000 },
+  });
+  router.install();
+  router.setHistory({ active: true, timeMs: T });
+  await sources.military.getSnapshot();
+  assert.equal(router.isFailed('military'), true);
+  await clock.run(15_001); // retry is due, but nothing was served
+  assert.equal(router.isFailed('military'), true);
+  assert.equal(router.isSwapped('military'), false);
+  assert.ok(!router.getState().swapped.includes('military'));
+  // the due retry fails again: live answer, still failed, new retry window
+  const before = sliceCalls(srv).length;
+  const r = await sources.military.getSnapshot();
+  assert.equal(r.source, 'live');
+  assert.equal(sliceCalls(srv).length, before + 1);
+  assert.equal(router.isFailed('military'), true);
+  await sources.military.getSnapshot(); // inside the new window: no slice
+  assert.equal(sliceCalls(srv).length, before + 1);
+  ok = true;
+  await clock.run(15_001);
+  const h = await sources.military.getSnapshot();
+  assert.equal(h.source, 'History: adsb.lol');
+  assert.equal(router.isFailed('military'), false);
+  assert.equal(router.isSwapped('military'), true);
 });
 
 test('D3 gap: an empty slice is served as an empty answer (never live)', async () => {
@@ -318,9 +358,9 @@ test('D3 gap: an empty slice is served as an empty answer (never live)', async (
   assert.equal(router.getState().served.flights.gap, true);
 });
 
-test('busy (429): one retry, then a 503 to the layer (no pass-through to live)', async () => {
+test('R4 busy (429): one retry, then D3 -> live pass-through + failed (no 503 to the layer)', async () => {
   let n = 0;
-  const { router, srv, win, clock } = setup({
+  const { router, srv, win, clock, sources } = setup({
     slice: () => {
       n++;
       return jsonResponse({ error: 'rate_limited' }, { status: 429 });
@@ -332,13 +372,35 @@ test('busy (429): one retry, then a 503 to the layer (no pass-through to live)',
   await flush();
   await clock.run(1_600);
   const r = await p;
-  assert.equal(r.status, 503);
-  assert.equal(r.headers.get('x-history-busy'), '1');
+  assert.equal(r.status, 200); // the live answer, so no layer backoff
+  assert.equal(r.headers.get('x-feed-source'), 'live');
   assert.equal(n, 2);
-  assert.equal(
-    srv.calls.some((c) => c.path === '/api/military'),
-    false,
-  );
+  assert.equal(srv.calls.filter((c) => c.path === '/api/military').length, 1);
+  assert.equal(router.isFailed('military'), true);
+  assert.equal(router.isSwapped('military'), false);
+  assert.ok(router.getState().failed.includes('military'));
+  // the next polls (e.g. settle refreshes) are answered live at once
+  const s2 = await sources.military.getSnapshot();
+  assert.equal(s2.source, 'live');
+  assert.equal(n, 2);
+});
+
+test('R4 busy (429) once, then ok: served from history, never failed', async () => {
+  let n = 0;
+  const { router, win, clock } = setup({
+    slice: (q) =>
+      ++n === 1
+        ? jsonResponse({ error: 'rate_limited' }, { status: 429 })
+        : defaultSlice(q),
+  });
+  router.install();
+  router.setHistory({ active: true, timeMs: T });
+  const p = win.fetch('/api/military');
+  await flush();
+  await clock.run(1_600);
+  const r = await p;
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('x-feed-source'), /^History/);
   assert.equal(router.isFailed('military'), false);
 });
 

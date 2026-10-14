@@ -229,20 +229,48 @@ function adaptFlights(answers, { t, nowMs }) {
   };
 }
 
+/**
+ * The seconds a recorded row is older at t than at its snapshot: the slice
+ * answers the snapshot at or before t (body.now = the snap ms), so every
+ * age relative to the snapshot grows by t - snap at t.
+ */
+export function snapLagSec(t, snapMs) {
+  return Number.isFinite(snapMs) && snapMs < t
+    ? Math.round(t - snapMs) / 1000
+    : 0;
+}
+
+/** A relative readsb age (seconds) grown by lag; anything else kept. */
+function ageBy(value, lagS) {
+  return typeof value === 'number' && Number.isFinite(value) && lagS
+    ? Math.round((value + lagS) * 1000) / 1000
+    : value;
+}
+
 function adaptMilitary(answers, { t, nowMs }) {
-  const delta = rebaseDelta(t, nowMs);
   const body = answers[0]?.body ?? {};
-  const ac = Array.isArray(body.ac) ? body.ac : [];
   const headers = answers[0]?.headers ?? {};
-  // rows keep their relative seen_pos (age at the poll); the poll times
-  // (now = the snap ms, ctime) move to now
+  // The live military source ignores body.now: it takes the fix time as
+  // receipt time minus seen_pos (no X-Feed-Age-Ms, D2). So the ages are
+  // made relative to t itself: seen / seen_pos grow by t - snap, and the
+  // poll times (now, ctime) become t, rebased to the browser now.
+  const lagS = snapLagSec(t, Number(body.now));
+  const ac = (Array.isArray(body.ac) ? body.ac : []).map((row) =>
+    lagS && row && typeof row === 'object'
+      ? {
+          ...row,
+          seen: ageBy(row.seen, lagS),
+          seen_pos: ageBy(row.seen_pos, lagS),
+        }
+      : row,
+  );
   return {
     body: {
       ...body,
       ac,
       total: ac.length,
-      now: rebaseMs(body.now, delta),
-      ctime: rebaseMs(body.ctime, delta),
+      now: nowMs,
+      ctime: nowMs,
     },
     headers: {
       'Content-Type': JSON_TYPE,

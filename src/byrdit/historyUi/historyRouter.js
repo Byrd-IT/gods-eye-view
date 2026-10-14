@@ -14,13 +14,17 @@
  * /api/history/slice (not a bridged route) and keeps judging only real live
  * answers.
  *
- * D3 quiet failure: a slice that fails (network, non-2xx, not JSON) marks
- * that feed failed; the request and the next ones pass through to live
- * (the globe is never blanked) until a retry after `retryMs` succeeds or
- * the control reports history available again. A failed feed is NOT
- * swapped, so its layer gets a LIVE chip. A recorded gap / empty slice is
- * a successful, EMPTY answer: nothing is drawn (never live, never another
- * time).
+ * D3 quiet failure: a slice that fails (network, non-2xx, not JSON, or a
+ * 429 that is still busy after one retry) marks that feed FAILED; the
+ * request and the next ones pass through to live (the globe is never
+ * blanked). The failure is LATCHED: the feed stays failed (not swapped, so
+ * its layer keeps a 'LIVE (history unavailable)' chip) until a history
+ * answer is actually served to the layer again. Retry eligibility is
+ * separate: after `retryMs` (or at once when the control reports history
+ * available again) the next layer request tries the slice first; if that
+ * fails too it passes through to live and the feed stays failed. A
+ * recorded gap / empty slice is a successful, EMPTY answer: nothing is
+ * drawn (never live, never another time).
  *
  * D6 cache + prefetch: slice answers are kept in a small LRU keyed by the
  * exact slice URL (raw answer; the rebase is applied when served, so a
@@ -170,7 +174,7 @@ export function createHistoryRouter({
   const cache = new Map(); // slice url -> {promise, value}
   const snaps = new Map(); // snap feed -> sorted epoch ms
   const lastLive = new Map(); // adapter id -> {url, key}
-  const failedUntil = new Map(); // adapter id -> ms
+  const failed = new Map(); // adapter id -> {retryAt} (latched, D3)
   const served = new Map(); // adapter id -> {t, rows, gap}
   const pinned = new Map(); // adapter id -> playback frame (driver)
   const listeners = new Set();
@@ -215,8 +219,22 @@ export function createHistoryRouter({
     };
   }
 
+  /** The feed failed and no history answer was served since (latched). */
   function isFailed(id) {
-    return (failedUntil.get(id) ?? 0) > now();
+    return failed.has(id);
+  }
+
+  /** A failed feed may try the slice again (retry eligibility, not state). */
+  function retryDue(id) {
+    const f = failed.get(id);
+    return !f || f.retryAt <= now();
+  }
+
+  function markFailed(adapter) {
+    const was = failed.has(adapter.id);
+    failed.set(adapter.id, { retryAt: now() + retryMs });
+    served.delete(adapter.id);
+    if (!was) notify();
   }
 
   /** History is active and this feed is answered from history. */
@@ -437,7 +455,9 @@ export function createHistoryRouter({
     const playing = active && Boolean(detail.playing);
     const error = Boolean(detail.error);
     const out = { entered: false, left: false, seeked: false, moved: false };
-    if (s.error && !error) failedUntil.clear(); // history is back (D3)
+    // history is back (D3): failed feeds may retry at once; they stay
+    // failed (LIVE chip) until a history answer is actually served
+    if (s.error && !error) for (const f of failed.values()) f.retryAt = 0;
     s.error = error;
     if (!active) {
       if (s.active) {
@@ -447,7 +467,7 @@ export function createHistoryRouter({
         s.timeMs = null;
         s.playing = false;
         clearCache();
-        failedUntil.clear();
+        failed.clear();
         served.clear();
         pinned.clear();
         notify();
@@ -486,22 +506,13 @@ export function createHistoryRouter({
     return JSON.stringify(adapter.sliceParams(url));
   }
 
-  function busyResponse() {
-    return new Response(JSON.stringify({ error: 'history_busy' }), {
-      status: 503,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'X-History-Busy': '1',
-        'Retry-After': '2',
-      },
-    });
-  }
-
   const sleep = (ms) =>
     new Promise((resolve) => timers.setTimeout(resolve, ms));
 
   async function answer(adapter, url, input, init, signal) {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    let busyRetried = false;
+    // loops only when a seek / LIVE happened while the slice was pending
+    for (;;) {
       const myGen = gen;
       const t = requestTime(adapter);
       const urls = adapter
@@ -517,21 +528,23 @@ export function createHistoryRouter({
         if (signal?.aborted) throw abortError();
         if (!s.active) return inner.call(target, input, init);
         if (isAbort(error) || gen !== myGen) continue; // a seek: ask again
-        if (error instanceof SliceError && error.kind === 'busy') {
-          if (attempt === 0) {
-            await withSignal(sleep(busyRetryMs), signal);
-            continue;
-          }
-          return busyResponse();
+        if (
+          error instanceof SliceError &&
+          error.kind === 'busy' &&
+          !busyRetried
+        ) {
+          busyRetried = true;
+          await withSignal(sleep(busyRetryMs), signal);
+          if (!s.active) return inner.call(target, input, init);
+          continue;
         }
-        failedUntil.set(adapter.id, now() + retryMs);
-        served.delete(adapter.id);
-        notify();
+        // D3: any failure, a repeated 429 included -> live + unavailable
+        markFailed(adapter);
         return inner.call(target, input, init);
       }
       if (!s.active) return inner.call(target, input, init); // LIVE meanwhile
       if (gen !== myGen) continue; // a seek meanwhile: answer the new t
-      const wasFailed = failedUntil.delete(adapter.id);
+      const wasFailed = failed.delete(adapter.id);
       const adapted = adapter.adapt(answers, { t, nowMs: now() });
       const rows = Number(adapted.headers['X-History-Rows']) || 0;
       const prevServed = served.get(adapter.id);
@@ -549,7 +562,6 @@ export function createHistoryRouter({
         },
       });
     }
-    return busyResponse();
   }
 
   function install() {
@@ -570,7 +582,8 @@ export function createHistoryRouter({
       } catch {
         adapter = null;
       }
-      if (!adapter || isFailed(adapter.id))
+      // a failed feed passes through until its retry is due (D3)
+      if (!adapter || !retryDue(adapter.id))
         return inner.call(target, input, init);
       // D6: a new bbox / maxRows drops the prefetched frames
       const key = liveParamsKey(adapter, url);

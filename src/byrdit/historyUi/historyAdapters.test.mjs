@@ -11,6 +11,7 @@ import {
   rebaseMs,
   rebaseSec,
   sliceUrl,
+  snapLagSec,
   viewToBboxes,
 } from './historyAdapters.js';
 import { openSkyState, readsbBody, readsbRow } from '../history/historyRows.js';
@@ -276,6 +277,46 @@ test('military adapter: readsb rows parse like live; poll times rebased, seen_po
   );
   assert.equal(fb.headers['X-Feed-Source'], 'History: adsb.lol archive');
   assert.equal(fb.headers['X-History-Fallback'], 'adsblol-dbflags');
+});
+
+test('R2 military: a snapshot older than t keeps its true age at t (live + archive)', () => {
+  const snap = Date.parse('2026-10-14T14:21:08.500Z');
+  const t = snap + 150_000; // the slice answers the snap 150 s before t
+  assert.equal(snapLagSec(t, snap), 150);
+  assert.equal(snapLagSec(snap, snap), 0);
+  assert.equal(snapLagSec(t, Number.NaN), 0);
+  assert.equal(snapLagSec(snap - 1, snap), 0); // never negative
+  const rows = src(docs.military)
+    .map((d) => readsbRow(d, snap))
+    .filter(Boolean);
+  // one fix exactly 4 s before the snap
+  rows[0] = { ...rows[0], seen_pos: 4, seen: 2 };
+  for (const extra of [{}, { 'X-History-Fallback': 'adsblol-dbflags' }]) {
+    const out = adapter('military').adapt(
+      [
+        answer(readsbBody(rows, snap), {
+          'X-History-Source': 'adsb.lol',
+          ...extra,
+        }),
+      ],
+      { t, nowMs: NOW },
+    );
+    assert.equal(out.body.now, NOW);
+    assert.equal(out.body.ctime, NOW);
+    // the real live source: observedAtMs = receipt now, no age header (D2)
+    const a = readsbSnapshot(out.body, { observedAtMs: NOW, now: NOW });
+    const r0 = a.records.find((r) => r.id === rows[0].hex);
+    assert.equal(NOW - r0.positionTimeMs, 154_000); // 4 s + 150 s, not 4 s
+    assert.equal(NOW - r0.contactTimeMs, 152_000);
+    for (const r of a.records) {
+      const row = rows.find((x) => x.hex === r.id);
+      assert.equal(
+        NOW - r.positionTimeMs,
+        Math.round((row.seen_pos + 150) * 1000),
+      );
+    }
+    assert.equal(out.headers['X-Feed-Age-Ms'], undefined);
+  }
 });
 
 test('vessels adapter: rows parse like live; per-row times stay recorded (shown as clock), poll times rebased', () => {
