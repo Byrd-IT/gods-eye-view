@@ -8,6 +8,7 @@ import {
 } from './trustedProxy.js';
 import { historyPlugins as browserSafeHistoryPlugins } from '../../src/byrdit/history/index.js';
 import { DEFAULT_HISTORY_PER_MIN } from '../../src/byrdit/history/historyApi.js';
+import { createWindHistoryReader } from './historyWind.js';
 
 /**
  * Server-side composition of the Byrd-IT history plugins (gev-history
@@ -17,6 +18,9 @@ import { DEFAULT_HISTORY_PER_MIN } from '../../src/byrdit/history/historyApi.js'
  * answers /api/weather/tile|image with a private weatherProxy instance whose
  * GetCapabilities reads come from the collector (single consumer of the
  * recorded metadata); only GetMap image bytes are live.
+ *
+ * B12c: /api/history/slice?feed=wind reads past GFS/IFS cycles with the
+ * injected byte-range reader (./historyWind.js, nothing stored).
  *
  * B9 (/api/history/*, GEV_HISTORY_API=1): the per-client rate limit is the
  * common cost limiter (server/providers/common/rate-limit.js,
@@ -45,6 +49,8 @@ export function historyPlugins(options = {}) {
       clientKey: historyClientKey(env),
       hostCheck: (allowed, additional) => (host) =>
         isAllowedHost(host, allowed, additional),
+      // B12c: wind at a past cycle through GEV's byte-range reader pieces
+      windReader: createWindHistoryReader(),
       ...options.historyApi,
     },
   });

@@ -39,6 +39,12 @@ export const HISTORY_INDICES = Object.freeze({
   transit: 'gev-history-transit',
   bikeshare: 'gev-history-bikeshare',
   bikeshareStations: 'gev-history-bikeshare-stations',
+  // B12c: CelesTrak GP (recorded group 'active'), USGS quakes + the B13
+  // archive, wind cycle ids (no grids), imagery availability metadata
+  gp: 'gev-history-gp',
+  quakes: 'gev-history-quakes,gev-history-quakes-hist-*',
+  cycles: 'gev-history-cycles',
+  imagery: 'gev-history-imagery',
 });
 const ALLOWED = new Set(Object.values(HISTORY_INDICES));
 

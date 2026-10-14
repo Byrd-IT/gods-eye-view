@@ -71,6 +71,26 @@ function send(res, status, body, headers = {}) {
 }
 
 /**
+ * B12c answers that are not a 200 JSON body: `status` (404 not_recorded,
+ * JSON), `text` (gp CSV, its own Content-Type header) or `bytes` (a wind
+ * grid). Always no-store.
+ */
+function sendOther(res, out) {
+  if (out.status) return send(res, out.status, out.body, out.headers);
+  const payload = out.bytes ?? out.text;
+  res.statusCode = 200;
+  for (const [k, v] of Object.entries({ ...JSON_HEADERS, ...out.headers }))
+    res.setHeader(k, v);
+  res.setHeader(
+    'Content-Length',
+    typeof payload === 'string'
+      ? new TextEncoder().encode(payload).length
+      : payload.byteLength,
+  );
+  return res.end(payload);
+}
+
+/**
  * A cacheable answer (DESIGN 4.4): ETag + private max-age=300, 304 when
  * If-None-Match matches. X-History-Cache says HIT/MISS (in-process LRU).
  */
@@ -137,6 +157,7 @@ export function createHistoryApi({
   fetchImpl,
   cache = createHistoryCache({ now }),
   healthService,
+  windReader = null,
 } = {}) {
   if (service === undefined) {
     const config = esConfigFromEnv(env);
@@ -147,6 +168,7 @@ export function createHistoryApi({
             ...(fetchImpl ? { fetchImpl } : {}),
           }),
           now,
+          windReader,
         })
       : null;
   }
@@ -246,8 +268,14 @@ export function createHistoryApi({
         route === 'slice' || route === 'track'
           ? await service[route](params)
           : { body: await service[route](params), headers: {} };
-      if (!cacheable) return send(res, 200, out.body, out.headers);
-      const text = JSON.stringify(out.body);
+      // B12c: 'nothing recorded' answers (404 + reason) and binary wind
+      // grids are never cached; CSV (gp) is cached like JSON
+      if (out.status || out.bytes) return sendOther(res, out);
+      if (!cacheable)
+        return out.text !== undefined
+          ? sendOther(res, out)
+          : send(res, 200, out.body, out.headers);
+      const text = out.text ?? JSON.stringify(out.body);
       const entry = { text, etag: bodyEtag(text), headers: out.headers };
       cache.set(key, entry);
       return sendCached(req, res, entry, 'MISS');

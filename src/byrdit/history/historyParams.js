@@ -71,7 +71,54 @@ export const SLICE_FEEDS = Object.freeze({
     defaultRows: MAX_ROWS,
     window: { def: DAY_MS, max: 7 * DAY_MS },
   },
+  // B12c (historySlicesB12c.js): satellites (GP elset nearest t, CSV),
+  // quakes (USGS GeoJSON as of t), wind (cycle at t through the byte-range
+  // reader, nothing stored) and imagery availability. `extras` lists the
+  // feed's own parameters (SLICE_EXTRAS); no bbox where it means nothing.
+  gp: { defaultRows: MAX_ROWS, extras: ['group'], noBbox: true },
+  quakes: { defaultRows: 5_000 },
+  wind: {
+    defaultRows: 1,
+    extras: ['model', 'overlay', 'part'],
+    noBbox: true,
+  },
+  imagery: { defaultRows: 1, extras: ['product'], noBbox: true },
 });
+
+/**
+ * B12c feed-specific slice parameters: a fixed syntax or set each; only the
+ * feeds that list one in SLICE_FEEDS[feed].extras accept it (else 400).
+ * `def` undefined = required for that feed.
+ */
+export const SLICE_EXTRAS = Object.freeze({
+  group: { re: /^[a-z0-9-]{1,40}$/ },
+  model: { set: ['gfs', 'ifs'], def: 'gfs' },
+  overlay: { set: ['none', 'temperature', 'pressure'], def: 'none' },
+  part: { set: ['manifest', 'grid'], def: 'manifest' },
+  product: {
+    set: ['radar', 'clouds', 'clouds-regional', 'lightning', 'daily'],
+  },
+});
+
+function parseSliceExtras(spec, q) {
+  const out = {};
+  for (const [name, rule] of Object.entries(SLICE_EXTRAS)) {
+    const value = q[name];
+    if (!spec.extras?.includes(name)) {
+      if (value !== undefined) throw bad(name);
+      continue;
+    }
+    if (value === undefined) {
+      if (rule.def === undefined) throw bad(name);
+      out[name] = rule.def;
+      continue;
+    }
+    const ok = rule.set ? rule.set.includes(value) : rule.re.test(value);
+    if (!ok) throw bad(name);
+    out[name] = value;
+  }
+  return out;
+}
 
 /** Fixed lookbacks of the latest-per-entity slices (B10, DESIGN 4.3). */
 export const VESSELS_LOOKBACK_MS = 35 * 60_000;
@@ -107,7 +154,14 @@ export const LOG_FEEDS = Object.freeze([
 ]);
 
 export const ROUTE_PARAMS = Object.freeze({
-  slice: ['feed', 't', 'bbox', 'maxRows', 'window'],
+  slice: [
+    'feed',
+    't',
+    'bbox',
+    'maxRows',
+    'window',
+    ...Object.keys(SLICE_EXTRAS),
+  ],
   coverage: ['feed', 'from', 'to', 'bucket'],
   snapshots: ['feed', 'around', 'n'],
   track: ['feed', 'id', 'from', 'to', 'minGapSec'],
@@ -223,6 +277,8 @@ export function parseSliceParams(search, rawQuery, now) {
   const spec = SLICE_FEEDS[feed];
   if (q.t === undefined) throw bad('t');
   const t = parseRetainedInstant(q.t, 't', now);
+  if (spec.noBbox && q.bbox !== undefined) throw bad('bbox');
+  const extras = parseSliceExtras(spec, q);
   const bbox = parseBbox(q.bbox);
   const maxRows = parseIntParam(q.maxRows, 'maxRows', {
     min: 1,
@@ -235,7 +291,7 @@ export function parseSliceParams(search, rawQuery, now) {
     windowMs = parseDuration(q.window, 'window');
     if (windowMs > spec.window.max) throw tooLarge('window');
   }
-  return { feed, t, bbox, maxRows, windowMs };
+  return { feed, t, bbox, maxRows, windowMs, ...extras };
 }
 
 /** GET /api/history/coverage */
