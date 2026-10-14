@@ -304,6 +304,60 @@ const LEAKY_WARNINGS = [
   ],
 ];
 
+/**
+ * Re-review t_19116187 (de12af6): escaped JSON quotes inside the value
+ * (R1a) and auth schemes in any letter case (R1b).
+ */
+function jsonAtDepth(value, depth) {
+  let text = JSON.stringify(value);
+  for (let i = 1; i < depth; i++) text = JSON.stringify(text).slice(1, -1);
+  return text;
+}
+const ESCAPED_QUOTE_SECRET = jsonAtDepth(
+  { password: 'fixture"sensitive value' },
+  2,
+);
+LEAKY_WARNINGS.push(
+  [ESCAPED_QUOTE_SECRET, String.raw`{\"password\":[redacted]}`],
+  [
+    `body ${ESCAPED_QUOTE_SECRET} rejected`,
+    String.raw`body {\"password\":[redacted]} rejected`,
+  ],
+  [
+    `${jsonAtDepth({ token: 'fixture\\sensitive value' }, 2)} after`,
+    String.raw`{\"token\":[redacted]} after`,
+  ],
+  [
+    jsonAtDepth({ token: 'fixture\\"sensitive value', code: 7 }, 1),
+    '{"token":[redacted],"code":7}',
+  ],
+  [
+    jsonAtDepth({ api_key: 'fixture"sensitive \\ value', code: 7 }, 3),
+    String.raw`{\\\"api_key\\\":[redacted],\\\"code\\\":7}`,
+  ],
+  [
+    `log ${jsonAtDepth({ msg: 'Digest response="fixture\\"sensitive value"' }, 2)}`,
+    String.raw`log {\"msg\":\"Digest [redacted]\"}`,
+  ],
+  [
+    'upstream sent basic fixture-sensitive-value',
+    'upstream sent Basic [redacted]',
+  ],
+  [
+    'upstream sent BASIC fixture-sensitive-value',
+    'upstream sent Basic [redacted]',
+  ],
+  [
+    'upstream sent bEaReR fixture-sensitive-value now',
+    'upstream sent Bearer [redacted] now',
+  ],
+  [
+    'upstream sent digest username="fixture", response="sensitive value"',
+    'upstream sent Digest [redacted]',
+  ],
+  ['upstream sent ntlm fixture-sensitive-value', 'upstream sent NTLM [redacted]'],
+);
+
 function assertNoSecret(text, label) {
   for (const fragment of SECRET_FRAGMENTS)
     assert.ok(
@@ -390,6 +444,94 @@ test('GET /basemap/health.json: no synthetic secret survives in warnings, toolti
     await gev.close();
     await edge.close();
   }
+});
+
+test('sanitizeHealthText: escaped quotes and backslashes at any JSON depth never end a value early', () => {
+  const secrets = [
+    'fixture"sensitive value',
+    'fixture\\sensitive value',
+    'fixture\\"sensitive value',
+    'fixture\\\\"sensitive \'value',
+    'fixture sensitive value\\',
+    '"fixture" sensitive "value"',
+  ];
+  for (const secret of secrets)
+    for (const key of ['password', 'token', 'client_secret'])
+      for (const depth of [1, 2, 3, 4]) {
+        const encoded = jsonAtDepth({ [key]: secret, code: 7 }, depth);
+        const input = `pre ${encoded} post`;
+        const out = sanitizeHealthText(input);
+        const label = `depth ${depth} ${input}`;
+        assertNoSecret(out, label);
+        assert.ok(out.startsWith('pre {'), label);
+        assert.ok(out.includes('[redacted]'), label);
+        assert.ok(out.endsWith('7} post'), `${label} -> ${out}`);
+        const down = composeHealth({
+          state: 'down',
+          gev_chip: `UNAVAILABLE ${input}`,
+          warnings: [input],
+        });
+        assertNoSecret(down.chip, `chip ${label}`);
+        assertNoSecret(down.warnings[0], `warning ${label}`);
+      }
+  // Auth scheme names in any case; ordinary words stay.
+  for (const scheme of ['basic', 'BASIC', 'Basic', 'bAsIc', 'bearer', 'TOKEN'])
+    assertNoSecret(
+      sanitizeHealthText(`upstream sent ${scheme} fixture-sensitive-value`),
+      scheme,
+    );
+  for (const plain of [
+    'job edge-sync failed (3 consecutive failures)',
+    'basemap edge healthy',
+    'terrain tiles digested in 4 s',
+    'disk 81% over guard 80%',
+  ])
+    assert.equal(sanitizeHealthText(plain), plain);
+});
+
+test('GET /basemap/health.json: down chip and tooltip drop escaped-quote and lower-case scheme secrets', async () => {
+  for (const [secret, shown] of [
+    [ESCAPED_QUOTE_SECRET, String.raw`{\"password\":[redacted]}`],
+    [
+      'upstream sent basic fixture-sensitive-value',
+      'upstream sent Basic [redacted]',
+    ],
+    [
+      'upstream sent BASIC fixture-sensitive-value',
+      'upstream sent Basic [redacted]',
+    ],
+  ])
+    for (const warnings of [[], [secret]]) {
+      const edge = await healthEdge({
+        ...EDGE_OK,
+        state: 'down',
+        gev_chip: `UNAVAILABLE ${secret}`,
+        warnings,
+      });
+      const gev = await front({
+        GEV_BASEMAP_HEALTH_URLS: `${edge.url}/health.json`,
+      });
+      try {
+        const res = await fetch(`${gev.url}/basemap/health.json`);
+        assert.equal(res.status, 200);
+        const raw = await res.text();
+        assertNoSecret(raw, `down body ${secret}`);
+        const body = JSON.parse(raw);
+        assert.equal(body.state, 'down');
+        assert.equal(body.chip, `UNAVAILABLE ${shown}`);
+        assert.deepEqual(body.warnings, warnings.length ? [shown] : []);
+        assert.equal(basemapConfigLeakCount(body), 0);
+        const health = await loadBasemapHealth({
+          fetchImpl: (url, init) => fetch(gev.url + url, init),
+        });
+        const tooltip = basemapDegradedReason(health);
+        assert.ok(tooltip.includes(shown), tooltip);
+        assertNoSecret(tooltip, `down tooltip ${secret}`);
+      } finally {
+        await gev.close();
+        await edge.close();
+      }
+    }
 });
 
 test('GET /basemap/health.json: composed from the edge, 30 s cache, browser shows the first warning', async () => {

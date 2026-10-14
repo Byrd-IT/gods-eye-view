@@ -215,8 +215,52 @@ export function composeBuildings(raw, layer = buildingsSettings({})) {
  */
 const SECRET_KEY = String.raw`[\w-]*?(?:api[-_]?key|apikey|key|access[-_]?token|token|secret|passw\w*|passphrase|pass|pwd|auth\w*|sig|signature|cookie|credentials?|session[-_]?id)`;
 /** HTTP authentication schemes (RFC 9110 11.4 plus common vendor ones). */
-const AUTH_SCHEME = String.raw`(?:Basic|Bearer|Digest|Negotiate|NTLM|Token|ApiKey|HOBA|Mutual|AWS4-HMAC-SHA256|SCRAM-SHA-\d+)`;
-const AUTH_PARAM = String.raw`[\w-]+\s*=\s*(?:"(?:[^"\\]|\\.)*(?:"|$)|[^\s,;]+)`;
+const AUTH_SCHEME_NAMES = [
+  'Basic',
+  'Bearer',
+  'Digest',
+  'Negotiate',
+  'NTLM',
+  'Token',
+  'ApiKey',
+  'HOBA',
+  'Mutual',
+  'AWS4-HMAC-SHA256',
+];
+const AUTH_SCHEME = `(?:${AUTH_SCHEME_NAMES.join('|')}|SCRAM-SHA-\\d+)`;
+/** Scheme names are case-insensitive (RFC 9110 11.1); show the usual spelling. */
+const AUTH_SCHEME_CANONICAL = new Map(
+  AUTH_SCHEME_NAMES.map((name) => [name.toLowerCase(), name]),
+);
+function canonicalAuthScheme(scheme) {
+  return (
+    AUTH_SCHEME_CANONICAL.get(scheme.toLowerCase()) ?? scheme.toUpperCase()
+  );
+}
+/** Backslashes in front of a quote: 0 plain, 1 JSON in JSON, 3, 7 deeper. */
+const ESCAPE_DEPTHS = [7, 3, 1, 0];
+/**
+ * A double-quoted string whose quotes carry `depth` backslashes. Inside, a
+ * quote closes the string only when the backslash run before it decodes,
+ * level by level, to that same depth: run length = depth modulo
+ * 2 * (depth + 1). Shorter or longer runs are embedded (escaped) quotes or
+ * escaped backslashes and stay inside the value, so a value never ends
+ * early and leaves its tail behind. Unterminated runs to the end of text.
+ */
+function quotedAtDepth(depth) {
+  const run = (n) => (n ? String.raw`\\{${n}}` : '');
+  const close = String.raw`(?:${run(2 * depth + 2)})*${run(depth)}"`;
+  const token = [
+    String.raw`[^\\"]`,
+    String.raw`\\+(?![\\"])`,
+    String.raw`(?!${close})\\*"`,
+    String.raw`\\+$`,
+  ].join('|');
+  return String.raw`${run(depth)}"(?:${token})*(?:${close}|$)`;
+}
+const DOUBLE_QUOTED = ESCAPE_DEPTHS.map(quotedAtDepth).join('|');
+const SINGLE_QUOTED = String.raw`'(?:[^'\\]|\\.|\\$)*(?:'|$)`;
+const AUTH_PARAM = String.raw`[\w-]+\s*=\s*(?:${DOUBLE_QUOTED}|${SINGLE_QUOTED}|[^\s,;]+)`;
 /**
  * A scheme's credentials: a token68 (Basic, Bearer) or an auth-param list
  * (Digest username="..", response=".."), every param included.
@@ -224,29 +268,32 @@ const AUTH_PARAM = String.raw`[\w-]+\s*=\s*(?:"(?:[^"\\]|\\.)*(?:"|$)|[^\s,;]+)`
 const AUTH_CREDENTIALS = `(?:${AUTH_PARAM}|[^\\s,;"')\\]}]+)(?:\\s*,\\s*${AUTH_PARAM})*`;
 /**
  * One secret value: a quoted string (double, single or backslash-escaped
- * JSON quotes, spaces and escapes included), an unterminated quote (to the
- * end of the text), an authentication scheme with its credentials, or a
- * bare token.
+ * JSON quotes at any nesting depth, embedded escaped quotes, backslashes
+ * and spaces included), an unterminated quote (to the end of the text), an
+ * authentication scheme with its credentials, or a bare token.
  */
 const SECRET_VALUE = [
-  String.raw`\\"(?:(?!\\").)*(?:\\"|$)`,
-  String.raw`"(?:[^"\\]|\\.)*(?:"|$)`,
-  String.raw`'(?:[^'\\]|\\.)*(?:'|$)`,
+  DOUBLE_QUOTED,
+  SINGLE_QUOTED,
   `${AUTH_SCHEME}\\s+${AUTH_CREDENTIALS}`,
   String.raw`\S+`,
 ].join('|');
 /**
- * key=value, key: value, "key": "value", 'key'='value', \"key\":\"value\".
- * Group 1 keeps the name and separator (quotes included), the value goes.
+ * key=value, key: value, "key": "value", 'key'='value', \"key\":\"value\"
+ * (and deeper JSON escaping). Group 1 keeps the name and separator (quotes
+ * included), the value goes.
  */
 const SECRET_ASSIGNMENT = new RegExp(
-  String.raw`((?:\\?["'])?\b${SECRET_KEY}\b(?:\\?["'])?\s*[=:]\s*)(?:${SECRET_VALUE})`,
+  String.raw`((?:\\*["'])?\b${SECRET_KEY}\b(?:\\*["'])?\s*[=:]\s*)(?:${SECRET_VALUE})`,
   'gi',
 );
-/** A scheme with credentials outside any key (log line "... Basic dXNl..."). */
+/**
+ * A scheme with credentials outside any key (log line "... Basic dXNl...",
+ * "basic ...", "BASIC ..."): any case, as RFC 9110 11.1 makes schemes.
+ */
 const AUTH_SCHEME_CREDENTIALS = new RegExp(
   String.raw`\b(${AUTH_SCHEME})\s+(?!\[redacted\])${AUTH_CREDENTIALS}`,
-  'g',
+  'gi',
 );
 
 /**
@@ -263,7 +310,10 @@ export function sanitizeHealthText(value) {
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S*/gi, '[url]')
     .replace(/\/\/[^\s/@]+@\S*/g, '[url]')
     .replace(SECRET_ASSIGNMENT, '$1[redacted]')
-    .replace(AUTH_SCHEME_CREDENTIALS, '$1 [redacted]')
+    .replace(
+      AUTH_SCHEME_CREDENTIALS,
+      (_, scheme) => `${canonicalAuthScheme(scheme)} [redacted]`,
+    )
     .replace(/\bBearer\s+(?!\[redacted\])\S+/gi, 'Bearer [redacted]')
     .replace(/AIza[0-9A-Za-z_-]{30,}/g, '[redacted]')
     .replace(
