@@ -958,3 +958,260 @@ test('/basemap down and Google failing: stays on Esri, at most 3 roots an hour',
   assert.ok(getGoogleRootCount() <= 3, `${getGoogleRootCount()} roots`);
   assertInStep(w, 'failing Google');
 });
+
+// ---------------------------------------------------------------------------
+// Re-review t_d9b79b50 R5/R6: pending pass-through switches and pins held
+// through an imagery-comparison lease. Real MapSourceController, a deferred
+// Esri provider (the test decides when it resolves), fake scene only.
+
+/**
+ * Esri's imagery provider resolves only when the test opens the gate, so a
+ * pick of Esri stays pending inside the real controller.
+ */
+function deferImagery(w, id = 'esri-imagery') {
+  const source = w.controller._sources.get(id);
+  const provider = w.providers.get(id);
+  const gates = [];
+  source.imagery = () =>
+    new Promise((resolve) => gates.push(() => resolve(provider)));
+  w.controller._imageryProviders.delete(id);
+  return {
+    get pending() {
+      return gates.length;
+    },
+    async open() {
+      while (gates.length) gates.shift()();
+      await settle();
+    },
+  };
+}
+
+test('R5: Google shown, Esri pending, Google chip -> Google wins (mode google, moveEnd stays)', async () => {
+  const w = world();
+  w.viewer.camera.positionCartographic = { height: 3_000 };
+  await w.start();
+  assert.equal(w.controller.getActiveId(), 'photoreal');
+  const esri = deferImagery(w);
+  const a = w.pick('esri-imagery');
+  await settle(2);
+  assert.equal(esri.pending, 1, 'Esri is pending in the controller');
+  const b = w.pick('photoreal');
+  assert.equal(w.machine.mode, 'google');
+  await esri.open();
+  await Promise.all([a, b]);
+  await settle();
+  assert.equal(w.controller.getActiveId(), 'photoreal', 'latest pick wins');
+  assert.equal(w.machine.mode, 'google');
+  assertInStep(w, 'after the pending Esri landed');
+  assert.equal(w.session.tileset.show, true);
+  assert.equal(w.viewer.scene.globe.show, false);
+  await w.fly(3_000);
+  assert.equal(w.controller.getActiveId(), 'photoreal', 'moveEnd');
+  w.advance(6_000);
+  await w.fly(50_000);
+  assert.equal(w.controller.getActiveId(), 'photoreal', 'still pinned');
+  assertInStep(w, 'pinned high up');
+  assert.equal(getGoogleRootCount(), 1);
+});
+
+test('R5: Esri pending, Auto chip -> auto stack (Google close in)', async () => {
+  const w = world();
+  w.viewer.camera.positionCartographic = { height: 3_000 };
+  await w.start();
+  const esri = deferImagery(w);
+  const a = w.pick('esri-imagery');
+  await settle(2);
+  const b = w.pick('basemap-auto');
+  await esri.open();
+  await Promise.all([a, b]);
+  await settle();
+  assert.equal(w.controller.getActiveId(), 'photoreal');
+  assert.equal(w.machine.mode, 'auto');
+  assertInStep(w, 'Auto after pending Esri');
+  // Auto really is on: zooming out leaves Google.
+  w.advance(6_000);
+  await w.fly(50_000);
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+  assertInStep(w, 'auto leaves');
+});
+
+test('R5: Open shown, Esri pending, Open chip -> Open wins', async () => {
+  const w = world();
+  await w.start();
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+  const esri = deferImagery(w);
+  const a = w.pick('esri-imagery');
+  await settle(2);
+  const b = w.pick('byrdit-open');
+  await esri.open();
+  await Promise.all([a, b]);
+  await settle();
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+  assert.equal(w.machine.mode, 'open');
+  assertInStep(w, 'Open after pending Esri');
+  await w.fly(2_000);
+  assert.equal(w.controller.getActiveId(), 'byrdit-open', 'Open stays pinned');
+  assert.equal(getGoogleRootCount(), 0);
+});
+
+test('R5: rapid picks with Esri pending - the last pick wins every time', async () => {
+  for (const [picks, active, mode] of [
+    [['esri-imagery', 'photoreal', 'esri-imagery'], 'esri-imagery', 'other'],
+    [
+      ['esri-imagery', 'photoreal', 'esri-imagery', 'basemap-auto'],
+      'photoreal',
+      'auto',
+    ],
+    [['esri-imagery', 'osm', 'photoreal'], 'photoreal', 'google'],
+    [['esri-imagery', 'basemap-auto', 'byrdit-open'], 'byrdit-open', 'open'],
+    [['esri-imagery', 'photoreal', 'osm'], 'osm', 'other'],
+  ]) {
+    const label = picks.join(' -> ');
+    const w = world();
+    w.viewer.camera.positionCartographic = { height: 3_000 };
+    await w.start();
+    assert.equal(w.controller.getActiveId(), 'photoreal', label);
+    const esri = deferImagery(w);
+    const all = [];
+    for (const id of picks) {
+      all.push(w.pick(id));
+      await settle(2);
+    }
+    await esri.open();
+    await Promise.all(all);
+    await settle();
+    assert.equal(w.controller.getActiveId(), active, label);
+    assert.equal(w.machine.mode, mode, label);
+    assertInStep(w, label);
+    assert.equal(
+      w.session.tileset?.show === true,
+      active === 'photoreal',
+      `${label}: Google drawn only when shown`,
+    );
+    // A later camera stop does not undo the pick.
+    await w.fly(3_000);
+    assert.equal(w.controller.getActiveId(), active, `${label} after moveEnd`);
+    assertInStep(w, `${label} after moveEnd`);
+  }
+});
+
+test('R6: Open pin survives an imagery comparison lease (release, then close in)', async () => {
+  const w = world();
+  await w.start();
+  await w.pick('byrdit-open');
+  assert.equal(w.machine.mode, 'open');
+  const lease = w.controller.acquireImageryComparison({ switchPolicy: 'esri' });
+  assert.equal((await lease.ready).status, 'ready');
+  assert.equal(w.controller.getActiveId(), 'esri-imagery');
+  await lease.release();
+  await settle();
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+  assert.equal(w.machine.mode, 'open', 'the pin is back');
+  assertInStep(w, 'after release');
+  await w.fly(2_000);
+  assert.equal(w.controller.getActiveId(), 'byrdit-open', 'no Google at 2 km');
+  assert.equal(getGoogleRootCount(), 0);
+});
+
+test('R6: Google pin at global view survives an imagery comparison lease', async () => {
+  const w = world();
+  await w.start();
+  await w.pick('photoreal');
+  assert.equal(w.controller.getActiveId(), 'photoreal');
+  assert.equal(w.machine.mode, 'google');
+  const lease = w.controller.acquireImageryComparison({ switchPolicy: 'esri' });
+  await lease.ready;
+  assert.equal(w.controller.getActiveId(), 'esri-imagery');
+  await lease.release();
+  await settle();
+  assert.equal(w.controller.getActiveId(), 'photoreal');
+  assert.equal(w.machine.mode, 'google', 'the pin is back');
+  assertInStep(w, 'after release');
+  w.advance(6_000);
+  await w.fly(50_000);
+  assert.equal(w.controller.getActiveId(), 'photoreal', 'still pinned high up');
+  assert.equal(getGoogleRootCount(), 1);
+});
+
+test('R6: a user pick during the lease wins over the pre-lease pin', async () => {
+  // Auto picked during the lease: release restores nothing, auto stays.
+  {
+    const w = world();
+    await w.start();
+    await w.pick('byrdit-open');
+    const lease = w.controller.acquireImageryComparison({
+      switchPolicy: 'esri',
+    });
+    await lease.ready;
+    await w.pick('basemap-auto');
+    await lease.release();
+    await settle();
+    assert.equal(w.machine.mode, 'auto');
+    assertInStep(w, 'auto during lease');
+    await w.fly(2_000);
+    assert.equal(w.controller.getActiveId(), 'photoreal', 'auto enters Google');
+  }
+  // Esri picked during the lease, then a restore of photoreal: auto, not
+  // the old Open pin.
+  {
+    const w = world();
+    await w.start();
+    await w.pick('byrdit-open');
+    const lease = w.controller.acquireImageryComparison({
+      switchPolicy: 'esri',
+    });
+    await lease.ready;
+    await w.pick('esri-imagery');
+    await lease.release();
+    await settle();
+    assert.equal(
+      w.controller.getActiveId(),
+      'esri-imagery',
+      'the user pick stays',
+    );
+    assert.equal(w.machine.mode, 'other');
+    await w.controller.setStack('photoreal');
+    await settle();
+    assert.equal(w.machine.mode, 'auto', 'the old pin does not come back');
+    assert.equal(w.controller.getActiveId(), 'byrdit-open');
+    assertInStep(w, 'restore after user Esri');
+  }
+  // Google picked during the lease: Google pin, release changes nothing.
+  {
+    const w = world();
+    await w.start();
+    await w.pick('byrdit-open');
+    const lease = w.controller.acquireImageryComparison({
+      switchPolicy: 'esri',
+    });
+    await lease.ready;
+    await w.pick('photoreal');
+    await lease.release();
+    await settle();
+    assert.equal(w.controller.getActiveId(), 'photoreal');
+    assert.equal(w.machine.mode, 'google');
+    assertInStep(w, 'Google during lease');
+  }
+});
+
+test('R6: an unpinned map stays unpinned through a lease and a share/recipe restore', async () => {
+  const w = world();
+  await w.start();
+  assert.equal(w.machine.mode, 'auto');
+  const lease = w.controller.acquireImageryComparison({ switchPolicy: 'esri' });
+  await lease.ready;
+  await lease.release();
+  await settle();
+  assert.equal(w.machine.mode, 'auto');
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+  // A recipe restore to Esri then a share restore of photoreal: still auto,
+  // no pin, no root at global view.
+  await w.controller.setStack('esri-imagery');
+  assert.equal(w.machine.mode, 'other');
+  await w.controller.setStack('photoreal');
+  await settle();
+  assert.equal(w.machine.mode, 'auto', 'a restore never pins');
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+  assert.equal(getGoogleRootCount(), 0);
+  assertInStep(w, 'restored');
+});

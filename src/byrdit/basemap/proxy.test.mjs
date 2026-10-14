@@ -840,3 +840,125 @@ test('route cache policy wins over conflicting upstream Cache-Control (200 and 3
     await up.close();
   }
 });
+
+test('queried layer.json is metadata: GET, HEAD and 304 are 60 s must-revalidate (R7)', async () => {
+  const seen = [];
+  const up = await listen((req, res) => {
+    seen.push({ url: req.url, inm: req.headers['if-none-match'] });
+    const meta = req.url.split('?')[0].endsWith('layer.json');
+    if (req.headers['if-none-match'] === '"q1"') {
+      res.writeHead(304, {
+        etag: '"q1"',
+        'cache-control': 'public, max-age=31536000, immutable',
+      });
+      return res.end();
+    }
+    res.writeHead(200, {
+      'content-type': meta
+        ? 'application/json'
+        : 'application/vnd.quantized-mesh',
+      etag: '"q1"',
+      'cache-control': 'public, max-age=31536000, immutable',
+    });
+    res.end(meta ? '{"tilejson":"2.1.0"}' : 'MESH');
+  });
+  const front = await gev({
+    terrainUrls: [up.url],
+    imageryUrls: [up.url],
+    imageryConfig: [],
+  });
+  const root = `${front.url}/basemap/v/x/terrain/cesium-mesh/ellipsoid`;
+  const query = '?extensions=octvertexnormals&v=1.2.0';
+  const META = 'max-age=60, must-revalidate';
+  const TILE = 'public, max-age=2592000';
+  try {
+    for (const [url, policy] of [
+      [`${root}/layer.json${query}`, META],
+      [`${root}/layer.json?v=1.2.0`, META],
+      [`${root}/3/1/1.terrain${query}`, TILE],
+    ]) {
+      const ok = await fetch(url);
+      assert.equal(ok.status, 200, url);
+      assert.equal(ok.headers.get('cache-control'), policy, `GET ${url}`);
+      await ok.arrayBuffer();
+      const head = await fetch(url, { method: 'HEAD' });
+      assert.equal(head.status, 200, `HEAD ${url}`);
+      assert.equal(head.headers.get('cache-control'), policy, `HEAD ${url}`);
+      const again = await fetch(url, { headers: { 'if-none-match': '"q1"' } });
+      assert.equal(again.status, 304, `304 ${url}`);
+      assert.equal(again.headers.get('cache-control'), policy, `304 ${url}`);
+    }
+    // The allowed query still reaches the edge.
+    assert.ok(
+      seen.some(
+        (s) =>
+          s.url ===
+          '/v/x/terrain/cesium-mesh/ellipsoid/layer.json?extensions=octvertexnormals&v=1.2.0',
+      ),
+      JSON.stringify(seen),
+    );
+  } finally {
+    await front.close();
+    await up.close();
+  }
+});
+
+test('missing layer.json (404/204, with or without query) is no-store; missing tiles keep 1 d (R7)', async () => {
+  let metaStatus = 404;
+  const up = await listen((req, res) => {
+    const path = req.url.split('?')[0];
+    if (path.endsWith('layer.json')) {
+      res.writeHead(metaStatus, {
+        'cache-control': 'public, max-age=31536000',
+      });
+      return res.end();
+    }
+    if (path.endsWith('.terrain')) {
+      res.writeHead(404);
+      return res.end('no tile');
+    }
+    res.writeHead(204);
+    res.end();
+  });
+  const front = await gev({
+    terrainUrls: [up.url],
+    imageryUrls: [up.url],
+    imageryConfig: [],
+  });
+  const root = `${front.url}/basemap/v/x/terrain/cesium-mesh/ellipsoid`;
+  const MISSING = 'public, max-age=86400';
+  try {
+    for (const status of [404, 204]) {
+      metaStatus = status;
+      for (const url of [
+        `${root}/layer.json`,
+        `${root}/layer.json?extensions=octvertexnormals&v=1.2.0`,
+      ]) {
+        for (const method of ['GET', 'HEAD']) {
+          const res = await fetch(url, { method });
+          await res.arrayBuffer();
+          assert.equal(res.status, status, `${method} ${url}`);
+          assert.equal(
+            res.headers.get('cache-control'),
+            'no-store',
+            `${method} ${status} ${url}`,
+          );
+        }
+      }
+    }
+    // Existing missing-tile policy is unchanged.
+    const terrainTile = await fetch(`${root}/3/1/1.terrain?v=1.2.0`);
+    await terrainTile.arrayBuffer();
+    assert.equal(terrainTile.status, 404);
+    assert.equal(terrainTile.headers.get('cache-control'), MISSING);
+    const imageryTile = await fetch(
+      `${front.url}/basemap/imagery/imagery-2025/3/1/1.webp`,
+    );
+    await imageryTile.arrayBuffer();
+    assert.equal(imageryTile.status, 204);
+    assert.equal(imageryTile.headers.get('cache-control'), MISSING);
+  } finally {
+    await front.close();
+    await up.close();
+  }
+});

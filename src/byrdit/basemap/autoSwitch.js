@@ -115,9 +115,13 @@ const READY_FRAMES = 2;
  *     the mode does not change)
  *   'photoreal' / 'byrdit-open' / unknown id, no user intent (share-link
  *     restore, whose parser defaults to 'photoreal'; recipe restore; an
- *     imagery-comparison lease release) -> leaves Esri/OSM/Bing back to auto,
- *     keeps a pin, re-evaluates
- *   any other available stack          -> passed through, auto off ('other')
+ *     imagery-comparison lease release) -> leaves Esri/OSM/Bing back to the
+ *     mode a restore-driven switch suspended (a lease from a pinned Google
+ *     or Open comes back pinned), otherwise to auto; keeps a pin;
+ *     re-evaluates. It never pins on its own.
+ *   any other available stack          -> passed through, auto off ('other');
+ *     the switch is tracked like a job, so a later selection waits for it
+ *     and then reconciles: the latest pick wins
  *   any other unavailable stack         -> passed through, mode unchanged
  *   controller-internal calls (fallbacks carry a private symbol option)
  *                                        -> passed through untouched
@@ -154,6 +158,12 @@ export function attachBasemapSwitching({
   let selection = 0;
   let busy = null;
   let again = false;
+  /**
+   * The mode a restore-driven switch to another map (an imagery-comparison
+   * lease, a recipe) suspended; a restore of Google/Open resumes it. Any
+   * user pick or mode selection clears it: the newer choice wins.
+   */
+  let suspendedMode = null;
   let dwellTimer = null;
   let pollTimer = null;
   let detached = false;
@@ -269,24 +279,32 @@ export function attachBasemapSwitching({
     return state;
   }
 
+  /**
+   * Make `job` the in-flight switch: selections wait for it, and an
+   * evaluation asked for meanwhile runs once it settles.
+   */
+  function track(job) {
+    const tracked = job.finally(() => {
+      if (busy === tracked) busy = null;
+      if (!busy && again && !detached) {
+        again = false;
+        evaluate();
+      }
+    });
+    busy = tracked;
+    return tracked;
+  }
+
   function run(action, options) {
     const my = ++seq;
-    const job = (
-      action === 'GOOGLE' ? enterGoogle(my, options) : leaveGoogle(my)
-    )
-      .catch((error) => {
-        notify(error?.message || String(error));
-        return controller.getState();
-      })
-      .finally(() => {
-        if (busy === job) busy = null;
-        if (again && !detached) {
-          again = false;
-          evaluate();
-        }
-      });
-    busy = job;
-    return job;
+    return track(
+      (action === 'GOOGLE' ? enterGoogle(my, options) : leaveGoogle(my)).catch(
+        (error) => {
+          notify(error?.message || String(error));
+          return controller.getState();
+        },
+      ),
+    );
   }
 
   function evaluate() {
@@ -321,6 +339,7 @@ export function attachBasemapSwitching({
    * in-flight switch first; a newer selection or pick wins.
    */
   async function select(mode, { explicit }) {
+    suspendedMode = null;
     machine.setMode(mode);
     const mine = ++selection;
     seq++;
@@ -366,23 +385,40 @@ export function attachBasemapSwitching({
     if (id === GOOGLE_STACK_ID || id === BYRDIT_OPEN_STACK_ID || !known) {
       // A restore (or an unknown id, which the controller would map to
       // Google): no pin, no root at global view; leaves another map.
-      return select(machine.mode === 'other' ? 'auto' : machine.mode, {
-        explicit: false,
-      });
+      const resume =
+        machine.mode === 'other' ? (suspendedMode ?? 'auto') : machine.mode;
+      return select(resume, { explicit: false });
     }
     // Unavailable: the controller reports it and nothing switches, so the
     // auto switch stays on.
     if (!controller.isStackAvailable(id)) return original(id, options);
+    // A user pick of another map is the newest choice; a restore-driven one
+    // (a lease, a recipe) suspends the current mode until a restore of
+    // Google/Open resumes it.
+    if (explicit) suspendedMode = null;
+    else if (machine.mode !== 'other') suspendedMode = machine.mode;
     machine.setMode('other');
     const mine = ++selection;
     seq++;
     timers.clearTimeout(dwellTimer);
+    // Issued now (synchronously: a lease reads the switch generation right
+    // after this call) and tracked: a selection made while it is pending
+    // waits for it, then reconciles with what it showed. Otherwise a slow
+    // provider could land after a newer pick and win.
+    let pending;
+    try {
+      pending = Promise.resolve(original(id, options));
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
     // A switch job this pick superseded may have committed the stack it left;
     // once the pick settles the machine follows what is actually shown.
-    return Promise.resolve(original(id, options)).then((state) => {
-      if (mine === selection) syncState();
-      return state;
-    });
+    return track(
+      pending.then((state) => {
+        if (mine === selection) syncState();
+        return state;
+      }),
+    );
   };
 
   controller.getStacks = () => [

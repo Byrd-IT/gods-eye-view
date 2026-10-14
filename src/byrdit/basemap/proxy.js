@@ -27,8 +27,10 @@ import { CONFIG_BUDGET, DEFAULT_SWITCH } from './config.js';
  *     fails the answer is 502, no-store.
  *   - Cache-Control is this route's policy, never the upstream's: tiles
  *     (200/304) public 30 d (versioned by archive/terrain version),
- *     layer.json and config.json 60 s must-revalidate, missing (204/404)
- *     1 d, anything else no-store.
+ *     layer.json and config.json 60 s must-revalidate, missing tiles
+ *     (204/404) 1 d, missing layer.json (204/404) no-store, anything else
+ *     no-store. The matched route says what is metadata, not the URL:
+ *     layer.json?extensions=...&v=... is still metadata.
  *   - Strict path patterns only, so no open proxy; GET/HEAD only; no keys,
  *     no cookies forwarded.
  *
@@ -338,7 +340,7 @@ export function createBasemapHandler(
     res.end(head ? undefined : body);
   }
 
-  async function relay(req, res, bases, path, { kind }) {
+  async function relay(req, res, bases, path, { kind, meta = false }) {
     const head = req.method === 'HEAD';
     const headers = {};
     for (const name of ['accept', 'if-none-match', 'if-modified-since'])
@@ -383,10 +385,11 @@ export function createBasemapHandler(
     for (const name of PASS_HEADERS) out[name] = got.headers.get(name);
     // The route decides caching; an upstream no-store/private/max-age is
     // never passed through (BASEMAP.md 4.5).
-    const meta = path.endsWith('layer.json');
+    // `meta` comes from the matched route, never from the upstream path,
+    // which may end in a query. Missing metadata must not stick: no-store.
     if (status === 200 || status === 304)
       out['cache-control'] = meta ? META_CACHE : TILE_CACHE;
-    else if (status === 204 || status === 404)
+    else if ((status === 204 || status === 404) && !meta)
       out['cache-control'] = MISSING_CACHE;
     else out['cache-control'] = 'no-store';
     if (body) out['content-length'] = String(body.length);
@@ -434,7 +437,7 @@ export function createBasemapHandler(
           res,
           settings.terrainUrls,
           `/v/${terrain[1]}/terrain/cesium-mesh/ellipsoid/${terrain[2]}${qs ? `?${qs}` : ''}`,
-          { kind: 'terrain' },
+          { kind: 'terrain', meta: terrain[2] === 'layer.json' },
         );
         return;
       }
