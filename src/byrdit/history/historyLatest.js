@@ -1,6 +1,7 @@
 import { HISTORY_INDICES as IDX } from './historyEs.js';
 import {
   COLLAPSE_CONCURRENCY,
+  COLLAPSE_FANOUT,
   latestPerKey,
   mapLimit,
 } from './historyCollapse.js';
@@ -83,12 +84,17 @@ const newestFirst = (a, b) =>
  */
 export function createLatestSlices({ es }) {
   /** Newest doc per key in the window, then the exact bbox rule above. */
-  async function newestIn(index, { window, extra = [], field, bbox, _source }) {
+  async function newestIn(
+    index,
+    { window, extra = [], field, bbox, _source, probe = false },
+  ) {
     if (!bbox) {
       return latestPerKey(es, index, {
         filter: [...window, ...extra],
         field,
         _source,
+        probe,
+        concurrency: probe ? COLLAPSE_FANOUT : COLLAPSE_CONCURRENCY,
       });
     }
     const cand = await latestPerKey(es, index, {
@@ -152,6 +158,8 @@ export function createLatestSlices({ es }) {
       window: [range('@timestamp', t - VESSELS_LOOKBACK_MS, t)],
       field: 'mmsi',
       bbox,
+      // ~32 k vessels in 35 min (2026-10-14): never one page
+      probe: true,
       _source: [
         'mmsi',
         '@timestamp',

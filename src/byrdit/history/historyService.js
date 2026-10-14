@@ -28,6 +28,7 @@ import {
 import { DAY_MS } from './historyParams.js';
 import { createLatestSlices } from './historyLatest.js';
 import { createTrackService } from './historyTrack.js';
+import { latestPerKey } from './historyCollapse.js';
 
 /**
  * /api/history query orchestration (gev-history DESIGN 4.3; card B9).
@@ -176,6 +177,35 @@ function tileOf(bboxArray) {
  * @param {() => number} [options.now]
  */
 export function createHistoryService({ es, now = () => Date.now() }) {
+  /**
+   * B10 performance gate (card t_7d16a765, DESIGN 4.3 benchmark): the
+   * poll/bucket reads page with collapse partitions (historyCollapse.js),
+   * not PIT + search_after. Measured on the live cluster, adsb.lol bucket
+   * reads, 20 distinct t over 3 days, in-process on S4: PIT p50/p95 global
+   * 792/4,902 ms, Texas 257/1,794 ms; term(snap) + collapse(icao24)
+   * 681/751 and 122/310; range(@timestamp) + collapse 705/783 and 129/178;
+   * identical row counts on every run. Opening a PIT touches every shard of
+   * every backing index (11, incl. the S1 warm hist ones) while a plain
+   * search skips non-matching shards (can_match), hence the tail. Used
+   * for the adsb.lol buckets (multi-index, 11 shards); the single-shard
+   * military / OpenSky streams keep PIT paging (military p95 285 ms through
+   * the hop). The `snap` term stays the filter (same answer as B9); one doc
+   * per icao24 per bucket, so collapse on it loses nothing. B9 semantics
+   * kept: at most maxRows rows, X-History-Truncated beyond.
+   */
+  async function rowsPerId(index, filter, field, maxRows) {
+    const r = await latestPerKey(es, index, {
+      filter,
+      field,
+      _source: AIRCRAFT_SOURCE,
+    });
+    return {
+      hits: r.hits.slice(0, maxRows),
+      total: r.hits.length,
+      truncated: r.truncated || r.hits.length > maxRows,
+    };
+  }
+
   /** day range key -> { at, days: Map(dayStartMs -> docs), latestMs } */
   const adsblolDays = new Map();
   let adsblolLast = null;
@@ -403,20 +433,17 @@ export function createHistoryService({ es, now = () => Date.now() }) {
   async function adsblolBucket(tMs, bbox, maxRows, extraFilter = []) {
     const snapS = adsblolSnapAtOrBefore(tMs);
     const snapMs = snapS * 1000;
-    const res = await es.searchAll(IDX.adsblol, {
-      query: {
-        bool: {
-          filter: [
-            { term: { snap: snapS } },
-            range('@timestamp', snapMs - 60_000, snapMs),
-            ...geoBox('location', bbox),
-            ...extraFilter,
-          ],
-        },
-      },
-      _source: AIRCRAFT_SOURCE,
+    const res = await rowsPerId(
+      IDX.adsblol,
+      [
+        { term: { snap: snapS } },
+        range('@timestamp', snapMs - 60_000, snapMs),
+        ...geoBox('location', bbox),
+        ...extraFilter,
+      ],
+      'icao24',
       maxRows,
-    });
+    );
     return { snapMs, ...res };
   }
 

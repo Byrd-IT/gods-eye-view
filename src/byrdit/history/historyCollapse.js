@@ -99,6 +99,10 @@ function partitionFilter(field, { lo, hi }) {
  * @param {string[]} [options._source]
  * @param {number} [options.pageSize]
  * @param {number} [options.maxQueries]
+ * @param {boolean} [options.probe] the caller expects more than one page
+ *   (e.g. the global vessels slice): the first request fetches only the
+ *   keys (to cut the partitions), not the documents
+ * @param {number} [options.concurrency]
  * @returns {Promise<{hits: object[], truncated: boolean, queries: number}>}
  */
 export async function latestPerKey(
@@ -113,23 +117,24 @@ export async function latestPerKey(
     maxQueries = COLLAPSE_MAX_QUERIES,
     concurrency = COLLAPSE_CONCURRENCY,
     fanout = COLLAPSE_FANOUT,
+    probe = false,
   },
 ) {
-  let queue = [{ lo: null, hi: null }];
+  let queue = [{ lo: null, hi: null, probe }];
   const hits = [];
   let queries = 0;
   let truncated = false;
   // the collapse key must be returned to cut a full partition
   const source = Array.isArray(_source)
     ? [...new Set([..._source, field])]
-    : [field];
+    : _source;
 
   async function run(part, next) {
     queries += 1;
     const json = await es.search(index, {
       size: pageSize,
       track_total_hits: false,
-      _source: source,
+      _source: part.probe ? [field] : source,
       query: {
         bool: { filter: [...filter, ...partitionFilter(field, part)] },
       },
@@ -138,7 +143,9 @@ export async function latestPerKey(
     });
     const page = json?.hits?.hits ?? [];
     if (page.length < pageSize) {
-      hits.push(...page);
+      if (part.probe)
+        next.push({ ...part, probe: false }); // need the docs
+      else hits.push(...page);
       return;
     }
     const parts = splitAtKeys(

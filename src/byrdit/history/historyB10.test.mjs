@@ -130,7 +130,16 @@ function createFakeEs(data, { maxWindow = 10_000, fail } = {}) {
         return true;
       });
     }
-    return hits.map((h, i) => ({ ...h, sort: [i] }));
+    const keep = Array.isArray(body._source) ? body._source : null;
+    return hits.map((h, i) => ({
+      ...h,
+      _source: keep
+        ? Object.fromEntries(
+            Object.entries(h._source).filter(([k]) => keep.includes(k)),
+          )
+        : h._source,
+      sort: [i],
+    }));
   }
   function aggregate(aggs, hits) {
     const out = {};
@@ -360,18 +369,31 @@ test('latestPerKey: exact newest per key at any group count (page 7, random keys
     apiKey: 'k',
     fetchImpl: fake.fetchImpl,
   });
-  for (const fanout of [2, 8]) {
+  for (const [fanout, probe, filter] of [
+    [2, false, []],
+    [8, false, []],
+    [8, true, []],
+    // probe on a partition that fits one page: the docs are fetched again
+    [8, true, [{ term: { k: docs[0].k } }]],
+  ]) {
     const r = await latestPerKey(
       es,
       'gev-history-vessels,gev-history-vessels-noaa',
       {
-        filter: [],
+        filter,
         field: 'k',
         pageSize: 7,
         fanout,
+        probe,
         maxQueries: 10_000,
       },
     );
+    if (filter.length) {
+      assert.equal(r.hits.length, 1);
+      assert.equal(r.hits[0]._source.n, want.get(docs[0].k).n);
+      assert.ok('@timestamp' in r.hits[0]._source, 'full docs, not the probe');
+      continue;
+    }
     assert.equal(r.truncated, false);
     const got = new Map(r.hits.map((h) => [h._source.k, h._source]));
     assert.equal(got.size, want.size);
