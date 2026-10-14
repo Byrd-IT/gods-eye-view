@@ -265,3 +265,70 @@ test('selection tells the controller who chose: chips/API are the user, restores
   await Promise.all([pick, restore, forced]);
   f.controls.destroy();
 });
+
+test('a degraded Byrd-IT Open: status reads "OPEN (degraded)" with the reason, chip synced on the next state', () => {
+  const container = makeElement();
+  container.ownerDocument = { createElement: (tag) => makeElement(tag) };
+  const statusElement = makeElement();
+  const health = { degradedReason: null };
+  const open = Object.defineProperty(
+    { id: 'byrdit-open', label: 'Byrd-IT Open', shortLabel: 'OPEN' },
+    'degradedReason',
+    { enumerable: true, get: () => health.degradedReason },
+  );
+  const stacks = () => [
+    { ...open, available: true },
+    { id: 'osm', label: 'OSM' },
+  ];
+  const listeners = new Set();
+  const controller = {
+    getStacks: stacks,
+    getActiveId: () => 'byrdit-open',
+    getState: (status) => ({
+      activeId: 'byrdit-open',
+      activeStack: open,
+      stacks: stacks(),
+      status: status || 'ready',
+      lastError: null,
+    }),
+    setStack: async () => controller.getState(),
+  };
+  const controls = createMapSourceControls({
+    container,
+    statusElement,
+    controller,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  });
+  const chip = container.children.find(
+    (el) => el.dataset.stackId === 'byrdit-open',
+  );
+  assert.equal(statusElement.textContent, 'OPEN');
+  assert.equal(statusElement.title, '');
+  assert.ok(!statusElement.classList.contains('warn'));
+
+  health.degradedReason = 'disk 81% over guard 80%';
+  for (const listener of listeners) listener();
+  assert.equal(statusElement.textContent, 'OPEN (degraded)');
+  assert.equal(statusElement.title, 'disk 81% over guard 80%');
+  assert.ok(statusElement.classList.contains('warn'));
+  assert.equal(chip.children[0].textContent, 'Byrd-IT Open (degraded)');
+  assert.equal(chip.title, 'disk 81% over guard 80%');
+
+  health.degradedReason = null;
+  for (const listener of listeners) listener();
+  assert.equal(statusElement.textContent, 'OPEN');
+  assert.equal(statusElement.title, '');
+  assert.ok(!statusElement.classList.contains('warn'));
+  assert.equal(chip.children[0].textContent, 'Byrd-IT Open');
+  controls.destroy();
+});
+
+test('a status tooltip set elsewhere is not cleared by a healthy stack', () => {
+  const f = fixture();
+  f.statusElement.title = 'from the shell';
+  f.controls.render(f.change('esri-imagery'));
+  assert.equal(f.statusElement.title, 'from the shell');
+});

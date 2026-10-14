@@ -32,15 +32,37 @@ export const BASEMAP_FALLBACK_ID = 'esri-imagery';
 export const BASEMAP_TILE_FAILURE_THRESHOLD = 3;
 
 /**
+ * The Byrd-IT Open descriptor with a live `degradedReason` (health.js): null
+ * while healthy or unknown, else the first health warning. The controller
+ * spreads descriptors in getStacks(), so every read sees the current value.
+ * Without a health source the shared frozen descriptor is used unchanged.
+ * @param {{degradedReason: string|null}|null} health
+ */
+export function byrditOpenDescriptor(health) {
+  if (!health) return BYRDIT_OPEN_STACK;
+  return Object.freeze(
+    Object.defineProperty({ ...BYRDIT_OPEN_STACK }, 'degradedReason', {
+      enumerable: true,
+      get: () => health.degradedReason ?? null,
+    }),
+  );
+}
+
+/**
  * Map source for the controller registry (same contract as the entries in
  * src/maps/defaultSources.js).
- * @param {{Cesium: object, config: ReturnType<import('./config.js').normalizeBasemapConfig>, fallbackTerrain: () => Promise<{provider: object}>}} options
+ * @param {{Cesium: object, config: ReturnType<import('./config.js').normalizeBasemapConfig>, fallbackTerrain: () => Promise<{provider: object}>, health?: {degradedReason: string|null}|null}} options
  */
-export function createBasemapMapSource({ Cesium, config, fallbackTerrain }) {
+export function createBasemapMapSource({
+  Cesium,
+  config,
+  fallbackTerrain,
+  health = null,
+}) {
   if (!config?.available)
     return createUnavailableBasemapSource(config?.unavailableReason);
   return {
-    descriptor: BYRDIT_OPEN_STACK,
+    descriptor: byrditOpenDescriptor(health),
     available: true,
     unavailableReason: null,
     imagery: () => createBasemapImageryProvider(Cesium, config.imagery),

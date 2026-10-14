@@ -18,6 +18,7 @@ import {
   mapStackChipModel,
   mapStackChipModels,
   renderMapStackChips,
+  syncMapStackChipStatus,
   syncMapStackChips,
 } from './mapStackChips.js';
 
@@ -368,12 +369,16 @@ test("models carry the stack's own reason and never invent an active chip", () =
     {
       id: 'osm',
       label: 'OSM',
+      text: 'OSM',
       available: true,
+      degraded: false,
+      degradedHint: '',
       active: false,
       requiresIon: false,
       requirement: '',
       unavailableHint: '',
       title: 'OSM',
+      ariaLabel: null,
     },
   ]);
 
@@ -593,5 +598,131 @@ test('the Visual Presets tray owns Map Source and the retired left panel is abse
     controls,
     /unsubscribe\?\.\(\)/,
     'component destruction releases its subscription',
+  );
+});
+
+test('degraded Byrd-IT Open: still selectable, "(degraded)" label, first warning as tooltip', () => {
+  const container = makeElement();
+  const selected = [];
+  const warning = 'terrain edge /healthz timed out (service active; busy?)';
+  const stacks = [
+    ...CONTROLLER_STACKS,
+    {
+      id: 'byrdit-open',
+      label: 'Byrd-IT Open',
+      available: true,
+      degradedReason: warning,
+    },
+  ];
+  const models = renderMapStackChips(container, stacks, {
+    activeId: 'osm',
+    doc,
+    onSelect: (id) => selected.push(id),
+  });
+  const model = models.find((m) => m.id === 'byrdit-open');
+  assert.equal(model.available, true);
+  assert.equal(model.degraded, true);
+  assert.equal(model.text, 'Byrd-IT Open (degraded)');
+  assert.equal(model.title, warning);
+  const chip = container.children.find(
+    (el) => el.dataset.stackId === 'byrdit-open',
+  );
+  assert.equal(chipText(chip), 'Byrd-IT Open (degraded)');
+  assert.equal(chip.title, warning);
+  assert.ok(chip.classList.contains('degraded'));
+  assert.ok(!chip.classList.contains('unavailable'));
+  assert.equal(chip.getAttribute('aria-disabled'), 'false');
+  assert.equal(
+    chip.getAttribute('aria-label'),
+    `Byrd-IT Open degraded: ${warning}`,
+  );
+  chip.click();
+  assert.deepEqual(selected, ['byrdit-open']);
+});
+
+test('degraded never overrides unavailable, and a blank reason is not degraded', () => {
+  const down = mapStackChipModel(
+    {
+      id: 'byrdit-open',
+      label: 'Byrd-IT Open',
+      available: false,
+      unavailableReason: 'Byrd-IT Open map service is unavailable (terrain)',
+      degradedReason: 'disk 81% over guard 80%',
+    },
+    null,
+  );
+  assert.equal(down.degraded, false);
+  assert.equal(down.title, 'Byrd-IT Open map service is unavailable (terrain)');
+  assert.equal(down.text, 'Byrd-IT Open');
+  for (const degradedReason of [null, '', '   ', 42]) {
+    const healthy = mapStackChipModel(
+      { id: 'byrdit-open', label: 'Byrd-IT Open', degradedReason },
+      null,
+    );
+    assert.equal(healthy.degraded, false);
+    assert.equal(healthy.text, 'Byrd-IT Open');
+    assert.equal(healthy.title, 'Byrd-IT Open');
+    assert.equal(healthy.ariaLabel, null);
+  }
+});
+
+test('syncMapStackChipStatus updates the rendered chip in place (health arrives later)', () => {
+  const container = makeElement();
+  const open = { id: 'byrdit-open', label: 'Byrd-IT Open', available: true };
+  const stacks = [...CONTROLLER_STACKS, open];
+  renderMapStackChips(container, stacks, { activeId: 'byrdit-open', doc });
+  const chip = container.children.find(
+    (el) => el.dataset.stackId === 'byrdit-open',
+  );
+  const before = container.children.slice();
+  assert.equal(chipText(chip), 'Byrd-IT Open');
+
+  const degraded = stacks.map((s) =>
+    s === open
+      ? { ...open, degradedReason: 'job edge-sync failed: HTTP 503' }
+      : s,
+  );
+  syncMapStackChipStatus(container, degraded);
+  assert.deepEqual(
+    container.children,
+    before,
+    'same chip elements, no re-render',
+  );
+  assert.equal(chipText(chip), 'Byrd-IT Open (degraded)');
+  assert.equal(chip.title, 'job edge-sync failed: HTTP 503');
+  assert.ok(chip.classList.contains('degraded'));
+  assert.ok(chip.classList.contains('active'), 'active state untouched');
+
+  chip.removeAttribute = (name) => delete chip.attributes[name];
+  syncMapStackChipStatus(container, stacks);
+  assert.equal(chipText(chip), 'Byrd-IT Open');
+  assert.equal(chip.title, 'Byrd-IT Open');
+  assert.ok(!chip.classList.contains('degraded'));
+  assert.equal(chip.getAttribute('aria-label'), null);
+
+  // Unavailable chips and unknown ids are left alone.
+  const bing = container.children.find(
+    (el) => el.dataset.stackId === 'bing-aerial',
+  );
+  const bingTitle = bing.title;
+  syncMapStackChipStatus(container, [
+    {
+      id: 'bing-aerial',
+      label: 'Bing Aerial',
+      available: false,
+      degradedReason: 'x',
+    },
+  ]);
+  assert.equal(bing.title, bingTitle);
+  syncMapStackChipStatus(null, stacks);
+  syncMapStackChipStatus(container, null);
+});
+
+test('the degraded chip style is amber and keeps the chip clickable', () => {
+  const css = readStylesheet(new URL('../style.css', import.meta.url));
+  assert.match(css, /\.map-stack-chip\.degraded\s*\{[^}]*border-color/);
+  assert.doesNotMatch(
+    css.match(/\.map-stack-chip\.degraded\s*\{[^}]*\}/)[0],
+    /not-allowed|pointer-events/,
   );
 });

@@ -89,6 +89,7 @@ async function crawl() {
     '/config',
     '/manifest.webmanifest',
     '/basemap/config.json',
+    '/basemap/health.json',
   ];
   queue.push(...jsonRoutes);
   const ref = /(?:from\s*|import\s*\(\s*|import\s+|src=|href=|url\()["']?(\/[^"')\s>]+)/g;
@@ -122,38 +123,44 @@ async function crawl() {
 }
 
 /**
- * BASEMAP.md 4.5: /basemap/config.json (only served with GEV_BASEMAP=1) holds
- * no credentials: no credential-named field, no key/token-shaped value, no
- * absolute upstream URL. Counts and field paths only.
+ * BASEMAP.md 4.5: /basemap/config.json and /basemap/health.json (only served
+ * with GEV_BASEMAP=1) hold no credentials: no credential-named field, no
+ * key/token-shaped value, no absolute upstream URL. Counts and field paths
+ * only.
  */
 async function checkBasemapConfig(origin) {
-  const res = await fetch(`${origin}/basemap/config.json`, {
-    headers: { Accept: 'application/json' },
-  });
-  const type = res.headers.get('content-type') ?? '';
-  const result = { status: res.status, served: false };
-  if (res.ok && /json/.test(type)) {
-    result.served = true;
-    let json = null;
-    try {
-      json = await res.json();
-    } catch {
-      result.parseError = true;
-    }
-    const findings = basemapConfigFindings(json);
-    result.credentialFields = findings.credentialFields.length;
-    result.credentialValues = findings.credentialValues.length;
-    result.externalUrls = findings.externalUrls.length;
-    const failures = report.contractFailures ?? (report.contractFailures = []);
-    if (result.parseError) failures.push('basemap config is not JSON');
-    if (findings.credentialFields.length)
-      failures.push(`basemap config credential fields: ${findings.credentialFields.join(',')}`);
-    if (findings.credentialValues.length)
-      failures.push(`basemap config credential-shaped values: ${findings.credentialValues.join(',')}`);
-    if (findings.externalUrls.length)
-      failures.push(`basemap config absolute URLs: ${findings.externalUrls.join(',')}`);
-  } else await res.body?.cancel();
-  report.basemapConfig = result;
+  for (const [path, name, reportKey] of [
+    ['/basemap/config.json', 'basemap config', 'basemapConfig'],
+    ['/basemap/health.json', 'basemap health', 'basemapHealth'],
+  ]) {
+    const res = await fetch(`${origin}${path}`, {
+      headers: { Accept: 'application/json' },
+    });
+    const type = res.headers.get('content-type') ?? '';
+    const result = { status: res.status, served: false };
+    if (res.ok && /json/.test(type)) {
+      result.served = true;
+      let json = null;
+      try {
+        json = await res.json();
+      } catch {
+        result.parseError = true;
+      }
+      const findings = basemapConfigFindings(json);
+      result.credentialFields = findings.credentialFields.length;
+      result.credentialValues = findings.credentialValues.length;
+      result.externalUrls = findings.externalUrls.length;
+      const failures = report.contractFailures ?? (report.contractFailures = []);
+      if (result.parseError) failures.push(`${name} is not JSON`);
+      if (findings.credentialFields.length)
+        failures.push(`${name} credential fields: ${findings.credentialFields.join(',')}`);
+      if (findings.credentialValues.length)
+        failures.push(`${name} credential-shaped values: ${findings.credentialValues.join(',')}`);
+      if (findings.externalUrls.length)
+        failures.push(`${name} absolute URLs: ${findings.externalUrls.join(',')}`);
+    } else await res.body?.cancel();
+    report[reportKey] = result;
+  }
 }
 
 /** Endpoint contract checks. Counts/booleans only; never prints a key. */

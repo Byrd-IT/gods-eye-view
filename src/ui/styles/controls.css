@@ -923,6 +923,16 @@
   cursor: not-allowed;
 }
 
+/* Working but reported degraded by its service (Byrd-IT Open health):
+   still selectable, amber edge, the reason is in the tooltip. */
+.map-stack-chip.degraded {
+  border-color: rgba(255, 184, 77, 0.55);
+}
+
+.map-stack-chip.degraded .map-stack-chip-label {
+  color: #ffb84d;
+}
+
 .map-stack-chip-req {
   font-size: 7px;
   letter-spacing: 0.3px;

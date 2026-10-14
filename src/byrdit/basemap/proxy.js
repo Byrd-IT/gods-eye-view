@@ -29,6 +29,14 @@ import { CONFIG_BUDGET, DEFAULT_BUILDINGS, DEFAULT_SWITCH } from './config.js';
  *     the buildings layer). The root tileset.json is metadata (60 s); the
  *     sub-tilesets and glb tiles sit under the versioned path (30 d); the
  *     edge's 410 for a stale implementation version is never cached.
+ *   - GET /basemap/health.json: the edge health report (P9 gb-refresh.py
+ *     health.json) reduced to state, chip text, up to 5 sanitized warnings
+ *     and the generated time. Nothing else (host, disk, jobs, info) passes,
+ *     URLs and key=value secrets inside warnings are redacted. Without
+ *     GEV_BASEMAP_HEALTH_URLS, or when every health URL fails, the answer is
+ *     200 {available:false, state:'unknown'}: health is advice and never
+ *     changes whether the stack is offered (that is config.json's job).
+ *     Cached 30 s (10 s when unknown); Cache-Control max-age=30.
  *   - URL lists are tried in order. The next one is tried on a network
  *     error, a timeout, a 5xx or a failure while reading the body
  *     (truncation, reset) - S4 active, then S5 standby. When every URL
@@ -48,6 +56,8 @@ import { CONFIG_BUDGET, DEFAULT_BUILDINGS, DEFAULT_SWITCH } from './config.js';
  *   GEV_BASEMAP_IMAGERY_URLS=a,b       imagery server base URLs
  *   GEV_BASEMAP_IMAGERY_CONFIG=x[,y]   imagery config.json: http(s) URL or absolute file path
  *   GEV_BASEMAP_BUILDINGS_URLS=a,b     buildings edge base URLs (P6, optional)
+ *   GEV_BASEMAP_HEALTH_URLS=a,b        full health.json URLs (P9, optional), e.g.
+ *                                      http://127.0.0.1:12355/health.json
  *   GEV_BASEMAP_BUILDINGS_BELOW_M      show buildings at or below this camera
  *                                      height (default 8000; hidden again
  *                                      above 1.25x)
@@ -72,6 +82,19 @@ const TILE_CACHE = 'public, max-age=2592000';
 const META_CACHE = 'max-age=60, must-revalidate';
 const MISSING_CACHE = 'public, max-age=86400';
 const PASS_HEADERS = ['content-type', 'etag', 'last-modified'];
+const HEALTH_CACHE = 'max-age=30, must-revalidate';
+const HEALTH_STATES = new Set(['ok', 'degraded', 'down']);
+const HEALTH_CHIPS = {
+  ok: 'OPEN',
+  degraded: 'OPEN (degraded)',
+  down: 'UNAVAILABLE',
+};
+export const HEALTH_BUDGET = Object.freeze({
+  attemptMs: 3_000,
+  composeMs: 3_500,
+});
+const MAX_HEALTH_WARNINGS = 5;
+const MAX_HEALTH_TEXT = 200;
 
 export function basemapEnabled(env = process.env) {
   return String(env.GEV_BASEMAP ?? '').trim() === '1';
@@ -100,6 +123,7 @@ export function basemapSettingsFromEnv(env = process.env) {
       .map((s) => s.trim())
       .filter(Boolean),
     buildingsUrls: urlList(env.GEV_BASEMAP_BUILDINGS_URLS),
+    healthUrls: urlList(env.GEV_BASEMAP_HEALTH_URLS),
     buildings: buildingsSettings(env),
     timeoutMs: num(env.GEV_BASEMAP_TIMEOUT_MS, 10_000),
     // Not env-tunable: the browser's timeout is built from the same numbers.
@@ -183,6 +207,67 @@ export function composeBuildings(raw, layer = buildingsSettings({})) {
     bounds: bbox(raw?.buildings?.bounds),
     ...layer,
   };
+}
+
+/**
+ * One health text for the browser: control characters removed, every
+ * absolute URL replaced by [url], key=value / Bearer secrets and key-shaped
+ * tokens redacted, at most MAX_HEALTH_TEXT characters.
+ */
+export function sanitizeHealthText(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S*/gi, '[url]')
+    .replace(/\/\/[^\s/@]+@\S*/g, '[url]')
+    .replace(
+      /\b(api[-_]?key|apikey|key|access_token|token|secret|passw\w*|auth\w*|sig|signature|cookie)(\s*[=:]\s*)\S+/gi,
+      '$1$2[redacted]',
+    )
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/AIza[0-9A-Za-z_-]{30,}/g, '[redacted]')
+    .replace(
+      /eyJ[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}(\.[0-9A-Za-z_-]*)?/g,
+      '[redacted]',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_HEALTH_TEXT);
+}
+
+export const UNKNOWN_HEALTH_REPORT = Object.freeze({
+  schema: 1,
+  available: false,
+  state: 'unknown',
+  chip: null,
+  warnings: [],
+  generated: null,
+});
+
+/**
+ * Edge health.json (P9 gb-refresh.py) -> browser health block. Field by
+ * field: host, disk, checks, jobs, info and anything else stay server-side.
+ */
+export function composeHealth(raw) {
+  const state = raw?.state;
+  if (!HEALTH_STATES.has(state))
+    return { ...UNKNOWN_HEALTH_REPORT, warnings: [] };
+  const chipText = sanitizeHealthText(raw?.gev_chip);
+  // ok/degraded chips are fixed strings; down may carry its explanation.
+  const chip =
+    state === 'down' && chipText.startsWith(HEALTH_CHIPS.down)
+      ? chipText
+      : HEALTH_CHIPS[state];
+  const warnings = (Array.isArray(raw?.warnings) ? raw.warnings : [])
+    .map(sanitizeHealthText)
+    .filter(Boolean)
+    .slice(0, MAX_HEALTH_WARNINGS);
+  const generated =
+    typeof raw?.generated === 'string' &&
+    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?Z$/.test(raw.generated)
+      ? raw.generated
+      : null;
+  return { schema: 1, available: true, state, chip, warnings, generated };
 }
 
 /** Imagery publish config (P2 schema 1) -> browser imagery block. */
@@ -362,6 +447,49 @@ export function createBasemapHandler(
   }
 
   const buildingsUrls = settings.buildingsUrls ?? [];
+  const healthUrls = settings.healthUrls ?? [];
+  let healthCached = null;
+  let healthPending = null;
+
+  /**
+   * Health: each URL is a full health.json URL (S4 local, S5, S1), tried in
+   * order inside HEALTH_BUDGET. Never throws; any failure is "unknown".
+   */
+  async function composeHealthReport() {
+    if (!healthUrls.length) return { ...UNKNOWN_HEALTH_REPORT, warnings: [] };
+    const deadline = AbortSignal.timeout(HEALTH_BUDGET.composeMs);
+    try {
+      return await upstream(healthUrls, '', {
+        timeoutMs: Math.min(settings.timeoutMs, HEALTH_BUDGET.attemptMs),
+        deadline,
+        read: async (response) => {
+          const health = composeHealth(await readJson(response));
+          if (!health.available) throw new Error('invalid health report');
+          return health;
+        },
+      });
+    } catch (error) {
+      log('[basemap] health unavailable:', error?.message || error);
+      return { ...UNKNOWN_HEALTH_REPORT, warnings: [] };
+    }
+  }
+
+  /** Cached 30 s when known, 10 s when not; concurrent misses share one fetch. */
+  async function health() {
+    if (healthCached && now() < healthCached.until) return healthCached.value;
+    healthPending ??= composeHealthReport()
+      .then((value) => {
+        healthCached = {
+          value,
+          until: now() + (value.available ? 30_000 : 10_000),
+        };
+        return value;
+      })
+      .finally(() => {
+        healthPending = null;
+      });
+    return healthPending;
+  }
 
   async function buildingsConfig(deadline) {
     if (!buildingsUrls.length) return { available: false };
@@ -504,6 +632,21 @@ export function createBasemapHandler(
           {
             'content-type': 'application/json; charset=utf-8',
             'cache-control': META_CACHE,
+            'content-length': String(Buffer.byteLength(body)),
+          },
+          body,
+          req.method === 'HEAD',
+        );
+        return;
+      }
+      if (url.pathname === '/basemap/health.json') {
+        const body = JSON.stringify(await health());
+        send(
+          res,
+          200,
+          {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': HEALTH_CACHE,
             'content-length': String(Buffer.byteLength(body)),
           },
           body,

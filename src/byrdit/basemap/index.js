@@ -10,6 +10,7 @@ import {
 import { createGoogleSession } from './googleSession.js';
 import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
 import { attachBuildings } from './buildings.js';
+import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
 
 /**
  * Entry point used by src/app/scene.js (BASEMAP.md 4.3).
@@ -29,6 +30,12 @@ import { attachBuildings } from './buildings.js';
  *   is available and the config offers buildings; it lives inside the open
  *   stack and follows the switch (never shown with Google, destroyed on any
  *   stack switch away from Byrd-IT Open).
+ *
+ *   Health (health.js, P9 follow-up): only when the stack is available,
+ *   /basemap/health.json is polled in the background (never awaited). When
+ *   the edge reports degraded (or down) the Byrd-IT Open chip reads
+ *   "(degraded)" with the first warning as its tooltip; a failed health
+ *   fetch changes nothing. Availability still comes only from config.json.
  */
 
 /** Tell the user each distinct status message at most once a minute. */
@@ -59,16 +66,23 @@ export async function openBasemap({
   doc = globalThis.document,
   fetchImpl = globalThis.fetch,
   notify = (message) => console.info('[Basemap]', message),
+  createHealthMonitor = createBasemapHealthMonitor,
 }) {
   if (!basemapFlagOn(doc)) return null;
   if (loaderStatus)
     loaderStatus.textContent = 'Loading the Byrd-IT Open map...';
   const config = await loadBasemapConfig({ fetchImpl, signal });
   signal?.throwIfAborted?.();
+  // Background only: the first poll starts here and is never awaited.
+  const health = config.available
+    ? createHealthMonitor({ load: () => loadBasemapHealth({ fetchImpl }) })
+    : null;
+  health?.start();
   const basemapSource = createBasemapMapSource({
     Cesium,
     config,
     fallbackTerrain: createKeylessTerrain,
+    health,
   });
   // Base map: the open stack, or Esri while /basemap is down.
   const baseId = config.available ? BYRDIT_OPEN_STACK_ID : BASEMAP_FALLBACK_ID;
@@ -105,9 +119,20 @@ export async function openBasemap({
     lazy: true,
     config,
     session,
+    health,
     initialStack: baseId,
     controllerOptions: { registry, initialStack: baseId },
     attach(controller) {
+      // A changed degraded reason re-announces the controller state so the
+      // chip row (mapSourceControls) re-reads getStacks().
+      if (health)
+        health.onChange = () => {
+          try {
+            controller._emitChange?.();
+          } catch {
+            /* the chip simply keeps its previous text */
+          }
+        };
       const machine = createSwitchMachine(config.switch);
       const detachSwitch = attachBasemapSwitching({
         controller,
@@ -128,6 +153,7 @@ export async function openBasemap({
             })
           : null;
       const detach = () => {
+        if (health) health.onChange = null;
         buildings?.();
         detachSwitch();
       };
@@ -136,6 +162,7 @@ export async function openBasemap({
       return detach;
     },
     destroy() {
+      health?.stop();
       if (!scene.isDestroyed?.()) session.destroy();
     },
   };
