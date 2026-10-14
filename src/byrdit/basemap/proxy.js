@@ -1,4 +1,4 @@
-import { CONFIG_BUDGET, DEFAULT_SWITCH } from './config.js';
+import { CONFIG_BUDGET, DEFAULT_BUILDINGS, DEFAULT_SWITCH } from './config.js';
 
 /**
  * Same-origin /basemap/* for the Byrd-IT Open map (BASEMAP.md 3.2, 4.2, 4.5).
@@ -21,6 +21,14 @@ import { CONFIG_BUDGET, DEFAULT_SWITCH } from './config.js';
  *     -> GEV_BASEMAP_TERRAIN_URLS (terrain edge, gev-basemap).
  *   - GET /basemap/imagery/<archive>/<z>/<x>/<y>.webp
  *     -> GEV_BASEMAP_IMAGERY_URLS (pmtiles serve; 204 for a missing tile).
+ *   - GET /basemap/v/<ver>/buildings/tileset.json,
+ *         /basemap/v/<ver>/buildings/<impl>/sub/<z>/<x>/<y>/tileset.json,
+ *         /basemap/v/<ver>/buildings/<impl>/<z>/<x>/<y>.glb
+ *     -> GEV_BASEMAP_BUILDINGS_URLS (gev-buildings edge, P5; optional: without
+ *     it the config says buildings.available:false and the stack runs without
+ *     the buildings layer). The root tileset.json is metadata (60 s); the
+ *     sub-tilesets and glb tiles sit under the versioned path (30 d); the
+ *     edge's 410 for a stale implementation version is never cached.
  *   - URL lists are tried in order. The next one is tried on a network
  *     error, a timeout, a 5xx or a failure while reading the body
  *     (truncation, reset) - S4 active, then S5 standby. When every URL
@@ -39,6 +47,10 @@ import { CONFIG_BUDGET, DEFAULT_SWITCH } from './config.js';
  *   GEV_BASEMAP_TERRAIN_URLS=a,b       terrain edge base URLs
  *   GEV_BASEMAP_IMAGERY_URLS=a,b       imagery server base URLs
  *   GEV_BASEMAP_IMAGERY_CONFIG=x[,y]   imagery config.json: http(s) URL or absolute file path
+ *   GEV_BASEMAP_BUILDINGS_URLS=a,b     buildings edge base URLs (P6, optional)
+ *   GEV_BASEMAP_BUILDINGS_BELOW_M      show buildings at or below this camera
+ *                                      height (default 8000; hidden again
+ *                                      above 1.25x)
  *   GEV_BASEMAP_AUTO=0|1               auto-switch (default 1)
  *   GEV_BASEMAP_ENTER_M, GEV_BASEMAP_LEAVE_M, GEV_BASEMAP_DWELL_MS
  *   GEV_BASEMAP_TIMEOUT_MS             per-upstream tile timeout (default 10000;
@@ -52,6 +64,8 @@ const TERRAIN_ROUTE =
   /^\/basemap\/v\/([A-Za-z0-9._-]{1,64})\/terrain\/cesium-mesh\/ellipsoid\/(layer\.json|\d{1,2}\/\d{1,8}\/\d{1,8}\.terrain)$/;
 const IMAGERY_ROUTE =
   /^\/basemap\/imagery\/([A-Za-z0-9._-]{1,64})\/(\d{1,2})\/(\d{1,8})\/(\d{1,8})\.webp$/;
+const BUILDINGS_ROUTE =
+  /^\/basemap\/v\/([A-Za-z0-9._-]{1,64})\/buildings\/(tileset\.json|[A-Za-z0-9._-]{1,32}\/sub\/\d{1,2}\/\d{1,8}\/\d{1,8}\/tileset\.json|[A-Za-z0-9._-]{1,32}\/\d{1,2}\/\d{1,8}\/\d{1,8}\.glb)$/;
 const NAME = /^[A-Za-z0-9._-]{1,64}$/;
 const TERRAIN_QUERY = new Set(['extensions', 'v']);
 const TILE_CACHE = 'public, max-age=2592000';
@@ -85,6 +99,8 @@ export function basemapSettingsFromEnv(env = process.env) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    buildingsUrls: urlList(env.GEV_BASEMAP_BUILDINGS_URLS),
+    buildings: buildingsSettings(env),
     timeoutMs: num(env.GEV_BASEMAP_TIMEOUT_MS, 10_000),
     // Not env-tunable: the browser's timeout is built from the same numbers.
     configAttemptMs: CONFIG_BUDGET.attemptMs,
@@ -97,6 +113,23 @@ export function basemapSettingsFromEnv(env = process.env) {
       reRootAgeMs: DEFAULT_SWITCH.reRootAgeMs,
       rootAttemptsPerHour: DEFAULT_SWITCH.rootAttemptsPerHour,
     },
+  };
+}
+
+function buildingsSettings(env) {
+  const showBelowM = num(
+    env.GEV_BASEMAP_BUILDINGS_BELOW_M,
+    DEFAULT_BUILDINGS.showBelowM,
+  );
+  return {
+    showBelowM,
+    hideAboveM:
+      showBelowM === DEFAULT_BUILDINGS.showBelowM
+        ? DEFAULT_BUILDINGS.hideAboveM
+        : showBelowM * 1.25,
+    maximumScreenSpaceError: DEFAULT_BUILDINGS.maximumScreenSpaceError,
+    cacheBytes: DEFAULT_BUILDINGS.cacheBytes,
+    maximumCacheOverflowBytes: DEFAULT_BUILDINGS.maximumCacheOverflowBytes,
   };
 }
 
@@ -124,6 +157,31 @@ export function composeTerrain(raw) {
     minzoom: int(raw?.terrain?.minzoom, 0, 22) ?? 0,
     maxzoom: int(raw?.terrain?.maxzoom, 0, 22) ?? 0,
     waterMask: /(^|[-_.])wm/.test(version),
+  };
+}
+
+/**
+ * Buildings edge /config.json (P5) -> browser buildings block. Field by
+ * field: the edge's copyright markup and anything else it sends stay
+ * server-side (the browser carries its own credit, credits.js).
+ */
+export function composeBuildings(raw, layer = buildingsSettings({})) {
+  const version = raw?.version;
+  const path = String(raw?.buildings?.path ?? '');
+  if (
+    typeof version !== 'string' ||
+    !NAME.test(version) ||
+    path !== `/v/${version}/buildings/tileset.json`
+  )
+    return { available: false };
+  return {
+    available: true,
+    version,
+    url: `/basemap/v/${version}/buildings/tileset.json`,
+    minzoom: int(raw?.buildings?.minzoom, 0, 22) ?? 0,
+    maxzoom: int(raw?.buildings?.maxzoom, 0, 22) ?? 0,
+    bounds: bbox(raw?.buildings?.bounds),
+    ...layer,
   };
 }
 
@@ -303,17 +361,42 @@ export function createBasemapHandler(
     return { available: false };
   }
 
+  const buildingsUrls = settings.buildingsUrls ?? [];
+
+  async function buildingsConfig(deadline) {
+    if (!buildingsUrls.length) return { available: false };
+    try {
+      return await upstream(buildingsUrls, '/config.json', {
+        timeoutMs: configAttemptMs,
+        deadline,
+        read: async (response) => {
+          const buildings = composeBuildings(
+            await readJson(response),
+            settings.buildings,
+          );
+          if (!buildings.available) throw new Error('invalid buildings config');
+          return buildings;
+        },
+      });
+    } catch (error) {
+      log('[basemap] buildings config unavailable:', error?.message || error);
+      return { available: false };
+    }
+  }
+
   async function compose() {
     const deadline = AbortSignal.timeout(budgetMs);
-    const [terrain, imagery] = await Promise.all([
+    const [terrain, imagery, buildings] = await Promise.all([
       terrainConfig(deadline),
       imageryConfig(deadline),
+      buildingsConfig(deadline),
     ]);
     return {
       schema: 1,
       generated: new Date(now()).toISOString(),
       terrain,
       imagery,
+      buildings,
       switch: { ...settings.switch },
     };
   }
@@ -323,7 +406,10 @@ export function createBasemapHandler(
     if (cached && now() < cached.until) return cached.value;
     pending ??= compose()
       .then((value) => {
-        const ok = value.terrain.available && value.imagery.available;
+        const ok =
+          value.terrain.available &&
+          value.imagery.available &&
+          (value.buildings.available || !buildingsUrls.length);
         cached = { value, until: now() + (ok ? 60_000 : 10_000) };
         return value;
       })
@@ -452,6 +538,17 @@ export function createBasemapHandler(
           {
             kind: 'imagery',
           },
+        );
+        return;
+      }
+      const buildings = BUILDINGS_ROUTE.exec(url.pathname);
+      if (buildings) {
+        await relay(
+          req,
+          res,
+          buildingsUrls,
+          `/v/${buildings[1]}/buildings/${buildings[2]}`,
+          { kind: 'buildings', meta: buildings[2] === 'tileset.json' },
         );
         return;
       }

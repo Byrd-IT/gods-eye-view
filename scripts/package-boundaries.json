@@ -2326,7 +2326,8 @@
       "src/byrdit/basemap/terrain.js",
       "src/byrdit/basemap/credits.js",
       "src/byrdit/basemap/googleSession.js",
-      "src/byrdit/basemap/autoSwitch.js"
+      "src/byrdit/basemap/autoSwitch.js",
+      "src/byrdit/basemap/buildings.js"
     ],
     "external": [
       "hls.js",

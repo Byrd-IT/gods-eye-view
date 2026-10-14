@@ -4,8 +4,10 @@
  * only while this stack is the one on screen (src/maps/credits.js), so
  * the credits come and go with the stack.
  *
- * NAIP was dropped (owner decision O2) and the buildings layer is not part of
- * this phase, so neither credit appears here.
+ * NAIP was dropped (owner decision O2), so no NAIP credit. The buildings
+ * credit is not part of the stack credit: the buildings layer registers
+ * BUILDINGS_CREDIT_HTML itself, only while buildings are on screen
+ * (buildings.js), because the layer comes and goes with the camera height.
  */
 
 export const GIBS_CREDIT = 'NASA GIBS / EOSDIS';
@@ -16,6 +18,13 @@ export const TERRAIN_CREDIT_HTML =
 export const WATER_MASK_CREDIT =
   '© OpenStreetMap contributors via Protomaps (ODbL)';
 export const CREDIT_SEPARATOR = ' | ';
+/** BASEMAP.md 4.4: buildings and map data (Overture buildings theme, P5). */
+export const BUILDINGS_CREDIT_TEXT =
+  '© OpenStreetMap contributors, Overture Maps Foundation (ODbL)';
+export const BUILDINGS_CREDIT_HTML =
+  'Buildings © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>,' +
+  ' <a href="https://docs.overturemaps.org/attribution/" target="_blank" rel="noopener">Overture Maps Foundation</a>' +
+  ' (<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>)';
 
 /** "Contains modified Copernicus Sentinel data <year>". */
 export function sentinelCredit(year) {

@@ -27,6 +27,26 @@ export const DEFAULT_SWITCH = Object.freeze({
 });
 
 /**
+ * Buildings layer defaults (P6; BASEMAP.md 4.2, 4.3 item 7). The layer is
+ * part of the Byrd-IT Open stack and is shown only while that stack is on
+ * screen and the camera is at or below showBelowM; it hides again above
+ * hideAboveM (hysteresis, so it does not flicker at the edge). The default
+ * show height equals the Google LEAVE height: in auto mode Google takes over
+ * at 5,000 m, so buildings are seen with the open globe from 8,000 m down
+ * to the Google switch, and all the way down when Open is pinned or Google
+ * is unavailable. Memory: Cesium's tile cache for this tileset is capped at
+ * cacheBytes (+ maximumCacheOverflowBytes while a view needs more).
+ */
+export const DEFAULT_BUILDINGS = Object.freeze({
+  showBelowM: 8_000,
+  hideAboveM: 10_000,
+  maximumScreenSpaceError: 16,
+  cacheBytes: 256 * 1024 * 1024,
+  maximumCacheOverflowBytes: 128 * 1024 * 1024,
+});
+const MAX_BUILDINGS_CACHE_BYTES = 1024 * 1024 * 1024;
+
+/**
  * Cold /basemap/config.json time budget, shared by the proxy and the browser
  * so a hung primary upstream still reaches the healthy standby before the
  * browser gives up (review t_d9b79b50 R2).
@@ -133,6 +153,7 @@ export function normalizeBasemapConfig(raw) {
       ),
     ),
   };
+  const buildings = normalizeBuildings(raw?.buildings);
   const reasons = [];
   if (!terrain.available) reasons.push('terrain');
   if (!imagery.available) reasons.push('imagery');
@@ -143,7 +164,41 @@ export function normalizeBasemapConfig(raw) {
       : null,
     terrain,
     imagery,
+    buildings,
     switch: sw,
+  };
+}
+
+/**
+ * The optional buildings block. A missing or invalid block only turns the
+ * buildings layer off; the stack itself stays available.
+ */
+export function normalizeBuildings(raw) {
+  const b = raw ?? {};
+  const url = samePath(b.url);
+  const showBelowM = positive(b.showBelowM, DEFAULT_BUILDINGS.showBelowM);
+  let hideAboveM = positive(b.hideAboveM, DEFAULT_BUILDINGS.hideAboveM);
+  if (hideAboveM <= showBelowM) hideAboveM = showBelowM * 1.25;
+  const sse = positive(
+    b.maximumScreenSpaceError,
+    DEFAULT_BUILDINGS.maximumScreenSpaceError,
+  );
+  const bytes = (value, fallback) =>
+    Math.min(MAX_BUILDINGS_CACHE_BYTES, Math.floor(positive(value, fallback)));
+  return {
+    available:
+      b.available === true && Boolean(url) && url.endsWith('/tileset.json'),
+    url: url && url.endsWith('/tileset.json') ? url : null,
+    version: typeof b.version === 'string' ? b.version : null,
+    bounds: bounds(b.bounds),
+    showBelowM,
+    hideAboveM,
+    maximumScreenSpaceError: Math.min(256, Math.max(1, sse)),
+    cacheBytes: bytes(b.cacheBytes, DEFAULT_BUILDINGS.cacheBytes),
+    maximumCacheOverflowBytes: bytes(
+      b.maximumCacheOverflowBytes,
+      DEFAULT_BUILDINGS.maximumCacheOverflowBytes,
+    ),
   };
 }
 

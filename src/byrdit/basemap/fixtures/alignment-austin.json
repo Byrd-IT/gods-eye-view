@@ -1,0 +1,704 @@
+{
+ "source": {
+  "buildings": "gev-buildings ov2026-09-23.1-v5-add 14/3743/6745.glb",
+  "terrain": "gev-basemap mh0.0.13-wm20261011 cesium-mesh/ellipsoid 14/7487/10947.terrain",
+  "buildingsInTile": 342
+ },
+ "tile": {
+  "z": 14,
+  "x": 7487,
+  "y": 10947
+ },
+ "buildings": [
+  {
+   "feature": 7,
+   "lon": -97.7404947,
+   "lat": 30.2678904,
+   "baseM": 122.27,
+   "groundElevM": 122.25,
+   "heightM": 11.6,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 17,
+   "lon": -97.7421615,
+   "lat": 30.2692908,
+   "baseM": 124.39,
+   "groundElevM": 124.39,
+   "heightM": 56.2,
+   "heightMethod": "explicit",
+   "name": "The Stephen F Austin Royal Sonesta Hotel"
+  },
+  {
+   "feature": 35,
+   "lon": -97.7402156,
+   "lat": 30.2760413,
+   "baseM": 140.2,
+   "groundElevM": 140.13,
+   "heightM": 8.9,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 61,
+   "lon": -97.7413519,
+   "lat": 30.2758459,
+   "baseM": 136.73,
+   "groundElevM": 136.67,
+   "heightM": 36.3,
+   "heightMethod": "explicit",
+   "name": "Tom C. Clark Building"
+  },
+  {
+   "feature": 77,
+   "lon": -97.7377662,
+   "lat": 30.2728497,
+   "baseM": 134.01,
+   "groundElevM": 133.96,
+   "heightM": 19,
+   "heightMethod": "explicit",
+   "name": "University of Texas Physicians Central Texas Trinity Professional Office"
+  },
+  {
+   "feature": 97,
+   "lon": -97.7360835,
+   "lat": 30.2698302,
+   "baseM": 119.63,
+   "groundElevM": 119.57,
+   "heightM": 5.97,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 116,
+   "lon": -97.7433889,
+   "lat": 30.272915,
+   "baseM": 141.01,
+   "groundElevM": 140.99,
+   "heightM": 13.3,
+   "heightMethod": "explicit",
+   "name": "Governor's Mansion"
+  },
+  {
+   "feature": 131,
+   "lon": -97.74363,
+   "lat": 30.2779721,
+   "baseM": 134.96,
+   "groundElevM": 134.87,
+   "heightM": 44.6,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 166,
+   "lon": -97.7365337,
+   "lat": 30.270128,
+   "baseM": 129.91,
+   "groundElevM": 129.85,
+   "heightM": 5.9,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 196,
+   "lon": -97.7351078,
+   "lat": 30.2716073,
+   "baseM": 120.69,
+   "groundElevM": 120.61,
+   "heightM": 6.4,
+   "heightMethod": "explicit",
+   "name": "Waterloo Greenway"
+  },
+  {
+   "feature": 214,
+   "lon": -97.7420327,
+   "lat": 30.2759297,
+   "baseM": 136.44,
+   "groundElevM": 136.38,
+   "heightM": 8.2,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 236,
+   "lon": -97.7423062,
+   "lat": 30.2716589,
+   "baseM": 134.93,
+   "groundElevM": 134.91,
+   "heightM": 44.8,
+   "heightMethod": "explicit",
+   "name": "AT&T"
+  },
+  {
+   "feature": 253,
+   "lon": -97.7440482,
+   "lat": 30.270854,
+   "baseM": 134.3,
+   "groundElevM": 134.29,
+   "heightM": 12.34,
+   "heightMethod": "explicit",
+   "name": "Historic US Fedral Courthouse"
+  },
+  {
+   "feature": 278,
+   "lon": -97.7441607,
+   "lat": 30.2763066,
+   "baseM": 134.87,
+   "groundElevM": 134.81,
+   "heightM": 9.9,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 316,
+   "lon": -97.7361479,
+   "lat": 30.2688904,
+   "baseM": 119.31,
+   "groundElevM": 119.25,
+   "heightM": 3.33,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 346,
+   "lon": -97.7392674,
+   "lat": 30.2675507,
+   "baseM": 120.86,
+   "groundElevM": 120.83,
+   "heightM": 11.6,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 363,
+   "lon": -97.7379805,
+   "lat": 30.2750735,
+   "baseM": 132.31,
+   "groundElevM": 132.23,
+   "heightM": 3,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 380,
+   "lon": -97.7378417,
+   "lat": 30.2675832,
+   "baseM": 121.43,
+   "groundElevM": 121.39,
+   "heightM": 6.4,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 395,
+   "lon": -97.7435926,
+   "lat": 30.2714914,
+   "baseM": 137.05,
+   "groundElevM": 137.04,
+   "heightM": 29.45,
+   "heightMethod": "explicit",
+   "name": "9th St Garage"
+  },
+  {
+   "feature": 438,
+   "lon": -97.7399154,
+   "lat": 30.2757854,
+   "baseM": 140.88,
+   "groundElevM": 140.81,
+   "heightM": 2,
+   "heightMethod": "explicit",
+   "name": "Capitol Extention"
+  },
+  {
+   "feature": 464,
+   "lon": -97.743732,
+   "lat": 30.2675462,
+   "baseM": 121.85,
+   "groundElevM": 121.84,
+   "heightM": 11.6,
+   "heightMethod": "explicit",
+   "name": "CVS Pharmacy"
+  },
+  {
+   "feature": 478,
+   "lon": -97.7447556,
+   "lat": 30.2740502,
+   "baseM": 137.97,
+   "groundElevM": 137.94,
+   "heightM": 7.21,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 505,
+   "lon": -97.743094,
+   "lat": 30.2767113,
+   "baseM": 136.58,
+   "groundElevM": 136.51,
+   "heightM": 4.85,
+   "heightMethod": "explicit",
+   "name": "Christ Science Church"
+  },
+  {
+   "feature": 536,
+   "lon": -97.7361366,
+   "lat": 30.2747896,
+   "baseM": 123.63,
+   "groundElevM": 123.53,
+   "heightM": 8.3,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 545,
+   "lon": -97.7414058,
+   "lat": 30.2699607,
+   "baseM": 126.19,
+   "groundElevM": 126.17,
+   "heightM": 16.3,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 568,
+   "lon": -97.743705,
+   "lat": 30.2764275,
+   "baseM": 135.57,
+   "groundElevM": 135.51,
+   "heightM": 21.4,
+   "heightMethod": "explicit",
+   "name": "Cornerstone Building"
+  },
+  {
+   "feature": 586,
+   "lon": -97.7416683,
+   "lat": 30.2717519,
+   "baseM": 129.72,
+   "groundElevM": 129.7,
+   "heightM": 10,
+   "heightMethod": "explicit",
+   "name": "Quiznos"
+  },
+  {
+   "feature": 620,
+   "lon": -97.7449111,
+   "lat": 30.2773022,
+   "baseM": 131.26,
+   "groundElevM": 131.19,
+   "heightM": 6.4,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 650,
+   "lon": -97.7418289,
+   "lat": 30.2782512,
+   "baseM": 139.24,
+   "groundElevM": 139.14,
+   "heightM": 24.4,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 680,
+   "lon": -97.7450933,
+   "lat": 30.277144,
+   "baseM": 130.62,
+   "groundElevM": 130.55,
+   "heightM": 12,
+   "heightMethod": "density",
+   "name": null
+  },
+  {
+   "feature": 699,
+   "lon": -97.7415023,
+   "lat": 30.269649,
+   "baseM": 125.72,
+   "groundElevM": 125.71,
+   "heightM": 105.46,
+   "heightMethod": "explicit",
+   "name": "Hyatt Centric Congress Avenue Austin"
+  },
+  {
+   "feature": 716,
+   "lon": -97.7441339,
+   "lat": 30.2720218,
+   "baseM": 138.3,
+   "groundElevM": 138.29,
+   "heightM": 11.53,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 746,
+   "lon": -97.736282,
+   "lat": 30.2679228,
+   "baseM": 118.98,
+   "groundElevM": 118.91,
+   "heightM": 12,
+   "heightMethod": "density",
+   "name": null
+  },
+  {
+   "feature": 779,
+   "lon": -97.7378791,
+   "lat": 30.2695605,
+   "baseM": 133.77,
+   "groundElevM": 133.73,
+   "heightM": 19.53,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 791,
+   "lon": -97.7446592,
+   "lat": 30.2712541,
+   "baseM": 137.06,
+   "groundElevM": 137.05,
+   "heightM": 6.97,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 812,
+   "lon": -97.7386456,
+   "lat": 30.2673786,
+   "baseM": 121.2,
+   "groundElevM": 121.16,
+   "heightM": 12.4,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 843,
+   "lon": -97.7406928,
+   "lat": 30.2718403,
+   "baseM": 129.46,
+   "groundElevM": 129.44,
+   "heightM": 38.8,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 871,
+   "lon": -97.7408105,
+   "lat": 30.2769857,
+   "baseM": 138.33,
+   "groundElevM": 138.24,
+   "heightM": 3.8,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 887,
+   "lon": -97.7361418,
+   "lat": 30.2763528,
+   "baseM": 123.76,
+   "groundElevM": 123.64,
+   "heightM": 4.4,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 902,
+   "lon": -97.7405911,
+   "lat": 30.2697746,
+   "baseM": 134.15,
+   "groundElevM": 134.13,
+   "heightM": 17.3,
+   "heightMethod": "explicit",
+   "name": "Central Presbyterian Church"
+  },
+  {
+   "feature": 929,
+   "lon": -97.7439141,
+   "lat": 30.2758367,
+   "baseM": 135.64,
+   "groundElevM": 135.59,
+   "heightM": 38.1,
+   "heightMethod": "explicit",
+   "name": "Penthouse Condos"
+  },
+  {
+   "feature": 953,
+   "lon": -97.7412075,
+   "lat": 30.2680905,
+   "baseM": 122.53,
+   "groundElevM": 122.51,
+   "heightM": 10.5,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 960,
+   "lon": -97.7361691,
+   "lat": 30.2714864,
+   "baseM": 123.61,
+   "groundElevM": 123.54,
+   "heightM": 23.2,
+   "heightMethod": "explicit",
+   "name": "Texas Association of Broadcasters Ann Arnold Center"
+  },
+  {
+   "feature": 983,
+   "lon": -97.7396957,
+   "lat": 30.2755528,
+   "baseM": 139.84,
+   "groundElevM": 139.77,
+   "heightM": 6.6,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1008,
+   "lon": -97.7388224,
+   "lat": 30.2688766,
+   "baseM": 128.74,
+   "groundElevM": 128.71,
+   "heightM": 30.9,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1059,
+   "lon": -97.7384794,
+   "lat": 30.269286,
+   "baseM": 128.12,
+   "groundElevM": 128.09,
+   "heightM": 5,
+   "heightMethod": "subtype",
+   "name": null
+  },
+  {
+   "feature": 1075,
+   "lon": -97.740907,
+   "lat": 30.2761157,
+   "baseM": 139.76,
+   "groundElevM": 139.69,
+   "heightM": 16.4,
+   "heightMethod": "explicit",
+   "name": "Texas Supreme Court Building"
+  },
+  {
+   "feature": 1104,
+   "lon": -97.7446431,
+   "lat": 30.2775208,
+   "baseM": 132.48,
+   "groundElevM": 132.4,
+   "heightM": 7.3,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1122,
+   "lon": -97.7386132,
+   "lat": 30.2719286,
+   "baseM": 137.48,
+   "groundElevM": 137.44,
+   "heightM": 23.7,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1145,
+   "lon": -97.736732,
+   "lat": 30.2703699,
+   "baseM": 130.65,
+   "groundElevM": 130.59,
+   "heightM": 5.25,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1172,
+   "lon": -97.7429333,
+   "lat": 30.2697049,
+   "baseM": 126.69,
+   "groundElevM": 126.69,
+   "heightM": 18.1,
+   "heightMethod": "explicit",
+   "name": "Tips Building"
+  },
+  {
+   "feature": 1197,
+   "lon": -97.7367429,
+   "lat": 30.2680856,
+   "baseM": 121.09,
+   "groundElevM": 121.03,
+   "heightM": 4.8,
+   "heightMethod": "explicit",
+   "name": "Better Days"
+  },
+  {
+   "feature": 1209,
+   "lon": -97.7398569,
+   "lat": 30.2677183,
+   "baseM": 121.81,
+   "groundElevM": 121.79,
+   "heightM": 9.3,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1231,
+   "lon": -97.7444447,
+   "lat": 30.2777302,
+   "baseM": 133.06,
+   "groundElevM": 132.98,
+   "heightM": 4.8,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1269,
+   "lon": -97.7433941,
+   "lat": 30.2774138,
+   "baseM": 135.32,
+   "groundElevM": 135.24,
+   "heightM": 14.7,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1282,
+   "lon": -97.74035,
+   "lat": 30.267909,
+   "baseM": 126.43,
+   "groundElevM": 126.41,
+   "heightM": 49.3,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1337,
+   "lon": -97.7375254,
+   "lat": 30.2684206,
+   "baseM": 123.01,
+   "groundElevM": 122.97,
+   "heightM": 8.87,
+   "heightMethod": "explicit",
+   "name": "The Salvation Army Center"
+  },
+  {
+   "feature": 1349,
+   "lon": -97.7388064,
+   "lat": 30.2676345,
+   "baseM": 122.28,
+   "groundElevM": 122.24,
+   "heightM": 4.9,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1371,
+   "lon": -97.7404088,
+   "lat": 30.2709656,
+   "baseM": 133.26,
+   "groundElevM": 133.24,
+   "heightM": 13.8,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1401,
+   "lon": -97.7382324,
+   "lat": 30.2747246,
+   "baseM": 132.91,
+   "groundElevM": 132.83,
+   "heightM": 5.4,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1434,
+   "lon": -97.7436623,
+   "lat": 30.2677277,
+   "baseM": 122.25,
+   "groundElevM": 122.25,
+   "heightM": 16.7,
+   "heightMethod": "explicit",
+   "name": "Yarings Building"
+  },
+  {
+   "feature": 1460,
+   "lon": -97.74363,
+   "lat": 30.2779721,
+   "baseM": 136.3,
+   "groundElevM": 136.21,
+   "heightM": 48.9,
+   "heightMethod": "explicit",
+   "name": "Texas Medical Association"
+  },
+  {
+   "feature": 1483,
+   "lon": -97.737429,
+   "lat": 30.2674623,
+   "baseM": 121.15,
+   "groundElevM": 121.1,
+   "heightM": 8.9,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1502,
+   "lon": -97.7417434,
+   "lat": 30.2715053,
+   "baseM": 128.59,
+   "groundElevM": 128.57,
+   "heightM": 12.5,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1521,
+   "lon": -97.7415505,
+   "lat": 30.2695327,
+   "baseM": 125.32,
+   "groundElevM": 125.31,
+   "heightM": 13.6,
+   "heightMethod": "explicit",
+   "name": "State Theatre"
+  },
+  {
+   "feature": 1540,
+   "lon": -97.74363,
+   "lat": 30.2767532,
+   "baseM": 134.7,
+   "groundElevM": 134.64,
+   "heightM": 5,
+   "heightMethod": "explicit",
+   "name": null
+  },
+  {
+   "feature": 1560,
+   "lon": -97.7406553,
+   "lat": 30.2712075,
+   "baseM": 132.31,
+   "groundElevM": 132.29,
+   "heightM": 32.33,
+   "heightMethod": "explicit",
+   "name": "KTBC Studios"
+  },
+  {
+   "feature": 1597,
+   "lon": -97.7410413,
+   "lat": 30.2708958,
+   "baseM": 127.78,
+   "groundElevM": 127.76,
+   "heightM": 18,
+   "heightMethod": "density",
+   "name": "Texas Public Policy Foundtation"
+  },
+  {
+   "feature": 1641,
+   "lon": -97.7405858,
+   "lat": 30.2679183,
+   "baseM": 122.61,
+   "groundElevM": 122.59,
+   "heightM": 12,
+   "heightMethod": "explicit",
+   "name": null
+  }
+ ]
+}

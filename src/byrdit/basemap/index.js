@@ -9,6 +9,7 @@ import {
 } from './stack.js';
 import { createGoogleSession } from './googleSession.js';
 import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
+import { attachBuildings } from './buildings.js';
 
 /**
  * Entry point used by src/app/scene.js (BASEMAP.md 4.3).
@@ -23,6 +24,11 @@ import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
  *     last resort of 4.3 item 6) and a greyed-out "Byrd-IT Open" chip with the
  *     reason. Google stays lazy and auto-switched: 0 roots at global view,
  *     1 for a close-up, the same retry limits. Chain: Google -> Esri.
+ *
+ *   The buildings layer (buildings.js, P6) is attached only when the stack
+ *   is available and the config offers buildings; it lives inside the open
+ *   stack and follows the switch (never shown with Google, destroyed on any
+ *   stack switch away from Byrd-IT Open).
  */
 
 /** Tell the user each distinct status message at most once a minute. */
@@ -103,7 +109,7 @@ export async function openBasemap({
     controllerOptions: { registry, initialStack: baseId },
     attach(controller) {
       const machine = createSwitchMachine(config.switch);
-      return attachBasemapSwitching({
+      const detachSwitch = attachBasemapSwitching({
         controller,
         viewer,
         session,
@@ -111,6 +117,23 @@ export async function openBasemap({
         notify: (message) =>
           tell(message, () => controller._onError?.(message)),
       });
+      const buildings =
+        config.available && config.buildings?.available
+          ? attachBuildings({
+              Cesium,
+              viewer,
+              controller,
+              session,
+              config: config.buildings,
+            })
+          : null;
+      const detach = () => {
+        buildings?.();
+        detachSwitch();
+      };
+      detach.evaluate = detachSwitch.evaluate;
+      detach.buildings = buildings;
+      return detach;
     },
     destroy() {
       if (!scene.isDestroyed?.()) session.destroy();
