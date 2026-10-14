@@ -433,6 +433,23 @@ if (MODE !== 'real') {
       Date.parse(st.time) === Date.parse(htValue),
     `reload restores ht ${htValue} -> ${st.time}`,
   );
+  // after a reload the "Restoring shared view" splash can still cover the
+  // page: wait until the LIVE button is the element under its own centre
+  await main.page
+    .waitForFunction(
+      () => {
+        const b = document.querySelector('.gev-hist-live');
+        if (!b) return false;
+        const r = b.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          r.left + r.width / 2,
+          r.top + r.height / 2,
+        );
+        return Boolean(hit && (hit === b || b.contains(hit)));
+      },
+      { timeout: 180000 },
+    )
+    .catch(() => say('LIVE button still covered after 180 s'));
   await shot(main.page, '06-reload-restores-ht');
   await main.page.click('.gev-hist-live');
   await sleep(500);
