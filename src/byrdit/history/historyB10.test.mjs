@@ -4,7 +4,12 @@ import { createHistoryApi } from './historyApi.js';
 import { compareKeys, latestPerKey, splitAtKeys } from './historyCollapse.js';
 import { createHistoryCache, bodyEtag, etagMatches } from './historyCache.js';
 import { feedHealth } from './historyHealth.js';
-import { mergeTrackPoints, thinTrack } from './historyTrack.js';
+import {
+  mergeTrackPoints,
+  sampleIntervalMs,
+  thinTrack,
+  TRACK_READ_MAX,
+} from './historyTrack.js';
 import { MAX_TRACK_POINTS } from './historyParams.js';
 import { normalizeAircraftTrack } from '../../sources/live/aircraft.js';
 
@@ -165,6 +170,50 @@ function createFakeEs(data, { maxWindow = 10_000, fail } = {}) {
         out[name] = {
           doc_count: hs.length,
           ...(spec.aggs ? aggregate(spec.aggs, hs) : {}),
+        };
+      } else if (spec.date_histogram) {
+        // fixed_interval / offset in ms, min_doc_count >= 1 (what /track uses)
+        const dh = spec.date_histogram;
+        const msOf = (v) => Number(/^(\d+)ms$/.exec(v ?? '0ms')[1]);
+        const iv = msOf(dh.fixed_interval);
+        const off = msOf(dh.offset);
+        const groups = new Map();
+        for (const h of hits) {
+          const t = dateOf(get(h._source, dh.field));
+          const k = Math.floor((t - off) / iv) * iv + off;
+          if (!groups.has(k)) groups.set(k, []);
+          groups.get(k).push(h);
+        }
+        if (groups.size > 65_536) throw new Error('too_many_buckets');
+        out[name] = {
+          buckets: [...groups]
+            .sort((a, b) => a[0] - b[0])
+            .filter(([, hs]) => hs.length >= (dh.min_doc_count ?? 0))
+            .map(([key, hs]) => ({
+              key,
+              doc_count: hs.length,
+              ...(spec.aggs ? aggregate(spec.aggs, hs) : {}),
+            })),
+        };
+      } else if (spec.top_hits) {
+        const keep = Array.isArray(spec.top_hits._source)
+          ? spec.top_hits._source
+          : null;
+        out[name] = {
+          hits: {
+            hits: sortHits(hits, spec.top_hits.sort)
+              .slice(0, spec.top_hits.size ?? 3)
+              .map((h) => ({
+                ...h,
+                _source: keep
+                  ? Object.fromEntries(
+                      Object.entries(h._source).filter(([k]) =>
+                        keep.includes(k),
+                      ),
+                    )
+                  : h._source,
+              })),
+          },
         };
       } else if (spec.max) {
         const v = hits.map((h) => get(h._source, spec.max.field));
@@ -952,7 +1001,9 @@ test('track thinning: minGapSec and the 5,000-point cap (first/last kept)', () =
     ),
   );
   assert.equal(gapped.at(-1).tMs, 19_999_000);
-  // same-source points are never collapsed, mixed within 5 s are
+  // every adsb.lol point within 5 s of the OpenSky point collapses into it
+  // (B10 review R1: 0 and 2,000 are both within 5 s of 4,000, not only the
+  // neighbour); a lone adsb.lol point far from OpenSky stays
   const m = mergeTrackPoints([
     { tMs: 0, source: 'adsblol' },
     { tMs: 2_000, source: 'adsblol' },
@@ -963,11 +1014,214 @@ test('track thinning: minGapSec and the 5,000-point cap (first/last kept)', () =
   assert.deepEqual(
     m.map((p) => [p.tMs, p.source]),
     [
-      [0, 'adsblol'],
       [4_000, 'opensky'],
       [20_000, 'adsblol'],
     ],
   );
+});
+
+// ------------------------------------------ B10 review R1-R3 regressions
+test('R1 merge: adsb.lol clusters on BOTH sides of an OpenSky point collapse into it; 5 s boundary', () => {
+  const a = (tMs) => ({ tMs, source: 'adsblol' });
+  const o = (tMs) => ({ tMs, source: 'opensky' });
+  // the review case: [adsblol@0, adsblol@1000, opensky@4000] -> opensky only
+  assert.deepEqual(
+    mergeTrackPoints([a(0), a(1_000), o(4_000)]).map((p) => [p.tMs, p.source]),
+    [[4_000, 'opensky']],
+  );
+  const m = mergeTrackPoints([
+    a(0), // 4 s before 4,000: dropped
+    a(1_000), // dropped
+    o(4_000),
+    a(7_000), // 3 s after: dropped
+    a(8_500), // 4.5 s after: dropped
+    a(9_500), // 5.5 s after: kept
+    a(20_000),
+    a(21_000),
+    a(24_999), // 5.001 s before 30,000: kept
+    a(25_000), // exactly 5 s: collapses (tie window is inclusive)
+    o(30_000),
+    o(32_000), // same source as 30,000: never collapsed with it
+    a(37_000), // 5 s after 32,000: dropped
+    a(37_001), // kept
+  ]);
+  assert.deepEqual(
+    m.map((p) => [p.tMs, p.source]),
+    [
+      [4_000, 'opensky'],
+      [9_500, 'adsblol'],
+      [20_000, 'adsblol'],
+      [21_000, 'adsblol'],
+      [24_999, 'adsblol'],
+      [30_000, 'opensky'],
+      [32_000, 'opensky'],
+      [37_001, 'adsblol'],
+    ],
+  );
+});
+
+test('R1 merge: randomized, equals the brute-force rule (no cross-source pair within 5 s, every OpenSky point kept)', () => {
+  const rnd = seeded(10);
+  for (let round = 0; round < 50; round += 1) {
+    const pts = Array.from({ length: 60 }, () => ({
+      tMs: Math.floor(rnd() * 120) * 1_000,
+      source: rnd() < 0.3 ? 'opensky' : 'adsblol',
+    }));
+    const os = pts.filter((p) => p.source === 'opensky');
+    const expected = pts
+      .filter(
+        (p) =>
+          p.source === 'opensky' ||
+          !os.some((q) => Math.abs(q.tMs - p.tMs) <= 5_000),
+      )
+      .map((p) => `${p.tMs}:${p.source}`)
+      .sort();
+    const got = mergeTrackPoints(pts);
+    assert.deepEqual(got.map((p) => `${p.tMs}:${p.source}`).sort(), expected);
+    for (let i = 1; i < got.length; i += 1)
+      assert.ok(got[i].tMs >= got[i - 1].tMs, 'time sorted');
+  }
+});
+
+test('R1 track: API answer has no adsb.lol point within 5 s of an OpenSky point', async () => {
+  const doc = (ms, source) => ({
+    '@timestamp': ms,
+    snap: Math.floor(ms / 1000),
+    icao24: 'cafe01',
+    location: { lat: 30 + ms / 1e9, lon: -97 },
+    source,
+  });
+  const base = DAY0 + 600_000;
+  const { api } = makeApi({
+    'gev-history-aircraft-adsblol': [
+      doc(base, 'adsblol'),
+      doc(base + 1_000, 'adsblol'),
+      doc(base + 8_000, 'adsblol'),
+      doc(base + 60_000, 'adsblol'),
+    ],
+    'gev-history-aircraft-opensky': [doc(base + 4_000, 'opensky')],
+  });
+  const r = await call(
+    api,
+    `/api/history/track?feed=aircraft&id=cafe01&from=${iso(DAY0)}&to=${iso(DAY0 + 3_600_000)}`,
+  );
+  assert.equal(r.status, 200, r.body);
+  assert.deepEqual(
+    r.json.path.map((p) => [p[0] - base / 1000, p[6]]),
+    [
+      [4, 'opensky'],
+      [60, 'adsblol'],
+    ],
+  );
+});
+
+test('R2 aircraft slice: maxRows keeps the same newest rows whatever order the collapse partitions finish', async () => {
+  const T0 = Date.UTC(2026, 9, 10, 12, 0, 0); // a 60 s bucket end, days old
+  const snapS = T0 / 1000;
+  // 10,500 aircraft in one bucket: more than one collapse page (10,000)
+  const docs = Array.from({ length: 10_500 }, (_, i) => ({
+    '@timestamp': T0 - 1_000 - (i % 50) * 1_000, // ties: 210 per instant
+    snap: snapS,
+    icao24: (0x100000 + i * 97).toString(16).padStart(6, '0'),
+    location: { lat: 30, lon: -97 },
+    source: 'adsblol',
+  }));
+  const expected = [...docs]
+    .sort(
+      (x, y) =>
+        y['@timestamp'] - x['@timestamp'] ||
+        (x.icao24 < y.icao24 ? -1 : x.icao24 > y.icao24 ? 1 : 0),
+    )
+    .slice(0, 50)
+    .map((d) => d.icao24);
+  const answers = [];
+  for (const seed of [1, 2, 3, 4]) {
+    const rnd = seeded(seed);
+    const { api } = makeApi(
+      { 'gev-history-aircraft-adsblol': docs },
+      {
+        fake: {
+          // delay every collapse request by a seeded random amount
+          fail: async (u, init) => {
+            const body = init.body ? JSON.parse(init.body) : null;
+            if (body?.collapse)
+              await new Promise((r) => setTimeout(r, Math.floor(rnd() * 25)));
+            return null;
+          },
+        },
+      },
+    );
+    const r = await call(
+      api,
+      `/api/history/slice?feed=aircraft&t=${iso(T0)}&maxRows=50`,
+    );
+    assert.equal(r.status, 200, r.body);
+    assert.equal(r.headers['x-history-truncated'], '1');
+    answers.push(r.json.states.map((s) => s[0]));
+  }
+  for (const ids of answers) assert.deepEqual(ids, expected);
+});
+
+test('R3 track: a dense range beyond the read cap is sampled end to end (first + last kept, <= 5,000 points, no prefix cut)', async () => {
+  const N = 60_000; // > TRACK_READ_MAX (50,000)
+  assert.ok(N > TRACK_READ_MAX);
+  const STEP = 15_000;
+  const from = Date.UTC(2026, 8, 20);
+  const to = from + (N - 1) * STEP; // 10.4 days, inside the 31 d cap
+  const docs = Array.from({ length: N }, (_, i) => ({
+    '@timestamp': from + i * STEP,
+    snap: Math.floor((from + i * STEP) / 1000),
+    icao24: 'de05e1',
+    location: { lat: 30 + i / 1e6, lon: -97 },
+    source: 'adsblol',
+  }));
+  const { api, fake } = makeApi({ 'gev-history-aircraft-adsblol': docs });
+  const r = await call(
+    api,
+    `/api/history/track?feed=aircraft&id=de05e1&from=${iso(from)}&to=${iso(to)}`,
+  );
+  assert.equal(r.status, 200, r.body);
+  const path = r.json.path;
+  assert.ok(path.length <= MAX_TRACK_POINTS, `${path.length} points`);
+  assert.ok(path.length > 4_000, `${path.length} points`);
+  assert.equal(r.json.startTime, from / 1000, 'first point of the range');
+  assert.equal(r.json.endTime, to / 1000, 'last point of the range');
+  assert.equal(path[0][0], from / 1000);
+  assert.equal(path.at(-1)[0], to / 1000);
+  // representative: no hole wider than two sampling intervals anywhere
+  const ivS = sampleIntervalMs(from, to) / 1000;
+  for (let i = 1; i < path.length; i += 1) {
+    assert.ok(path[i][0] > path[i - 1][0], 'time ascending');
+    assert.ok(
+      path[i][0] - path[i - 1][0] <= 2 * ivS + STEP / 1000,
+      `gap at ${i}`,
+    );
+  }
+  // the second half of the range is as well covered as the first
+  const mid = (from + to) / 2000;
+  const late = path.filter((p) => p[0] > mid).length;
+  assert.ok(late > path.length * 0.45, `late half ${late}/${path.length}`);
+  assert.equal(r.headers['x-history-sampled'], '1');
+  assert.equal(r.headers['x-history-truncated'], undefined);
+  // bounded: the PIT read stops after its first page, one sampling request
+  const dense = esSearches(fake).filter(
+    (c) => c.body?.query && JSON.stringify(c.body.query).includes('de05e1'),
+  );
+  assert.ok(dense.some((c) => c.body.aggs?.t?.date_histogram));
+  const pitPages = fake.calls.filter(
+    (c) =>
+      c.path === '/_search' && JSON.stringify(c.body?.query).includes('de05e1'),
+  );
+  assert.ok(pitPages.length <= 2, `${pitPages.length} PIT pages`); // adsb.lol + opensky
+});
+
+test('R3 track: sampling interval bounds the bucket count and honours minGapSec', () => {
+  const day = 86_400_000;
+  for (const range of [3_600_000, day, 31 * day]) {
+    const iv = sampleIntervalMs(0, range);
+    assert.ok(Math.floor(range / iv) + 1 <= MAX_TRACK_POINTS, String(range));
+  }
+  assert.equal(sampleIntervalMs(0, day, 600_000), 600_000);
 });
 
 // --------------------------------------------------------------- abuse

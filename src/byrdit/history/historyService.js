@@ -150,6 +150,21 @@ function geoShapeBox(field, bbox) {
 
 const sourceOf = (hit) => hit?._source ?? {};
 
+const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Newest @timestamp first; ties by the key field, then _id (codepoint). */
+export function newestFirstByKey(x, y, field) {
+  return (
+    (docTimeMs(sourceOf(y)) ?? -Infinity) -
+      (docTimeMs(sourceOf(x)) ?? -Infinity) ||
+    cmpStr(
+      String(sourceOf(x)[field] ?? ''),
+      String(sourceOf(y)[field] ?? ''),
+    ) ||
+    cmpStr(String(x?._id ?? ''), String(y?._id ?? ''))
+  );
+}
+
 function parseMessage(text) {
   if (typeof text !== 'string' || text.length > 8192) return null;
   try {
@@ -199,8 +214,12 @@ export function createHistoryService({ es, now = () => Date.now() }) {
       field,
       _source: AIRCRAFT_SOURCE,
     });
+    // B10 review R2: latestPerKey appends partitions in COMPLETION order
+    // (concurrent requests), so cut maxRows only after a deterministic
+    // order: newest first, then the key, then _id. Same data -> same rows.
+    const hits = [...r.hits].sort((x, y) => newestFirstByKey(x, y, field));
     return {
-      hits: r.hits.slice(0, maxRows),
+      hits: hits.slice(0, maxRows),
       total: r.hits.length,
       truncated: r.truncated || r.hits.length > maxRows,
     };
