@@ -78,10 +78,16 @@ export function cameraHeight(viewer) {
   return Number.isFinite(ground) ? carto.height - ground : carto.height;
 }
 
-/** Transient user activation: a click/tap/key within the last few seconds. */
-export function userGestureActive(nav = globalThis.navigator) {
-  return nav?.userActivation?.isActive === true;
-}
+/**
+ * `setStack` option a caller passes to say who chose the stack:
+ *   'user'    - a chip, the dropdown, voice or the API (src/ui/mapSourceControls.js
+ *               passes it for every selection that also updates the share link)
+ *   'restore' - a share link, a recipe or scene restore, a lease release
+ * Anything without `intent: 'user'` counts as a restore. Transient browser
+ * activation (navigator.userActivation) is NOT used: a restore that a click
+ * started would look like a user pick.
+ */
+export const USER_INTENT = 'user';
 
 function hasPrivateOptions(options) {
   return (
@@ -92,16 +98,33 @@ function hasPrivateOptions(options) {
 }
 
 /**
+ * Frames the no-flash wait needs after a show/hide before it trusts
+ * `tilesLoaded`: a hidden tileset keeps the value of the last frame it drew,
+ * and the globe's load queues describe the previous imagery layer until the
+ * next frame selects tiles again.
+ */
+const READY_FRAMES = 2;
+
+/**
  * Wire the switch to a MapSourceController (decorates THIS instance only).
  *
- * setStack routing (chips, share links, scenes):
- *   'basemap-auto'           -> auto mode
- *   'photoreal' / 'byrdit-open' from a user gesture -> pin Google / Open
- *   'photoreal' / 'byrdit-open' without a gesture (share-link restore, whose
- *     parser defaults to 'photoreal') -> stays in auto, re-evaluates
- *   anything else            -> passed through, auto off ('other')
+ * setStack routing (chips, share links, scenes, leases):
+ *   'basemap-auto'                      -> auto mode
+ *   'photoreal' / 'byrdit-open', intent 'user' -> pin Google / Open
+ *     (an unavailable one is passed through: the controller reports why and
+ *     the mode does not change)
+ *   'photoreal' / 'byrdit-open' / unknown id, no user intent (share-link
+ *     restore, whose parser defaults to 'photoreal'; recipe restore; an
+ *     imagery-comparison lease release) -> leaves Esri/OSM/Bing back to auto,
+ *     keeps a pin, re-evaluates
+ *   any other available stack          -> passed through, auto off ('other')
+ *   any other unavailable stack         -> passed through, mode unchanged
  *   controller-internal calls (fallbacks carry a private symbol option)
- *                            -> passed through untouched
+ *                                        -> passed through untouched
+ *
+ * Every selection reconciles the machine with the stack the controller
+ * really shows: when they disagree (back from Esri, a lease, a superseded
+ * switch) the stack the mode asks for is applied at once, without dwell.
  *
  * @returns {() => void} detach
  */
@@ -111,9 +134,9 @@ export function attachBasemapSwitching({
   session,
   machine,
   heightOf = () => cameraHeight(viewer),
-  isUserGesture = () => userGestureActive(),
   notify = () => {},
   timers = globalThis,
+  now = Date.now,
   revealTimeoutMs = 3_000,
   pollMs = 1_000,
 }) {
@@ -125,7 +148,10 @@ export function attachBasemapSwitching({
   const ownGetStacks = Object.hasOwn(controller, 'getStacks')
     ? controller.getStacks
     : null;
+  /** Invalidates in-flight switch jobs. */
   let seq = 0;
+  /** Invalidates older selections still waiting for a job to finish. */
+  let selection = 0;
   let busy = null;
   let again = false;
   let dwellTimer = null;
@@ -137,66 +163,117 @@ export function attachBasemapSwitching({
     controller.isStackAvailable(BYRDIT_OPEN_STACK_ID)
       ? BYRDIT_OPEN_STACK_ID
       : 'esri-imagery';
+  const stackFor = (state) =>
+    state === 'GOOGLE' ? GOOGLE_STACK_ID : openTarget();
 
-  function waitUntil(test) {
+  /** The machine follows what the controller actually shows. */
+  function syncState() {
+    if (detached) return;
+    machine.commit(
+      controller.getActiveId() === GOOGLE_STACK_ID ? 'GOOGLE' : 'OPEN',
+    );
+  }
+
+  /**
+   * Resolve once `test()` holds for a frame drawn AFTER this call (at least
+   * READY_FRAMES postRender events), or after revealTimeoutMs, or when the
+   * job is superseded. Keeps frames coming while it waits (the render
+   * governor may have the scene in requestRenderMode).
+   */
+  function waitRendered(test, my) {
+    const scene = viewer?.scene;
     return new Promise((resolve) => {
-      if (test()) return resolve(true);
-      const started = Date.now();
-      const id = timers.setInterval(() => {
-        if (detached || test() || Date.now() - started >= revealTimeoutMs) {
-          timers.clearInterval(id);
-          resolve(test());
-        }
-      }, 100);
+      let frames = 0;
+      let done = false;
+      let interval = null;
+      let removeFrame = null;
+      const started = now();
+      const finish = () => {
+        if (done) return;
+        done = true;
+        timers.clearInterval(interval);
+        removeFrame?.();
+        resolve(frames >= READY_FRAMES && test());
+      };
+      const check = () => {
+        if (detached || my !== seq) return finish();
+        if (frames >= READY_FRAMES && test()) return finish();
+        if (now() - started >= revealTimeoutMs) return finish();
+        scene?.requestRender?.();
+      };
+      removeFrame =
+        scene?.postRender?.addEventListener?.(() => {
+          frames += 1;
+          check();
+        }) ?? null;
+      interval = timers.setInterval(check, 100);
+      scene?.requestRender?.();
     });
   }
 
-  async function enterGoogle(my) {
+  async function enterGoogle(my, { reconcile = false } = {}) {
     let tileset;
     try {
       tileset = await session.ensure();
     } catch (error) {
       if (my !== seq || detached) return controller.getState();
-      machine.commit('OPEN');
       notify(
         `${error?.message || 'Google 3D unavailable'}; showing Byrd-IT Open`,
       );
-      if (controller.getActiveId() === GOOGLE_STACK_ID)
-        return original(openTarget());
+      const active = controller.getActiveId();
+      // Leaving Google, or a selection that must land on the base map (from
+      // Esri/OSM/Bing): show the open stack. An automatic entry from the base
+      // map (or its own tile-failure fallback) stays where it is.
+      if (
+        active === GOOGLE_STACK_ID ||
+        (reconcile && active !== openTarget())
+      ) {
+        const state = await original(openTarget());
+        syncState();
+        return state;
+      }
+      syncState();
       return controller.getState();
     }
     if (my !== seq || detached) return controller.getState();
-    // No flash: Google first, the globe goes once its tiles are in (<= 3 s).
+    // No flash: Google first; the base goes once Google has drawn the
+    // current view (<= 3 s).
     if (controller.getActiveId() !== GOOGLE_STACK_ID) {
       tileset.show = true;
-      await waitUntil(() => tileset.tilesLoaded === true);
+      await waitRendered(() => tileset.tilesLoaded === true, my);
       if (my !== seq || detached) {
         if (controller.getActiveId() !== GOOGLE_STACK_ID) tileset.show = false;
         return controller.getState();
       }
     }
     const state = await original(GOOGLE_STACK_ID);
-    if (state?.activeId === GOOGLE_STACK_ID) machine.commit('GOOGLE');
+    syncState();
     return state;
   }
 
   async function leaveGoogle(my) {
     const tileset = session.tileset;
+    const wasGoogle = controller.getActiveId() === GOOGLE_STACK_ID;
     const state = await original(openTarget());
+    // Commit whatever landed even when superseded: the controller has
+    // switched, and the machine must not keep saying GOOGLE.
+    syncState();
     if (my !== seq || detached) return state;
-    if (state?.activeId !== GOOGLE_STACK_ID) machine.commit('OPEN');
-    // No flash: keep Google drawn until the globe has its tiles (<= 3 s).
-    if (tileset && controller.getActiveId() !== GOOGLE_STACK_ID) {
+    // No flash: keep Google drawn until the globe has drawn the current view
+    // with its new imagery (<= 3 s). Only when Google was what showed.
+    if (wasGoogle && tileset && controller.getActiveId() !== GOOGLE_STACK_ID) {
       tileset.show = true;
-      await waitUntil(() => viewer?.scene?.globe?.tilesLoaded === true);
+      await waitRendered(() => viewer?.scene?.globe?.tilesLoaded === true, my);
       if (controller.getActiveId() !== GOOGLE_STACK_ID) tileset.show = false;
     }
     return state;
   }
 
-  function run(action) {
+  function run(action, options) {
     const my = ++seq;
-    const job = (action === 'GOOGLE' ? enterGoogle(my) : leaveGoogle(my))
+    const job = (
+      action === 'GOOGLE' ? enterGoogle(my, options) : leaveGoogle(my)
+    )
       .catch((error) => {
         notify(error?.message || String(error));
         return controller.getState();
@@ -227,37 +304,85 @@ export function attachBasemapSwitching({
     return action ? run(action) : null;
   }
 
-  async function pin(mode) {
+  /** The base map counts as shown (machine OPEN) for this selection. */
+  function showsOpen(active, explicit) {
+    if (active === openTarget()) return true;
+    // A restore keeps the controller's own tile-failure fallback to Esri; an
+    // explicit pick of Open/Auto retries the open stack.
+    return (
+      !explicit &&
+      active === 'esri-imagery' &&
+      controller.getSwitchOrigin?.() === 'automatic'
+    );
+  }
+
+  /**
+   * Apply a mode and make the controller show what it asks for. Waits for an
+   * in-flight switch first; a newer selection or pick wins.
+   */
+  async function select(mode, { explicit }) {
     machine.setMode(mode);
+    const mine = ++selection;
     seq++;
-    if (busy) await busy.catch(() => {});
-    const state = (await evaluate()) ?? controller.getState();
-    // Coming back from Esri/OSM/Bing (or Google failed): OPEN means the open
-    // stack is what shows.
+    timers.clearTimeout(dwellTimer);
+    while (busy) await busy.catch(() => {});
+    if (detached || mine !== selection) return controller.getState();
     const active = controller.getActiveId();
+    const inStep =
+      active === GOOGLE_STACK_ID
+        ? machine.state === 'GOOGLE'
+        : machine.state === 'OPEN' && showsOpen(active, explicit);
+    if (inStep && !(explicit && mode !== 'auto')) {
+      // The controller shows what the machine thinks: the normal rules
+      // (hysteresis, dwell) decide.
+      return (await evaluate()) ?? controller.getState();
+    }
+    // Out of step (back from another map, a lease, a superseded switch) or a
+    // pin: apply the wanted state now, without dwell.
+    const want = machine.target(heightOf());
     if (
-      !detached &&
-      machine.state === 'OPEN' &&
-      active !== GOOGLE_STACK_ID &&
-      active !== openTarget()
-    )
-      return original(openTarget());
-    return state;
+      want === 'GOOGLE'
+        ? active === GOOGLE_STACK_ID
+        : showsOpen(active, explicit)
+    ) {
+      machine.commit(want);
+      return controller.getState();
+    }
+    return run(want, { reconcile: true });
   }
 
   controller.setStack = (id, options = {}) => {
     if (detached || hasPrivateOptions(options)) return original(id, options);
-    if (id === BASEMAP_AUTO_STACK.id) return pin('auto');
-    if (id === GOOGLE_STACK_ID || id === BYRDIT_OPEN_STACK_ID) {
-      if (!isUserGesture()) {
-        if (machine.mode === 'other') machine.setMode('auto');
-        return Promise.resolve(evaluate()).then(() => controller.getState());
-      }
-      return pin(id === GOOGLE_STACK_ID ? 'google' : 'open');
+    const explicit = options?.intent === USER_INTENT;
+    if (id === BASEMAP_AUTO_STACK.id) return select('auto', { explicit });
+    const known = controller.getStack ? Boolean(controller.getStack(id)) : true;
+    if ((id === GOOGLE_STACK_ID || id === BYRDIT_OPEN_STACK_ID) && explicit) {
+      // Validate before touching the mode: the controller reports why.
+      if (!controller.isStackAvailable(id)) return original(id, options);
+      return select(id === GOOGLE_STACK_ID ? 'google' : 'open', {
+        explicit,
+      });
     }
+    if (id === GOOGLE_STACK_ID || id === BYRDIT_OPEN_STACK_ID || !known) {
+      // A restore (or an unknown id, which the controller would map to
+      // Google): no pin, no root at global view; leaves another map.
+      return select(machine.mode === 'other' ? 'auto' : machine.mode, {
+        explicit: false,
+      });
+    }
+    // Unavailable: the controller reports it and nothing switches, so the
+    // auto switch stays on.
+    if (!controller.isStackAvailable(id)) return original(id, options);
     machine.setMode('other');
+    const mine = ++selection;
     seq++;
-    return original(id, options);
+    timers.clearTimeout(dwellTimer);
+    // A switch job this pick superseded may have committed the stack it left;
+    // once the pick settles the machine follows what is actually shown.
+    return Promise.resolve(original(id, options)).then((state) => {
+      if (mine === selection) syncState();
+      return state;
+    });
   };
 
   controller.getStacks = () => [
@@ -287,6 +412,7 @@ export function attachBasemapSwitching({
     if (detached) return;
     detached = true;
     seq++;
+    selection++;
     timers.clearTimeout(dwellTimer);
     timers.clearInterval(pollTimer);
     for (const remove of removers) remove?.();

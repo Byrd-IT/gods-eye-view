@@ -79,12 +79,14 @@ function fixture() {
   const listeners = new Set();
   const requests = [];
   const calls = [];
+  const intents = [];
   const controller = {
     getStacks: () => sources,
     getActiveId: () => state.activeId,
     getState: (status) => ({ ...state, status: status || state.status }),
-    setStack: (id) => {
+    setStack: (id, options) => {
       calls.push(['select', id]);
+      intents.push(options?.intent);
       return new Promise((resolve, reject) =>
         requests.push({ id, resolve, reject }),
       );
@@ -123,6 +125,7 @@ function fixture() {
     controls,
     requests,
     calls,
+    intents,
     listeners,
     chip,
     change,
@@ -249,4 +252,16 @@ test('completion after destruction cannot paint or notify', async () => {
   assert.equal(f.calls.length, count);
   assert.equal(f.statusElement.textContent, label);
   assert.equal(await f.controls.select('osm'), null);
+});
+
+test('selection tells the controller who chose: chips/API are the user, restores are not', async () => {
+  const f = fixture();
+  f.chip('esri-imagery').click();
+  const pick = f.controls.select('osm');
+  const restore = f.controls.select('esri-imagery', { syncShare: false });
+  const forced = f.controls.select('osm', { syncShare: false, intent: 'user' });
+  assert.deepEqual(f.intents, ['user', 'user', 'restore', 'user']);
+  for (const request of f.requests) request.resolve(f.change(request.id));
+  await Promise.all([pick, restore, forced]);
+  f.controls.destroy();
 });

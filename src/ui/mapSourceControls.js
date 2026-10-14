@@ -32,7 +32,15 @@ export function createMapSourceControls({
       statusElement.classList.toggle('warn', !!state.lastError);
     }
   }
-  async function select(stackId, { syncShare = true } = {}) {
+  /**
+   * `intent` tells the controller who chose the stack: 'user' (a chip, the
+   * dropdown, voice, the API - every selection that also updates the share
+   * link) or 'restore' (a share link or recipe being applied).
+   */
+  async function select(
+    stackId,
+    { syncShare = true, intent = syncShare ? 'user' : 'restore' } = {},
+  ) {
     if (destroyed) return null;
     const current = ++generation;
     if (syncShare) claimSelection();
@@ -40,7 +48,7 @@ export function createMapSourceControls({
     render(controller.getState('switching'));
     let state;
     try {
-      state = await controller.setStack(stackId);
+      state = await controller.setStack(stackId, { intent });
     } catch (error) {
       if (!destroyed && current === generation) {
         render(controller.getState());

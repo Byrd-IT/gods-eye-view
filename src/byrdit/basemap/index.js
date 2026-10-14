@@ -2,7 +2,11 @@ import { createDefaultMapSources } from '../../maps/defaultSources.js';
 import { createKeylessTerrain } from '../../maps/terrain.js';
 import { loadPhotorealisticTileset } from '../../maps/google3d.js';
 import { basemapFlagOn, loadBasemapConfig } from './config.js';
-import { createBasemapMapSource, BYRDIT_OPEN_STACK_ID } from './stack.js';
+import {
+  createBasemapMapSource,
+  BASEMAP_FALLBACK_ID,
+  BYRDIT_OPEN_STACK_ID,
+} from './stack.js';
 import { createGoogleSession } from './googleSession.js';
 import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
 
@@ -12,11 +16,13 @@ import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
  *   flag OFF (no <meta name="gev-basemap" content="1">): returns null and makes
  *     no request; scene.js runs its existing path unchanged (Google created
  *     eagerly, Esri when it fails).
- *   flag ON, /basemap down: `{lazy: false}`. The existing path runs, plus a
- *     greyed-out "Byrd-IT Open" chip with the reason. Chain: Google -> Esri.
  *   flag ON, /basemap up: `{lazy: true}`. Startup stack is byrdit-open. Google
  *     is created only by the switch (close-up, or the user pins it). Chain:
  *     Google -> byrdit-open -> Esri.
+ *   flag ON, /basemap down: `{lazy: true}` as well, with Esri as the base (the
+ *     last resort of 4.3 item 6) and a greyed-out "Byrd-IT Open" chip with the
+ *     reason. Google stays lazy and auto-switched: 0 roots at global view,
+ *     1 for a close-up, the same retry limits. Chain: Google -> Esri.
  */
 
 /** Tell the user each distinct status message at most once a minute. */
@@ -58,17 +64,9 @@ export async function openBasemap({
     config,
     fallbackTerrain: createKeylessTerrain,
   });
-  if (!config.available) {
-    console.warn('[Basemap]', config.unavailableReason);
-    return {
-      lazy: false,
-      config,
-      controllerOptions: { basemapSource },
-      initialStack: null,
-      attach: () => () => {},
-      destroy() {},
-    };
-  }
+  // Base map: the open stack, or Esri while /basemap is down.
+  const baseId = config.available ? BYRDIT_OPEN_STACK_ID : BASEMAP_FALLBACK_ID;
+  if (!config.available) console.warn('[Basemap]', config.unavailableReason);
 
   const scene = viewer.scene;
   const session = createGoogleSession({
@@ -94,14 +92,15 @@ export async function openBasemap({
       basemapSource,
     }),
     session,
+    baseId,
   );
   const tell = createNotifier(notify);
   return {
     lazy: true,
     config,
     session,
-    initialStack: BYRDIT_OPEN_STACK_ID,
-    controllerOptions: { registry, initialStack: BYRDIT_OPEN_STACK_ID },
+    initialStack: baseId,
+    controllerOptions: { registry, initialStack: baseId },
     attach(controller) {
       const machine = createSwitchMachine(config.switch);
       return attachBasemapSwitching({
@@ -123,10 +122,14 @@ export async function openBasemap({
  * Replace the eager Google entry of a default registry with a lazy one whose
  * tileset is whatever the session holds (null until the first root request).
  * The controller reads `source.tileset` on every activation and visibility
- * change, so the getter is all it needs. The open stack becomes the default
- * and the recovery stack.
+ * change, so the getter is all it needs. The base stack (the open stack, or
+ * Esri while /basemap is down) becomes the default and the recovery stack.
  */
-export function createLazyGoogleRegistry(registry, session) {
+export function createLazyGoogleRegistry(
+  registry,
+  session,
+  baseId = BYRDIT_OPEN_STACK_ID,
+) {
   const sources = registry.sources.map((source) => {
     if (source.descriptor.id !== 'photoreal') return source;
     const lazy = { ...source };
@@ -140,8 +143,8 @@ export function createLazyGoogleRegistry(registry, session) {
   });
   return {
     ...registry,
-    defaultId: BYRDIT_OPEN_STACK_ID,
-    recoveryId: BYRDIT_OPEN_STACK_ID,
+    defaultId: baseId,
+    recoveryId: baseId,
     sources,
   };
 }
