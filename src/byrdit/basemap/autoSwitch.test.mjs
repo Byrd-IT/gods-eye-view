@@ -13,7 +13,11 @@ import {
   resetGoogleRootCount,
 } from './googleSession.js';
 import { createBasemapMapSource } from './stack.js';
-import { createLazyGoogleRegistry, openBasemap } from './index.js';
+import {
+  createLazyGoogleRegistry,
+  createNotifier,
+  openBasemap,
+} from './index.js';
 import { normalizeBasemapConfig } from './config.js';
 import { basemapCreditHtml } from './credits.js';
 import { SERVED } from './fixtures/config.mjs';
@@ -508,4 +512,42 @@ test('createDefaultMapSources without a basemap source is unchanged', () => {
     plain.sources.map((s) => s.descriptor.id),
     ['photoreal', 'bing-aerial', 'bing-labels', 'esri-imagery', 'osm'],
   );
+});
+
+test('Auto from Esri with Google down: back on Byrd-IT Open, not stuck on Esri', async () => {
+  const w = world({ failGoogle: () => true });
+  await w.start();
+  w.gesture = true;
+  await w.controller.setStack('esri-imagery');
+  assert.equal(w.controller.getActiveId(), 'esri-imagery');
+  await w.fly(2_500);
+  await w.controller.setStack('basemap-auto');
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+  await w.controller.setStack('esri-imagery');
+  await w.controller.setStack('byrdit-open');
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+});
+
+test('status messages reach the user at most once a minute each', () => {
+  let t = 0;
+  const seen = [];
+  const extra = [];
+  const tell = createNotifier(
+    (m) => seen.push(m),
+    60_000,
+    () => t,
+  );
+  assert.equal(
+    tell('a', () => extra.push('a')),
+    true,
+  );
+  assert.equal(
+    tell('a', () => extra.push('a')),
+    false,
+  );
+  assert.equal(tell('b'), true);
+  t += 60_000;
+  assert.equal(tell('a'), true);
+  assert.deepEqual(seen, ['a', 'b', 'a']);
+  assert.deepEqual(extra, ['a']);
 });

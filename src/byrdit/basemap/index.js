@@ -20,17 +20,19 @@ import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
  */
 
 /** Tell the user each distinct status message at most once a minute. */
-function createNotifier(sink, intervalMs = 60_000) {
+export function createNotifier(sink, intervalMs = 60_000, now = Date.now) {
   const last = new Map();
-  return (message) => {
-    const t = Date.now();
-    if (t - (last.get(message) ?? -Infinity) < intervalMs) return;
+  return (message, also = null) => {
+    const t = now();
+    if (t - (last.get(message) ?? -Infinity) < intervalMs) return false;
     last.set(message, t);
     try {
       sink(message);
+      also?.();
     } catch {
       /* status reporting never breaks switching */
     }
+    return true;
   };
 }
 
@@ -107,10 +109,8 @@ export async function openBasemap({
         viewer,
         session,
         machine,
-        notify: (message) => {
-          tell(message);
-          controller._onError?.(message);
-        },
+        notify: (message) =>
+          tell(message, () => controller._onError?.(message)),
       });
     },
     destroy() {

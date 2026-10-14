@@ -231,7 +231,18 @@ export function attachBasemapSwitching({
     machine.setMode(mode);
     seq++;
     if (busy) await busy.catch(() => {});
-    return (await evaluate()) ?? controller.getState();
+    const state = (await evaluate()) ?? controller.getState();
+    // Coming back from Esri/OSM/Bing (or Google failed): OPEN means the open
+    // stack is what shows.
+    const active = controller.getActiveId();
+    if (
+      !detached &&
+      machine.state === 'OPEN' &&
+      active !== GOOGLE_STACK_ID &&
+      active !== openTarget()
+    )
+      return original(openTarget());
+    return state;
   }
 
   controller.setStack = (id, options = {}) => {
