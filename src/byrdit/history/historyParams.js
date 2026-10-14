@@ -57,7 +57,44 @@ export const SLICE_FEEDS = Object.freeze({
     defaultRows: 100,
     window: { def: 30 * DAY_MS, max: 30 * DAY_MS },
   },
+  // B10 (DESIGN 4.3): latest per entity inside a lookback window.
+  // vessels: per mmsi within [t - 35 min, t] (fixed: the 15 min stationary
+  // gate + 2 x the 5 min write bucket + slack).
+  vessels: { defaultRows: MAX_ROWS },
+  // transit: per feedId + vehicleId within [t - 3 min, t] (fixed).
+  transit: { defaultRows: MAX_ROWS },
+  // bikeshare: per station. The recorder is CHANGE-ONLY (B15), so a
+  // station whose counts did not change for 15 min has no doc in
+  // [t - 15 min, t] (measured 2026-10-14: 2,524 of 8,656 stations); the
+  // lookback is therefore a window, default 24 h (all 8,656), max 7 d.
+  bikeshare: {
+    defaultRows: MAX_ROWS,
+    window: { def: DAY_MS, max: 7 * DAY_MS },
+  },
 });
+
+/** Fixed lookbacks of the latest-per-entity slices (B10, DESIGN 4.3). */
+export const VESSELS_LOOKBACK_MS = 35 * 60_000;
+export const TRANSIT_LOOKBACK_MS = 3 * 60_000;
+
+/**
+ * GET /api/history/track feeds and their id syntax (B10, DESIGN 4.3):
+ * aircraft/military: ICAO 24-bit hex; vessels: MMSI; transit:
+ * "<feedId>:<vehicleId>" (registry feed id, vehicle id as recorded).
+ */
+export const TRACK_FEEDS = Object.freeze([
+  'aircraft',
+  'military',
+  'vessels',
+  'transit',
+]);
+/** DESIGN 4.3: ranges <= 31 d, <= 5,000 points. */
+export const MAX_TRACK_RANGE_MS = 31 * DAY_MS;
+export const MAX_TRACK_POINTS = 5_000;
+export const MAX_MIN_GAP_S = 86_400;
+const HEX_ID = /^[0-9a-f]{6}$/;
+const MMSI_ID = /^\d{5,10}$/;
+const TRANSIT_FEED_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /** Feeds with recorded polls in gev-history-ingest-log (coverage/snapshots). */
 export const LOG_FEEDS = Object.freeze([
@@ -73,6 +110,8 @@ export const ROUTE_PARAMS = Object.freeze({
   slice: ['feed', 't', 'bbox', 'maxRows', 'window'],
   coverage: ['feed', 'from', 'to', 'bucket'],
   snapshots: ['feed', 'around', 'n'],
+  track: ['feed', 'id', 'from', 'to', 'minGapSec'],
+  health: [],
 });
 
 export class HistoryParamError extends Error {
@@ -214,6 +253,65 @@ export function parseCoverageParams(search, rawQuery, now) {
   if (Math.ceil((to - from) / bucketMs) > MAX_COVERAGE_BUCKETS)
     throw tooLarge('bucket');
   return { feed, from, to, bucket: bucketName, bucketMs };
+}
+
+/**
+ * Track id per feed -> parsed id, or a 400. Transit ids are
+ * "<feedId>:<vehicleId>". The vehicle part is GEV's transit identifier
+ * rule (no control chars, no lone surrogates, <= 256 UTF-8 bytes) minus
+ * the path-segment ban on '/': recorded ids carry it (HSL "12/2631") and
+ * here it is a query value matched by a term query, never a path.
+ */
+export function parseTrackId(feed, value) {
+  const text = String(value ?? '');
+  if (feed === 'aircraft' || feed === 'military') {
+    const id = text.trim().toLowerCase();
+    if (!HEX_ID.test(id)) throw bad('id');
+    return { id };
+  }
+  if (feed === 'vessels') {
+    if (!MMSI_ID.test(text)) throw bad('id');
+    return { id: text };
+  }
+  const at = text.indexOf(':');
+  if (at <= 0) throw bad('id');
+  const feedId = text.slice(0, at);
+  const vehicleId = text.slice(at + 1);
+  if (!TRANSIT_FEED_ID.test(feedId)) throw bad('id');
+  if (
+    !vehicleId ||
+    /[\u0000-\u001f\u007f\\]/u.test(vehicleId) ||
+    /[\uD800-\uDFFF]/u.test(vehicleId) ||
+    new TextEncoder().encode(vehicleId).length > 256
+  )
+    throw bad('id');
+  return { id: text, feedId, vehicleId };
+}
+
+/** GET /api/history/track */
+export function parseTrackParams(search, rawQuery, now) {
+  const q = readQuery(search, 'track', rawQuery);
+  const feed = feedOf(q, TRACK_FEEDS);
+  if (q.id === undefined || q.id === '') throw bad('id');
+  const ids = parseTrackId(feed, q.id);
+  if (q.from === undefined) throw bad('from');
+  if (q.to === undefined) throw bad('to');
+  const from = parseRetainedInstant(q.from, 'from', now);
+  const to = parseRetainedInstant(q.to, 'to', now);
+  if (!(from < to)) throw bad('to');
+  if (to - from > MAX_TRACK_RANGE_MS) throw tooLarge('to');
+  const minGapSec = parseIntParam(q.minGapSec, 'minGapSec', {
+    min: 0,
+    max: MAX_MIN_GAP_S,
+    def: 0,
+  });
+  return { feed, ...ids, from, to, minGapSec };
+}
+
+/** GET /api/history/health (no parameters). */
+export function parseHealthParams(search, rawQuery) {
+  readQuery(search, 'health', rawQuery);
+  return {};
 }
 
 /** GET /api/history/snapshots */

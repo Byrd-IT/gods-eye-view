@@ -2,8 +2,10 @@ import { makeRateLimiter } from '../../sources/rateLimit.js';
 import {
   HistoryParamError,
   parseCoverageParams,
+  parseHealthParams,
   parseSliceParams,
   parseSnapshotParams,
+  parseTrackParams,
 } from './historyParams.js';
 import {
   HistoryUnavailableError,
@@ -11,6 +13,17 @@ import {
   esConfigFromEnv,
 } from './historyEs.js';
 import { createHistoryService } from './historyService.js';
+import {
+  CACHE_MAX_AGE_S,
+  LIVE_EDGE_MS,
+  aboutInstant,
+  bodyEtag,
+  cacheKey,
+  createHistoryCache,
+  etagMatches,
+} from './historyCache.js';
+import { createHealthService } from './historyHealth.js';
+import { parseCollectorUrls } from './collectorBridge.js';
 
 /**
  * /api/history/* routes (gev-history DESIGN 4.3; card B9 item 1).
@@ -20,14 +33,22 @@ import { createHistoryService } from './historyService.js';
  *      server/byrdit/history.js; build/allowedHosts.js hostCheckPlugin also
  *      runs first for every route) -> 403.
  *   2. GET only (DESIGN 4.3; HEAD too) -> 405 Allow: GET.
- *   3. Known route only (/slice, /coverage, /snapshots) -> 404.
+ *   3. Known route only (/slice, /coverage, /snapshots, /track, /health)
+ *      -> 404.
  *   4. Per-client rate limit (server/providers/common/rate-limit.js,
  *      GEV_RATELIMIT_HISTORY_PER_MIN, default 60/min) -> 429.
  *   5. Parameter allowlist + hard caps (historyParams.js) -> 400/404/413.
  *   6. At most MAX_IN_FLIGHT ES-backed answers at once -> 429 busy.
  *   7. Store errors never leak: 503 {error:'history_unavailable'}.
  * Disabled (no middleware at all) unless GEV_HISTORY_API=1; enabled without
- * a reader key configured -> every route answers 503.
+ * a reader key configured -> every store route answers 503 (/health still
+ * answers from the collector, historyStore: 'not_configured').
+ *
+ * B10 caching (DESIGN 4.4, historyCache.js): an answer about a moment older
+ * than 5 min is kept in a 64 MB in-process LRU and sent with an ETag and
+ * `Cache-Control: private, max-age=300`; If-None-Match -> 304. The live edge
+ * and /health are `no-store`, never cached, no ETag. Errors are never
+ * cached.
  */
 
 export const HISTORY_PREFIX = '/api/history';
@@ -47,6 +68,32 @@ function send(res, status, body, headers = {}) {
     res.setHeader(k, v);
   res.setHeader('Content-Length', new TextEncoder().encode(text).length);
   res.end(text);
+}
+
+/**
+ * A cacheable answer (DESIGN 4.4): ETag + private max-age=300, 304 when
+ * If-None-Match matches. X-History-Cache says HIT/MISS (in-process LRU).
+ */
+function sendCached(req, res, entry, state) {
+  const headers = {
+    ...JSON_HEADERS,
+    ...entry.headers,
+    'Cache-Control': `private, max-age=${CACHE_MAX_AGE_S}`,
+    ETag: entry.etag,
+    'X-History-Cache': state,
+  };
+  if (etagMatches(req.headers?.['if-none-match'], entry.etag)) {
+    res.statusCode = 304;
+    for (const [k, v] of Object.entries(headers)) {
+      if (k === 'Content-Type' || k === 'Content-Length') continue;
+      res.setHeader(k, v);
+    }
+    return res.end();
+  }
+  res.statusCode = 200;
+  for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+  res.setHeader('Content-Length', new TextEncoder().encode(entry.text).length);
+  return res.end(entry.text);
 }
 
 /** Socket peer only (a localhost/LAN fallback; the server injects its own). */
@@ -88,6 +135,8 @@ export function createHistoryApi({
   now = () => Date.now(),
   log = (line) => console.warn(line),
   fetchImpl,
+  cache = createHistoryCache({ now }),
+  healthService,
 } = {}) {
   if (service === undefined) {
     const config = esConfigFromEnv(env);
@@ -100,6 +149,27 @@ export function createHistoryApi({
           now,
         })
       : null;
+  }
+  if (healthService === undefined) {
+    const config = esConfigFromEnv(env);
+    let urls;
+    try {
+      urls = parseCollectorUrls(env.GEV_COLLECTOR_URLS);
+    } catch {
+      urls = [];
+    }
+    healthService = createHealthService({
+      es:
+        service && config
+          ? createHistoryEsClient({
+              ...config,
+              ...(fetchImpl ? { fetchImpl } : {}),
+            })
+          : null,
+      collectorUrls: urls,
+      ...(fetchImpl ? { fetchImpl } : {}),
+      now,
+    });
   }
   allow ??= makeRateLimiter({
     windowMs: 60_000,
@@ -133,6 +203,8 @@ export function createHistoryApi({
       slice: parseSliceParams,
       coverage: parseCoverageParams,
       snapshots: parseSnapshotParams,
+      track: parseTrackParams,
+      health: parseHealthParams,
     };
     const parse = Object.hasOwn(parsers, route) ? parsers[route] : null;
     if (!parse) return send(res, 404, { error: 'not_found' });
@@ -150,17 +222,35 @@ export function createHistoryApi({
         });
       return send(res, 400, { error: 'invalid_param', param: null });
     }
+    if (route === 'health') {
+      // collector + coverage summary; never cached, never a 503 for the
+      // store (its own field says so)
+      try {
+        return send(res, 200, await healthService.health());
+      } catch {
+        return send(res, 503, { error: 'history_unavailable' });
+      }
+    }
     if (!service) return send(res, 503, { error: 'history_unavailable' });
+    const about = aboutInstant(route, params);
+    const cacheable =
+      cache !== null && about !== null && about < now() - LIVE_EDGE_MS;
+    const key = cacheable ? cacheKey(route, params) : null;
+    const hit = key ? cache.get(key) : null;
+    if (hit) return sendCached(req, res, hit, 'HIT');
     if (inFlight >= MAX_IN_FLIGHT)
       return send(res, 429, { error: 'busy' }, { 'Retry-After': '1' });
     inFlight += 1;
     try {
-      if (route === 'slice') {
-        const { body, headers } = await service.slice(params);
-        return send(res, 200, body, headers);
-      }
-      const body = await service[route](params);
-      return send(res, 200, body);
+      const out =
+        route === 'slice' || route === 'track'
+          ? await service[route](params)
+          : { body: await service[route](params), headers: {} };
+      if (!cacheable) return send(res, 200, out.body, out.headers);
+      const text = JSON.stringify(out.body);
+      const entry = { text, etag: bodyEtag(text), headers: out.headers };
+      cache.set(key, entry);
+      return sendCached(req, res, entry, 'MISS');
     } catch (error) {
       logFailure(
         error instanceof HistoryUnavailableError

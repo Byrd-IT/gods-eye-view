@@ -33,6 +33,12 @@ export const HISTORY_INDICES = Object.freeze({
   perimeters: 'gev-history-perimeters,gev-history-perimeters-hist-*',
   cyclones: 'gev-history-cyclones,gev-history-cyclones-hist-*',
   launches: 'gev-history-launches,gev-history-launches-hist-*',
+  // B10: AISStream recorder + the NOAA MarineCadastre archive (B18)
+  vessels: 'gev-history-vessels,gev-history-vessels-noaa',
+  vesselStatic: 'gev-history-vessel-static',
+  transit: 'gev-history-transit',
+  bikeshare: 'gev-history-bikeshare',
+  bikeshareStations: 'gev-history-bikeshare-stations',
 });
 const ALLOWED = new Set(Object.values(HISTORY_INDICES));
 
@@ -242,11 +248,20 @@ export function createHistoryEsClient({
   /**
    * All hits of `query` up to `maxRows`, paged with a point in time and
    * search_after (DESIGN 4.3: PIT + search_after pages internally).
+   * With `stopWhenOver`, an answer whose total exceeds `maxRows` stops after
+   * the first page and returns no hits ({stopped: true, total}).
    * @returns {Promise<{hits: object[], total: number, truncated: boolean, pages: number}>}
    */
   async function searchAll(
     index,
-    { query, sort, _source, maxRows, pageSize = PAGE_SIZE },
+    {
+      query,
+      sort,
+      _source,
+      maxRows,
+      pageSize = PAGE_SIZE,
+      stopWhenOver = false,
+    },
   ) {
     await verify();
     const opened = await call(
@@ -277,6 +292,11 @@ export function createHistoryEsClient({
         pages += 1;
         if (pages === 1) total = json?.hits?.total?.value ?? 0;
         if (typeof json?.pit_id === 'string') pit = json.pit_id;
+        // stopWhenOver: the caller has a cheaper way to read an over-cap
+        // answer (e.g. /track samples the whole range), so do not page on
+        if (stopWhenOver && pages === 1 && total > maxRows) {
+          return { hits: [], total, truncated: true, pages, stopped: true };
+        }
         const page = json?.hits?.hits ?? [];
         hits.push(...page);
         if (page.length < size || hits.length > maxRows) break;
