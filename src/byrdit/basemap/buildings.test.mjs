@@ -61,6 +61,19 @@ function fakeTimers() {
       for (const entry of [...pending.values()])
         if (entry.kind === 'interval') entry.fn();
     },
+    /** Fire (and drop) every pending timeout, whatever its delay. */
+    fireTimeouts() {
+      for (const [handle, entry] of [...pending.entries()])
+        if (entry.kind === 'timeout') {
+          pending.delete(handle);
+          entry.fn();
+        }
+    },
+    timeouts() {
+      return [...pending.values()]
+        .filter((e) => e.kind === 'timeout')
+        .map((e) => e.ms);
+    },
     count(kind) {
       return [...pending.values()].filter((e) => e.kind === kind).length;
     },
@@ -101,8 +114,10 @@ function fakeCesium({ fail = () => false, delay = null } = {}) {
   const made = [];
   const handlers = [];
   const calls = [];
+  const creditsMade = [];
   class Credit {
     constructor(html, showOnScreen) {
+      creditsMade.push(this);
       this.html = html;
       this.showOnScreen = showOnScreen;
     }
@@ -157,13 +172,18 @@ function fakeCesium({ fail = () => false, delay = null } = {}) {
       },
     },
   };
-  return { Cesium, made, handlers, calls };
+  return { Cesium, made, handlers, calls, creditsMade };
 }
 
-function world({ served = SERVED, cesium = fakeCesium(), withSwitch = true } = {}) {
+function world({
+  served = SERVED,
+  cesium = fakeCesium(),
+  withSwitch = true,
+} = {}) {
   resetGoogleRootCount();
   let t = 50_000_000;
   const credits = new Set();
+  const creditOps = { add: 0, remove: 0 };
   const primitives = [];
   const camera = {
     positionCartographic: { height: 20_000_000 },
@@ -181,8 +201,14 @@ function world({ served = SERVED, cesium = fakeCesium(), withSwitch = true } = {
       pick: () => pickResult,
       frameState: {
         creditDisplay: {
-          addStaticCredit: (c) => credits.add(c),
-          removeStaticCredit: (c) => credits.delete(c),
+          addStaticCredit: (c) => {
+            creditOps.add += 1;
+            credits.add(c);
+          },
+          removeStaticCredit: (c) => {
+            creditOps.remove += 1;
+            credits.delete(c);
+          },
         },
       },
       primitives: {
@@ -251,6 +277,7 @@ function world({ served = SERVED, cesium = fakeCesium(), withSwitch = true } = {
     controller,
     session,
     credits,
+    creditOps,
     primitives,
     timers,
     cards,
@@ -521,6 +548,221 @@ test('tileset.json failure: warned once, the stack stays, retried after a minute
   assert.equal(w.buildings().length, 1);
 });
 
+/** A gate the fake fromUrl awaits, released per call. */
+function gates() {
+  const open = [];
+  return {
+    delay: () =>
+      new Promise((resolve) => {
+        open.push(resolve);
+      }),
+    release: () => open.shift()?.(),
+    get waiting() {
+      return open.length;
+    },
+  };
+}
+
+test('R1 stationary camera: a failed root is retried by timer alone, no camera or controller event', async () => {
+  const w = world({
+    withSwitch: false,
+    cesium: fakeCesium({ fail: (n) => n === 1 }),
+  });
+  await w.start();
+  await w.fly(3000); // the last camera event in this test
+  assert.equal(w.calls.length, 1);
+  assert.equal(w.warnings.length, 1);
+  assert.equal(w.detach.state().retryPending, true);
+  assert.deepEqual(w.timers.timeouts(), [60_000], 'one timer at retryMs');
+  // A timer that fires early (clock not advanced) respects the backoff and
+  // re-arms for the rest of it instead of requesting.
+  w.advance(20_000);
+  w.timers.fireTimeouts();
+  await settle();
+  assert.equal(w.calls.length, 1, 'no request inside the backoff');
+  assert.deepEqual(w.timers.timeouts(), [40_000]);
+  w.advance(40_000);
+  w.timers.fireTimeouts();
+  await settle();
+  assert.equal(w.calls.length, 2, 'recovered with no external event');
+  assert.equal(w.buildings().length, 1);
+  assert.equal(w.buildings()[0].show, true);
+  assert.equal(w.hasBuildingsCredit(), true);
+  assert.equal(w.detach.state().retryPending, false);
+  assert.deepEqual(w.timers.timeouts(), []);
+});
+
+test('R1 repeated failure keeps the backoff; never two requests in flight', async () => {
+  const g = gates();
+  const w = world({
+    withSwitch: false,
+    cesium: fakeCesium({ fail: (n) => n <= 2, delay: g.delay }),
+  });
+  await w.start();
+  await w.fly(3000);
+  g.release();
+  await settle();
+  assert.equal(w.calls.length, 1);
+  assert.deepEqual(w.timers.timeouts(), [60_000]);
+  w.advance(60_000);
+  w.timers.fireTimeouts();
+  await settle();
+  assert.equal(w.calls.length, 2, 'retry started');
+  assert.equal(w.detach.state().creating, true);
+  // While it is in flight nothing else starts a request or arms a timer.
+  for (let i = 0; i < 10; i++) w.detach.evaluate();
+  await w.fly(2900);
+  w.advance(120_000);
+  w.timers.fireTimeouts();
+  await settle();
+  assert.equal(w.calls.length, 2, 'no overlap');
+  assert.deepEqual(w.timers.timeouts(), []);
+  g.release(); // second failure
+  await settle();
+  assert.equal(w.warnings.length, 2);
+  assert.deepEqual(w.timers.timeouts(), [60_000], 'backoff restarts');
+  w.timers.fireTimeouts();
+  await settle();
+  assert.equal(w.calls.length, 2, 'early fire still waits');
+  w.advance(60_000);
+  w.timers.fireTimeouts();
+  await settle();
+  g.release();
+  await settle();
+  assert.equal(w.calls.length, 3);
+  assert.equal(w.buildings().length, 1);
+});
+
+test('R1 retry timer cancelled on detach', async () => {
+  const w = world({
+    withSwitch: false,
+    cesium: fakeCesium({ fail: () => true }),
+  });
+  await w.start();
+  await w.fly(3000);
+  assert.deepEqual(w.timers.timeouts(), [60_000]);
+  w.detach();
+  assert.deepEqual(w.timers.timeouts(), []);
+  w.advance(600_000);
+  w.timers.fireTimeouts();
+  await settle();
+  assert.equal(w.calls.length, 1);
+});
+
+test('R1 retry timer cancelled on switch away; back to Open retries once due', async () => {
+  const w = world({
+    withSwitch: false,
+    cesium: fakeCesium({ fail: (n) => n === 1 }),
+  });
+  await w.start();
+  await w.fly(3000);
+  assert.deepEqual(w.timers.timeouts(), [60_000]);
+  await w.controller.setStack('osm', { intent: 'user' });
+  await settle();
+  assert.deepEqual(w.timers.timeouts(), [], 'cancelled with the stack');
+  w.advance(60_000);
+  w.timers.fireTimeouts();
+  await settle();
+  assert.equal(w.calls.length, 1, 'no request while another stack shows');
+  await w.controller.setStack('byrdit-open', { intent: 'user' });
+  await settle();
+  assert.equal(w.calls.length, 2);
+  assert.equal(w.buildings().length, 1);
+});
+
+test('R1 no retry while hidden: above the threshold or Google drawn', async () => {
+  const w = world({
+    withSwitch: false,
+    cesium: fakeCesium({ fail: (n) => n === 1 }),
+  });
+  await w.start();
+  await w.fly(3000);
+  await w.fly(12_000);
+  assert.deepEqual(w.timers.timeouts(), [], 'above the threshold: no timer');
+  w.advance(60_000);
+  await settle();
+  assert.equal(w.calls.length, 1);
+  await w.fly(3000);
+  assert.equal(w.calls.length, 2, 'due on the way back down');
+  // Fresh failure, then Google drawn over the open stack: timer cancelled.
+  const v = world({
+    withSwitch: false,
+    cesium: fakeCesium({ fail: (n) => n === 1 }),
+  });
+  await v.start();
+  await v.fly(3000);
+  assert.deepEqual(v.timers.timeouts(), [60_000]);
+  const google = { kind: 'google', show: true };
+  Object.defineProperty(v.session, 'tileset', { get: () => google });
+  v.viewer.scene.requestRender();
+  await settle();
+  assert.deepEqual(v.timers.timeouts(), [], 'Google drawn: cancelled');
+  v.advance(60_000);
+  v.timers.fireTimeouts();
+  await settle();
+  assert.equal(v.calls.length, 1, 'no buildings root while Google shows');
+  google.show = false;
+  v.viewer.scene.requestRender();
+  await settle();
+  assert.equal(v.calls.length, 2);
+  assert.equal(v.buildings()[0].show, true);
+});
+
+test('R1 in-flight races: failure landing after detach or switch-away arms no timer', async () => {
+  for (const leave of ['detach', 'switch']) {
+    const g = gates();
+    const w = world({
+      withSwitch: false,
+      cesium: fakeCesium({ fail: () => true, delay: g.delay }),
+    });
+    await w.start();
+    await w.fly(3000);
+    assert.equal(w.detach.state().creating, true);
+    if (leave === 'detach') w.detach();
+    else {
+      await w.controller.setStack('osm', { intent: 'user' });
+      await settle();
+    }
+    g.release();
+    await settle();
+    assert.deepEqual(w.timers.timeouts(), [], `${leave}: no timer`);
+    assert.equal(w.warnings.length, 0, `${leave}: stale failure ignored`);
+    w.advance(600_000);
+    w.timers.fireTimeouts();
+    await settle();
+    assert.equal(w.calls.length, 1, `${leave}: no retry`);
+  }
+});
+
+test('R2 credit idempotent: unchanged evaluations construct/add/remove nothing', async () => {
+  const w = world({ withSwitch: false });
+  await w.start();
+  assert.equal(w.creditsMade.length, 0);
+  await w.fly(3000);
+  const buildingsCredits = () =>
+    w.creditsMade.filter((c) => c.html === BUILDINGS_CREDIT_HTML).length;
+  assert.equal(buildingsCredits(), 1);
+  const ops = { ...w.creditOps };
+  for (let i = 0; i < 100; i++) w.detach.evaluate();
+  assert.equal(buildingsCredits(), 1, 'no new Credit');
+  assert.deepEqual(w.creditOps, ops, 'no add/remove');
+  // Hide and show again: one remove, one add, the same Credit object.
+  await w.fly(12_000);
+  for (let i = 0; i < 50; i++) w.detach.evaluate();
+  assert.equal(w.creditOps.remove, ops.remove + 1);
+  assert.equal(w.hasBuildingsCredit(), false);
+  await w.fly(3000);
+  for (let i = 0; i < 50; i++) w.detach.evaluate();
+  assert.equal(w.creditOps.add, ops.add + 1);
+  assert.equal(w.creditOps.remove, ops.remove + 1);
+  assert.equal(buildingsCredits(), 1, 'Credit reused');
+  assert.equal(w.hasBuildingsCredit(), true);
+  assert.equal(w.detach.state().credit, true);
+  w.detach();
+  assert.equal(w.creditOps.remove, ops.remove + 2);
+  assert.equal(w.detach.state().credit, false);
+});
+
 test('camera polling: 1 Hz only between moveStart and moveEnd', async () => {
   const w = world({ withSwitch: false });
   await w.start();
@@ -596,14 +838,19 @@ test('pick info: explicit height plain, any other method shown as estimated', ()
   ]) {
     const r = info({ height: 9, height_method: method });
     assert.equal(r.heightEstimated, true, String(method));
-    assert.deepEqual(r.rows, [
-      ['Height', `~9.0 m (estimated from ${label})`],
-    ]);
+    assert.deepEqual(r.rows, [['Height', `~9.0 m (estimated from ${label})`]]);
   }
   // noData values and broken getters are skipped, not shown as 0.
   const sparse = buildingPickInfo((n) => {
     if (n === 'gers_id') throw new Error('no property');
-    return { height: 5, height_method: 'class', num_floors: 0, ground_elev: 0, class: 'house', subtype: 'house' }[n];
+    return {
+      height: 5,
+      height_method: 'class',
+      num_floors: 0,
+      ground_elev: 0,
+      class: 'house',
+      subtype: 'house',
+    }[n];
   });
   assert.deepEqual(sparse.rows, [
     ['Type', 'house'],
@@ -717,7 +964,11 @@ test('openBasemap attach: buildings only when the config offers them', async () 
       viewer,
       googleApiKey: 'k',
       doc,
-      fetchImpl: async () => ({ ok: true, status: 200, json: async () => served }),
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => served,
+      }),
     });
     let listener = null;
     const controller = {

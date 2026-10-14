@@ -26,7 +26,10 @@ import { BUILDINGS_CREDIT_HTML } from './credits.js';
  * Evaluation follows the P3 switch rules: camera moveEnd plus a 1 Hz timer
  * while the camera moves, every settled controller switch, and a per-frame
  * check of ONE boolean (is Google drawn) that re-evaluates only when it
- * changes.
+ * changes. A failed tileset.json arms ONE retry timer (retryMs backoff) while
+ * the layer still wants to show, so a stationary camera recovers; the timer
+ * is cancelled on switch-away, while hidden (threshold or Google drawn) and
+ * on detach, and never starts a request while one is in flight.
  *
  * Memory: maximumScreenSpaceError, cacheBytes and maximumCacheOverflowBytes
  * come from /basemap/config.json (config.js DEFAULT_BUILDINGS).
@@ -229,7 +232,11 @@ export function attachBuildings({
   let failedAt = -Infinity;
   let pollTimer = null;
   let googleWasShown = false;
-  let creditOn = null;
+  // The credit's on-screen state is a boolean; the Credit object is made
+  // once and reused, so an unchanged evaluation never touches the display.
+  let creditShown = false;
+  let credit = null;
+  let retryTimer = null;
   let handler = null;
   let created = 0;
   let destroyed = 0;
@@ -238,16 +245,43 @@ export function attachBuildings({
   const googleShown = () => session?.tileset?.show === true;
 
   function setCredit(on) {
-    if (on === creditOn) return;
+    const want = Boolean(on);
+    if (want === creditShown) return;
     const display = scene?.frameState?.creditDisplay;
     if (!display) return;
     try {
-      if (creditOn) display.removeStaticCredit(creditOn);
-      creditOn = on ? new Cesium.Credit(BUILDINGS_CREDIT_HTML, true) : null;
-      if (creditOn) display.addStaticCredit(creditOn);
+      if (want) {
+        credit ??= new Cesium.Credit(BUILDINGS_CREDIT_HTML, true);
+        display.addStaticCredit(credit);
+      } else {
+        display.removeStaticCredit(credit);
+      }
+      creditShown = want;
     } catch {
-      creditOn = null;
+      // Leave creditShown as it was; the next real change tries again.
     }
+  }
+
+  /**
+   * Retry after a failed tileset.json while the layer still wants to show
+   * (stationary camera: no camera or controller event would ever come).
+   * One timer at most; it fires at failedAt + retryMs and re-evaluates, so
+   * eligibility (open stack, Google not drawn, below the threshold, nothing
+   * in flight) and the backoff are checked by evaluate(), not here.
+   */
+  function scheduleRetry() {
+    if (retryTimer !== null || detached || !Number.isFinite(failedAt)) return;
+    const wait = Math.max(0, failedAt + retryMs - now());
+    retryTimer = timers.setTimeout(() => {
+      retryTimer = null;
+      evaluate();
+    }, wait);
+  }
+
+  function cancelRetry() {
+    if (retryTimer === null) return;
+    timers.clearTimeout(retryTimer);
+    retryTimer = null;
   }
 
   /** Make the tileset, the credit and the pick card follow `visible`. */
@@ -332,6 +366,9 @@ export function attachBuildings({
       creating = false;
       failedAt = now();
       warn('[Basemap] buildings tileset unavailable:', error?.message || error);
+      // Still wanted (evaluate() keeps `visible` current): one retry timer at
+      // failedAt + retryMs. Its evaluate() re-checks eligibility and backoff.
+      if (visible) scheduleRetry();
     }
   }
 
@@ -339,6 +376,7 @@ export function attachBuildings({
     if (detached) return;
     const openShown = controller.getActiveId() === BYRDIT_OPEN_STACK_ID;
     if (!openShown) {
+      cancelRetry();
       if (tileset || creating) destroyTileset();
       return;
     }
@@ -347,8 +385,12 @@ export function attachBuildings({
       googleShown: googleShown(),
       heightM: heightOf(),
     });
-    if (visible && !tileset && !creating && now() - failedAt >= retryMs)
-      void create();
+    if (visible && !tileset && !creating) {
+      if (now() - failedAt >= retryMs) {
+        cancelRetry();
+        void create();
+      } else scheduleRetry();
+    } else cancelRetry();
     sync();
   }
 
@@ -381,6 +423,7 @@ export function attachBuildings({
 
   const detach = () => {
     if (detached) return;
+    cancelRetry();
     destroyTileset();
     detached = true;
     timers.clearInterval(pollTimer);
@@ -394,7 +437,8 @@ export function attachBuildings({
     creating,
     created,
     destroyed,
-    credit: Boolean(creditOn),
+    credit: creditShown,
+    retryPending: retryTimer !== null,
   });
   return detach;
 }
