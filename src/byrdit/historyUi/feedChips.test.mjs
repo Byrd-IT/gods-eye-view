@@ -246,3 +246,60 @@ test('fetch wrapper: the same promise back, body never read, errors untouched, r
   chips.destroy();
   assert.equal(win.fetch, original);
 });
+
+test('paused grey -> paused cleared is announced (draw false), then recovery (review R2)', () => {
+  const { chips, win, advance } = harness();
+  const lastOk = Date.parse('2026-10-14T14:02:00Z');
+  const staleSince = lastOk + 3 * MIN;
+  chips.observe(
+    '/api/flights',
+    bridgeResponse({
+      lastOk,
+      ageMs: 10 * MIN, // server now = lastOk + 10 min (grey until stale + 60)
+      staleSince,
+      reason: 'opensky_paused_until=17:30',
+    }),
+  );
+  chips.refresh();
+  // the browser clock is irrelevant: only monotonic time since the answer
+  advance(40 * MIN); // server lastOk + 50 min < greyUntil (+63 min)
+  chips.refresh();
+  advance(20 * MIN); // server lastOk + 70 min >= greyUntil
+  chips.refresh();
+  const s = chips.states()[0];
+  assert.equal(s.state, 'paused');
+  assert.equal(s.draw, false);
+  advance(5 * MIN); // only the age moves: no new announcement
+  chips.refresh();
+  chips.observe('/api/flights', bridgeResponse({ lastOk: T0 }));
+  chips.refresh();
+  const events = win.events
+    .filter((e) => e.type === FEED_STATE_EVENT)
+    .map((e) => [e.detail.feed, e.detail.state, e.detail.draw, e.detail.chip]);
+  assert.deepEqual(events, [
+    ['flights', 'paused', true, 'OpenSky paused until 17:30 UTC'],
+    ['flights', 'paused', false, 'OpenSky paused until 17:30 UTC'],
+    ['flights', 'live', true, 'LIVE'],
+  ]);
+});
+
+test('a group with a cleared pause and a grey member shows the not-drawn one', () => {
+  const { chips } = harness();
+  const lastOk = Date.parse('2026-10-14T13:00:00Z');
+  chips.observe(
+    '/api/transit/vehicles/a',
+    bridgeResponse({
+      lastOk,
+      ageMs: 2 * 3_600_000,
+      staleSince: lastOk + 3 * MIN,
+      reason: 'opensky_paused_until=17:30',
+    }),
+  );
+  chips.observe(
+    '/api/transit/vehicles/b',
+    bridgeResponse({ lastOk, ageMs: 20 * MIN, staleSince: lastOk + 3 * MIN }),
+  );
+  const [s] = chips.states();
+  assert.equal(s.state, 'paused');
+  assert.equal(s.draw, false);
+});

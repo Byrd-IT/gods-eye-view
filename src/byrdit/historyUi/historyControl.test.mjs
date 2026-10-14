@@ -13,9 +13,14 @@ const NOW = Date.parse('2026-10-14T16:00:00Z');
 const HREF =
   'https://gev.example/?sv=29.76,-95.37,180,45,60#lat=29.7&lon=-95.3&l=abcDEF';
 
-function setup({ href = HREF, fetchImpl, tileOutlines = null } = {}) {
+function setup({
+  href = HREF,
+  fetchImpl,
+  tileOutlines = null,
+  worldOptions = {},
+} = {}) {
   const clock = fakeClock(NOW);
-  const world = fixtureWorld(NOW);
+  const world = fixtureWorld(NOW, worldOptions);
   const calls = [];
   const doc = fakeDocument();
   const win = fakeWindow(href, fetchImpl ?? fixtureFetch(world, { calls }));
@@ -445,4 +450,77 @@ test('app shell touch point: exactly one dynamic import + one call', () => {
     /import\('\.\.\/byrdit\/historyUi\/historyShell\.js'\)/,
   );
   assert.match(shell, /mountHistoryForShell\(this\)/);
+});
+
+test('mixed-source snapshots: Shift + arrow moves exactly 10 DISTINCT times both ways, across the gap (review R1)', async () => {
+  const h = setup({ worldOptions: { mixedSources: true } });
+  const at = (iso) => h.root.getAttribute('data-time') === iso;
+  h.control.seek(Date.parse('2026-10-14T14:20:00Z'));
+  await h.clock.run(300);
+  h.doc.key('ArrowLeft', { shiftKey: true });
+  await h.control.settle();
+  assert.ok(at('2026-10-14T14:10:00.000Z'), h.root.getAttribute('data-time'));
+  h.doc.key('ArrowLeft', { shiftKey: true });
+  await h.control.settle();
+  // 14:09, gap [14:02, 14:09), 14:01 .. 13:53
+  assert.ok(at('2026-10-14T13:53:00.000Z'), h.root.getAttribute('data-time'));
+  h.doc.key('ArrowRight', { shiftKey: true });
+  await h.control.settle();
+  // 13:54 .. 14:01 (8), 14:09 (9), 14:10 (10)
+  assert.ok(at('2026-10-14T14:10:00.000Z'), h.root.getAttribute('data-time'));
+  h.doc.key('ArrowRight', { shiftKey: true });
+  await h.control.settle();
+  assert.ok(at('2026-10-14T14:20:00.000Z'), h.root.getAttribute('data-time'));
+  h.doc.key('ArrowRight');
+  await h.control.settle();
+  assert.ok(at('2026-10-14T14:21:00.000Z'), h.root.getAttribute('data-time'));
+  h.control.destroy();
+});
+
+test('a Military gap does not stop aircraft snapping where aircraft was recorded (review R3)', async () => {
+  const h = setup({ worldOptions: { aircraftContinuous: true } });
+  h.q('.gev-hist-badge').click();
+  await h.clock.run(500);
+  const target = Date.parse('2026-10-14T14:05:25Z');
+  const f = (target - (NOW - DAY_MS)) / DAY_MS;
+  const before = h.calls.length;
+  await h.pointer('pointerdown', f);
+  await h.pointer('pointerup', f);
+  await h.clock.run(500);
+  const asked = h.calls.slice(before).filter((c) => c.includes('/snapshots'));
+  assert.ok(
+    asked.some((c) => c.includes('feed=aircraft')),
+    asked.join(' '),
+  );
+  assert.ok(
+    !asked.some((c) => c.includes('feed=military')),
+    'Military gap: not asked',
+  );
+  assert.equal(h.root.getAttribute('data-time'), '2026-10-14T14:05:00.000Z');
+  // the Military lane gap is still named by the HUD
+  assert.match(
+    h.q('.gev-hist-hud').textContent,
+    /No recording at this time \(gap 14:02-14:09 UTC\) - Military/,
+  );
+  h.control.destroy();
+});
+
+test('control: nothing recorded near t in any lane -> the time stays in the gap', async () => {
+  const h = setup();
+  h.q('.gev-hist-badge').click();
+  await h.clock.run(500);
+  const target = Date.parse('2026-10-14T14:05:25Z');
+  const f = (target - (NOW - DAY_MS)) / DAY_MS;
+  const before = h.calls.length;
+  await h.pointer('pointerdown', f);
+  await h.pointer('pointerup', f);
+  await h.clock.run(500);
+  const asked = h.calls.slice(before).filter((c) => c.includes('/snapshots'));
+  assert.ok(
+    !asked.some((c) => c.includes('feed=military')),
+    'Military gap: not asked',
+  );
+  assert.equal(h.root.getAttribute('data-time'), '2026-10-14T14:05:25.000Z');
+  assert.match(h.q('.gev-hist-hud').textContent, /gap 14:02-14:09 UTC/);
+  h.control.destroy();
 });

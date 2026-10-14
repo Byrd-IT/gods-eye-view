@@ -14,6 +14,7 @@ import {
   coverageRange,
   createSnapIndex,
   decodeHt,
+  distinctTimes,
   encodeHt,
   fallbackStep,
   followWindow,
@@ -238,4 +239,28 @@ test('ht: strict ISO UTC inside the 2-year window, else ignored', () => {
     null,
     'hash is not the ht',
   );
+});
+
+test('steps count DISTINCT times: B9 lists an aircraft epoch once per source (review R1)', () => {
+  const t = NOW - HOUR_MS;
+  const dup = [-1, -1, 0, 0, 1, 1].map((m) => t + m * MINUTE_MS);
+  assert.deepEqual(distinctTimes(dup), [t - MINUTE_MS, t, t + MINUTE_MS]);
+  const idx = createSnapIndex();
+  idx.add(t, dup);
+  assert.equal(idx.step(t, 1, 1), t + MINUTE_MS);
+  assert.equal(idx.step(t, -1, 1), t - MINUTE_MS);
+  // only ONE distinct time is known ahead: the 2nd step must be fetched,
+  // never answered as t + 1 min (the duplicate counted as a step)
+  assert.equal(idx.step(t, 1, 2), null);
+  assert.equal(idx.step(t, -1, 2), null);
+  // ten distinct times both ways, every one listed twice
+  const many = [];
+  for (let m = -12; m <= 12; m++)
+    many.push(t + m * MINUTE_MS, t + m * MINUTE_MS);
+  const big = createSnapIndex();
+  big.add(t, many);
+  assert.equal(big.step(t, 1, 10), t + 10 * MINUTE_MS);
+  assert.equal(big.step(t, -1, 10), t - 10 * MINUTE_MS);
+  assert.equal(pickStep(many, t, 1, 10), t + 10 * MINUTE_MS);
+  assert.equal(pickStep(many, t, -1, 10), t - 10 * MINUTE_MS);
 });

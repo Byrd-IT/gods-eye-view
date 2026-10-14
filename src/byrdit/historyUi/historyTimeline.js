@@ -176,12 +176,28 @@ export function snapTo(t, snaps, toleranceMs) {
  * (dir < 0) t. Fewer available -> the farthest one; none -> null.
  */
 export function pickStep(snaps, t, dir, count = 1) {
-  const eps = 500; // a snapshot at t itself is not a step
-  const side = [...new Set((snaps ?? []).filter(isTime))]
-    .filter((s) => (dir > 0 ? s > t + eps : s < t - eps))
-    .sort((a, b) => (dir > 0 ? a - b : b - a));
+  const side = stepSide(snaps, t, dir);
   if (!side.length) return null;
   return side[Math.min(count, side.length) - 1];
+}
+
+/** a snapshot within this of t is t itself, not a step */
+const STEP_EPS_MS = 500;
+
+/**
+ * Distinct recorded times. B9 /snapshots?feed=aircraft lists one entry per
+ * SOURCE, so the same epoch can come twice (adsblol + opensky); a step is
+ * one distinct time, never one entry.
+ */
+export function distinctTimes(snaps) {
+  return [...new Set((snaps ?? []).filter(isTime))].sort((a, b) => a - b);
+}
+
+/** Distinct snaps strictly beyond t in dir, nearest first. */
+export function stepSide(snaps, t, dir) {
+  return distinctTimes(snaps)
+    .filter((s) => (dir > 0 ? s > t + STEP_EPS_MS : s < t - STEP_EPS_MS))
+    .sort((a, b) => (dir > 0 ? a - b : b - a));
 }
 
 /**
@@ -193,7 +209,7 @@ export function createSnapIndex({ maxEntries = 16 } = {}) {
   let entries = [];
   return {
     add(around, snaps) {
-      const list = (snaps ?? []).filter(isTime).sort((a, b) => a - b);
+      const list = distinctTimes(snaps);
       const d = list.reduce((m, s) => Math.max(m, Math.abs(s - around)), 0);
       entries = [
         { lo: around - d, hi: around + d, snaps: list },
@@ -205,11 +221,8 @@ export function createSnapIndex({ maxEntries = 16 } = {}) {
       for (const e of entries) {
         if (t < e.lo || t > e.hi) continue;
         const inside = e.snaps.filter((s) => (dir > 0 ? s <= e.hi : s >= e.lo));
-        const pick = pickStep(inside, t, dir, count);
-        const ahead = inside.filter((s) =>
-          dir > 0 ? s > t + 500 : s < t - 500,
-        );
-        if (pick !== null && ahead.length >= count) return pick;
+        const ahead = stepSide(inside, t, dir); // distinct times
+        if (ahead.length >= count) return ahead[count - 1];
       }
       return null;
     },

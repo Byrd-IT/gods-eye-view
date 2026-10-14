@@ -134,3 +134,14 @@ test('an aborted snapshot request stays an AbortError (not "unavailable")', asyn
     (e) => e.name === 'AbortError',
   );
 });
+
+test('snapshots: duplicate epochs from two sources come back once (review R1)', async () => {
+  const client = createHistoryClient({
+    fetchImpl: fixtureFetch(fixtureWorld(NOW, { mixedSources: true })),
+    now: () => NOW,
+  });
+  const around = NOW - 600_000;
+  const snaps = await client.snapshots({ feed: 'aircraft', around, n: 6 });
+  // 6 entries = 3 distinct minutes, each as adsblol + opensky
+  assert.deepEqual(snaps, [around - 60_000, around, around + 60_000]);
+});

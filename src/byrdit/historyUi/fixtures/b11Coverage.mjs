@@ -18,6 +18,13 @@
  *     [now - 2 h + 2 min, now - 2 h + 9 min) where nothing was recorded and
  *     the gap detector wrote {from, to}
  *   - OpenSky tiles: one Texas tile + one world tile at each polled bucket
+ *
+ * Options (review R1/R3 regressions):
+ *   aircraftContinuous  aircraft (OpenSky) recorded straight through the
+ *                       military gap: only the Military lane has the gap
+ *   mixedSources        aircraft /snapshots lists every time TWICE (as
+ *                       'adsblol' and 'opensky'), like B9 historyService
+ *                       snapshots(): per-source n nearest merged, sliced to n
  */
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -31,7 +38,10 @@ const BUCKETS = {
 };
 export const TEXAS_TILE = [-106.6, 25.8, -93.5, 36.5];
 
-export function fixtureWorld(now) {
+export function fixtureWorld(
+  now,
+  { aircraftContinuous = false, mixedSources = false } = {},
+) {
   const base = Math.floor(now / MIN) * MIN;
   const gapFrom = base - 2 * 60 * MIN + 2 * MIN;
   const gapTo = base - 2 * 60 * MIN + 9 * MIN;
@@ -43,12 +53,17 @@ export function fixtureWorld(now) {
     unverifiedDay: today - DAY,
     today,
     firstPoll: today - 30 * DAY,
+    aircraftContinuous,
+    mixedSources,
   };
 }
 
 const iso = (ms) => new Date(ms).toISOString();
-const recordedAt = (w, t) =>
-  t >= w.firstPoll && t <= w.now && !(t >= w.gap.from && t < w.gap.to);
+const recordedAt = (w, t, feed = 'military') =>
+  t >= w.firstPoll &&
+  t <= w.now &&
+  ((feed === 'aircraft' && w.aircraftContinuous) ||
+    !(t >= w.gap.from && t < w.gap.to));
 
 function adsblolDays(w, from, to) {
   const out = [];
@@ -73,12 +88,13 @@ function pollBuckets(
   from,
   to,
   bucketMs,
-  { tiles = false, expected = true } = {},
+  { tiles = false, expected = true, feed = 'military' } = {},
 ) {
   const out = [];
   for (let b = from; b < to; b += bucketMs) {
     let polls = 0;
-    for (let t = b; t < b + bucketMs; t += MIN) if (recordedAt(w, t)) polls++;
+    for (let t = b; t < b + bucketMs; t += MIN)
+      if (recordedAt(w, t, feed)) polls++;
     const bucket = {
       t: iso(b),
       polls_ok: polls,
@@ -112,6 +128,7 @@ export function coverageFixture(w, { feed, from, to, bucket }) {
           buckets: pollBuckets(w, from, to, bucketMs, {
             tiles: true,
             expected: false,
+            feed: 'aircraft',
           }),
           tilesOmitted: to - from > 7 * DAY,
         },
@@ -146,20 +163,31 @@ export function snapshotsFixture(w, { feed, around, n }) {
     const dLo = around - lo;
     const dHi = hi - around;
     if (dLo <= dHi) {
-      if (recordedAt(w, lo)) out.push(lo);
+      if (recordedAt(w, lo, feed)) out.push(lo);
       lo -= MIN;
     } else {
-      if (recordedAt(w, hi)) out.push(hi);
+      if (recordedAt(w, hi, feed)) out.push(hi);
       hi += MIN;
     }
   }
   const source = feed === 'aircraft' ? 'opensky' : 'collector';
+  let snaps = out.map((ms) => ({ t: iso(ms), epochMs: ms, source }));
+  if (feed === 'aircraft' && w.mixedSources)
+    snaps = out
+      .flatMap((ms) => [
+        { t: iso(ms), epochMs: ms, source: 'adsblol' },
+        { t: iso(ms), epochMs: ms, source: 'opensky' },
+      ])
+      .sort(
+        (a, b) =>
+          Math.abs(a.epochMs - around) - Math.abs(b.epochMs - around) ||
+          a.epochMs - b.epochMs,
+      )
+      .slice(0, n);
   return {
     feed,
     around: iso(around),
-    snaps: out
-      .sort((a, b) => a - b)
-      .map((ms) => ({ t: iso(ms), epochMs: ms, source })),
+    snaps: snaps.sort((a, b) => a.epochMs - b.epochMs),
   };
 }
 

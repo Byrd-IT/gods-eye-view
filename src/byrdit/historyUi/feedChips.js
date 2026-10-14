@@ -86,6 +86,22 @@ export const BRIDGED_FEEDS = Object.freeze([
 /** Severity: a layer group shows its worst member. */
 const RANK = { live: 0, grey: 1, paused: 2, none: 3, cleared: 4 };
 
+/** Worse = not drawn first (a cleared pause beats a grey feed), then RANK. */
+const worse = (a, b) =>
+  (a.draw ? 0 : 1) - (b.draw ? 0 : 1) || RANK[a.state] - RANK[b.state];
+
+/** Everything a 'gev:feed-state' consumer acts on (not the age text). */
+const actionKey = (s) =>
+  JSON.stringify([
+    s.state,
+    s.draw,
+    s.chip,
+    s.lastOkAt,
+    s.staleSince,
+    s.greyUntil,
+    s.reason,
+  ]);
+
 /** The feed of a request URL (path only), or null. */
 export function feedOfUrl(url, origin = 'http://localhost') {
   let path;
@@ -182,7 +198,8 @@ export function createFeedChips({
 } = {}) {
   const entries = new Map(); // key (url path) -> {feed, base, serverNow, at}
   const listeners = new Set();
-  let last = new Map(); // feed id -> signature
+  let last = new Map(); // feed id -> render signature
+  let lastAction = new Map(); // feed id -> announced (actionable) signature
   let restore = null;
 
   function serverNowOf(response) {
@@ -227,24 +244,32 @@ export function createFeedChips({
         ...chipState(entry, t - entry.at, { timeZone, locale }),
       };
       const prev = out.get(entry.feed.id);
-      if (!prev || RANK[s.state] > RANK[prev.state]) out.set(entry.feed.id, s);
+      if (!prev || worse(s, prev) > 0) out.set(entry.feed.id, s);
     }
     return BRIDGED_FEEDS.map((f) => out.get(f.id)).filter(Boolean);
   }
 
-  /** Re-evaluate (call on a timer); announces each feed whose state moved. */
+  /**
+   * Re-evaluate (call on a timer). A feed is announced on 'gev:feed-state'
+   * whenever anything B12 acts on moves: state, draw, chip text or the
+   * server times / reason - e.g. paused stays 'paused' while draw flips
+   * true -> false at greyUntil (review R2). The age text alone only
+   * re-renders the chips, it is not announced.
+   */
   function refresh() {
     const list = states();
     const next = new Map(
       list.map((s) => [s.feed, `${s.state}|${s.chip}|${s.age}`]),
     );
+    const nextAction = new Map(list.map((s) => [s.feed, actionKey(s)]));
     for (const s of list) {
-      if (last.get(s.feed)?.split('|')[0] !== s.state) announce(s);
+      if (lastAction.get(s.feed) !== nextAction.get(s.feed)) announce(s);
     }
     const changed =
       list.length !== last.size ||
       list.some((s) => last.get(s.feed) !== next.get(s.feed));
     last = next;
+    lastAction = nextAction;
     if (changed) for (const fn of [...listeners]) safe(() => fn(list));
     return list;
   }

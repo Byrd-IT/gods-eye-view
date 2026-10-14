@@ -10,6 +10,7 @@ import {
   openskyTilesAt,
   overlay,
   parseGaps,
+  snapBlockedAt,
   toMs,
 } from './coverageRibbon.js';
 import {
@@ -274,4 +275,33 @@ test('gap records: epoch or ISO, open gap runs to now', () => {
     '2026-10-13 23:50-2026-10-14 00:10 UTC',
   );
   assert.equal(MINUTE_MS, 60_000);
+});
+
+test("snap is blocked per feed: only that feed's gap, and only with no other lane recorded (review R3)", () => {
+  const at = Date.parse('2026-10-14T14:05:25Z');
+  const day = ribbonFor({ from: NOW - DAY_MS, to: NOW });
+  assert.equal(gapsAt(at, day).length, 1, 'the Military gap');
+  assert.equal(snapBlockedAt('military', at, day), true);
+  assert.equal(snapBlockedAt('aircraft', at, day), false, 'not a Military gap');
+  assert.equal(snapBlockedAt('aircraft', at, null), false, 'no coverage yet');
+  // adsb.lol missing day: OpenSky polled that day -> aircraft still snaps
+  const week = ribbonFor({ from: NOW - 5 * DAY_MS, to: NOW });
+  const inMissing = W.missingDay + 3_600_000;
+  assert.equal(snapBlockedAt('aircraft', inMissing, week), false);
+  // ... and with OpenSky blank too, the aircraft feed is blocked
+  const blank = {
+    ...week,
+    lanes: week.lanes.map((l) =>
+      l.id === 'opensky'
+        ? {
+            ...l,
+            segments: [
+              { from: week.lanes[0].segments[0].from, to: NOW, kind: 'none' },
+            ],
+          }
+        : l,
+    ),
+  };
+  assert.equal(snapBlockedAt('aircraft', inMissing, blank), true);
+  assert.equal(snapBlockedAt('military', inMissing, blank), false);
 });

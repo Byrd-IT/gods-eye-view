@@ -12,6 +12,8 @@
  * concurrent identical questions share one request. The API allows 60
  * requests/min per client; the control never fetches while a scrub drags.
  */
+import { distinctTimes } from './historyTimeline.js';
+
 export const HISTORY_UNAVAILABLE = 'history unavailable';
 
 export class HistoryUnavailableError extends Error {
@@ -103,8 +105,10 @@ export function createHistoryClient({
   }
 
   /**
-   * Nearest stored snapshot times (exact n nearest, B9).
-   * @returns {Promise<number[]>} epoch ms, ascending
+   * Nearest stored snapshot times (exact n nearest, B9). B9 lists aircraft
+   * entries per source (adsblol + opensky), so one epoch can come twice;
+   * the answer here is the DISTINCT times (may be fewer than n).
+   * @returns {Promise<number[]>} epoch ms, ascending, no duplicates
    */
   async function snapshots({ feed, around, n = 10 }, { signal } = {}) {
     const value = await getJson(
@@ -114,10 +118,11 @@ export function createHistoryClient({
     );
     if (!value || !Array.isArray(value.snaps))
       throw new HistoryUnavailableError('bad_body');
-    return value.snaps
-      .map((s) => (Number.isFinite(s?.epochMs) ? s.epochMs : Date.parse(s?.t)))
-      .filter(Number.isFinite)
-      .sort((a, b) => a - b);
+    return distinctTimes(
+      value.snaps.map((s) =>
+        Number.isFinite(s?.epochMs) ? s.epochMs : Date.parse(s?.t),
+      ),
+    );
   }
 
   return {

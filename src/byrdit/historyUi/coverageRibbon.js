@@ -226,6 +226,35 @@ export function gapsAt(t, ribbon) {
   return (ribbon?.gaps ?? []).filter((g) => t >= g.from && t < g.to);
 }
 
+/** Ribbon lanes that hold each snap feed's recordings. */
+export const FEED_LANES = Object.freeze({
+  aircraft: Object.freeze(['adsblol', 'opensky']),
+  military: Object.freeze(['military']),
+});
+
+const HAS_DATA = new Set(['recorded', 'unverified', 'partial']);
+
+/**
+ * Should snap-to-data skip `feed` at t? Only when t is inside a known gap
+ * of one of THAT feed's lanes and no other lane of the feed has data at t.
+ * A Military gap never stops aircraft snapping; an adsb.lol missing day
+ * does not stop it either where OpenSky polled. (Review R3.)
+ */
+export function snapBlockedAt(feed, t, ribbon) {
+  const lanes = FEED_LANES[feed] ?? [feed];
+  const gapped = gapsAt(t, ribbon).filter((g) => lanes.includes(g.lane));
+  if (!gapped.length) return false;
+  const gappedLanes = new Set(gapped.map((g) => g.lane));
+  return !(ribbon?.lanes ?? []).some(
+    (lane) =>
+      lanes.includes(lane.id) &&
+      !gappedLanes.has(lane.id) &&
+      lane.segments.some(
+        (s) => t >= s.from && t < s.to && HAS_DATA.has(s.kind),
+      ),
+  );
+}
+
 const pad = (n) => String(n).padStart(2, '0');
 const hhmm = (ms) => {
   const d = new Date(ms);

@@ -24,9 +24,9 @@ import {
 } from './historyClient.js';
 import {
   buildRibbon,
-  gapsAt,
   hudLines,
   openskyTilesAt,
+  snapBlockedAt,
 } from './coverageRibbon.js';
 import { createFeedChips } from './feedChips.js';
 import {
@@ -46,6 +46,7 @@ import {
   readHtFromUrl,
   snapTo,
   snapToleranceMs,
+  stepSide,
   timeToFraction,
   windowAround,
   writeHtToUrl,
@@ -651,10 +652,11 @@ export function mountHistoryControl({
   async function snapNow() {
     const gen = ++seekGen;
     const t = s.timeMs;
-    // inside a known gap the time stays put: the HUD names the gap
-    if (gapsAt(t, s.ribbon).length) return;
     const tolerance = snapToleranceMs(spanOf());
     for (const feed of SNAP_FEEDS) {
+      // inside a known gap OF THIS FEED (and no other lane of it recorded)
+      // the feed is not asked: the HUD names the gap. Other feeds still snap.
+      if (snapBlockedAt(feed, t, s.ribbon)) continue;
       let snaps;
       try {
         snaps = await api.snapshots({ feed, around: t, n: 10 });
@@ -732,10 +734,7 @@ export function mountHistoryControl({
   async function findStep(t, dir, count) {
     const feed = SNAP_FEEDS[0];
     const n = Math.min(50, count * 2 + 4);
-    const beyond = (list, from) =>
-      list
-        .filter((x) => (dir > 0 ? x > from + 500 : x < from - 500))
-        .sort((a, b) => (dir > 0 ? a - b : b - a));
+    const beyond = (list, from) => stepSide(list, from, dir); // distinct
     let cur = t;
     let remaining = count;
     let rounds = 0;
