@@ -1482,6 +1482,9 @@ export class StyleManager extends ShellFacade {
     import('../byrdit/skyView/skyView.js')
       .then((sky) => sky.mountSkyViewForShell(this))
       .catch((error) => console.warn('[Sky] view unavailable:', error));
+    import('../byrdit/historyUi/historyShell.js')
+      .then((h) => h.mountHistoryForShell(this))
+      .catch((error) => console.warn('[History] control unavailable:', error));
   }
 
   // ── Share Button ─────────────────────────────
