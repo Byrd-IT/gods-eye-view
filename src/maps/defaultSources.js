@@ -14,6 +14,7 @@ export function createDefaultMapSources({
   googleTileset = null,
   cesiumToken = '',
   googleApiKey = '',
+  basemapSource = null,
 } = {}) {
   const ionToken = String(cesiumToken || '').trim();
   const hasIon = Boolean(ionToken);
@@ -69,6 +70,6 @@ export function createDefaultMapSources({
             }
           : {}),
       };
-    }),
+    }).concat(basemapSource ?? []),
   };
 }

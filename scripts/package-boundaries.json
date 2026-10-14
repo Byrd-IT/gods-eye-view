@@ -80,6 +80,12 @@
     ],
     "external": []
   },
+  "basemap": {
+    "runtime": "node",
+    "exports": ["./server/byrdit/basemap"],
+    "modules": ["src/byrdit/basemap/proxy.js", "src/byrdit/basemap/config.js"],
+    "external": []
+  },
   "adsb-lol-source": {
     "exports": ["./sources/adsb-lol"],
     "modules": ["src/data/adsbLolFallback.js"],
@@ -2312,7 +2318,15 @@
       "src/tools/functions.js",
       "src/voice/actionSchemas.js",
       "src/view/index.js",
-      "src/app/embed.js"
+      "src/app/embed.js",
+      "src/byrdit/basemap/index.js",
+      "src/byrdit/basemap/config.js",
+      "src/byrdit/basemap/stack.js",
+      "src/byrdit/basemap/imagery.js",
+      "src/byrdit/basemap/terrain.js",
+      "src/byrdit/basemap/credits.js",
+      "src/byrdit/basemap/googleSession.js",
+      "src/byrdit/basemap/autoSwitch.js"
     ],
     "external": [
       "hls.js",

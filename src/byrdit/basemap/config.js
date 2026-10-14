@@ -1,0 +1,159 @@
+/**
+ * Byrd-IT Open base map: browser side of /basemap/config.json (BASEMAP.md
+ * 4.2, 4.3).
+ *
+ * The flag is server-side (GEV_BASEMAP=1). The /basemap proxy plugin marks
+ * the page with <meta name="gev-basemap" content="1">. Without that marker
+ * nothing in this module runs and no /basemap request is made, so with the
+ * flag OFF the page behaves exactly as before.
+ *
+ * Coverage is discovered from the config (written from the real archives),
+ * never hard-coded here. Every URL the browser uses is a same-origin
+ * /basemap/ path; normalizeBasemapConfig drops anything else.
+ */
+
+export const BASEMAP_META_NAME = 'gev-basemap';
+export const BASEMAP_CONFIG_URL = '/basemap/config.json';
+export const BASEMAP_PATH_PREFIX = '/basemap/';
+
+/** Rev2 4.3 switching defaults; /basemap/config.json may override them. */
+export const DEFAULT_SWITCH = Object.freeze({
+  auto: true,
+  enterM: 5_000,
+  leaveM: 8_000,
+  dwellMs: 5_000,
+  reRootAgeMs: 2.5 * 60 * 60 * 1000,
+  rootAttemptsPerHour: 3,
+});
+
+/** True only when the server rendered the page with the basemap flag on. */
+export function basemapFlagOn(doc = globalThis.document) {
+  try {
+    const meta = doc?.querySelector?.(`meta[name="${BASEMAP_META_NAME}"]`);
+    return meta?.getAttribute?.('content') === '1';
+  } catch {
+    return false;
+  }
+}
+
+const finite = (value) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+const zoom = (value) =>
+  Number.isInteger(value) && value >= 0 && value <= 22 ? value : null;
+const samePath = (value) =>
+  typeof value === 'string' &&
+  value.startsWith(BASEMAP_PATH_PREFIX) &&
+  !value.includes('://') &&
+  !value.includes('..') &&
+  !value.includes('?')
+    ? value
+    : null;
+
+function bounds(value) {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const [w, s, e, n] = value.map(finite);
+  if ([w, s, e, n].some((v) => v === null)) return null;
+  if (w < -180 || e > 180 || s < -90 || n > 90 || w >= e || s >= n) return null;
+  return [w, s, e, n];
+}
+
+function positive(value, fallback) {
+  const v = finite(value);
+  return v !== null && v > 0 ? v : fallback;
+}
+
+/**
+ * Validate the served config into the shape the stack uses. Unknown fields
+ * are dropped; a part that does not validate is marked unavailable with a
+ * reason rather than half-used.
+ * @param {unknown} raw
+ */
+export function normalizeBasemapConfig(raw) {
+  const t = raw?.terrain ?? {};
+  const i = raw?.imagery ?? {};
+  const terrainUrl = samePath(t.url);
+  const imageryUrl = samePath(i.url);
+  const terrain = {
+    available: t.available === true && Boolean(terrainUrl),
+    url: terrainUrl,
+    version: typeof t.version === 'string' ? t.version : null,
+    maxzoom: zoom(t.maxzoom) ?? 0,
+    waterMask: t.waterMask !== false,
+  };
+  const regions = (Array.isArray(i.regions) ? i.regions : [])
+    .map((r) => ({ bounds: bounds(r?.bounds), maxzoom: zoom(r?.maxzoom) }))
+    .filter((r) => r.bounds && r.maxzoom !== null);
+  const baseMaxzoom = zoom(i.baseMaxzoom) ?? 0;
+  const imagery = {
+    available:
+      i.available === true &&
+      Boolean(imageryUrl) &&
+      /\{z\}.*\{x\}.*\{y\}/.test(imageryUrl ?? ''),
+    url: imageryUrl,
+    baseMaxzoom,
+    maxzoom: Math.max(baseMaxzoom, zoom(i.maxzoom) ?? baseMaxzoom),
+    year: Number.isInteger(i.year) ? i.year : null,
+    regions,
+  };
+  const s = raw?.switch ?? {};
+  const enterM = positive(s.enterM, DEFAULT_SWITCH.enterM);
+  let leaveM = positive(s.leaveM, DEFAULT_SWITCH.leaveM);
+  if (leaveM <= enterM) leaveM = enterM * 1.6;
+  const sw = {
+    auto: s.auto !== false,
+    enterM,
+    leaveM,
+    dwellMs: positive(s.dwellMs, DEFAULT_SWITCH.dwellMs),
+    reRootAgeMs: positive(s.reRootAgeMs, DEFAULT_SWITCH.reRootAgeMs),
+    rootAttemptsPerHour: Math.max(
+      1,
+      Math.floor(
+        positive(s.rootAttemptsPerHour, DEFAULT_SWITCH.rootAttemptsPerHour),
+      ),
+    ),
+  };
+  const reasons = [];
+  if (!terrain.available) reasons.push('terrain');
+  if (!imagery.available) reasons.push('imagery');
+  return {
+    available: reasons.length === 0,
+    unavailableReason: reasons.length
+      ? `Byrd-IT Open map service is unavailable (${reasons.join(', ')})`
+      : null,
+    terrain,
+    imagery,
+    switch: sw,
+  };
+}
+
+/**
+ * Fetch and validate /basemap/config.json. A network or HTTP failure gives
+ * an unavailable config (never throws), so the caller can take the esri path.
+ */
+export async function loadBasemapConfig({
+  fetchImpl = globalThis.fetch,
+  signal,
+  timeoutMs = 4_000,
+} = {}) {
+  try {
+    const timeout = AbortSignal.timeout?.(timeoutMs);
+    const combined =
+      signal && timeout && AbortSignal.any
+        ? AbortSignal.any([signal, timeout])
+        : (signal ?? timeout);
+    const response = await fetchImpl(BASEMAP_CONFIG_URL, {
+      signal: combined,
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return normalizeBasemapConfig(await response.json());
+  } catch (error) {
+    signal?.throwIfAborted?.();
+    const unavailable = normalizeBasemapConfig(null);
+    unavailable.unavailableReason = `Byrd-IT Open map service is unavailable (${
+      error?.message || String(error)
+    })`;
+    return unavailable;
+  }
+}

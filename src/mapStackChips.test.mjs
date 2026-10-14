@@ -139,8 +139,12 @@ test('the row renders exactly the five owner-approved sources', () => {
     'Esri Satellite',
     'OSM',
   ]);
+  // basemap-auto / byrdit-open exist only with GEV_BASEMAP=1 (BASEMAP.md 4.3);
+  // with the flag off the controller never lists them, so the row is unchanged.
   assert.deepEqual(PRESENTED_MAP_STACK_IDS, [
+    'basemap-auto',
     'photoreal',
+    'byrdit-open',
     'bing-aerial',
     'bing-labels',
     'esri-imagery',
@@ -180,7 +184,37 @@ test('re-rendering replaces the previous chips instead of stacking a second row'
   });
   renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'osm', doc });
 
-  assert.equal(container.children.length, PRESENTED_MAP_STACK_IDS.length);
+  assert.equal(container.children.length, CONTROLLER_STACKS.length);
+});
+
+test('basemap flag ON: Auto, Google 3D and Byrd-IT Open lead the row', () => {
+  const container = makeElement();
+  const withBasemap = [
+    ...CONTROLLER_STACKS,
+    { id: 'byrdit-open', label: 'Byrd-IT Open', available: true },
+    { id: 'basemap-auto', label: 'Auto', available: true },
+  ];
+  renderMapStackChips(container, withBasemap, {
+    activeId: 'byrdit-open',
+    doc,
+  });
+  assert.deepEqual(
+    container.children.map((chip) => chip.dataset.stackId),
+    [
+      'basemap-auto',
+      'photoreal',
+      'byrdit-open',
+      'bing-aerial',
+      'bing-labels',
+      'esri-imagery',
+      'osm',
+    ],
+  );
+  assert.deepEqual(container.children.slice(0, 3).map(chipText), [
+    'Auto',
+    'Google 3D',
+    'Byrd-IT Open',
+  ]);
 });
 
 test('clicking a chip dispatches that stack id — the same selection the dropdown made', () => {
