@@ -569,8 +569,11 @@ test('pick: a building of this tileset opens the card; anything else closes it',
   w.click();
   assert.equal(w.cards.length, before);
   releasePointer(lease);
-  // Hidden layer: no card.
+  // An open card closes when the layer hides; a hidden layer opens none.
+  w.click();
+  assert.ok(w.cards.at(-1)?.info);
   await w.fly(12_000);
+  assert.equal(w.cards.at(-1), null);
   const hiddenCount = w.cards.length;
   w.click();
   assert.equal(w.cards.length, hiddenCount);
