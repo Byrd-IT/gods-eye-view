@@ -235,6 +235,19 @@ test('keyboard: Space toggles play, arrows step recorded snapshots, Shift = 10',
   const button = h.q('.gev-hist-play');
   await h.doc.tap(' ', h.clock, { target: button });
   assert.equal(h.root.getAttribute('data-playing'), 'false');
+  // arrows inside a widget that owns them (tabs) are not stolen
+  h.doc.removeEventListener('keydown', voice);
+  h.doc.removeEventListener('keyup', voice);
+  const tabs = h.doc.createElement('div');
+  tabs.setAttribute('role', 'tablist');
+  const tab = h.doc.createElement('button');
+  tabs.append(tab);
+  h.doc.body.append(tabs);
+  const at = h.root.getAttribute('data-time');
+  const arrow = h.doc.key('ArrowRight', { target: tab });
+  await h.clock.run(100);
+  assert.equal(arrow.defaultPrevented, false);
+  assert.equal(h.root.getAttribute('data-time'), at);
   h.control.destroy();
 });
 

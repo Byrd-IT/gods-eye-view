@@ -64,6 +64,22 @@ const TICK_MS = 250;
 const STEP_SEARCH_ROUNDS = 12;
 /** A Space tap shorter than voice push-to-talk's hold delay (500 ms). */
 const SPACE_TAP_MS = 450;
+/** Focus inside one of these keeps its own ArrowLeft/ArrowRight. */
+const ARROW_OWNERS = [
+  '[role="slider"]:not(.gev-hist-scrub)',
+  '[role="radio"]',
+  '[role="radiogroup"]',
+  '[role="tablist"]',
+  '[role="listbox"]',
+  '[role="menu"]',
+  '[role="menubar"]',
+  '[role="grid"]',
+  '[role="tree"]',
+  'select',
+].join(', ');
+/** Right edge label at the live edge (a constant, not a literal in a
+ * textContent statement: materialSymbolsSubset.test reads those as glyphs). */
+const NOW_LABEL = 'now';
 const SKY_HEARTBEAT_MS = 2_000;
 const CHIP_REFRESH_MS = 15_000;
 const URL_WRITE_MS = 1_000;
@@ -512,7 +528,7 @@ export function mountHistoryControl({
       dom.edgeFrom.textContent = formatUtc(s.win.from, { seconds: false });
       dom.edgeTo.textContent =
         s.win.to >= t - 60_000
-          ? 'now'
+          ? NOW_LABEL
           : formatUtc(s.win.to, { seconds: false });
     }
     renderChips();
@@ -932,12 +948,8 @@ export function mountHistoryControl({
     const target = e.target;
     if (isEditable(target) || inSky(target)) return;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      if (
-        target?.matches?.(
-          '[role="slider"]:not(.gev-hist-scrub), [role="radio"]',
-        )
-      )
-        return;
+      // widgets that own their arrow keys keep them
+      if (target?.closest?.(ARROW_OWNERS)) return;
       e.preventDefault();
       step(e.key === 'ArrowRight' ? 1 : -1, e.shiftKey ? 10 : 1);
     }
