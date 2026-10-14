@@ -105,6 +105,7 @@ export const HISTORY_CSS = `
 .gev-hist-chip-live { border-color: rgba(64, 220, 120, 0.6); color: #6ff0a0; }
 .gev-hist-chip-grey, .gev-hist-chip-cleared, .gev-hist-chip-none, .gev-hist-chip-paused { color: #b8bec6; background: rgba(150, 150, 150, 0.18); border-color: rgba(180, 180, 180, 0.45); }
 .gev-hist-chip-cleared { opacity: 0.8; font-style: italic; }
+.gev-hist-chip-unswapped { border-color: rgba(64, 220, 120, 0.75); color: #6ff0a0; background: rgba(20, 90, 50, 0.35); font-weight: 600; }
 @media (max-width: 900px) {
   .gev-hist { left: 12px; width: calc(100vw - 24px); min-width: 0; max-width: none; bottom: 232px; }
   .gev-hist[data-expanded='false'] { width: auto; max-width: calc(100vw - 24px); }

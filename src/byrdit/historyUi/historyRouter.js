@@ -1,0 +1,622 @@
+/**
+ * History fetch router (gev-history DESIGN 4.5, card B12a, umbrella D1/D3/D6).
+ *
+ * A pass-through wrapper of window.fetch, installed by mountHistoryForShell
+ * AFTER the B11 feed-chip observer, so the chain is
+ *
+ *   layer source -> router -> feedChips observer -> browser fetch
+ *
+ * LIVE: every request goes straight through (same promise).
+ * HISTORY: a GET on a route with an adapter (historyAdapters.js) is answered
+ * from /api/history/slice at the history time, adapted to the exact live
+ * body and headers, so the layer's own parser runs unchanged. The slice
+ * request goes through the inner fetch: the chip observer sees
+ * /api/history/slice (not a bridged route) and keeps judging only real live
+ * answers.
+ *
+ * D3 quiet failure: a slice that fails (network, non-2xx, not JSON) marks
+ * that feed failed; the request and the next ones pass through to live
+ * (the globe is never blanked) until a retry after `retryMs` succeeds or
+ * the control reports history available again. A failed feed is NOT
+ * swapped, so its layer gets a LIVE chip. A recorded gap / empty slice is
+ * a successful, EMPTY answer: nothing is drawn (never live, never another
+ * time).
+ *
+ * D6 cache + prefetch: slice answers are kept in a small LRU keyed by the
+ * exact slice URL (raw answer; the rebase is applied when served, so a
+ * cached answer is never served with a stale delta). prefetch() fills it
+ * with at most `prefetchConcurrency` requests in flight IN TOTAL; a seek,
+ * LIVE or a change of the slice parameters (bbox / maxRows) drops the cache
+ * and cancels the prefetches.
+ *
+ * Playback frames: while playing, the slice time of a feed is its recorded
+ * snapshot at or before t (setSnaps; B9 /snapshots) or t floored to the
+ * adapter's quantum, so the layer's request asks exactly the URL prefetched
+ * for that frame. Paused / released, the slice time is t itself (the B11
+ * control already snaps a release to a recorded snapshot).
+ *
+ * A request carrying init.gevLive (the voice tools: they report "current"
+ * data) always passes through.
+ */
+import {
+  HISTORY_ADAPTERS,
+  adapterForPath,
+  sliceUrl,
+} from './historyAdapters.js';
+
+export const LIVE_ONLY_FLAG = 'gevLive';
+/** A playback move larger than this (or backwards) is a seek. */
+export const PLAY_JUMP_MS = 10 * 60_000;
+/** A known snapshot farther back than this is not the frame of t. */
+export const MAX_FRAME_LAG_MS = 10 * 60_000;
+const SNAPS_KEEP = 2_000;
+/**
+ * Slice requests per minute this tab allows itself. The history API limits
+ * a client to 60 /api/history/* requests per minute (historyApi.js,
+ * GEV_RATELIMIT_HISTORY_PER_MIN); the rest is left for the control's
+ * coverage / snapshots questions. Playback paces its frames to this budget
+ * (historyRefresh.js) and a prefetch never spends the last PREFETCH_RESERVE.
+ */
+export const SLICE_BUDGET_PER_MIN = 40;
+export const PREFETCH_RESERVE = 6;
+
+export class SliceError extends Error {
+  constructor(kind, status = null) {
+    super(`history slice ${kind}`);
+    this.name = 'SliceError';
+    this.kind = kind; // 'busy' | 'failed'
+    this.status = status;
+  }
+}
+
+const abortError = () => new DOMException('Aborted', 'AbortError');
+const isAbort = (e) => e?.name === 'AbortError';
+
+function withSignal(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (v) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(e);
+      },
+    );
+  });
+}
+
+function requestOf(input, init) {
+  const isRequest =
+    input && typeof input === 'object' && !(input instanceof URL);
+  const url = isRequest ? input.url : String(input);
+  const method = String(
+    init?.method ?? (isRequest ? input.method : 'GET') ?? 'GET',
+  ).toUpperCase();
+  const signal = init?.signal ?? (isRequest ? input.signal : null) ?? null;
+  return { url, method, signal };
+}
+
+/** Lower-cased header object of a Response. */
+function headerObject(response) {
+  const out = {};
+  try {
+    response.headers?.forEach?.((v, k) => {
+      out[String(k).toLowerCase()] = v;
+    });
+  } catch {
+    /* none */
+  }
+  return out;
+}
+
+/** Sorted unique numbers. */
+function mergeTimes(list, more) {
+  const set = new Set(list);
+  for (const x of more) if (Number.isFinite(x)) set.add(x);
+  const out = [...set].sort((a, b) => a - b);
+  return out.length > SNAPS_KEEP ? out.slice(out.length - SNAPS_KEEP) : out;
+}
+
+/** Largest value <= t (binary search), or null. */
+function floorOf(sorted, t) {
+  let lo = 0,
+    hi = sorted.length - 1,
+    out = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid] <= t) {
+      out = sorted[mid];
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return out;
+}
+
+/**
+ * @param {object} options
+ *   target               window (fetch owner)
+ *   adapters             adapter registry (historyAdapters.js)
+ *   now                  wall clock ms (the rebase "now")
+ *   retryMs              how long a failed feed passes through before retry
+ *   busyRetryMs          one retry of a 429 (rate limit / busy) after this
+ *   cacheMax             slice answers kept (LRU)
+ *   prefetchConcurrency  prefetches in flight in total
+ *   timers               {setTimeout, clearTimeout}
+ */
+export function createHistoryRouter({
+  target = globalThis.window,
+  adapters = HISTORY_ADAPTERS,
+  now = () => Date.now(),
+  base = '/api/history',
+  retryMs = 15_000,
+  busyRetryMs = 1_500,
+  cacheMax = 32,
+  prefetchConcurrency = 2,
+  budgetPerMin = SLICE_BUDGET_PER_MIN,
+  prefetchReserve = PREFETCH_RESERVE,
+  timers = globalThis,
+  monotonic = () => globalThis.performance?.now?.() ?? Date.now(),
+} = {}) {
+  let inner = null; // the fetch below the router (feedChips -> browser)
+  let restore = null;
+  const s = { active: false, timeMs: null, playing: false, error: false };
+  let gen = 0;
+  const cache = new Map(); // slice url -> {promise, value}
+  const snaps = new Map(); // snap feed -> sorted epoch ms
+  const lastLive = new Map(); // adapter id -> {url, key}
+  const failedUntil = new Map(); // adapter id -> ms
+  const served = new Map(); // adapter id -> {t, rows, gap}
+  const pinned = new Map(); // adapter id -> playback frame (driver)
+  const listeners = new Set();
+  const queue = []; // prefetch slice urls
+  const running = new Map(); // prefetch url -> AbortController
+  const stats = { slices: 0, cacheHits: 0, prefetches: 0, maxInFlight: 0 };
+  const spent = []; // monotonic ms of slice network requests (last minute)
+
+  /** Slice requests left in the rolling minute. */
+  function budgetLeft() {
+    const floor = monotonic() - 60_000;
+    while (spent.length && spent[0] <= floor) spent.shift();
+    return budgetPerMin - spent.length;
+  }
+
+  const origin = () => target?.location?.origin ?? 'http://localhost';
+
+  function notify() {
+    const st = getState();
+    for (const fn of [...listeners]) {
+      try {
+        fn(st);
+      } catch {
+        /* keep going */
+      }
+    }
+  }
+
+  function getState() {
+    return {
+      active: s.active,
+      timeMs: s.timeMs,
+      playing: s.playing,
+      swapped: adapters.filter((a) => isSwapped(a.id)).map((a) => a.id),
+      failed: adapters.filter((a) => isFailed(a.id)).map((a) => a.id),
+      served: Object.fromEntries(served),
+      cacheSize: cache.size,
+      prefetchInFlight: running.size,
+      prefetchQueued: queue.length,
+      budgetLeft: budgetLeft(),
+      stats: { ...stats },
+    };
+  }
+
+  function isFailed(id) {
+    return (failedUntil.get(id) ?? 0) > now();
+  }
+
+  /** History is active and this feed is answered from history. */
+  function isSwapped(id) {
+    return s.active && adapters.some((a) => a.id === id) && !isFailed(id);
+  }
+
+  // ── cache ───────────────────────────────────────────────
+
+  function clearCache() {
+    cancelPrefetch();
+    cache.clear();
+  }
+
+  function remember(url, entry) {
+    cache.delete(url);
+    cache.set(url, entry);
+    while (cache.size > cacheMax) {
+      const oldest = cache.keys().next().value;
+      if (running.has(oldest)) break;
+      cache.delete(oldest);
+    }
+  }
+
+  async function fetchSlice(url, signal) {
+    let response;
+    try {
+      response = await inner.call(target, url, {
+        signal,
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+    } catch (error) {
+      if (isAbort(error)) throw error;
+      throw new SliceError('failed');
+    }
+    if (response?.status === 429) throw new SliceError('busy', 429);
+    if (!response?.ok) throw new SliceError('failed', response?.status ?? null);
+    const type = String(response.headers?.get?.('content-type') ?? '');
+    if (!/\bjson\b/i.test(type))
+      throw new SliceError('failed', response.status);
+    let body;
+    try {
+      body = await response.json();
+    } catch (error) {
+      if (isAbort(error)) throw error;
+      throw new SliceError('failed', response.status);
+    }
+    if (!body || typeof body !== 'object')
+      throw new SliceError('failed', response.status);
+    return { body, headers: headerObject(response) };
+  }
+
+  /** One slice answer, from the cache or the network (shared in flight). */
+  function getSlice(url, { signal = null, prefetch = false } = {}) {
+    const hit = cache.get(url);
+    if (hit) {
+      if (!prefetch) stats.cacheHits++;
+      // touch: keep the frame being shown
+      cache.delete(url);
+      cache.set(url, hit);
+      return hit.promise;
+    }
+    stats.slices++;
+    spent.push(monotonic());
+    const entry = {};
+    entry.promise = fetchSlice(url, signal).then(
+      (value) => {
+        entry.value = value;
+        return value;
+      },
+      (error) => {
+        if (cache.get(url) === entry) cache.delete(url);
+        throw error;
+      },
+    );
+    remember(url, entry);
+    return entry.promise;
+  }
+
+  // ── prefetch (D6) ───────────────────────────────────────
+
+  function cancelPrefetch() {
+    queue.length = 0;
+    for (const [url, controller] of running) {
+      controller.abort();
+      running.delete(url);
+    }
+  }
+
+  function pump() {
+    while (running.size < prefetchConcurrency && queue.length) {
+      // a prefetch never spends the budget the layers' own requests need
+      if (budgetLeft() <= prefetchReserve) {
+        queue.length = 0;
+        return;
+      }
+      const url = queue.shift();
+      if (cache.has(url) || running.has(url)) continue;
+      const controller = new AbortController();
+      running.set(url, controller);
+      stats.prefetches++;
+      stats.maxInFlight = Math.max(stats.maxInFlight, running.size);
+      getSlice(url, { signal: controller.signal, prefetch: true })
+        .catch(() => {})
+        .finally(() => {
+          if (running.get(url) === controller) running.delete(url);
+          pump();
+        });
+    }
+  }
+
+  /** Slice URLs of an adapter's last live request at time t. */
+  function urlsAt(adapter, t) {
+    const last = lastLive.get(adapter.id);
+    if (!last) return [];
+    let url;
+    try {
+      url = new URL(last.url, origin());
+    } catch {
+      return [];
+    }
+    return adapter
+      .sliceParams(url)
+      .map((params) => sliceUrl(adapter, params, t, base));
+  }
+
+  /** Queue the slices of `times` for a swapped adapter (cache fill). */
+  function prefetch(adapterId, times) {
+    const adapter = adapters.find((a) => a.id === adapterId);
+    if (!adapter || !isSwapped(adapterId)) return [];
+    const urls = [];
+    for (const t of times)
+      for (const url of urlsAt(adapter, t))
+        if (!cache.has(url) && !running.has(url) && !queue.includes(url)) {
+          queue.push(url);
+          urls.push(url);
+        }
+    pump();
+    return urls;
+  }
+
+  // ── frames ──────────────────────────────────────────────
+
+  function setSnaps(feed, list) {
+    snaps.set(feed, mergeTimes(snaps.get(feed) ?? [], list));
+  }
+
+  /** The slice time of an adapter at t (see the module note). */
+  function frameTime(adapter, t = s.timeMs) {
+    if (!Number.isFinite(t)) return t;
+    if (!s.playing) return t;
+    const list = adapter.snapFeed ? snaps.get(adapter.snapFeed) : null;
+    if (list?.length) {
+      const floor = floorOf(list, t);
+      if (floor !== null && t - floor <= MAX_FRAME_LAG_MS) return floor;
+    }
+    const q = adapter.quantumMs;
+    return q ? Math.floor(t / q) * q : t;
+  }
+
+  /**
+   * Playback: the frame the driver chose to show for an adapter (a
+   * prefetched recorded frame at or before t). Layer requests during
+   * playback ask it, so a shown frame is the one prefetched for it.
+   */
+  function pinFrame(adapterId, frame) {
+    if (Number.isFinite(frame)) pinned.set(adapterId, frame);
+    else pinned.delete(adapterId);
+  }
+
+  /** The slice time a layer request asks now (pinned frame or frameTime). */
+  function requestTime(adapter) {
+    const t = s.timeMs;
+    const pin = pinned.get(adapter.id);
+    if (
+      s.playing &&
+      Number.isFinite(pin) &&
+      pin <= t &&
+      t - pin <= MAX_FRAME_LAG_MS
+    )
+      return pin;
+    return frameTime(adapter, t);
+  }
+
+  /** The next `count` frame times after `frame` (known snapshots / quanta). */
+  function nextFrames(adapter, frame, count = 2, limit = now()) {
+    const out = [];
+    const list = adapter.snapFeed ? snaps.get(adapter.snapFeed) : null;
+    if (list?.length) {
+      for (const x of list) {
+        if (x > frame && x <= limit) out.push(x);
+        if (out.length >= count) break;
+      }
+      return out;
+    }
+    const q = adapter.quantumMs;
+    if (!q) return out;
+    for (let x = frame + q; out.length < count && x <= limit; x += q)
+      out.push(x);
+    return out;
+  }
+
+  /** Known snapshot times after t (playback asks for more when short). */
+  function snapsAfter(feed, t) {
+    return (snaps.get(feed) ?? []).filter((x) => x > t);
+  }
+
+  // ── the history time ────────────────────────────────────
+
+  /**
+   * Feed the control state ('gev:history-time' detail / handle.getState()).
+   * @returns {{entered, left, seeked, moved}}
+   */
+  function setHistory(detail = {}) {
+    const active = Boolean(detail.active) && Number.isFinite(detail.timeMs);
+    const timeMs = active ? detail.timeMs : null;
+    const playing = active && Boolean(detail.playing);
+    const error = Boolean(detail.error);
+    const out = { entered: false, left: false, seeked: false, moved: false };
+    if (s.error && !error) failedUntil.clear(); // history is back (D3)
+    s.error = error;
+    if (!active) {
+      if (s.active) {
+        out.left = true;
+        gen++;
+        s.active = false;
+        s.timeMs = null;
+        s.playing = false;
+        clearCache();
+        failedUntil.clear();
+        served.clear();
+        pinned.clear();
+        notify();
+      }
+      return out;
+    }
+    const prev = s.timeMs;
+    const wasPlaying = s.playing;
+    if (!s.active) {
+      out.entered = true;
+      gen++;
+      clearCache();
+    } else if (timeMs !== prev) {
+      out.moved = true;
+      const jump =
+        timeMs < prev ||
+        timeMs - prev > PLAY_JUMP_MS ||
+        !(wasPlaying && playing);
+      if (jump) {
+        out.seeked = true;
+        gen++;
+        clearCache();
+      }
+    }
+    s.active = true;
+    s.timeMs = timeMs;
+    s.playing = playing;
+    if (!playing || out.seeked || out.entered) pinned.clear();
+    if (out.entered) notify();
+    return out;
+  }
+
+  // ── the fetch wrapper ───────────────────────────────────
+
+  function liveParamsKey(adapter, url) {
+    return JSON.stringify(adapter.sliceParams(url));
+  }
+
+  function busyResponse() {
+    return new Response(JSON.stringify({ error: 'history_busy' }), {
+      status: 503,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-History-Busy': '1',
+        'Retry-After': '2',
+      },
+    });
+  }
+
+  const sleep = (ms) =>
+    new Promise((resolve) => timers.setTimeout(resolve, ms));
+
+  async function answer(adapter, url, input, init, signal) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const myGen = gen;
+      const t = requestTime(adapter);
+      const urls = adapter
+        .sliceParams(url)
+        .map((params) => sliceUrl(adapter, params, t, base));
+      let answers;
+      try {
+        answers = await withSignal(
+          Promise.all(urls.map((u) => getSlice(u))),
+          signal,
+        );
+      } catch (error) {
+        if (signal?.aborted) throw abortError();
+        if (!s.active) return inner.call(target, input, init);
+        if (isAbort(error) || gen !== myGen) continue; // a seek: ask again
+        if (error instanceof SliceError && error.kind === 'busy') {
+          if (attempt === 0) {
+            await withSignal(sleep(busyRetryMs), signal);
+            continue;
+          }
+          return busyResponse();
+        }
+        failedUntil.set(adapter.id, now() + retryMs);
+        served.delete(adapter.id);
+        notify();
+        return inner.call(target, input, init);
+      }
+      if (!s.active) return inner.call(target, input, init); // LIVE meanwhile
+      if (gen !== myGen) continue; // a seek meanwhile: answer the new t
+      const wasFailed = failedUntil.delete(adapter.id);
+      const adapted = adapter.adapt(answers, { t, nowMs: now() });
+      const rows = Number(adapted.headers['X-History-Rows']) || 0;
+      const prevServed = served.get(adapter.id);
+      served.set(adapter.id, {
+        t,
+        rows,
+        gap: adapted.headers['X-History-Gap'] === '1',
+      });
+      if (wasFailed || !prevServed) notify();
+      return new Response(JSON.stringify(adapted.body), {
+        status: 200,
+        headers: {
+          ...adapted.headers,
+          'X-History-T': new Date(t).toISOString(),
+        },
+      });
+    }
+    return busyResponse();
+  }
+
+  function install() {
+    if (restore || typeof target?.fetch !== 'function') return;
+    inner = target.fetch;
+    const wrapped = function historyRouterFetch(input, init) {
+      if (!s.active) return inner.call(target, input, init);
+      let req;
+      let url;
+      let adapter;
+      try {
+        req = requestOf(input, init);
+        url = new URL(req.url, origin());
+        adapter =
+          req.method === 'GET' && !init?.[LIVE_ONLY_FLAG]
+            ? adapterForPath(url.pathname, adapters)
+            : null;
+      } catch {
+        adapter = null;
+      }
+      if (!adapter || isFailed(adapter.id))
+        return inner.call(target, input, init);
+      // D6: a new bbox / maxRows drops the prefetched frames
+      const key = liveParamsKey(adapter, url);
+      const last = lastLive.get(adapter.id);
+      if (last && last.key !== key) clearCache();
+      lastLive.set(adapter.id, { url: url.href, key });
+      return answer(adapter, url, input, init, req.signal);
+    };
+    target.fetch = wrapped;
+    restore = () => {
+      if (target.fetch === wrapped) target.fetch = inner;
+    };
+  }
+
+  return {
+    install,
+    setHistory,
+    frameTime,
+    requestTime,
+    pinFrame,
+    nextFrames,
+    setSnaps,
+    snapsAfter,
+    prefetch,
+    cancelPrefetch,
+    clearCache,
+    isSwapped,
+    isFailed,
+    getState,
+    adapters,
+    /** The fetch below the router (history requests of the driver). */
+    innerFetch: (...args) => (inner ?? target.fetch).call(target, ...args),
+    hasCached: (url) => cache.has(url),
+    budgetLeft,
+    budgetPerMin,
+    frameBudgetPerMin: Math.max(1, budgetPerMin - prefetchReserve),
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    destroy() {
+      restore?.();
+      restore = null;
+      clearCache();
+      listeners.clear();
+      s.active = false;
+    },
+  };
+}

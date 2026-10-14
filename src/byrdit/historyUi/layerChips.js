@@ -1,0 +1,164 @@
+/**
+ * LIVE chips for the mixed state (gev-history DESIGN 4.5, card B12a, D5).
+ *
+ * While history is active, every ENABLED layer that is NOT answered from
+ * history gets a visible 'LIVE' chip in the B11 chip strip, so a globe that
+ * mixes recorded and live layers never does so silently. Enabled ids come
+ * from shell._dataManager.getEnabledLayerIds() (updates via its subscribe);
+ * a layer whose swap is not built yet, or whose history feed has failed and
+ * passes through to live (D3), shows LIVE too.
+ *
+ * This wraps the B11 feed-chip provider and is passed to
+ * mountHistoryControl({chips}); the control renders every chip whose state
+ * is not 'live' even when collapsed. In history mode the live staleness
+ * chip of a SWAPPED feed is dropped (its layer shows the recording, not the
+ * live feed), and so are the green 'live' feed chips (the layer's LIVE chip
+ * says it; grey / cleared / paused staleness chips stay). On LIVE the list
+ * is the B11 list unchanged, so the LIVE chips disappear.
+ */
+
+export const UNSWAPPED_STATE = 'unswapped';
+/** Chip text (named constants: no lowercase literal in a textContent=). */
+export const LIVE_CHIP = 'LIVE';
+export const LIVE_CHIP_UNAVAILABLE = 'LIVE (history unavailable)';
+
+export function createLayerChips({
+  feedChips,
+  getRouter = () => null,
+  getDataManager = () => null,
+} = {}) {
+  const listeners = new Set();
+  let lastSig = '';
+  let offManager = null;
+  let offRouter = null;
+  let offBase = null;
+  let manager = null;
+
+  function attach() {
+    const dm = safeGet(getDataManager);
+    if (dm && dm !== manager && typeof dm.subscribe === 'function') {
+      offManager?.();
+      manager = dm;
+      offManager = dm.subscribe((change) => {
+        // enabled set / names move on lifecycle changes; refresh events are
+        // cheap to compare (the signature drops unchanged lists)
+        if (change?.type === 'refresh') return;
+        refresh({ base: false });
+      });
+    }
+    const router = safeGet(getRouter);
+    if (router && !offRouter && typeof router.subscribe === 'function')
+      offRouter = router.subscribe(() => refresh({ base: false }));
+  }
+
+  function states() {
+    attach();
+    const base = feedChips?.states?.() ?? [];
+    const router = safeGet(getRouter);
+    const rs = router?.getState?.();
+    if (!rs?.active) return base;
+    const dm = safeGet(getDataManager);
+    let enabled;
+    let all;
+    try {
+      enabled = dm?.getEnabledLayerIds?.() ?? new Set();
+      all = dm?.getAll?.() ?? [];
+    } catch {
+      enabled = new Set();
+      all = [];
+    }
+    const adapters = router.adapters ?? [];
+    const swappedFeeds = new Set(
+      adapters.filter((a) => router.isSwapped(a.id)).map((a) => a.id),
+    );
+    const swappedLayers = new Set(
+      adapters.filter((a) => swappedFeeds.has(a.id)).map((a) => a.layerId),
+    );
+    const failedLayers = new Set(
+      adapters.filter((a) => router.isFailed?.(a.id)).map((a) => a.layerId),
+    );
+    // a swapped feed's live staleness chip is not about what it shows now;
+    // a green live chip would only repeat the LIVE chip of its layer
+    const out = base.filter(
+      (c) => !swappedFeeds.has(c.feed) && c.state !== 'live',
+    );
+    const ids = [
+      ...all.map((l) => l.id).filter((id) => enabled.has(id)),
+      ...[...enabled].filter((id) => !all.some((l) => l.id === id)),
+    ];
+    for (const id of ids) {
+      if (swappedLayers.has(id)) continue;
+      const label = all.find((l) => l.id === id)?.name || id;
+      out.push({
+        feed: `layer:${id}`,
+        layerId: id,
+        label,
+        state: UNSWAPPED_STATE,
+        draw: true,
+        chip: failedLayers.has(id) ? LIVE_CHIP_UNAVAILABLE : LIVE_CHIP,
+        age: null,
+        lastOkAt: null,
+        staleSince: null,
+        greyUntil: null,
+        reason: null,
+      });
+    }
+    return out;
+  }
+
+  /** Recompute; tell the control only when the list changed. */
+  function refresh({ base = true } = {}) {
+    if (base) feedChips?.refresh?.();
+    const list = states();
+    const sig = JSON.stringify(
+      list.map((c) => [c.feed, c.state, c.chip, c.age, c.label]),
+    );
+    if (sig !== lastSig) {
+      lastSig = sig;
+      for (const fn of [...listeners]) {
+        try {
+          fn(list);
+        } catch {
+          /* keep going */
+        }
+      }
+    }
+    return list;
+  }
+
+  return {
+    install() {
+      feedChips?.install?.();
+      offBase = feedChips?.subscribe?.(() => refresh({ base: false })) ?? null;
+      attach();
+    },
+    observe: (...args) => feedChips?.observe?.(...args),
+    /** Hook the router / data manager once they exist (shell order). */
+    connect() {
+      attach();
+      return refresh({ base: false });
+    },
+    states,
+    refresh,
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    destroy() {
+      offBase?.();
+      offManager?.();
+      offRouter?.();
+      offBase = offManager = offRouter = null;
+      listeners.clear();
+      feedChips?.destroy?.();
+    },
+  };
+}
+
+function safeGet(fn) {
+  try {
+    return fn?.() ?? null;
+  } catch {
+    return null;
+  }
+}
