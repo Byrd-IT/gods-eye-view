@@ -13,7 +13,7 @@ import {
 } from '../../src/byrdit/history/index.js';
 import { DEFAULT_HISTORY_PER_MIN } from '../../src/byrdit/history/historyApi.js';
 import { createWindHistoryReader } from './historyWind.js';
-import { createWeatherServingTimes } from './historyImageryTimes.js';
+import { createWeatherServingState } from './historyImageryTimes.js';
 
 /**
  * Server-side composition of the Byrd-IT history plugins (gev-history
@@ -26,9 +26,10 @@ import { createWeatherServingTimes } from './historyImageryTimes.js';
  *
  * B12c: /api/history/slice?feed=wind reads past GFS/IFS cycles with the
  * injected byte-range reader (./historyWind.js, nothing stored).
- * feed=imagery judges pixel availability against the time set GEV's weather
- * pixel route accepts now (./historyImageryTimes.js: the same capabilities
- * source as that route, collector with GEV_BRIDGE_WEATHER=1, else NOAA).
+ * feed=imagery judges pixel availability by the weather pixel route's OWN
+ * serving state (./historyImageryTimes.js: that route instance's manifest;
+ * the bridge's private instance with GEV_BRIDGE_WEATHER=1, else a loopback
+ * to this server's /api/weather), never by a second capabilities read.
  *
  * B9 (/api/history/*, GEV_HISTORY_API=1): the per-client rate limit is the
  * common cost limiter (server/providers/common/rate-limit.js,
@@ -49,8 +50,12 @@ export function historyPlugins(options = {}) {
     env.GEV_RATELIMIT_HISTORY_PER_MIN,
     DEFAULT_HISTORY_PER_MIN,
   );
+  const weatherTimes = createWeatherServingState({
+    bridged: enabledBridgeFeeds(env).includes('weather'),
+  });
   return browserSafeHistoryPlugins({
     weatherProxy,
+    weatherServing: weatherTimes,
     ...options,
     historyApi: {
       allow: limiter ?? (() => true),
@@ -59,22 +64,10 @@ export function historyPlugins(options = {}) {
         isAllowedHost(host, allowed, additional),
       // B12c: wind at a past cycle through GEV's byte-range reader pieces
       windReader: createWindHistoryReader(),
-      weatherTimes: createWeatherServingTimes({
-        bridged: enabledBridgeFeeds(env).includes('weather'),
-        collectorUrls: collectorUrlsOf(env),
-      }),
+      weatherTimes,
       ...options.historyApi,
     },
   });
-}
-
-/** GEV_COLLECTOR_URLS (an invalid value -> none: imagery pixels 'unknown'). */
-function collectorUrlsOf(env) {
-  try {
-    return parseCollectorUrls(env.GEV_COLLECTOR_URLS);
-  } catch {
-    return [];
-  }
 }
 
 /**

@@ -137,6 +137,40 @@ export function createWeatherImagery({
   return {
     /** Handle a /tile or /image request (req.url relative to /api/weather). */
     handle: (req, res) => handler(req, res),
+    /**
+     * B12c R1b: this private instance's OWN /manifest (its getMetadata, the
+     * cache /tile and /image judge with), called in-process, so history
+     * imagery reports what this route serves now. Resolves the JSON body.
+     * @param {string} product
+     */
+    manifest: (product) =>
+      new Promise((resolve, reject) => {
+        const res = {
+          statusCode: 0,
+          writeHead(status) {
+            this.statusCode = status;
+          },
+          once() {},
+          removeListener() {},
+          end(body) {
+            if (this.statusCode !== 200) return reject(new Error('manifest'));
+            try {
+              resolve(JSON.parse(String(body)));
+            } catch (error) {
+              reject(error);
+            }
+          },
+        };
+        Promise.resolve(
+          handler(
+            {
+              method: 'GET',
+              url: `/manifest?product=${encodeURIComponent(product)}`,
+            },
+            res,
+          ),
+        ).catch(reject);
+      }),
     stats,
   };
 }

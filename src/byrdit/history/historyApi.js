@@ -316,6 +316,9 @@ export function historyApiPlugin(options = {}) {
       );
       isAllowedHost = options.hostCheck(allowed, additional);
     }
+    // B12c R1b: imagery pixel state is asked of this server's own
+    // /api/weather route (loopback; unused when the weather feed is bridged)
+    options.weatherTimes?.attachServer?.(server.httpServer);
     server.middlewares.use(createHistoryApi({ ...options, isAllowedHost }));
   };
   return {

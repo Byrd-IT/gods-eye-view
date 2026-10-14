@@ -1,38 +1,33 @@
-import { parseWeatherCapabilities } from '../providers/weather.js';
-import { readResponseTextCapped } from '../providers/common/http.js';
-import {
-  capsCollectorFeed,
-  classifyNowcoastRequest,
-} from '../../src/byrdit/history/weatherImagery.js';
+import { Server as TlsServer } from 'node:tls';
 
 /**
- * The frame times GEV's weather PIXEL ROUTE accepts now, for
- * /api/history/slice?feed=imagery (card B12c t_de253a39, review R1).
+ * The EFFECTIVE serving state of GEV's weather pixel route, for
+ * /api/history/slice?feed=imagery (card B12c t_de253a39, review R1 / R1b).
  *
- * /api/weather/tile|image (server/providers/weather.js, unchanged) renders
- * a time only if it is in `allowedTimes` of its current GetCapabilities read
- * (newest 26 times <= 24 h old), else 400 unknown_weather_time. This reader
- * computes that same set from the SAME capabilities source the serving path
- * uses, with GEV's own parseWeatherCapabilities:
- *  - GEV_BRIDGE_WEATHER=1: the bridge's private weatherProxy reads the
- *    collector snapshot /v1/latest/nowcoast-caps-<service> (weatherImagery.js;
- *    STALE or missing = unavailable, no NOAA fallback), so this does too;
- *  - otherwise GEV's own weatherProxy reads NOAA GetCapabilities at the same
- *    fixed URL, so this does too.
- * The read is cached for the route's own metadata TTL (weather.js PRODUCTS
- * metadataTtlMs: lightning 10 min, else 2 min). marginMs (2 x that TTL)
- * tells pixelAvailability how far the route's read can drift from ours.
- * A failed read throws; the slice then says X-History-Pixels: unknown.
+ * /api/weather/tile|image (server/providers/weather.js, unchanged) renders a
+ * time only if it is in `allowedTimes` of ITS OWN cached GetCapabilities
+ * read (newest 26 times <= 24 h old), else 400 unknown_weather_time; while
+ * that read is stale (NOAA/collector failed, kept up to 1 h) it refuses any
+ * uncached frame (503 weather_metadata_stale). A second, independent
+ * capabilities read can disagree with the route for up to that hour (review
+ * R1b), so this module does NOT read capabilities itself. It asks the
+ * serving route instance for its own manifest (getMetadata on the same
+ * cache the tile route uses) and reports exactly that:
+ *  - unbridged: a loopback GET /api/weather/manifest?product=<p> to this
+ *    server's own listening socket (GEV's weatherProxy instance from
+ *    server/providers/local.js answers it);
+ *  - GEV_BRIDGE_WEATHER=1: /api/weather/manifest is answered from the
+ *    collector, but /tile and /image by the bridge's PRIVATE weatherProxy
+ *    instance (src/byrdit/history/weatherImagery.js), so the bridge attaches
+ *    that instance's in-process manifest call (attachRoute) and only that is
+ *    used; the loopback is never used in bridged mode.
+ * The manifest lists `times` = the newest 13 of the route's allowedTimes, so
+ * a listed frame is accepted by the tile route at the moment of the check.
+ * Anything that cannot be established (no route attached, socket not
+ * listening, TLS, timeout, bad answer) throws; the slice then says
+ * X-History-Pixels: unknown and claims nothing.
  */
 
-const NOWCOAST_BASE = 'https://nowcoast.noaa.gov/geoserver/observations/';
-/** weather.js PRODUCTS[product].service */
-export const PRODUCT_SERVICE = Object.freeze({
-  radar: 'weather_radar',
-  clouds: 'satellite',
-  'clouds-regional': 'satellite',
-  lightning: 'lightning_detection',
-});
 /** weather.js PRODUCTS[product].metadataTtlMs ?? 120_000 */
 export const PRODUCT_TTL_MS = Object.freeze({
   radar: 120_000,
@@ -40,110 +35,140 @@ export const PRODUCT_TTL_MS = Object.freeze({
   'clouds-regional': 120_000,
   lightning: 600_000,
 });
-const MAX_CAPS_BYTES = 512 * 1024; // weather.js metadata cap
-const FAILURE_HOLD_MS = 30_000; // weather.js: one metadata attempt per 30 s
+const MAX_MANIFEST_BYTES = 64 * 1024;
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
-/** The NOAA GetCapabilities URL weatherProxy fetches for a service. */
-export const nowcoastCapsUrl = (service) =>
-  `${NOWCOAST_BASE}${service}/ows?service=WMS&version=1.3.0&request=GetCapabilities`;
+/** A pixel-state failure with a reason the slice puts in a header. */
+function unknown(reason) {
+  const error = new Error(reason);
+  error.reason = reason;
+  return error;
+}
+
+/**
+ * Validate a weather.js describe() manifest for `product`.
+ * @returns {{times: string[], fetchedAt: number|null, stale: boolean,
+ *   unavailable: boolean}}
+ */
+export function servingStateOf(body, product) {
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    body.product !== product ||
+    !Array.isArray(body.times) ||
+    body.times.length > 26 ||
+    body.times.some((x) => typeof x !== 'string' || !ISO_RE.test(x)) ||
+    typeof body.stale !== 'boolean' ||
+    typeof body.unavailable !== 'boolean' ||
+    !(body.fetchedAt === null || Number.isFinite(body.fetchedAt))
+  )
+    throw unknown('serving_route_bad_answer');
+  return {
+    times: body.times,
+    fetchedAt: body.fetchedAt,
+    stale: body.stale,
+    unavailable: body.unavailable,
+  };
+}
+
+/** http://host:port of a listening node server for a loopback call, or null. */
+export function loopbackBase(httpServer) {
+  if (!httpServer?.listening || httpServer instanceof TlsServer) return null;
+  const a = httpServer.address();
+  if (!a || typeof a !== 'object' || !Number.isInteger(a.port)) return null;
+  const host =
+    a.address === '0.0.0.0' || a.address === '::' || !a.address
+      ? '127.0.0.1'
+      : a.address;
+  return `http://${host.includes(':') ? `[${host}]` : host}:${a.port}`;
+}
 
 /**
  * @param {object} [o]
- * @param {boolean} [o.bridged] GEV_BRIDGE_WEATHER=1 (collector-owned caps)
- * @param {string[]} [o.collectorUrls] GEV_COLLECTOR_URLS, tried in order
- * @param {typeof fetch} [o.fetchImpl]
+ * @param {boolean} [o.bridged] GEV_BRIDGE_WEATHER=1
+ * @param {typeof fetch} [o.fetchImpl] the loopback call
  * @param {() => number} [o.now]
  * @param {number} [o.timeoutMs]
  */
-export function createWeatherServingTimes({
+export function createWeatherServingState({
   bridged = false,
-  collectorUrls = [],
   fetchImpl = (...args) => globalThis.fetch(...args),
   now = () => Date.now(),
-  timeoutMs = 12_000,
+  timeoutMs = 5_000,
 } = {}) {
-  const cache = new Map(); // product -> { value, at }
-  const failures = new Map(); // product -> at
-  const inflight = new Map(); // service -> Promise<string>
+  let httpServer = null;
+  let routeManifest = null;
 
-  async function fetchText(url) {
-    const response = await fetchImpl(url, {
-      redirect: 'error',
-      headers: { Accept: 'application/xml,text/xml' },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return { ok: false };
-    }
-    return { ok: true, response };
-  }
-
-  async function readCaps(service) {
-    if (!bridged) {
-      const url = nowcoastCapsUrl(service);
-      if (classifyNowcoastRequest(url)?.kind !== 'capabilities')
-        throw new Error('weather_caps_url');
-      const r = await fetchText(url);
-      if (!r.ok) throw new Error('weather_caps_unavailable');
-      return readResponseTextCapped(r.response, MAX_CAPS_BYTES);
-    }
-    for (const base of collectorUrls) {
-      try {
-        const r = await fetchText(
-          `${base}/v1/latest/${capsCollectorFeed(service)}`,
-        );
-        if (!r.ok) continue;
-        const h = r.response.headers;
-        if (
-          h.get('x-feed-cache') === 'STALE' ||
-          h.get('x-feed-stale-since') !== null
-        ) {
-          // the bridge treats a STALE snapshot as unavailable
-          await r.response.body?.cancel();
-          throw new Error('weather_caps_stale');
-        }
-        return await readResponseTextCapped(r.response, MAX_CAPS_BYTES);
-      } catch (error) {
-        if (error?.message === 'weather_caps_stale') throw error;
-        /* unreachable / timeout: next collector */
-      }
-    }
-    throw new Error('weather_caps_unavailable');
-  }
-
-  /**
-   * @param {'radar'|'clouds'|'clouds-regional'|'lightning'} product
-   * @returns {Promise<{allowedTimes: string[], fetchedAt: number,
-   *   marginMs: number}>}
-   */
-  async function read(product) {
-    const service = PRODUCT_SERVICE[product];
-    if (!service) throw new Error('unknown_weather_product');
-    const ttl = PRODUCT_TTL_MS[product];
-    const hit = cache.get(product);
-    if (hit && now() - hit.at < ttl) return hit.value;
-    if (now() - (failures.get(product) ?? -Infinity) < FAILURE_HOLD_MS)
-      throw new Error('weather_caps_unavailable');
+  async function viaLoopback(product) {
+    const base = loopbackBase(httpServer);
+    if (!base) throw unknown('serving_route_unreachable');
+    let response;
     try {
-      let pending = inflight.get(service);
-      if (!pending) {
-        pending = readCaps(service).finally(() => inflight.delete(service));
-        inflight.set(service, pending);
-      }
-      const xml = await pending;
-      const at = now();
-      const { allowedTimes } = parseWeatherCapabilities(xml, product, at);
-      const value = { allowedTimes, fetchedAt: at, marginMs: 2 * ttl };
-      cache.set(product, { value, at });
-      failures.delete(product);
-      return value;
-    } catch (error) {
-      cache.delete(product);
-      failures.set(product, now());
-      throw error;
+      response = await fetchImpl(
+        `${base}/api/weather/manifest?product=${encodeURIComponent(product)}`,
+        {
+          redirect: 'error',
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+      );
+    } catch {
+      throw unknown('serving_route_unreachable');
+    }
+    if (
+      response.status !== 200 ||
+      !/json/.test(response.headers.get('content-type') ?? '')
+    ) {
+      await response.body?.cancel();
+      throw unknown('serving_route_unreachable');
+    }
+    let text;
+    try {
+      text = await response.text();
+    } catch {
+      throw unknown('serving_route_unreachable');
+    }
+    if (text.length > MAX_MANIFEST_BYTES)
+      throw unknown('serving_route_bad_answer');
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw unknown('serving_route_bad_answer');
     }
   }
 
-  return { read };
+  return {
+    /** historyApiPlugin: this server's own socket (unbridged loopback). */
+    attachServer(server) {
+      httpServer = server ?? null;
+    },
+    /** collector bridge: the private weatherProxy instance's manifest. */
+    attachRoute(manifest) {
+      routeManifest = typeof manifest === 'function' ? manifest : null;
+    },
+    /**
+     * @param {'radar'|'clouds'|'clouds-regional'|'lightning'} product
+     * @returns {Promise<{times: string[], fetchedAt: number|null,
+     *   stale: boolean, unavailable: boolean, checkedAt: number,
+     *   marginMs: number}>}
+     */
+    async read(product) {
+      const ttl = PRODUCT_TTL_MS[product];
+      if (!ttl) throw unknown('unknown_weather_product');
+      let body;
+      if (bridged) {
+        if (!routeManifest) throw unknown('serving_route_unreachable');
+        try {
+          body = await routeManifest(product);
+        } catch {
+          throw unknown('serving_route_unreachable');
+        }
+      } else body = await viaLoopback(product);
+      return {
+        ...servingStateOf(body, product),
+        checkedAt: now(),
+        marginMs: ttl,
+      };
+    },
+  };
 }

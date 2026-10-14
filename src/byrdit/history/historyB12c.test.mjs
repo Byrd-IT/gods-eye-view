@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { createRequire } from 'node:module';
-import { createHistoryApi } from './historyApi.js';
+import { createServer } from 'node:http';
+import { Server as TlsServer } from 'node:tls';
+import { createHistoryApi, historyApiPlugin } from './historyApi.js';
 import { HISTORY_INDICES } from './historyEs.js';
 import { SLICE_FEEDS } from './historyParams.js';
 import {
@@ -30,10 +32,12 @@ import {
   windStep,
 } from '../../../server/byrdit/historyWind.js';
 import {
-  createWeatherServingTimes,
-  nowcoastCapsUrl,
+  createWeatherServingState,
+  loopbackBase,
 } from '../../../server/byrdit/historyImageryTimes.js';
 import { weatherProxy } from '../../../server/providers/weather.js';
+import { createWeatherImagery } from './weatherImagery.js';
+import { createCollectorBridge } from './collectorBridge.js';
 
 const { json2satrec, propagate } = createRequire(import.meta.url)(
   'satellite.js',
@@ -1320,165 +1324,406 @@ function noaa(capsOf) {
   };
   return { fetchImpl, seen };
 }
-/** GEV's unchanged weatherProxy route handler (/api/weather/*). */
-function pixelRoute(fetchImpl, now) {
+const tileOf = (product, time) =>
+  `/tile?product=${product}&time=${encodeURIComponent(time)}&z=0&x=0&y=0`;
+
+// ---- B12c review R1b: availability from the serving route's OWN state
+/**
+ * GEV's unchanged weatherProxy mounted at /api/weather on a REAL listening
+ * socket (as server/providers/local.js mounts it), so the history reader's
+ * loopback and the tile requests go through the same route instance.
+ */
+async function liveWeatherServer(fetchImpl, now) {
   let handler;
   weatherProxy({ fetchImpl, now }).configureServer({
     middlewares: { use: (_route, h) => (handler = h) },
   });
-  return async (path) => {
-    const res = {
-      statusCode: 0,
-      headers: {},
-      writeHead(status, headers) {
-        this.statusCode = status;
-        this.headers = headers;
-      },
-      once() {},
-      removeListener() {},
-      end(body) {
-        this.body = body;
-        this.resolve();
-      },
-    };
-    const done = new Promise((r) => (res.resolve = r));
-    handler({ url: path, method: 'GET' }, res);
-    await done;
-    return res;
+  const server = createServer((req, res) => {
+    if (!req.url.startsWith('/api/weather/')) {
+      res.writeHead(404);
+      return res.end();
+    }
+    req.url = req.url.slice('/api/weather'.length);
+    handler(req, res);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  return {
+    server,
+    async tile(product, time) {
+      const r = await fetch(`${base}/api/weather${tileOf(product, time)}`);
+      const body = Buffer.from(await r.arrayBuffer());
+      let error = null;
+      try {
+        error = JSON.parse(body.toString('utf8')).error;
+      } catch {
+        /* png */
+      }
+      return { status: r.status, error };
+    },
+    async manifest(product) {
+      const r = await fetch(`${base}/api/weather/manifest?product=${product}`);
+      return r.json();
+    },
+    close: () => new Promise((r) => server.close(r)),
   };
 }
-const tileOf = (product, time) =>
-  `/tile?product=${product}&time=${encodeURIComponent(time)}&z=0&x=0&y=0`;
+/** A loopback reader attached to `server` (the unbridged production wiring). */
+function loopbackState(server, now) {
+  const s = createWeatherServingState({ now });
+  s.attachServer(server);
+  return s;
+}
+const claimedOf = (r) =>
+  (r.headers['x-history-pixels-frames'] ?? '').split(',').filter(Boolean);
 
-test('imagery pixels: X-History-Pixels-Frames are exactly the frames GEV pixel route renders (real capabilities, real weatherProxy)', async () => {
-  const caps = () => CAPS;
+test('imagery pixels: claimed frames are exactly the route manifest frames and every one renders (real caps, real weatherProxy, real loopback socket)', async () => {
   const now = () => CAPS_AT;
-  const upstream = noaa(caps);
-  const route = pixelRoute(upstream.fetchImpl, now);
-  const weatherTimes = createWeatherServingTimes({
-    fetchImpl: upstream.fetchImpl,
-    now,
-  });
-  const { api } = makeApi(
-    { 'gev-history-imagery': recordedFrames(CAPS) },
-    { now: CAPS_AT, weatherTimes },
-  );
-  const states = {};
-  for (const product of Object.keys(PRODUCT_LAYER))
-    for (const ageH of [0.5, 1, 1.5, 3, 6]) {
-      const t = CAPS_AT - ageH * HOUR;
-      const r = await call(
-        api,
-        slice(`feed=imagery&t=${iso(t)}&product=${product}`),
-      );
-      assert.equal(r.status, 200);
-      assert.equal(r.headers['cache-control'], 'no-store');
-      assert.equal(r.headers.etag, undefined);
-      assert.equal(r.headers['x-history-pixels-basis'], PIXELS_BASIS);
-      assert.equal(r.headers['x-history-pixels-checked-at'], iso(CAPS_AT));
-      const claimed = (r.headers['x-history-pixels-frames'] ?? '')
-        .split(',')
-        .filter(Boolean);
-      const frames = r.json.times;
-      assert.ok(frames.length > 0, `${product} ${ageH}h`);
-      let accepted = 0;
-      for (const time of frames) {
-        const tile = await route(tileOf(product, time));
-        if (tile.statusCode === 200) accepted += 1;
-        else {
-          assert.equal(tile.statusCode, 400);
-          assert.equal(JSON.parse(tile.body).error, 'unknown_weather_time');
+  const upstream = noaa(() => CAPS);
+  const live = await liveWeatherServer(upstream.fetchImpl, now);
+  try {
+    const { api } = makeApi(
+      { 'gev-history-imagery': recordedFrames(CAPS) },
+      { now: CAPS_AT, weatherTimes: loopbackState(live.server, now) },
+    );
+    const states = {};
+    for (const product of Object.keys(PRODUCT_LAYER))
+      for (const ageH of [0.25, 0.5, 1, 1.5, 3, 6]) {
+        const t = CAPS_AT - ageH * HOUR;
+        const r = await call(
+          api,
+          slice(`feed=imagery&t=${iso(t)}&product=${product}`),
+        );
+        assert.equal(r.status, 200);
+        assert.equal(r.headers['cache-control'], 'no-store');
+        assert.equal(r.headers.etag, undefined);
+        assert.equal(r.headers['x-history-pixels-basis'], PIXELS_BASIS);
+        assert.equal(r.headers['x-history-pixels-checked-at'], iso(CAPS_AT));
+        assert.equal(r.headers['x-history-pixels-route-read-at'], iso(CAPS_AT));
+        const claimed = claimedOf(r);
+        const frames = r.json.times;
+        assert.ok(frames.length > 0, `${product} ${ageH}h`);
+        // the route's own list (newest 13 of its allowedTimes)
+        const listed = (await live.manifest(product)).times;
+        assert.deepEqual(
+          claimed,
+          frames.filter((x) => listed.includes(x)),
+        );
+        const older = frames.filter(
+          (x) => listed.length === 13 && x < listed[0],
+        );
+        assert.equal(
+          Number(r.headers['x-history-pixels-undetermined'] ?? 0),
+          older.length,
+        );
+        for (const time of frames) {
+          const tile = await live.tile(product, time);
+          if (claimed.includes(time))
+            // a claimed frame ALWAYS renders through the real route
+            assert.equal(tile.status, 200, `${product} ${time}`);
+          else if (!older.includes(time)) {
+            // a frame called not renderable is refused by the real route
+            assert.equal(tile.status, 400, `${product} ${time}`);
+            assert.equal(tile.error, 'unknown_weather_time');
+          } else if (tile.status !== 200) {
+            // undetermined (older than the route's published list)
+            assert.equal(tile.status, 400);
+            assert.equal(tile.error, 'unknown_weather_time');
+          }
         }
-        // a claimed frame ALWAYS renders through the real route
-        if (claimed.includes(time))
-          assert.equal(tile.statusCode, 200, `${product} ${time}`);
-      }
-      // conservative only at the drift edges (newest frame of the read)
-      assert.ok(claimed.length <= accepted && accepted - claimed.length <= 2);
-      const state = r.headers['x-history-pixels'];
-      assert.equal(
-        state,
-        claimed.length === 0
-          ? 'unavailable'
-          : claimed.length === frames.length
+        assert.equal(
+          r.headers['x-history-pixels'],
+          claimed.length === frames.length
             ? 'available'
-            : 'partial',
-      );
-      states[`${product}@${ageH}`] = state;
-    }
-  // the review's cases: radar / GOES regional 3 h back render NOTHING (the
-  // route keeps 26 frames, ~1.7 h); global IR 6 h back renders every frame
-  assert.equal(states['radar@3'], 'unavailable');
-  assert.equal(states['clouds-regional@3'], 'unavailable');
-  assert.equal(states['clouds@6'], 'available');
-  assert.equal(states['radar@0.5'], 'available');
-  // 1-1.5 h back the route's oldest frames are already gone (partial); the
-  // two frames it may push out within one metadata TTL are not claimed
-  assert.equal(states['radar@1'], 'partial');
-  assert.equal(states['radar@1.5'], 'partial');
-  assert.equal(states['lightning@3'], 'available');
+            : claimed.length
+              ? 'partial'
+              : older.length
+                ? 'unknown'
+                : 'unavailable',
+        );
+        if (!claimed.length && older.length)
+          assert.equal(
+            r.headers['x-history-pixels-reason'],
+            'frames_older_than_route_list',
+          );
+        states[`${product}@${ageH}`] = r.headers['x-history-pixels'];
+      }
+    // the review's cases: radar / GOES regional 3 h back are NOT claimed
+    // renderable (older than the route's list: unknown, never 'available')
+    assert.equal(states['radar@3'], 'unknown');
+    assert.equal(states['clouds-regional@3'], 'unknown');
+    assert.equal(states['radar@0.25'], 'partial');
+    // only the route's own reads (one per product, its TTL not run out),
+    // never a second NOAA capabilities reader
+    assert.equal(upstream.seen.caps, 4);
+  } finally {
+    await live.close();
+  }
 });
 
-test('imagery pixels: the serving source unreadable -> unknown (never available); a newer capabilities read expires frames, never cached', async () => {
-  // unknown: the capabilities source fails (the route 503s too)
-  const down = noaa(() => ({}));
-  const t = CAPS_AT - 30 * 60_000;
-  const a = makeApi(
-    { 'gev-history-imagery': recordedFrames(CAPS) },
-    {
-      now: CAPS_AT,
-      weatherTimes: createWeatherServingTimes({
-        fetchImpl: down.fetchImpl,
-        now: () => CAPS_AT,
-      }),
-    },
+test('imagery pixels R1b: route on its 1 h stale fallback while upstream has moved on -> unknown, nothing claimed; recovery claims only what the route accepts', async () => {
+  // the reviewer's case: the route read caps at 17:35Z; 30 min later its
+  // refresh fails (it keeps the 17:35Z read, stale:true) while NOAA, for any
+  // other reader, already lists seven newer 4-min frames
+  const oldXml = CAPS.weather_radar;
+  const listed = capsTimes(oldXml, PRODUCT_LAYER.radar[1]);
+  const added = Array.from({ length: 7 }, (_, i) =>
+    iso(Date.parse(listed.at(-1)) + (i + 1) * 4 * 60_000),
   );
-  const u = await call(a.api, slice(`feed=imagery&t=${iso(t)}&product=radar`));
-  assert.equal(u.headers['x-history-pixels'], 'unknown');
-  assert.equal(u.headers['x-history-pixels-basis'], 'unknown');
-  assert.equal(u.headers['x-history-pixels-frames'], undefined);
-  const route = pixelRoute(down.fetchImpl, () => CAPS_AT);
-  assert.equal((await route(tileOf('radar', u.json.times[0]))).statusCode, 503);
-  // expiry: the same slice URL, later, after the route's capabilities moved
-  // on 3 h (radar frames every 4 min): the earlier 'available' must not
-  // survive in any cache, ETag or 304
+  const newerXml = oldXml.replace(
+    /(<Dimension\b[^>]*name="time"[^>]*>)([^<]*)(<\/Dimension>)/g,
+    (_all, start, list, end) =>
+      start + [...list.trim().split(','), ...added].join(',') + end,
+  );
+  let clock = CAPS_AT;
+  let routeCaps = 'old'; // 'old' | 'fail' | 'new'
+  const upstream = noaa(() =>
+    routeCaps === 'fail'
+      ? {}
+      : { weather_radar: routeCaps === 'old' ? oldXml : newerXml },
+  );
+  const live = await liveWeatherServer(upstream.fetchImpl, () => clock);
+  try {
+    const all = [...listed, ...added];
+    const { api } = makeApi(
+      {
+        'gev-history-imagery': all.map((time) => ({
+          kind: 'nowcoast-time',
+          product: 'radar',
+          layer: PRODUCT_LAYER.radar[1],
+          time_available: time,
+          snap: Date.parse(time) + 60_000,
+        })),
+      },
+      {
+        clock: () => clock,
+        weatherTimes: loopbackState(live.server, () => clock),
+      },
+    );
+    const path = () => slice(`feed=imagery&t=${iso(clock)}&product=radar`);
+    // prime the route at 17:35Z (fresh)
+    const first = await call(api, path());
+    assert.equal(first.headers['x-history-pixels'], 'partial');
+    // +30 min: the route's refresh fails -> stale (its 1 h fallback)
+    clock += 30 * 60_000;
+    routeCaps = 'fail';
+    const r = await call(api, path());
+    assert.equal(r.status, 200);
+    assert.equal(r.headers['x-history-pixels'], 'unknown');
+    assert.equal(
+      r.headers['x-history-pixels-reason'],
+      'serving_metadata_stale',
+    );
+    assert.equal(r.headers['x-history-pixels-basis'], 'unknown');
+    assert.equal(r.headers['x-history-pixels-route-read-at'], iso(CAPS_AT));
+    assert.equal(r.headers['x-history-pixels-frames'], undefined);
+    // the recorded list itself still shows the newer frames (D3: the record)
+    assert.ok(added.every((x) => r.json.times.includes(x)));
+    // NOAA now has newer caps, but the route is still on its stale hold
+    // (one attempt per 30 s): still unknown, never the newer list
+    routeCaps = 'new';
+    clock += 10_000;
+    const held = await call(api, path());
+    assert.equal(held.headers['x-history-pixels'], 'unknown');
+    for (const time of held.json.times) {
+      const tile = await live.tile('radar', time);
+      assert.notEqual(tile.status, 200, `stale route never renders ${time}`);
+    }
+    // the route recovers (after its 30 s hold): claimed = what it accepts
+    clock += 30_000;
+    const ok = await call(api, path());
+    assert.equal(ok.headers['x-history-pixels-route-read-at'], iso(clock));
+    const claimed = claimedOf(ok);
+    assert.ok(claimed.length > 0);
+    assert.ok(added.every((x) => claimed.includes(x)));
+    for (const time of claimed)
+      assert.equal((await live.tile('radar', time)).status, 200, time);
+    // the review's six frames are claimed only if the route accepts them
+    for (const time of [
+      '2026-10-14T17:32:00.000Z',
+      '2026-10-14T17:36:00.000Z',
+      '2026-10-14T17:40:00.000Z',
+      '2026-10-14T17:44:00.000Z',
+      '2026-10-14T17:48:00.000Z',
+      '2026-10-14T17:52:00.000Z',
+    ])
+      if (claimed.includes(time))
+        assert.equal((await live.tile('radar', time)).status, 200, time);
+  } finally {
+    await live.close();
+  }
+});
+
+test('imagery pixels R1b: upstream moves on while the route still holds its cached read -> claims follow the ROUTE, not upstream', async () => {
+  const oldXml = CAPS.weather_radar;
+  const listed = capsTimes(oldXml, PRODUCT_LAYER.radar[1]);
+  const added = [iso(Date.parse(listed.at(-1)) + 4 * 60_000)];
+  const newerXml = oldXml.replace(
+    /(<Dimension\b[^>]*name="time"[^>]*>)([^<]*)(<\/Dimension>)/g,
+    (_all, start, list, end) =>
+      start + [...list.trim().split(','), ...added].join(',') + end,
+  );
+  let clock = CAPS_AT;
+  let xml = oldXml;
+  const upstream = noaa(() => ({ weather_radar: xml }));
+  const live = await liveWeatherServer(upstream.fetchImpl, () => clock);
+  try {
+    const { api } = makeApi(
+      {
+        'gev-history-imagery': [...listed, ...added].map((time) => ({
+          kind: 'nowcoast-time',
+          product: 'radar',
+          layer: PRODUCT_LAYER.radar[1],
+          time_available: time,
+          snap: Date.parse(time) + 60_000,
+        })),
+      },
+      {
+        clock: () => clock,
+        weatherTimes: loopbackState(live.server, () => clock),
+      },
+    );
+    await call(api, slice(`feed=imagery&t=${iso(clock)}&product=radar`));
+    xml = newerXml; // upstream moved on; the route's 2 min TTL still runs
+    clock += 60_000;
+    const r = await call(
+      api,
+      slice(`feed=imagery&t=${iso(clock)}&product=radar`),
+    );
+    assert.ok(r.json.times.includes(added[0]), 'recorded');
+    assert.ok(!claimedOf(r).includes(added[0]), 'route does not list it yet');
+    assert.equal((await live.tile('radar', added[0])).status, 400);
+    for (const time of claimedOf(r))
+      assert.equal((await live.tile('radar', time)).status, 200, time);
+  } finally {
+    await live.close();
+  }
+});
+
+test('imagery pixels: no route state -> unknown with a reason (unattached, closed socket, unavailable route, bad answer, bridged without a route, TLS)', async () => {
+  const t = CAPS_AT - 30 * 60_000;
+  const q = slice(`feed=imagery&t=${iso(t)}&product=radar`);
+  const data = { 'gev-history-imagery': recordedFrames(CAPS) };
+  const expectUnknown = async (weatherTimes, reason) => {
+    const { api } = makeApi(data, { now: CAPS_AT, weatherTimes });
+    const r = await call(api, q);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers['x-history-pixels'], 'unknown', reason);
+    assert.equal(r.headers['x-history-pixels-reason'], reason);
+    assert.equal(r.headers['x-history-pixels-basis'], 'unknown');
+    assert.equal(r.headers['x-history-pixels-frames'], undefined);
+    return r;
+  };
+  await expectUnknown(null, 'serving_route_unreachable');
+  await expectUnknown(
+    createWeatherServingState({ now: () => CAPS_AT }),
+    'serving_route_unreachable',
+  );
+  // the route itself cannot read caps: unavailable, and it 503s the tiles
+  const down = noaa(() => ({}));
+  const dead = await liveWeatherServer(down.fetchImpl, () => CAPS_AT);
+  const r = await expectUnknown(
+    loopbackState(dead.server, () => CAPS_AT),
+    'serving_metadata_unavailable',
+  );
+  assert.equal((await dead.tile('radar', r.json.times[0])).status, 503);
+  await dead.close();
+  // the socket is gone
+  await expectUnknown(
+    loopbackState(dead.server, () => CAPS_AT),
+    'serving_route_unreachable',
+  );
+  // something else answers /api/weather/manifest
+  const bogus = createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ product: 'radar', times: ['yesterday'] }));
+  });
+  await new Promise((done) => bogus.listen(0, '127.0.0.1', done));
+  await expectUnknown(
+    loopbackState(bogus, () => CAPS_AT),
+    'serving_route_bad_answer',
+  );
+  await new Promise((done) => bogus.close(done));
+  // bridged: the loopback would reach the COLLECTOR manifest, never used
+  const calls = [];
+  const bridged = createWeatherServingState({
+    bridged: true,
+    fetchImpl: async (url) => {
+      calls.push(url);
+      return new Response('{}');
+    },
+  });
+  bridged.attachServer({ listening: true, address: () => ({ port: 1 }) });
+  await expectUnknown(bridged, 'serving_route_unreachable');
+  assert.deepEqual(calls, []);
+  // a TLS server is not called over plain http
+  assert.equal(loopbackBase(new TlsServer()), null);
+  assert.equal(
+    loopbackBase({
+      listening: true,
+      address: () => ({ address: '::', port: 8080 }),
+    }),
+    'http://127.0.0.1:8080',
+  );
+  assert.equal(
+    loopbackBase({
+      listening: true,
+      address: () => ({ address: '::1', port: 8080 }),
+    }),
+    'http://[::1]:8080',
+  );
+});
+
+test('imagery pixels: a later check after the route moved on expires frames; never cached (no ETag, 304 or LRU)', async () => {
   const grid = Array.from({ length: 136 }, (_, i) =>
     iso(CAPS_AT - 6 * HOUR + i * 4 * 60_000),
   );
   const upTo = (ms) => grid.filter((x) => Date.parse(x) <= ms - 5 * 60_000);
   let clock = CAPS_AT;
   const upstream = noaa(() => ({ weather_radar: radarCaps(upTo(clock)) }));
-  const weatherTimes = createWeatherServingTimes({
-    fetchImpl: upstream.fetchImpl,
-    now: () => clock,
-  });
-  const b = makeApi(
-    {
-      'gev-history-imagery': grid.map((time) => ({
-        kind: 'nowcoast-time',
-        product: 'radar',
-        layer: PRODUCT_LAYER.radar[1],
-        time_available: time,
-        snap: Date.parse(time) + 60_000,
-      })),
-    },
-    { clock: () => clock, weatherTimes },
-  );
-  const path = slice(`feed=imagery&t=${iso(t)}&product=radar`);
-  const first = await call(b.api, path);
-  assert.equal(first.headers['x-history-pixels'], 'available');
-  assert.equal(first.headers['x-history-cache'], undefined);
-  clock = CAPS_AT + 3 * HOUR;
-  const second = await call(b.api, path, {
-    headers: { 'if-none-match': '"anything"' },
-  });
-  assert.equal(second.status, 200);
-  assert.equal(second.body, first.body, 'the recorded list itself is fixed');
-  assert.equal(second.headers['x-history-pixels'], 'unavailable');
-  assert.equal(second.headers['x-history-pixels-checked-at'], iso(clock));
-  const route2 = pixelRoute(upstream.fetchImpl, () => clock);
-  for (const time of second.json.times)
-    assert.equal((await route2(tileOf('radar', time))).statusCode, 400);
+  const live = await liveWeatherServer(upstream.fetchImpl, () => clock);
+  try {
+    const { api } = makeApi(
+      {
+        'gev-history-imagery': grid.map((time) => ({
+          kind: 'nowcoast-time',
+          product: 'radar',
+          layer: PRODUCT_LAYER.radar[1],
+          time_available: time,
+          snap: Date.parse(time) + 60_000,
+        })),
+      },
+      {
+        clock: () => clock,
+        weatherTimes: loopbackState(live.server, () => clock),
+      },
+    );
+    const path = slice(
+      `feed=imagery&t=${iso(CAPS_AT - 7 * 60_000)}&product=radar`,
+    );
+    const first = await call(api, path);
+    assert.equal(first.headers['x-history-pixels'], 'available');
+    assert.equal(first.headers['x-history-cache'], undefined);
+    clock = CAPS_AT + 3 * HOUR;
+    const second = await call(api, path, {
+      headers: { 'if-none-match': '"anything"' },
+    });
+    assert.equal(second.status, 200);
+    assert.equal(second.body, first.body, 'the recorded list itself is fixed');
+    // older than everything the route lists now: not claimed (unknown,
+    // the route's unpublished allowedTimes tail could hold some)
+    assert.equal(second.headers['x-history-pixels'], 'unknown');
+    assert.equal(
+      second.headers['x-history-pixels-reason'],
+      'frames_older_than_route_list',
+    );
+    assert.equal(second.headers['x-history-pixels-frames'], undefined);
+    assert.equal(second.headers['x-history-pixels-checked-at'], iso(clock));
+    for (const time of second.json.times)
+      assert.equal((await live.tile('radar', time)).status, 400);
+  } finally {
+    await live.close();
+  }
 });
 
 /** A minimal radar GetCapabilities listing `times` (weather.js parses it). */
@@ -1494,81 +1739,161 @@ function radarCaps(times) {
   return `<WMS_Capabilities><Capability><Layer><Title>radar</Title><Layer><Name>${PRODUCT_LAYER.radar[1]}</Name><EX_GeographicBoundingBox>${box}</EX_GeographicBoundingBox><Dimension name="time" default="${times.at(-1)}" units="ISO8601">${times.join(',')}</Dimension></Layer></Layer></Capability></WMS_Capabilities>`;
 }
 
-test('pixelAvailability: frames that can differ between the route read and ours are not claimed', () => {
+test('pixelAvailability: only frames the route lists are claimed; stale / unavailable / unread -> unknown', () => {
   const at = Date.UTC(2026, 9, 14, 12);
   const step = 4 * 60_000;
   const list = (n) =>
     Array.from({ length: n }, (_, i) => iso(at - (n - 1 - i) * step));
-  // a full 26-frame route set, margin 5 min -> 2 frames at each end unsure
-  const allowed = list(26);
-  const serving = { allowedTimes: allowed, fetchedAt: at, marginMs: 300_000 };
-  const p = pixelAvailability(allowed, serving, at);
-  assert.equal(p.state, 'partial');
-  assert.deepEqual(p.renderable, allowed.slice(2, -2));
-  // fewer than 26 (nothing pushed out by count): the oldest are sure
-  const few = list(20);
-  const q = pixelAvailability(
-    few,
-    { allowedTimes: few, fetchedAt: at, marginMs: 300_000 },
-    at,
-  );
-  assert.deepEqual(q.renderable, few.slice(0, -2));
-  // the 24 h limit minus the margin
+  const times = list(13);
+  const state = (extra = {}) => ({
+    times,
+    fetchedAt: at,
+    checkedAt: at,
+    stale: false,
+    unavailable: false,
+    marginMs: 120_000,
+    ...extra,
+  });
+  assert.deepEqual(pixelAvailability(times, state(), at).renderable, times);
+  assert.equal(pixelAvailability(times, state(), at).state, 'available');
+  const older = list(20).slice(0, 7);
+  const mixed = pixelAvailability([...older, ...times], state(), at);
+  assert.equal(mixed.state, 'partial');
+  assert.deepEqual(mixed.renderable, times);
+  // older than a FULL published list: may be in the route's unpublished
+  // allowedTimes tail -> undetermined, never called unavailable
+  assert.deepEqual(mixed.undetermined, older);
+  const old = pixelAvailability(older, state(), at);
+  assert.equal(old.state, 'unknown');
+  assert.equal(old.reason, 'frames_older_than_route_list');
+  // a short list is the whole allowedTimes: older frames do not render
+  const short = state({ times: times.slice(-5) });
+  assert.equal(pixelAvailability(older, short, at).state, 'unavailable');
+  // within the list's span but not listed, or newer: does not render
+  const gap = [iso(at - 2 * step - 60_000), iso(at + step)];
+  const g = pixelAvailability(gap, state(), at + step);
+  assert.equal(g.state, 'unavailable');
+  assert.deepEqual(g.undetermined, []);
+  // the 24 h limit: within the route TTL of it undetermined, past it refused
   const r = pixelAvailability(
-    few.slice(0, 5),
-    { allowedTimes: few, fetchedAt: at, marginMs: 300_000 },
-    Date.parse(few[2]) + DAY - 300_000,
+    times,
+    state(),
+    Date.parse(times[2]) + DAY - 60_000,
   );
-  assert.deepEqual(r.renderable, few.slice(2, 5));
-  // a frame the route does not list is never claimed; nothing read -> unknown
-  assert.equal(
-    pixelAvailability([iso(at - 3 * HOUR)], serving, at).state,
-    'unavailable',
+  assert.deepEqual(r.renderable, times.slice(3));
+  assert.deepEqual(r.undetermined, times.slice(2, 3));
+  const past = pixelAvailability(
+    times.slice(0, 1),
+    state(),
+    Date.parse(times[0]) + DAY + 1,
   );
-  assert.equal(pixelAvailability(allowed, null, at).state, 'unknown');
+  assert.equal(past.state, 'unavailable');
+  for (const [s, reason] of [
+    [state({ stale: true }), 'serving_metadata_stale'],
+    [state({ unavailable: true, times: [] }), 'serving_metadata_unavailable'],
+    [{ error: 'serving_route_unreachable' }, 'serving_route_unreachable'],
+    [null, 'serving_route_unreachable'],
+    [{ fetchedAt: at }, 'serving_route_bad_answer'],
+  ]) {
+    const p = pixelAvailability(times, s, at);
+    assert.equal(p.state, 'unknown', reason);
+    assert.equal(p.reason, reason);
+    assert.deepEqual(p.renderable, []);
+  }
   assert.equal(pixelAvailability([], null, at).state, 'unavailable');
 });
 
-test('weather serving times: bridged mode reads the collector capabilities snapshot (STALE = unavailable), never NOAA', async () => {
-  const urls = [];
-  let stale = false;
-  const fetchImpl = async (url) => {
-    urls.push(url);
-    if (url.startsWith('http://c1')) return new Response('', { status: 503 });
-    return new Response(CAPS.weather_radar, {
-      headers: stale ? { 'X-Feed-Cache': 'STALE' } : {},
-    });
-  };
+test('imagery pixels bridged: judged by the bridge PRIVATE weatherProxy instance (in-process manifest), never the loopback; collector STALE -> unknown', async () => {
   let clock = CAPS_AT;
-  const reader = createWeatherServingTimes({
-    bridged: true,
-    collectorUrls: ['http://c1:4180', 'http://c2:4180'],
-    fetchImpl,
-    now: () => clock,
-  });
-  const v = await reader.read('radar');
-  assert.equal(v.allowedTimes.length, 26);
-  assert.equal(v.marginMs, 240_000);
-  assert.deepEqual(urls, [
-    'http://c1:4180/v1/latest/nowcoast-caps-weather-radar',
-    'http://c2:4180/v1/latest/nowcoast-caps-weather-radar',
-  ]);
-  assert.equal(await reader.read('radar'), v, 'kept for the route TTL');
-  assert.equal(urls.length, 2);
-  clock += 120_000;
-  stale = true;
-  await assert.rejects(reader.read('radar'));
-  assert.ok(urls.every((u) => !u.includes('noaa.gov')));
-  // unbridged: the same fixed NOAA URL weatherProxy reads
-  const direct = [];
-  await createWeatherServingTimes({
-    fetchImpl: async (url) => {
-      direct.push(url);
-      return new Response(CAPS.lightning_detection);
+  let collectorStale = false;
+  const reads = [];
+  const imagery = createWeatherImagery({
+    readCollector: async (feed) => {
+      reads.push(feed);
+      return {
+        ok: true,
+        body: new TextEncoder().encode(CAPS.weather_radar),
+        headers: collectorStale ? { 'X-Feed-Cache': 'STALE' } : {},
+      };
     },
-    now: () => CAPS_AT,
-  }).read('lightning');
-  assert.deepEqual(direct, [nowcoastCapsUrl('lightning_detection')]);
+    liveFetch: noaa(() => CAPS).fetchImpl,
+    now: () => clock,
+    weatherProxy,
+  });
+  const loopbackCalls = [];
+  const weatherTimes = createWeatherServingState({
+    bridged: true,
+    now: () => clock,
+    fetchImpl: async (url) => {
+      loopbackCalls.push(url);
+      throw new Error('loopback must not be used when bridged');
+    },
+  });
+  weatherTimes.attachRoute(imagery.manifest);
+  const { api } = makeApi(
+    { 'gev-history-imagery': recordedFrames(CAPS) },
+    { clock: () => clock, weatherTimes },
+  );
+  const tile = async (time) => {
+    const res = {
+      statusCode: 0,
+      writeHead(s) {
+        this.statusCode = s;
+      },
+      once() {},
+      removeListener() {},
+      end() {
+        this.resolve();
+      },
+    };
+    const done = new Promise((r) => (res.resolve = r));
+    imagery.handle({ method: 'GET', url: tileOf('radar', time) }, res);
+    await done;
+    return res.statusCode;
+  };
+  const r = await call(
+    api,
+    slice(`feed=imagery&t=${iso(clock - 20 * 60_000)}&product=radar`),
+  );
+  assert.equal(r.headers['x-history-pixels-basis'], PIXELS_BASIS);
+  const claimed = claimedOf(r);
+  assert.ok(claimed.length > 0);
+  for (const time of claimed) assert.equal(await tile(time), 200, time);
+  assert.ok(reads.every((f) => f === 'nowcoast-caps-weather-radar'));
+  // the collector snapshot goes STALE: the private route keeps its read as
+  // stale (1 h) -> unknown, nothing claimed
+  clock += 3 * 60_000;
+  collectorStale = true;
+  const s = await call(
+    api,
+    slice(`feed=imagery&t=${iso(clock - 20 * 60_000)}&product=radar`),
+  );
+  assert.equal(s.headers['x-history-pixels'], 'unknown');
+  assert.equal(s.headers['x-history-pixels-reason'], 'serving_metadata_stale');
+  assert.deepEqual(loopbackCalls, []);
+});
+
+test('imagery pixels wiring: the bridge attaches its private route; the history API plugin attaches its own server', () => {
+  const attached = [];
+  createCollectorBridge({
+    name: 'weather',
+    urls: ['http://c1:4180'],
+    weatherProxy,
+    weatherServing: { attachRoute: (fn) => attached.push(['route', fn]) },
+  });
+  assert.equal(attached.length, 1);
+  assert.equal(typeof attached[0][1], 'function');
+  const httpServer = { listening: false };
+  const plugin = historyApiPlugin({
+    env: ENV,
+    weatherTimes: { attachServer: (s) => attached.push(['server', s]) },
+  });
+  plugin.configurePreviewServer({
+    config: { preview: {}, server: {} },
+    httpServer,
+    middlewares: { use() {} },
+  });
+  assert.deepEqual(attached[1], ['server', httpServer]);
 });
 
 test('imagery: before the first record -> an unavailable manifest (valid for the layer) + reason', async () => {

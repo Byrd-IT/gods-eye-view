@@ -129,15 +129,16 @@ export const NOWCOAST_PRODUCTS = Object.freeze([
 /**
  * Pixels are NOT recorded (DESIGN 1.5 #14). A frame renders only if GEV's
  * pixel route (/api/weather/tile|image, server/providers/weather.js) accepts
- * its time NOW: the route serves only the newest 26 times of its CURRENT
+ * its time NOW: the route serves only the newest 26 times of ITS OWN cached
  * GetCapabilities read that are <= 24 h old (allowedTimes), else 400
- * unknown_weather_time. nowCOAST itself lists ~6-9 h, but the route's 26
- * frames are ~1.7 h of radar. So availability is judged per frame against
- * that same time set (weatherTimes, injected server-side: the same
- * capabilities source as the serving path, parsed by GEV's own
- * parseWeatherCapabilities), never against a static window.
+ * unknown_weather_time, and while that read is stale (up to 1 h after an
+ * upstream failure) it refuses every uncached frame. nowCOAST itself lists
+ * ~6-9 h, but the route's frames are ~1-2 h of radar. So availability is
+ * judged per frame against the serving route instance's OWN manifest
+ * (weatherTimes, injected server-side; review R1b: never a second,
+ * independent capabilities read that can drift from the route's).
  */
-export const PIXELS_BASIS = 'serving-path-capabilities';
+export const PIXELS_BASIS = 'serving-route-manifest';
 /** server/providers/weather.js parseWeatherCapabilities: 24 h, 26 kept, 13 sent. */
 const WEATHER_MAX_AGE_MS = DAY_MS;
 const WEATHER_KEEP = 26;
@@ -646,11 +647,13 @@ export function createB12cSlices({
     }
     const kept = [...times].sort().slice(-WEATHER_KEEP).slice(-WEATHER_SEND);
     let serving = null;
-    if (weatherTimes && kept.length) {
+    if (kept.length) {
       try {
+        if (!weatherTimes) throw new Error('serving_route_unreachable');
         serving = await weatherTimes.read(product);
-      } catch {
-        serving = null; // unknown: never claimed renderable
+      } catch (error) {
+        // unknown: never claimed renderable
+        serving = { error: error?.reason ?? 'serving_route_unreachable' };
       }
     }
     return {
@@ -774,54 +777,100 @@ export function featureCollection(features, t) {
 
 /**
  * Which recorded frames GEV's pixel route renders NOW (see PIXELS_BASIS).
- * `serving` = { allowedTimes (ISO, ascending, as parseWeatherCapabilities
- * returns them), fetchedAt, marginMs } from the serving path's capabilities
- * source; null = that source could not be read -> 'unknown', nothing
- * claimed renderable.
- *
- * The route judges with ITS OWN cached read, which can be up to marginMs
- * older or newer than ours. Frames whose status can differ in that window
- * are NOT claimed renderable (conservative, never a false 'available'):
- *  - the newest k frames (k = frames listed within marginMs of the newest):
- *    an older route read may not list them yet;
- *  - when the route keeps a full 26, the oldest k: a newer route read may
- *    already have pushed them out;
- *  - frames within marginMs of the 24 h age limit.
+ * `serving` = the serving route instance's own state { times (the newest
+ * 13 of its allowedTimes, ascending), fetchedAt, stale, unavailable,
+ * checkedAt, marginMs } (server/byrdit/historyImageryTimes.js), or
+ * { error } / null when it could not be established.
+ *  - not established, route unavailable, or route metadata STALE (it then
+ *    refuses every uncached frame) -> 'unknown', nothing claimed;
+ *  - a frame the route lists (and not within marginMs of the 24 h limit)
+ *    renders: claimed in `renderable`;
+ *  - a frame not listed but not older than the oldest listed one, or older
+ *    than 24 h, does NOT render (the list is the newest end of allowedTimes);
+ *  - a frame older than the oldest listed one when the route lists a full
+ *    13 may still be in its allowedTimes (up to 26, not published), or is
+ *    within marginMs of 24 h: UNDETERMINED, never called unavailable.
+ * State: all claimed 'available'; some claimed 'partial'; none claimed and
+ * some undetermined 'unknown' (reason frames_older_than_route_list); else
+ * 'unavailable'.
  */
 export function pixelAvailability(frames, serving, nowMs) {
   if (!frames.length)
-    return { state: 'unavailable', renderable: [], serving: serving ?? null };
-  if (!serving || !Array.isArray(serving.allowedTimes))
-    return { state: 'unknown', renderable: [], serving: null };
-  const allowed = serving.allowedTimes;
+    return { state: 'unavailable', renderable: [], undetermined: [], serving };
+  const reason = !serving
+    ? 'serving_route_unreachable'
+    : serving.error
+      ? serving.error
+      : !Array.isArray(serving.times)
+        ? 'serving_route_bad_answer'
+        : serving.unavailable
+          ? 'serving_metadata_unavailable'
+          : serving.stale
+            ? 'serving_metadata_stale'
+            : null;
+  if (reason)
+    return {
+      state: 'unknown',
+      renderable: [],
+      undetermined: [...frames],
+      serving,
+      reason,
+    };
+  const listed = new Set(serving.times);
+  const oldest = serving.times.length ? Date.parse(serving.times[0]) : null;
+  const full = serving.times.length >= WEATHER_SEND;
   const margin = serving.marginMs ?? 0;
-  const newest = Date.parse(allowed.at(-1));
-  const k = allowed.filter((x) => newest - Date.parse(x) < margin).length;
-  const sure = new Set(
-    allowed.slice(allowed.length >= WEATHER_KEEP ? k : 0, allowed.length - k),
-  );
-  const renderable = frames.filter(
-    (x) => sure.has(x) && nowMs - Date.parse(x) <= WEATHER_MAX_AGE_MS - margin,
-  );
+  const renderable = [];
+  const undetermined = [];
+  for (const x of frames) {
+    const age = nowMs - Date.parse(x);
+    if (age > WEATHER_MAX_AGE_MS) continue; // the route refuses > 24 h
+    if (age > WEATHER_MAX_AGE_MS - margin) undetermined.push(x);
+    else if (listed.has(x)) renderable.push(x);
+    else if (full && Date.parse(x) < oldest) undetermined.push(x);
+  }
   return {
     state:
-      renderable.length === 0
-        ? 'unavailable'
-        : renderable.length === frames.length
-          ? 'available'
-          : 'partial',
+      renderable.length === frames.length
+        ? 'available'
+        : renderable.length
+          ? 'partial'
+          : undetermined.length
+            ? 'unknown'
+            : 'unavailable',
     renderable,
+    undetermined,
     serving,
+    ...(!renderable.length && undetermined.length
+      ? { reason: 'frames_older_than_route_list' }
+      : {}),
   };
 }
 
 /** Response headers for pixelAvailability(); the frame list says which. */
-export function pixelHeaders({ state, renderable, serving }) {
+export function pixelHeaders({
+  state,
+  renderable,
+  undetermined = [],
+  serving,
+  reason,
+}) {
+  const known =
+    serving && !serving.error && Array.isArray(serving.times) && !serving.stale
+      ? !serving.unavailable
+      : false;
   return {
     'X-History-Pixels': state,
-    'X-History-Pixels-Basis': serving ? PIXELS_BASIS : 'unknown',
+    'X-History-Pixels-Basis': known ? PIXELS_BASIS : 'unknown',
+    ...(reason ? { 'X-History-Pixels-Reason': reason } : {}),
+    ...(known && undetermined.length
+      ? { 'X-History-Pixels-Undetermined': String(undetermined.length) }
+      : {}),
+    ...(serving && Number.isFinite(serving.checkedAt)
+      ? { 'X-History-Pixels-Checked-At': isoOf(serving.checkedAt) }
+      : {}),
     ...(serving && Number.isFinite(serving.fetchedAt)
-      ? { 'X-History-Pixels-Checked-At': isoOf(serving.fetchedAt) }
+      ? { 'X-History-Pixels-Route-Read-At': isoOf(serving.fetchedAt) }
       : {}),
     ...(renderable.length
       ? { 'X-History-Pixels-Frames': renderable.join(',') }

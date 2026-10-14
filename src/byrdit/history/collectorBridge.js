@@ -155,6 +155,8 @@ function epoch(value) {
  * @param {Function} [options.weatherProxy] GEV's weatherProxy factory,
  *   injected server-side (server/byrdit/history.js); absent = weather
  *   tile/image fail closed (503)
+ * @param {{attachRoute?: Function}} [options.weatherServing] B12c R1b:
+ *   history imagery is told this bridge's private weather route manifest
  * @param {() => number} [options.now]
  * @param {(line: string) => void} [options.log] state transitions only
  */
@@ -166,6 +168,7 @@ export function createCollectorBridge({
   fetchImpl = (...args) => globalThis.fetch(...args),
   liveFetchImpl = (...args) => globalThis.fetch(...args),
   weatherProxy,
+  weatherServing,
   now = () => Date.now(),
   log = (line) => console.warn(line),
 }) {
@@ -224,6 +227,7 @@ export function createCollectorBridge({
         now,
       })
     : null;
+  if (imagery) weatherServing?.attachRoute?.(imagery.manifest);
 
   // B7 pattern route (CelesTrak): one entry, one collector snapshot per
   // group (/api/celestrak/<group> -> celestrak-<group>)
@@ -558,6 +562,7 @@ export function collectorBridgePlugin({
   fetchImpl,
   liveFetchImpl,
   weatherProxy,
+  weatherServing,
   now,
   log,
 } = {}) {
@@ -574,6 +579,7 @@ export function collectorBridgePlugin({
         fetchImpl,
         liveFetchImpl,
         weatherProxy,
+        weatherServing,
         now,
         log,
       });
