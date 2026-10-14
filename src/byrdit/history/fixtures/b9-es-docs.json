@@ -1,0 +1,1235 @@
+{
+ "meta": {
+  "capturedAt": "2026-10-14",
+  "capturedWith": "gev-history-reader key, _search hits (_id + _source); perimeter/cone geometry trimmed for size",
+  "card": "t_c420bd36 B9"
+ },
+ "military": [
+  {
+   "_id": "EAGGMWD8NIwPJFf2DqVYu3___l7FNivfQjvmRw",
+   "_source": {
+    "@timestamp": "2026-10-14T14:21:08.000Z",
+    "snap": 1791987668500,
+    "source": "adsb.lol",
+    "hex": "3b7f58",
+    "location": {
+     "lat": 44.764389,
+     "lon": -1.969103
+    },
+    "seen_pos_s": 0.025,
+    "callsign": "MEDOC05",
+    "squawk": "2644",
+    "db_flags": 1,
+    "on_ground": false,
+    "baro_alt_m": 12192,
+    "geo_alt_m": 12733,
+    "velocity_ms": 193.23,
+    "track_deg": 7.96,
+    "vert_rate_ms": 0
+   }
+  },
+  {
+   "_id": "EAGpxpYp2MiuZ-DE7z3Udn___l7FNivfd3jsHw",
+   "_source": {
+    "@timestamp": "2026-10-14T14:21:08.000Z",
+    "snap": 1791987668500,
+    "source": "adsb.lol",
+    "hex": "ae1234",
+    "location": {
+     "lat": 40.180447,
+     "lon": -80.790586
+    },
+    "seen_pos_s": 0.135,
+    "callsign": "RCH3213",
+    "squawk": "7402",
+    "type": "C17",
+    "registration": "03-3123",
+    "db_flags": 1,
+    "on_ground": false,
+    "baro_alt_m": 11209,
+    "geo_alt_m": 11826.2,
+    "velocity_ms": 266.48,
+    "track_deg": 139.85,
+    "vert_rate_ms": -4.88
+   }
+  },
+  {
+   "_id": "EAHf422w6t2eHsf8WgFABX___l7FNivfGIsOug",
+   "_source": {
+    "@timestamp": "2026-10-14T14:21:08.000Z",
+    "snap": 1791987668500,
+    "source": "adsb.lol",
+    "hex": "ae5b3d",
+    "location": {
+     "lat": 31.353817,
+     "lon": -85.998724
+    },
+    "seen_pos_s": 0.24,
+    "squawk": "4560",
+    "type": "H60",
+    "registration": "14-20703",
+    "db_flags": 1,
+    "on_ground": false,
+    "baro_alt_m": 228.6,
+    "geo_alt_m": 289.6,
+    "velocity_ms": 41,
+    "track_deg": 118.5,
+    "vert_rate_ms": 3.9
+   }
+  },
+  {
+   "_id": "EAI77aWq3_q4IL7LWJ0tgX___l7FNivfhGSk_w",
+   "_source": {
+    "@timestamp": "2026-10-14T14:21:08.000Z",
+    "snap": 1791987668500,
+    "source": "adsb.lol",
+    "hex": "43c952",
+    "location": {
+     "lat": 51.699554,
+     "lon": -1.630059
+    },
+    "seen_pos_s": 0.354,
+    "callsign": "VIPER02",
+    "squawk": "3701",
+    "type": "H64",
+    "registration": "ZM736",
+    "db_flags": 1,
+    "on_ground": false,
+    "baro_alt_m": 152.4,
+    "geo_alt_m": 327.7,
+    "velocity_ms": 66.36,
+    "track_deg": 326.06,
+    "vert_rate_ms": 0
+   }
+  },
+  {
+   "_id": "EALaTRGOso_CZNPyt3PjXn___l7FNo2HK6jp5w",
+   "_source": {
+    "@timestamp": "2026-10-14T14:20:43.000Z",
+    "snap": 1791987668500,
+    "source": "adsb.lol",
+    "hex": "ae6cf2",
+    "location": {
+     "lat": 38.06786,
+     "lon": -80.253276
+    },
+    "seen_pos_s": 25.998,
+    "callsign": "VENUS41",
+    "type": "GLF5",
+    "registration": "20-1949",
+    "db_flags": 1,
+    "on_ground": false,
+    "baro_alt_m": 3109,
+    "geo_alt_m": 3261.4,
+    "velocity_ms": 159.37,
+    "track_deg": 77.13,
+    "vert_rate_ms": -10.4
+   }
+  },
+  {
+   "_id": "EAMa4Z0PJcI_nQ0cLf4fQX___l7FNj9nCBvuEA",
+   "_source": {
+    "@timestamp": "2026-10-14T14:21:03.000Z",
+    "snap": 1791987668500,
+    "source": "adsb.lol",
+    "hex": "43c074",
+    "location": {
+     "lat": 51.059656,
+     "lon": -2.481472
+    },
+    "seen_pos_s": 5.242,
+    "callsign": "CMNDO14",
+    "squawk": "7424",
+    "type": "EH10",
+    "registration": "ZJ125",
+    "db_flags": 1,
+    "on_ground": false,
+    "baro_alt_m": 243.8,
+    "vert_rate_ms": 0.14
+   }
+  }
+ ],
+ "military_ground": [
+  {
+   "_id": "EDPoZpgFyGwwg3lLDHNGMH___l7FLDzn8bsECg",
+   "_source": {
+    "@timestamp": "2026-10-14T14:31:59.000Z",
+    "snap": 1791988372001,
+    "source": "adsb.lol",
+    "hex": "adffd9",
+    "location": {
+     "lat": 29.350127,
+     "lon": -100.771893
+    },
+    "seen_pos_s": 52.649,
+    "callsign": "BULLY82",
+    "type": "T38",
+    "registration": "66-4326",
+    "db_flags": 1,
+    "on_ground": true,
+    "velocity_ms": 5.56
+   }
+  },
+  {
+   "_id": "ED6pNYKygoGs2uNwZt4LkX___l7FK31_ybY-WQ",
+   "_source": {
+    "@timestamp": "2026-10-14T14:32:48.000Z",
+    "snap": 1791988372001,
+    "source": "adsb.lol",
+    "hex": "e49218",
+    "location": {
+     "lat": -3.773571,
+     "lon": -38.534889
+    },
+    "seen_pos_s": 3.927,
+    "callsign": "GEIV03",
+    "squawk": "3464",
+    "type": "E550",
+    "registration": "FAB3603",
+    "db_flags": 1,
+    "on_ground": true,
+    "velocity_ms": 0
+   }
+  }
+ ],
+ "adsblol": [
+  {
+   "_id": "JwAFHneuPRCLzfT8kdh37n___l7JMyPhWE59ow",
+   "_source": {
+    "@timestamp": 1791920757790,
+    "snap": 1791920760,
+    "source": "adsblol",
+    "icao24": "a1b472",
+    "location": {
+     "lat": 36.077007,
+     "lon": -115.619591
+    },
+    "on_ground": false,
+    "db_flags": 0,
+    "baro_alt_m": 1935.5,
+    "geo_alt_m": 1943.1,
+    "velocity_ms": 60.4,
+    "track_deg": 275.4,
+    "vert_rate_ms": -2.28,
+    "callsign": "N209LF",
+    "squawk": "1200",
+    "category": "A7",
+    "registration": "N209LF",
+    "type": "EC30",
+    "position_source": 0,
+    "import_batch": "adsblol-2026.10.13-20261014T040001Z"
+   }
+  },
+  {
+   "_id": "JwAOCeEo1T3Od8wra8ah0H___l7JMzPbYczmlQ",
+   "_source": {
+    "@timestamp": 1791920753700,
+    "snap": 1791920760,
+    "source": "adsblol",
+    "icao24": "abe872",
+    "location": {
+     "lat": 36.135709,
+     "lon": -91.006476
+    },
+    "on_ground": false,
+    "db_flags": 0,
+    "baro_alt_m": 10972.8,
+    "geo_alt_m": 11673.8,
+    "velocity_ms": 226.7,
+    "track_deg": 263.8,
+    "vert_rate_ms": 0.0,
+    "callsign": "SWA908",
+    "squawk": "0503",
+    "category": "A3",
+    "registration": "N8667D",
+    "type": "B738",
+    "position_source": 0,
+    "import_batch": "adsblol-2026.10.13-20261014T040001Z"
+   }
+  },
+  {
+   "_id": "JwAPEVkB0U9CrfMsEJ7KFX___l7JM1Ft0IYIqw",
+   "_source": {
+    "@timestamp": 1791920746130,
+    "snap": 1791920760,
+    "source": "adsblol",
+    "icao24": "c012a7",
+    "location": {
+     "lat": 47.33812,
+     "lon": -86.403351
+    },
+    "on_ground": false,
+    "db_flags": 0,
+    "baro_alt_m": 10668.0,
+    "geo_alt_m": 10942.3,
+    "velocity_ms": 277.5,
+    "track_deg": 115.2,
+    "vert_rate_ms": 0.0,
+    "callsign": "ACA1122",
+    "squawk": "3453",
+    "category": "A3",
+    "registration": "C-FHBQ",
+    "type": "BCS3",
+    "position_source": 0,
+    "import_batch": "adsblol-2026.10.13-20261014T040001Z"
+   }
+  },
+  {
+   "_id": "JwA19EI-bfg7uAcPPr2_an___l7JMzel-q8BsA",
+   "_source": {
+    "@timestamp": 1791920752730,
+    "snap": 1791920760,
+    "source": "adsblol",
+    "icao24": "a58672",
+    "location": {
+     "lat": 38.827652,
+     "lon": -114.78032
+    },
+    "on_ground": false,
+    "db_flags": 0,
+    "baro_alt_m": 10668.0,
+    "geo_alt_m": 10828.0,
+    "velocity_ms": 243.1,
+    "track_deg": 82.1,
+    "vert_rate_ms": -0.33,
+    "callsign": "UAL702",
+    "squawk": "6337",
+    "category": "A3",
+    "registration": "N455UA",
+    "type": "A320",
+    "position_source": 0,
+    "import_batch": "adsblol-2026.10.13-20261014T040001Z"
+   }
+  },
+  {
+   "_id": "JwBhUJlxxDEKsYMqsVZB5H___l7JM3WPFaVYsA",
+   "_source": {
+    "@timestamp": 1791920736880,
+    "snap": 1791920760,
+    "source": "adsblol",
+    "icao24": "a1bc23",
+    "location": {
+     "lat": 41.519662,
+     "lon": -87.363728
+    },
+    "on_ground": false,
+    "db_flags": 0,
+    "baro_alt_m": 487.7,
+    "geo_alt_m": 419.1,
+    "velocity_ms": 42.1,
+    "track_deg": 348.0,
+    "vert_rate_ms": -2.6,
+    "callsign": "N2102C",
+    "squawk": "1200",
+    "category": "A1",
+    "registration": "N2102C",
+    "type": "P28A",
+    "position_source": 0,
+    "import_batch": "adsblol-2026.10.13-20261014T040001Z"
+   }
+  },
+  {
+   "_id": "JwBhiivHdS3f9sKmUDurtn___l7JMyDp3Bq2xQ",
+   "_source": {
+    "@timestamp": 1791920758550,
+    "snap": 1791920760,
+    "source": "adsblol",
+    "icao24": "a4801f",
+    "location": {
+     "lat": 32.225693,
+     "lon": -98.166028
+    },
+    "on_ground": false,
+    "db_flags": 0,
+    "baro_alt_m": 716.3,
+    "geo_alt_m": 701.0,
+    "velocity_ms": 58.5,
+    "track_deg": 331.6,
+    "vert_rate_ms": -1.3,
+    "callsign": "N38970",
+    "squawk": "1200",
+    "category": "A1",
+    "registration": "N38970",
+    "type": "P28A",
+    "position_source": 0,
+    "import_batch": "adsblol-2026.10.13-20261014T040001Z"
+   }
+  }
+ ],
+ "adsblol_mil": [
+  {
+   "_id": "JwBOEwSYZHwoXZl2k2AefX___mfxZoG1dAvcgg",
+   "_source": {
+    "@timestamp": 1752591597130,
+    "snap": 1752591600,
+    "source": "adsblol",
+    "icao24": "3b7b3e",
+    "location": {
+     "lat": 43.711807,
+     "lon": 5.132276
+    },
+    "on_ground": false,
+    "db_flags": 1,
+    "baro_alt_m": 2438.4,
+    "geo_alt_m": 2667.0,
+    "velocity_ms": 101.0,
+    "track_deg": 304.4,
+    "vert_rate_ms": -0.33,
+    "callsign": "MILAN77",
+    "squawk": "7074",
+    "category": "A2",
+    "registration": "F-ZBMJ",
+    "type": "DH8D",
+    "position_source": 0,
+    "import_batch": "adsblol-2025.07.15-20261013T043024Z"
+   }
+  },
+  {
+   "_id": "JwFVyxuetdtRsCsQQTBdMn___mfxZoahPxyzzA",
+   "_source": {
+    "@timestamp": 1752591595870,
+    "snap": 1752591600,
+    "source": "adsblol",
+    "icao24": "adfdd1",
+    "location": {
+     "lat": 41.945938,
+     "lon": -79.99158
+    },
+    "on_ground": false,
+    "db_flags": 1,
+    "baro_alt_m": 7315.2,
+    "geo_alt_m": 7719.1,
+    "velocity_ms": 118.3,
+    "track_deg": 295.8,
+    "vert_rate_ms": 0.0,
+    "callsign": "WING22",
+    "squawk": "3023",
+    "category": "A1",
+    "registration": "92-03329",
+    "type": "BE20",
+    "position_source": 0,
+    "import_batch": "adsblol-2025.07.15-20261013T043024Z"
+   }
+  },
+  {
+   "_id": "JwFhyjAsFkFmm-en_PpRkn___mfxZrQZUPfdPw",
+   "_source": {
+    "@timestamp": 1752591584230,
+    "snap": 1752591600,
+    "source": "adsblol",
+    "icao24": "ae01c9",
+    "location": {
+     "lat": 49.53566,
+     "lon": 15.08047
+    },
+    "on_ground": false,
+    "db_flags": 1,
+    "baro_alt_m": 8534.4,
+    "geo_alt_m": 8869.7,
+    "velocity_ms": 212.6,
+    "track_deg": 299.1,
+    "vert_rate_ms": -0.65,
+    "callsign": "JAKE17",
+    "squawk": "4201",
+    "category": "A5",
+    "registration": "64-14841",
+    "type": "R135",
+    "position_source": 0,
+    "import_batch": "adsblol-2025.07.15-20261013T043024Z"
+   }
+  }
+ ],
+ "opensky": [
+  {
+   "_id": "JwAPU9UZBb0bVgHPJAjEon___l7JMp4_e6bdww",
+   "_source": {
+    "@timestamp": "2026-10-13T19:46:32.000Z",
+    "snap": 1791920792000,
+    "source": "opensky",
+    "icao24": "888219",
+    "location": {
+     "lat": 25.2715,
+     "lon": 120.941
+    },
+    "callsign": "VJC988",
+    "origin_country": "Viet Nam",
+    "baro_alt_m": 10668,
+    "on_ground": false,
+    "velocity_ms": 247.37,
+    "track_deg": 44.66,
+    "vert_rate_ms": 0,
+    "geo_alt_m": 11399.5,
+    "position_source": 0,
+    "category": "0"
+   }
+  },
+  {
+   "_id": "JwAXsQxmgFF7hm5ItTz7SH___l7JMqIn2t4oMw",
+   "_source": {
+    "@timestamp": "2026-10-13T19:46:31.000Z",
+    "snap": 1791920792000,
+    "source": "opensky",
+    "icao24": "a559b7",
+    "location": {
+     "lat": 30.3076,
+     "lon": -81.7019
+    },
+    "callsign": "N444CM",
+    "origin_country": "United States",
+    "baro_alt_m": 2484.1,
+    "on_ground": false,
+    "velocity_ms": 88.67,
+    "track_deg": 211.48,
+    "vert_rate_ms": 6.5,
+    "geo_alt_m": 2628.9,
+    "position_source": 0,
+    "category": "0"
+   }
+  },
+  {
+   "_id": "JwAiEb2zDD6sZGeZv7EaM3___l7JM21Hdj9O7Q",
+   "_source": {
+    "@timestamp": "2026-10-13T19:45:39.000Z",
+    "snap": 1791920792000,
+    "source": "opensky",
+    "icao24": "7810a3",
+    "location": {
+     "lat": 32.497,
+     "lon": 127.6334
+    },
+    "callsign": "CXA806",
+    "origin_country": "China",
+    "baro_alt_m": 10363.2,
+    "on_ground": false,
+    "velocity_ms": 203.73,
+    "track_deg": 246.8,
+    "vert_rate_ms": -0.33,
+    "geo_alt_m": 10866.1,
+    "squawk": "7042",
+    "position_source": 0,
+    "category": "0"
+   }
+  },
+  {
+   "_id": "JwAljJWyGF8dStJrxUyIrX___l7JMqYPel5Drw",
+   "_source": {
+    "@timestamp": "2026-10-13T19:46:30.000Z",
+    "snap": 1791920792000,
+    "source": "opensky",
+    "icao24": "ae5d47",
+    "location": {
+     "lat": 31.0022,
+     "lon": -84.9451
+    },
+    "callsign": "SPUD63",
+    "origin_country": "United States",
+    "baro_alt_m": 899.2,
+    "on_ground": false,
+    "velocity_ms": 66.73,
+    "track_deg": 117.55,
+    "vert_rate_ms": -2.28,
+    "geo_alt_m": 952.5,
+    "position_source": 0,
+    "category": "0"
+   }
+  },
+  {
+   "_id": "JwBAKyyigeGB1lgzzqcI_H___l7JMq3fTysA9w",
+   "_source": {
+    "@timestamp": "2026-10-13T19:46:28.000Z",
+    "snap": 1791920792000,
+    "source": "opensky",
+    "icao24": "8991a4",
+    "location": {
+     "lat": 22.875,
+     "lon": 115.627
+    },
+    "callsign": "CAL5893",
+    "origin_country": "Taiwan",
+    "baro_alt_m": 8321,
+    "on_ground": false,
+    "velocity_ms": 213.78,
+    "track_deg": 263.64,
+    "vert_rate_ms": -10.08,
+    "geo_alt_m": 8892.5,
+    "position_source": 0,
+    "category": "1"
+   }
+  },
+  {
+   "_id": "JwBmvgsPzpmUQsIa8GJtwH___l7JNYhX0oWHPQ",
+   "_source": {
+    "@timestamp": "2026-10-13T19:43:21.000Z",
+    "snap": 1791920792000,
+    "source": "opensky",
+    "icao24": "a56742",
+    "location": {
+     "lat": 33.2058,
+     "lon": 82.8021
+    },
+    "callsign": "N4472F",
+    "origin_country": "United States",
+    "on_ground": true,
+    "velocity_ms": 13.89,
+    "track_deg": 2.81,
+    "position_source": 0,
+    "category": "0"
+   }
+  }
+ ],
+ "fires": [
+  {
+   "_id": "5b93b5ec1f9b80d3316fdf2b4ac0cb76b242c4831efe37b38bbc4979c047b807",
+   "_source": {
+    "@timestamp": "2026-10-14T12:52:00.000Z",
+    "snap": 1791983588712,
+    "source": "nasa-firms",
+    "firms_source": "VIIRS_NOAA21_NRT",
+    "location": {
+     "lat": 19.40512,
+     "lon": -155.29103
+    },
+    "frp": 3.94,
+    "acq_date": "2026-10-14",
+    "acq_time": "1252",
+    "confidence": "n",
+    "brightness": 309.43,
+    "brightness_ti5": 288.68,
+    "daynight": "N",
+    "satellite": "N21",
+    "instrument": "VIIRS",
+    "scan": 0.7,
+    "track": 0.7
+   }
+  },
+  {
+   "_id": "5dc218ecd235d49c8a878c2848f1d1959bd100089b78fd4904b62a1a47af5b28",
+   "_source": {
+    "@timestamp": "2026-10-14T12:44:00.000Z",
+    "snap": 1791987184686,
+    "source": "nasa-firms",
+    "firms_source": "MODIS_NRT",
+    "location": {
+     "lat": 33.63433,
+     "lon": 43.72601
+    },
+    "frp": 33.68,
+    "acq_date": "2026-10-14",
+    "acq_time": "1244",
+    "confidence": "83",
+    "brightness": 330.95,
+    "brightness_ti5": 301.1,
+    "daynight": "D",
+    "satellite": "Aqua",
+    "instrument": "MODIS",
+    "scan": 1.33,
+    "track": 1.14
+   }
+  },
+  {
+   "_id": "788c9bd0b36d823910e279d20b5d2c9663678382b43cb3952c9cdbb743c2f667",
+   "_source": {
+    "@timestamp": "2026-10-14T12:44:00.000Z",
+    "snap": 1791987184686,
+    "source": "nasa-firms",
+    "firms_source": "MODIS_NRT",
+    "location": {
+     "lat": 33.63593,
+     "lon": 43.73996
+    },
+    "frp": 20.66,
+    "acq_date": "2026-10-14",
+    "acq_time": "1244",
+    "confidence": "76",
+    "brightness": 323.66,
+    "brightness_ti5": 300.25,
+    "daynight": "D",
+    "satellite": "Aqua",
+    "instrument": "MODIS",
+    "scan": 1.34,
+    "track": 1.15
+   }
+  },
+  {
+   "_id": "c657d9c1ae762c7cc637e78f4e152c94616e89e91cdff99a328bcfa27c7193dc",
+   "_source": {
+    "@timestamp": "2026-10-14T12:44:00.000Z",
+    "snap": 1791987184686,
+    "source": "nasa-firms",
+    "firms_source": "MODIS_NRT",
+    "location": {
+     "lat": 33.75294,
+     "lon": 43.70087
+    },
+    "frp": 20.44,
+    "acq_date": "2026-10-14",
+    "acq_time": "1244",
+    "confidence": "75",
+    "brightness": 322.4,
+    "brightness_ti5": 294.97,
+    "daynight": "D",
+    "satellite": "Aqua",
+    "instrument": "MODIS",
+    "scan": 1.33,
+    "track": 1.14
+   }
+  }
+ ],
+ "fires_hist": [
+  {
+   "_id": "c8009c0b2a4f8ba31e2fdb1f4edee1d8b3898c35676e9c4e61c5e4ad0f0a9205",
+   "_source": {
+    "@timestamp": "2026-10-11T23:58:00Z",
+    "snap": 1791763080,
+    "source": "nasa-firms",
+    "firms_source": "VIIRS_NOAA21_NRT",
+    "location": {
+     "lat": 13.79752,
+     "lon": 28.88195
+    },
+    "frp": 0.92,
+    "confidence": "n",
+    "brightness": 310.14,
+    "brightness_ti5": 293.76,
+    "daynight": "N",
+    "satellite": "N21",
+    "instrument": "VIIRS",
+    "acq_date": "2026-10-11",
+    "acq_time": "2358",
+    "scan": 0.43,
+    "track": 0.46,
+    "import_batch": "t_5c2fa741-fires-20261012T184234Z"
+   }
+  },
+  {
+   "_id": "3f11ea3dfb0cd0b3c9c173fdfcf7b7a619e641a40e59a13b552bebc4fe04001b",
+   "_source": {
+    "@timestamp": "2026-10-11T23:58:00Z",
+    "snap": 1791763080,
+    "source": "nasa-firms",
+    "firms_source": "VIIRS_NOAA21_NRT",
+    "location": {
+     "lat": 15.42268,
+     "lon": 21.77824
+    },
+    "frp": 1.3,
+    "confidence": "n",
+    "brightness": 312.64,
+    "brightness_ti5": 292.6,
+    "daynight": "N",
+    "satellite": "N21",
+    "instrument": "VIIRS",
+    "acq_date": "2026-10-11",
+    "acq_time": "2358",
+    "scan": 0.41,
+    "track": 0.37,
+    "import_batch": "t_5c2fa741-fires-20261012T184234Z"
+   }
+  }
+ ],
+ "perimeters": [
+  {
+   "_id": "a5da2b90c461871ec627a1af0dde107a85746559afccfbd3dfbf3f726a469a4f",
+   "_source": {
+    "@timestamp": "2026-10-14T13:02:22.000Z",
+    "snap": 1791983583513,
+    "source": "nifc-wfigs",
+    "fire_id": "2026-MIMIS-070006",
+    "geometry": {
+     "type": "MultiPolygon",
+     "coordinates": [
+      [
+       [
+        [
+         -88.1811,
+         46.6291
+        ],
+        [
+         -88.1819,
+         46.6275
+        ],
+        [
+         -88.1829,
+         46.6282
+        ],
+        [
+         -88.1836,
+         46.6316
+        ],
+        [
+         -88.1808,
+         46.6313
+        ],
+        [
+         -88.1816,
+         46.6326
+        ],
+        [
+         -88.1795,
+         46.6341
+        ],
+        [
+         -88.1792,
+         46.6376
+        ],
+        [
+         -88.1818,
+         46.6383
+        ],
+        [
+         -88.1791,
+         46.6398
+        ],
+        [
+         -88.1791,
+         46.6413
+        ],
+        [
+         -88.1811,
+         46.6291
+        ]
+       ]
+      ]
+     ]
+    },
+    "incident_name": "Craig Lake Fire",
+    "poly_date_current": 1791982942000,
+    "size_acres": 600,
+    "containment_pct": 25,
+    "state": "US-MI",
+    "county": "Baraga"
+   }
+  },
+  {
+   "_id": "e0d74fbb7da6b695e35d4b96c8907f98afad36ca5d95e3ae0ddb41af20bb73f3",
+   "_source": {
+    "@timestamp": "2026-10-14T13:00:14.000Z",
+    "snap": 1791983583513,
+    "source": "nifc-wfigs",
+    "fire_id": "2026-WIWIS-FIRE125380",
+    "geometry": {
+     "type": "MultiPolygon",
+     "coordinates": [
+      [
+       [
+        [
+         -90.2717,
+         45.265
+        ],
+        [
+         -90.2715,
+         45.2652
+        ],
+        [
+         -90.2714,
+         45.265
+        ],
+        [
+         -90.2717,
+         45.265
+        ],
+        [
+         -90.2717,
+         45.265
+        ]
+       ]
+      ]
+     ]
+    },
+    "incident_name": "Sugarbush",
+    "poly_date_current": 1791982814000,
+    "size_acres": 0.1,
+    "state": "US-WI",
+    "county": "Taylor"
+   }
+  },
+  {
+   "_id": "8680e36b93b7888d4eabe53f105c83addfd5351bd54de130abf373d89f09eb6d",
+   "_source": {
+    "@timestamp": "2026-10-14T12:58:20.000Z",
+    "snap": 1791983583513,
+    "source": "nifc-wfigs",
+    "fire_id": "2026-WIWIS-FIRE125370",
+    "geometry": {
+     "type": "MultiPolygon",
+     "coordinates": [
+      [
+       [
+        [
+         -90.7271,
+         44.7426
+        ],
+        [
+         -90.7255,
+         44.7422
+        ],
+        [
+         -90.7277,
+         44.7422
+        ],
+        [
+         -90.7271,
+         44.7426
+        ],
+        [
+         -90.7271,
+         44.7426
+        ]
+       ]
+      ]
+     ]
+    },
+    "incident_name": "Harvest Time",
+    "poly_date_current": 1791982700000,
+    "size_acres": 1.45,
+    "state": "US-WI",
+    "county": "Clark"
+   }
+  }
+ ],
+ "cyclones_nhc": [
+  {
+   "_id": "7365c9bf402738a1a2b6e8ac79ea1b618ce70d91a5079362ede964649819a74a",
+   "_source": {
+    "@timestamp": "2026-10-14T09:00:00.000Z",
+    "snap": 1791968288563,
+    "source": "noaa-nhc",
+    "storm_id": "ep212026",
+    "advisory": "4",
+    "name": "Trudy",
+    "basin": "EP",
+    "classification": "TS",
+    "position": {
+     "lat": 11.1,
+     "lon": -99
+    },
+    "intensity_kt": 45,
+    "pressure_mb": 1002,
+    "movement_dir_deg": 295,
+    "movement_speed_kt": 10
+   }
+  },
+  {
+   "_id": "08417b7639fd300cbd20ecb73535c5d5e4193dc065134c0e6d4e4485634c6d3b",
+   "_source": {
+    "@timestamp": "2026-10-14T09:00:00.000Z",
+    "snap": 1791968288563,
+    "source": "noaa-nhc",
+    "storm_id": "ep202026",
+    "advisory": "28",
+    "name": "Simon",
+    "basin": "EP",
+    "classification": "HU",
+    "position": {
+     "lat": 19.8,
+     "lon": -107.9
+    },
+    "intensity_kt": 90,
+    "pressure_mb": 969,
+    "movement_dir_deg": 230,
+    "movement_speed_kt": 3
+   }
+  },
+  {
+   "_id": "072b7760b3434a715dce42ec6532ffc5bc3fb0e48d843e718fc9438ad2bf5633",
+   "_source": {
+    "@timestamp": "2026-10-14T09:00:00.000Z",
+    "snap": 1791969188866,
+    "source": "noaa-nhc",
+    "storm_id": "ep212026",
+    "advisory": "4",
+    "name": "Trudy",
+    "basin": "EP",
+    "classification": "TS",
+    "position": {
+     "lat": 11.1,
+     "lon": -99
+    },
+    "intensity_kt": 45,
+    "pressure_mb": 1002,
+    "movement_dir_deg": 295,
+    "movement_speed_kt": 10,
+    "forecast_track": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       -99,
+       11.1
+      ],
+      [
+       -100.2,
+       11.5
+      ],
+      [
+       -101.3,
+       12.4
+      ],
+      [
+       -101.8,
+       13.1
+      ],
+      [
+       -102.4,
+       14
+      ]
+     ]
+    },
+    "cone": {
+     "type": "Polygon",
+     "coordinates": [
+      [
+       [
+        -99.096,
+        10.8426
+       ],
+       [
+        -99.0727,
+        10.8396
+       ],
+       [
+        -99.048,
+        10.8381
+       ],
+       [
+        -99.0218,
+        10.8381
+       ],
+       [
+        -98.995,
+        10.8397
+       ],
+       [
+        -98.9685,
+        10.8432
+       ],
+       [
+        -98.9432,
+        10.8485
+       ],
+       [
+        -98.9193,
+        10.8556
+       ],
+       [
+        -99.096,
+        10.8426
+       ]
+      ]
+     ]
+    }
+   }
+  }
+ ],
+ "cyclones_atcf": [
+  {
+   "_id": "8313a9ee707837c68ce09faaf7b5b97252ec29c332a083bc376f3a8306e3fc2e",
+   "_source": {
+    "@timestamp": "2026-10-12T12:00:00Z",
+    "snap": 1791806400,
+    "source": "nhc-atcf-btk",
+    "storm_id": "EP202026",
+    "advisory": "atcf-btk:2026101212",
+    "name": "SIMON",
+    "basin": "EP",
+    "position": {
+     "lat": 20.0,
+     "lon": -106.4
+    },
+    "intensity_kt": 95,
+    "pressure_mb": 962,
+    "classification": "HU",
+    "import_batch": "t_5c2fa741-cyclones-20261012T142844Z"
+   }
+  },
+  {
+   "_id": "661497a2f04d6a0b8241018012fa7dff221691d99429d212da2733781e7aa6bc",
+   "_source": {
+    "@timestamp": "2026-10-12T06:00:00Z",
+    "snap": 1791784800,
+    "source": "nhc-atcf-btk",
+    "storm_id": "EP202026",
+    "advisory": "atcf-btk:2026101206",
+    "name": "SIMON",
+    "basin": "EP",
+    "position": {
+     "lat": 19.8,
+     "lon": -106.0
+    },
+    "intensity_kt": 95,
+    "pressure_mb": 961,
+    "classification": "HU",
+    "import_batch": "t_5c2fa741-cyclones-20261012T142844Z"
+   }
+  }
+ ],
+ "launches": [
+  {
+   "_id": "1e64d8bafb185b82a327ac3c12a6d2d9da340c0f430b4c1873296a1a91ecc1dc",
+   "_source": {
+    "@timestamp": "2026-10-14T11:40:00.000Z",
+    "snap": 1791978223428,
+    "source": "ll2",
+    "launch_id": "dfcabb3c-078b-4f5b-a47c-0161f248cee9",
+    "name": "Zhuque-2E | Unknown Payload",
+    "status": "Go for Launch",
+    "net": "2026-10-14T11:40:00.000Z",
+    "last_updated": "2026-10-13T01:07:00.000Z",
+    "pad_name": "Launch Area 96A",
+    "pad_location": {
+     "lat": 40.91491,
+     "lon": 100.245488
+    },
+    "provider": "LandSpace",
+    "mission": "Unknown Payload",
+    "payload_summary": "Unknown Payload | Unknown | N/A"
+   }
+  },
+  {
+   "_id": "3aa156e87b6cbd64ac98b9fa05dd6dd64ed71e843c6cbd9a919c7ca6137a695a",
+   "_source": {
+    "@timestamp": "2026-10-14T11:40:00.000Z",
+    "snap": 1791981824801,
+    "source": "ll2",
+    "launch_id": "dfcabb3c-078b-4f5b-a47c-0161f248cee9",
+    "name": "Zhuque-2E Block 2 | 10 satellites",
+    "status": "Launch Successful",
+    "net": "2026-10-14T11:40:00.000Z",
+    "last_updated": "2026-10-14T12:34:37.000Z",
+    "pad_name": "Launch Area 96A",
+    "pad_location": {
+     "lat": 40.91491,
+     "lon": 100.245488
+    },
+    "provider": "LandSpace",
+    "mission": "10 satellites",
+    "payload_summary": "10 satellites | Technology | SSO"
+   }
+  },
+  {
+   "_id": "d51443428101c7749259c250ea7aec265771dfe17eb36693f9ac4f3f0b62432d",
+   "_source": {
+    "@timestamp": "2026-10-13T10:33:44.000Z",
+    "snap": 1791888186589,
+    "source": "ll2",
+    "launch_id": "bf2c3027-a314-403e-a416-2bfd5d165ad1",
+    "name": "Falcon 9 Block 5 | Dragon CRS-2 SpX-35",
+    "status": "Launch in Flight",
+    "net": "2026-10-13T10:33:44.000Z",
+    "last_updated": "2026-10-13T10:42:28.000Z",
+    "pad_name": "Space Launch Complex 40",
+    "pad_location": {
+     "lat": 28.56194122,
+     "lon": -80.57735736
+    },
+    "provider": "SpaceX",
+    "mission": "Dragon CRS-2 SpX-35",
+    "payload_summary": "Dragon CRS-2 SpX-35 | Resupply | LEO"
+   }
+  },
+  {
+   "_id": "dae8a850d4eeca1d9304cb2120e14c08f7d2e82718062ed201965e52a7e2ea18",
+   "_source": {
+    "@timestamp": "2026-10-13T10:33:44.000Z",
+    "snap": 1791889085874,
+    "source": "ll2",
+    "launch_id": "bf2c3027-a314-403e-a416-2bfd5d165ad1",
+    "name": "Falcon 9 Block 5 | Dragon CRS-2 SpX-35",
+    "status": "Launch Successful",
+    "net": "2026-10-13T10:33:44.000Z",
+    "last_updated": "2026-10-13T10:52:50.000Z",
+    "pad_name": "Space Launch Complex 40",
+    "pad_location": {
+     "lat": 28.56194122,
+     "lon": -80.57735736
+    },
+    "provider": "SpaceX",
+    "mission": "Dragon CRS-2 SpX-35",
+    "payload_summary": "Dragon CRS-2 SpX-35 | Resupply | LEO"
+   }
+  }
+ ],
+ "ingest_military": [
+  {
+   "_id": "ce69cad6b2af5e2e41c0b2025772543ebeb2a9ef33f07823461f4b9261363e80",
+   "_source": {
+    "@timestamp": "2026-10-14T14:32:48.873Z",
+    "source": "collector",
+    "kind": "poll",
+    "feed": "military",
+    "instance": "server5:1427098:1791920338",
+    "ok": true,
+    "duration_ms": 7628,
+    "bytes": 223995,
+    "docs_received": 432,
+    "docs_written": 403,
+    "docs_dup": 29,
+    "docs_rejected": 0,
+    "message": "{\"outcome\":\"ok\",\"reason\":null,\"rows\":511,\"invalid_rows\":0,\"out_of_window\":0,\"bulk_errors\":0,\"spooled\":0,\"ack_invalid\":0,\"es_blocked\":null,\"epoch\":32}",
+    "http_status": 200,
+    "snap": 1791988372001
+   }
+  },
+  {
+   "_id": "9e85413cec4de3aebce0f3cca85b8813f520c27ff2b46dc19d850a3fffd9b9c9",
+   "_source": {
+    "@timestamp": "2026-10-14T14:31:48.874Z",
+    "source": "collector",
+    "kind": "poll",
+    "feed": "military",
+    "instance": "server5:1427098:1791920338",
+    "ok": true,
+    "duration_ms": 849,
+    "bytes": 231244,
+    "docs_received": 443,
+    "docs_written": 416,
+    "docs_dup": 27,
+    "docs_rejected": 0,
+    "message": "{\"outcome\":\"ok\",\"reason\":null,\"rows\":524,\"invalid_rows\":0,\"out_of_window\":0,\"bulk_errors\":0,\"spooled\":0,\"ack_invalid\":0,\"es_blocked\":null,\"epoch\":32}",
+    "http_status": 200,
+    "snap": 1791988309001
+   }
+  }
+ ],
+ "ingest_opensky": [
+  {
+   "_id": "bfa6247bfa80f5537e978679618facd76ad77630f439141b48bbf06824d6f4a0",
+   "_source": {
+    "@timestamp": "2026-10-13T19:46:38.259Z",
+    "source": "collector",
+    "kind": "poll",
+    "feed": "aircraft-opensky",
+    "instance": "server5:1427098:1791920338",
+    "ok": true,
+    "duration_ms": 1491,
+    "bytes": 425978,
+    "docs_received": 3183,
+    "docs_written": 2838,
+    "docs_dup": 345,
+    "docs_rejected": 0,
+    "message": "{\"outcome\":\"ok\",\"reason\":null,\"rows\":3183,\"invalid_rows\":0,\"out_of_window\":0,\"bulk_errors\":0,\"spooled\":0,\"ack_invalid\":0,\"es_blocked\":null,\"epoch\":32,\"tile\":\"-100,-15,135,35\",\"tile_bbox\":[-100,-15,135,35],\"request_bbox\":[-99.995,-14.995,134.995,34.995],\"credits\":4,\"probe\":false,\"plan_cost\":4,\"plan_tiles\":1,\"cadence_ms\":90948,\"views\":3,\"remaining\":7509,\"positionless\":0,\"tokens\":106.27}",
+    "http_status": 200,
+    "snap": 1791920792000
+   }
+  },
+  {
+   "_id": "5fe13413673d638b2e0d0d9436fefe3c38f255478170b0abb72593c1083b6429",
+   "_source": {
+    "@timestamp": "2026-10-13T19:46:20.384Z",
+    "source": "collector",
+    "kind": "poll",
+    "feed": "aircraft-opensky",
+    "instance": "server5:1427098:1791920338",
+    "ok": true,
+    "duration_ms": 1291,
+    "bytes": 282850,
+    "docs_received": 2095,
+    "docs_written": 2094,
+    "docs_dup": 1,
+    "docs_rejected": 0,
+    "message": "{\"outcome\":\"ok\",\"reason\":null,\"rows\":2095,\"invalid_rows\":0,\"out_of_window\":0,\"bulk_errors\":0,\"spooled\":0,\"ack_invalid\":0,\"es_blocked\":null,\"epoch\":32,\"tile\":\"-100,20,-80,35\",\"tile_bbox\":[-100,20,-80,35],\"request_bbox\":[-99.995,20.005,-80.005,34.995],\"credits\":3,\"probe\":false,\"plan_cost\":3,\"plan_tiles\":1,\"cadence_ms\":68211,\"views\":1,\"remaining\":7513,\"positionless\":0,\"tokens\":109.49}",
+    "http_status": 200,
+    "snap": 1791920776000
+   }
+  }
+ ]
+}
