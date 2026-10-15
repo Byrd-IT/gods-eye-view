@@ -108,6 +108,7 @@ const QUAKE_SOURCE = [
   'mag_type',
   'depth_km',
   'place',
+  'ids',
 ];
 const QUAKE_TERMS_CHUNK = 5_000;
 
@@ -440,6 +441,18 @@ export function createB12cSlices({
    * all_day.geojson window). The window and bbox are applied to the
    * WINNING version only (never before choosing it, which would resurrect a
    * superseded version).
+   *
+   * Revised-later fallback (owner decision 2B, t_bfce1826 / t_a49a1f4a):
+   * the B13 archive holds ONE version per event, the one current at import,
+   * mostly revised long after the origin. An ARCHIVE event with no version
+   * updated <= t is served from its OLDEST archive version, and the answer
+   * carries X-History-Revised-Later: <n>. Live-collector versions are first
+   * observations, so an event whose oldest version is live and newer than t
+   * was not yet published at t and stays hidden (strict rule).
+   *
+   * Merged events: when the recorder keeps USGS `ids`, an event id listed
+   * in another served event's ids is superseded and dropped
+   * (X-History-Superseded: <n>). No served doc with ids -> no-op.
    */
   async function sliceQuakes({ t, bbox, maxRows }) {
     const first = await firstRecord(
@@ -459,22 +472,31 @@ export function createB12cSlices({
       },
     });
     if (first === null || t < first) return empty('before_recording_start');
-    const candidates = await latestPerKey(es, IDX.quakes, {
-      filter: [
-        range('updated', undefined, t),
-        range(
-          '@timestamp',
-          t - QUAKE_WINDOW_MS - QUAKE_ORIGIN_SLACK_MS,
-          t + QUAKE_ORIGIN_SLACK_MS,
-        ),
-      ],
-      field: 'event_id',
-      timeField: 'updated',
-      _source: ['event_id'],
-    });
-    const ids = [
-      ...new Set(candidates.hits.map((h) => sourceOf(h).event_id)),
-    ].filter((id) => typeof id === 'string' && id);
+    const originRange = range(
+      '@timestamp',
+      t - QUAKE_WINDOW_MS - QUAKE_ORIGIN_SLACK_MS,
+      t + QUAKE_ORIGIN_SLACK_MS,
+    );
+    const [candidates, archived] = await Promise.all([
+      latestPerKey(es, IDX.quakes, {
+        filter: [range('updated', undefined, t), originRange],
+        field: 'event_id',
+        timeField: 'updated',
+        _source: ['event_id'],
+      }),
+      latestPerKey(es, IDX.quakesArchive, {
+        filter: [originRange],
+        field: 'event_id',
+        timeField: 'updated',
+        _source: ['event_id'],
+      }),
+    ]);
+    const idsOf = (res) =>
+      res.hits
+        .map((h) => sourceOf(h).event_id)
+        .filter((id) => typeof id === 'string' && id);
+    const archiveIds = new Set(idsOf(archived));
+    const ids = [...new Set([...idsOf(candidates), ...archiveIds])];
     const chunks = [];
     for (let i = 0; i < ids.length; i += QUAKE_TERMS_CHUNK)
       chunks.push(ids.slice(i, i + QUAKE_TERMS_CHUNK));
@@ -489,27 +511,57 @@ export function createB12cSlices({
         _source: QUAKE_SOURCE,
       }),
     );
+    const strict = new Set(parts.flatMap(idsOf));
+    const later = [...archiveIds].filter((id) => !strict.has(id));
+    const laterChunks = [];
+    for (let i = 0; i < later.length; i += QUAKE_TERMS_CHUNK)
+      laterChunks.push(later.slice(i, i + QUAKE_TERMS_CHUNK));
+    const oldest = await mapLimit(laterChunks, 2, (chunk) =>
+      latestPerKey(es, IDX.quakesArchive, {
+        filter: [{ terms: { event_id: chunk } }],
+        field: 'event_id',
+        timeField: 'updated',
+        order: 'asc',
+        _source: QUAKE_SOURCE,
+      }),
+    );
+    const winners = [];
+    for (const [revisedLater, list] of [
+      [false, parts],
+      [true, oldest],
+    ])
+      for (const part of list)
+        for (const hit of part.hits) {
+          const doc = sourceOf(hit);
+          const f = quakeFeature(doc);
+          if (f) winners.push({ f, doc, hit, revisedLater });
+        }
+    const superseded = supersededQuakeIds(winners.map((w) => w.doc));
     const sources = new Set();
+    const revisedSet = new Set();
+    let supersededCount = 0;
     let features = [];
-    for (const part of parts)
-      for (const hit of part.hits) {
-        const f = quakeFeature(sourceOf(hit));
-        if (!f) continue;
-        const origin = f.properties.time;
-        if (origin < t - QUAKE_WINDOW_MS || origin > t) continue;
-        const [lon, lat] = f.geometry.coordinates;
-        if (
-          bbox &&
-          !(lon >= bbox.w && lon <= bbox.e && lat >= bbox.s && lat <= bbox.n)
-        )
-          continue;
-        sources.add(
-          String(hit._index ?? '').includes(QUAKE_ARCHIVE_PREFIX)
-            ? 'usgs-archive'
-            : 'usgs-fdsn',
-        );
-        features.push(f);
+    for (const { f, hit, revisedLater } of winners) {
+      const origin = f.properties.time;
+      if (origin < t - QUAKE_WINDOW_MS || origin > t) continue;
+      const [lon, lat] = f.geometry.coordinates;
+      if (
+        bbox &&
+        !(lon >= bbox.w && lon <= bbox.e && lat >= bbox.s && lat <= bbox.n)
+      )
+        continue;
+      if (superseded.has(f.id)) {
+        supersededCount += 1;
+        continue;
       }
+      sources.add(
+        String(hit._index ?? '').includes(QUAKE_ARCHIVE_PREFIX)
+          ? 'usgs-archive'
+          : 'usgs-fdsn',
+      );
+      if (revisedLater) revisedSet.add(f);
+      features.push(f);
+    }
     // USGS order: newest origin first; ties by id (deterministic)
     features.sort(
       (x, y) =>
@@ -518,9 +570,12 @@ export function createB12cSlices({
     );
     const truncated =
       candidates.truncated ||
+      archived.truncated ||
       parts.some((p) => p.truncated) ||
+      oldest.some((p) => p.truncated) ||
       features.length > maxRows;
     features = features.slice(0, maxRows);
+    const revisedLaterCount = features.filter((f) => revisedSet.has(f)).length;
     const partial = t - QUAKE_WINDOW_MS < first;
     return {
       body: featureCollection(features, t),
@@ -530,6 +585,12 @@ export function createB12cSlices({
         'X-History-Sources': [...sources].sort().join(',') || 'none',
         ...(partial ? { 'X-History-Partial-Window': '1' } : {}),
         ...(truncated ? { 'X-History-Truncated': '1' } : {}),
+        ...(revisedLaterCount > 0
+          ? { 'X-History-Revised-Later': String(revisedLaterCount) }
+          : {}),
+        ...(supersededCount > 0
+          ? { 'X-History-Superseded': String(supersededCount) }
+          : {}),
       },
     };
   }
@@ -759,6 +820,45 @@ export function quakeFeature(doc) {
     geometry: { type: 'Point', coordinates: [lon, lat, fin(doc.depth_km)] },
     id,
   };
+}
+
+/** USGS `ids` of a recorded version: keyword array or the raw ",a,b," string. */
+export function quakeIds(doc) {
+  const raw = doc?.ids;
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? raw.split(',')
+      : [];
+  return list.filter((id) => typeof id === 'string' && id);
+}
+
+/**
+ * Event ids superseded by a USGS merge among the served versions: X is
+ * superseded when another served event Y lists X in its ids (and X does not
+ * list Y back, or Y was updated later; tie -> the smaller id is kept).
+ * Versions without ids contribute nothing, so while the recorder keeps no
+ * ids this returns an empty set.
+ */
+export function supersededQuakeIds(docs) {
+  const served = new Map();
+  for (const d of docs)
+    if (typeof d?.event_id === 'string' && d.event_id)
+      served.set(d.event_id, d);
+  const out = new Set();
+  for (const [y, dy] of served)
+    for (const x of quakeIds(dy)) {
+      if (x === y || !served.has(x)) continue;
+      const dx = served.get(x);
+      if (!quakeIds(dx).includes(y)) {
+        out.add(x);
+        continue;
+      }
+      const ux = dateMs(dx.updated) ?? -Infinity;
+      const uy = dateMs(dy.updated) ?? -Infinity;
+      if (uy > ux || (uy === ux && y < x)) out.add(x);
+    }
+  return out;
 }
 
 /** USGS summary FeatureCollection envelope (metadata.generated = t). */

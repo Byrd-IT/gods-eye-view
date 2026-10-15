@@ -18,6 +18,8 @@ import {
   gpCsvRow,
   pickNearestEpoch,
   pixelAvailability,
+  quakeIds,
+  supersededQuakeIds,
   windGridId,
 } from './historySlicesB12c.js';
 import { parseGP } from '../gpCsv.js';
@@ -258,6 +260,7 @@ test('B12c feeds are served by the slice route and read only allowlisted indices
     HISTORY_INDICES.quakes,
     'gev-history-quakes,gev-history-quakes-hist-*',
   );
+  assert.equal(HISTORY_INDICES.quakesArchive, 'gev-history-quakes-hist-*');
   assert.equal(HISTORY_INDICES.cycles, 'gev-history-cycles');
   assert.equal(HISTORY_INDICES.imagery, 'gev-history-imagery');
 });
@@ -666,6 +669,9 @@ test('quakes shape: history at the live capture time == the live all_day.geojson
   const h = normalizeEarthquakeSnapshot(r.json);
   const l = normalizeEarthquakeSnapshot(live);
   assert.ok(l.length >= 30);
+  // after the collector start the strict rule holds: nothing revised later
+  assert.equal(r.headers['x-history-revised-later'], undefined);
+  assert.equal(r.headers['x-history-superseded'], undefined);
   const order = (rows) =>
     [...rows].sort((a, b) => (a.usgsId < b.usgsId ? -1 : 1));
   assert.deepEqual(order(h), order(l));
@@ -736,6 +742,8 @@ test('quakes as of t: newest version with updated <= t; window and bbox judged o
   );
   const box = await call(api, slice(`feed=quakes&t=${iso(t)}&bbox=0,0,30,30`));
   assert.deepEqual(box.json.features.map((f) => f.id).sort(), ['a', 'd', 'g']);
+  // n = 0 -> no revised-later header
+  assert.equal(r.headers['x-history-revised-later'], undefined);
 });
 
 test('quakes: archive-only events are labelled; before the first record -> empty + reason; partial window flagged', async () => {
@@ -768,6 +776,167 @@ test('quakes: maxRows keeps the newest origins, flags truncation', async () => {
     Array.from({ length: 10 }, (_, i) => `q${i}`),
   );
   assert.equal(r.headers['x-history-truncated'], '1');
+});
+
+// ------------------------------------------- quakes 2B (t_a49a1f4a)
+const ARCH = (ms) => {
+  const d = new Date(ms);
+  const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+  return `gev-history-quakes-hist-${end.toISOString().slice(0, 10).replaceAll('-', '.')}`;
+};
+
+test('quakes 2B: an archive event with no version updated <= t is served from its OLDEST archive version + X-History-Revised-Later', async () => {
+  const t = Date.parse('2026-03-01T12:00:00Z');
+  const LATER = Date.parse('2026-10-12T14:00:00Z');
+  const archive = [
+    // r1: one archive version, revised long after t -> served, flagged
+    quake('r1', t - 2 * HOUR, LATER, { mag: 4.2 }),
+    // r2: two archive versions, both after t -> the OLDEST one
+    quake('r2', t - 3 * HOUR, t + 10 * DAY, { mag: 3.3 }),
+    quake('r2', t - 3 * HOUR, LATER, { mag: 3.9 }),
+    // s1: archive version updated <= t -> strict rule, not counted
+    quake('s1', t - 5 * HOUR, t - 4 * HOUR, { mag: 2.8 }),
+    // w1: oldest version's origin outside [t - 24 h, t] -> not shown
+    quake('w1', t - DAY - 2 * HOUR, LATER),
+    // x1: origin after t -> not shown
+    quake('x1', t + 60_000, LATER),
+  ];
+  const { api } = makeApi(
+    {
+      [ARCH(t)]: archive,
+      // first record of the whole feed is long before t
+      [ARCH(t - 60 * DAY)]: [quake('old', t - 60 * DAY, t - 59 * DAY)],
+    },
+    { now: Date.parse('2026-10-14T18:00:00Z') },
+  );
+  const r = await call(api, slice(`feed=quakes&t=${iso(t)}`));
+  assert.equal(r.status, 200);
+  const got = Object.fromEntries(r.json.features.map((f) => [f.id, f]));
+  assert.deepEqual(Object.keys(got).sort(), ['r1', 'r2', 's1']);
+  assert.equal(got.r2.properties.mag, 3.3);
+  assert.equal(got.r2.properties.updated, t + 10 * DAY);
+  assert.equal(got.r1.properties.time, t - 2 * HOUR); // real origin time
+  assert.equal(got.s1.properties.updated, t - 4 * HOUR);
+  assert.equal(r.headers['x-history-revised-later'], '2');
+  assert.equal(r.headers['x-history-sources'], 'usgs-archive');
+  assert.equal(r.headers['x-history-rows'], '3');
+  // the GEV parser accepts the answer unchanged
+  assert.equal(normalizeEarthquakeSnapshot(r.json).length, 3);
+  // bbox is judged on the served (oldest) version, header counts only kept
+  const box = await call(api, slice(`feed=quakes&t=${iso(t)}&bbox=0,0,30,30`));
+  assert.equal(box.headers['x-history-revised-later'], '2');
+  const none = await call(
+    api,
+    slice(`feed=quakes&t=${iso(t)}&bbox=-30,-30,-1,-1`),
+  );
+  assert.deepEqual(none.json.features, []);
+  assert.equal(none.headers['x-history-revised-later'], undefined);
+});
+
+test('quakes 2B: live-collector versions are never a fallback (not yet published at t); strict wins when any version <= t exists', async () => {
+  const t = Date.UTC(2026, 9, 14, 12);
+  const { api } = makeApi({
+    'gev-history-quakes': [
+      // p: first observed live AFTER t -> hidden (it was not published at t)
+      quake('p', t - HOUR, t + 5 * 60_000),
+      // q: archive copy revised later, but a live version <= t exists
+      quake('q', t - 2 * HOUR, t - 90 * 60_000, { mag: 3.0 }),
+    ],
+    [ARCH(t)]: [quake('q', t - 2 * HOUR, t + DAY, { mag: 3.6 })],
+  });
+  const r = await call(api, slice(`feed=quakes&t=${iso(t)}`));
+  assert.deepEqual(
+    r.json.features.map((f) => f.id),
+    ['q'],
+  );
+  assert.equal(r.json.features[0].properties.mag, 3.0);
+  assert.equal(r.headers['x-history-revised-later'], undefined);
+});
+
+test('quakes 2B: maxRows truncation counts only the revised-later events kept', async () => {
+  const t = Date.parse('2026-03-01T12:00:00Z');
+  const LATER = Date.parse('2026-10-12T14:00:00Z');
+  const docs = Array.from({ length: 6 }, (_, i) =>
+    // even: strict (updated <= t); odd: revised later
+    quake(`m${i}`, t - (i + 1) * 60_000, i % 2 ? LATER : t - 30_000),
+  );
+  const { api } = makeApi({ [ARCH(t)]: docs });
+  const r = await call(api, slice(`feed=quakes&t=${iso(t)}&maxRows=3`));
+  assert.deepEqual(
+    r.json.features.map((f) => f.id),
+    ['m0', 'm1', 'm2'],
+  );
+  assert.equal(r.headers['x-history-revised-later'], '1');
+  assert.equal(r.headers['x-history-truncated'], '1');
+});
+
+test('quakes ids: superseded event ids are dropped once the recorder keeps USGS ids; no-op while ids are absent', async () => {
+  const t = Date.UTC(2026, 9, 14, 12);
+  const noIds = [
+    quake('us6000u268', t - 2 * HOUR, t - 100 * 60_000),
+    quake('tx2026ueznej', t - 2 * HOUR, t - 30 * 60_000),
+  ];
+  const a = makeApi({ 'gev-history-quakes': noIds });
+  const r0 = await call(a.api, slice(`feed=quakes&t=${iso(t)}`));
+  assert.deepEqual(r0.json.features.map((f) => f.id).sort(), [
+    'tx2026ueznej',
+    'us6000u268',
+  ]);
+  assert.equal(r0.headers['x-history-superseded'], undefined);
+
+  const withIds = [
+    quake('us6000u268', t - 2 * HOUR, t - 100 * 60_000, {
+      ids: ['us6000u268'],
+    }),
+    quake('tx2026ueznej', t - 2 * HOUR, t - 30 * 60_000, {
+      ids: ['us6000u268', 'tx2026ueznej'],
+    }),
+    // raw USGS comma string is accepted too
+    quake('ak1', t - 3 * HOUR, t - 3 * HOUR, { ids: ',ak1,' }),
+    quake('us7', t - 3 * HOUR, t - 2 * HOUR, { ids: ',ak1,us7,' }),
+  ];
+  const b = makeApi({ 'gev-history-quakes': withIds });
+  const r1 = await call(b.api, slice(`feed=quakes&t=${iso(t)}`));
+  assert.deepEqual(r1.json.features.map((f) => f.id).sort(), [
+    'tx2026ueznej',
+    'us7',
+  ]);
+  assert.equal(r1.headers['x-history-superseded'], '2');
+  assert.equal(r1.headers['x-history-rows'], '2');
+  // the merge is judged as of t: before the merge version, both are served
+  const early = await call(
+    b.api,
+    slice(`feed=quakes&t=${iso(t - 60 * 60_000)}`),
+  );
+  assert.ok(early.json.features.some((f) => f.id === 'us6000u268'));
+});
+
+test('supersededQuakeIds: one-way listing drops the listed id; mutual listing keeps the later-updated one; no ids -> empty', () => {
+  const d = (id, upd, ids) => ({
+    event_id: id,
+    updated: iso(upd),
+    ...(ids ? { ids } : {}),
+  });
+  assert.deepEqual(
+    [...supersededQuakeIds([d('a', 1, null), d('b', 2, null)])],
+    [],
+  );
+  assert.deepEqual(
+    [...supersededQuakeIds([d('a', 1, ['a']), d('b', 2, ['a', 'b'])])],
+    ['a'],
+  );
+  assert.deepEqual(
+    [...supersededQuakeIds([d('a', 5, ['a', 'b']), d('b', 2, ['a', 'b'])])],
+    ['b'],
+  );
+  assert.deepEqual(
+    [...supersededQuakeIds([d('b', 2, ['a', 'b']), d('a', 2, ['a', 'b'])])],
+    ['b'],
+  );
+  // an id listed but not served is ignored
+  assert.deepEqual([...supersededQuakeIds([d('a', 1, ['a', 'zz'])])], []);
+  assert.deepEqual(quakeIds({ ids: ',x,,y,' }), ['x', 'y']);
+  assert.deepEqual(quakeIds({}), []);
 });
 
 // ------------------------------------------------------------------- wind
