@@ -43,6 +43,10 @@ export const HISTORY_INDICES = Object.freeze({
   // archive, wind cycle ids (no grids), imagery availability metadata
   gp: 'gev-history-gp',
   quakes: 'gev-history-quakes,gev-history-quakes-hist-*',
+  // t_a49a1f4a (2B, decision B): the live collector alone and the B13
+  // archive alone, for the archive-only revised-later fallback
+  quakesLive: 'gev-history-quakes',
+  quakesArchive: 'gev-history-quakes-hist-*',
   cycles: 'gev-history-cycles',
   imagery: 'gev-history-imagery',
 });

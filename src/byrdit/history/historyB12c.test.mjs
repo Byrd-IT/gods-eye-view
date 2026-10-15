@@ -260,6 +260,8 @@ test('B12c feeds are served by the slice route and read only allowlisted indices
     HISTORY_INDICES.quakes,
     'gev-history-quakes,gev-history-quakes-hist-*',
   );
+  assert.equal(HISTORY_INDICES.quakesLive, 'gev-history-quakes');
+  assert.equal(HISTORY_INDICES.quakesArchive, 'gev-history-quakes-hist-*');
   assert.equal(HISTORY_INDICES.cycles, 'gev-history-cycles');
   assert.equal(HISTORY_INDICES.imagery, 'gev-history-imagery');
 });
@@ -831,62 +833,80 @@ test('quakes 2B: an archive event with no version updated <= t is served from it
   assert.equal(none.headers['x-history-revised-later'], undefined);
 });
 
-test('quakes 2B: the fallback is the OLDEST recorded version across live + archive; strict wins when any version <= t exists', async () => {
+test('quakes 2B (decision B): fallback only for ARCHIVE-ONLY events; an event the live collector first saw after t is hidden and never overridden by a later archive copy; strict wins over all sources', async () => {
   const t = Date.UTC(2026, 9, 14, 12);
   const { api } = makeApi({
     'gev-history-quakes': [
-      // p: live-only, first recorded after t -> served from that version
+      // p: live-only, first recorded after t -> hidden (not published at t)
       quake('p', t - HOUR, t + 5 * 60_000, { mag: 2.7 }),
       // q: a live version <= t exists -> strict, archive copy ignored
       quake('q', t - 2 * HOUR, t - 90 * 60_000, { mag: 3.0 }),
-      // u: live revision t+1m is older than the archive revision t+1d
+      // u: live t+1m 3.1, archive t+1d 4.2 -> hidden, never 4.2 over 3.1
       quake('u', t - HOUR, t + 60_000, { mag: 3.1 }),
-      // v: live revision t+1h is NEWER than the archive revision t+1m
+      // v: live t+1h, archive copy OLDER (t+1m) -> still hidden (live seen)
       quake('v', t - 3 * HOUR, t + HOUR, { mag: 5.0 }),
-      // o: oldest recorded version moved its origin out of the window
-      quake('o', t - DAY - HOUR, t + 2 * 60_000),
-      quake('o', t - 4 * HOUR, t + HOUR),
+      // y: live <= t, archive <= t and newer -> strict over all sources
+      quake('y', t - 4 * HOUR, t - 3 * HOUR, { mag: 2.5 }),
     ],
     [ARCH(t)]: [
       quake('q', t - 2 * HOUR, t + DAY, { mag: 3.6 }),
       quake('u', t - HOUR, t + DAY, { mag: 4.2 }),
       quake('v', t - 3 * HOUR, t + 60_000, { mag: 4.4 }),
+      quake('y', t - 4 * HOUR, t - HOUR, { mag: 2.9 }),
+      // z: archive-only, two versions after t -> oldest, flagged
+      quake('z', t - 5 * HOUR, t + 2 * HOUR, { mag: 3.3 }),
+      quake('z', t - 5 * HOUR, t + DAY, { mag: 3.8 }),
     ],
   });
   const r = await call(api, slice(`feed=quakes&t=${iso(t)}`));
   const got = Object.fromEntries(r.json.features.map((f) => [f.id, f]));
-  assert.deepEqual(Object.keys(got).sort(), ['p', 'q', 'u', 'v']);
-  assert.equal(got.p.properties.mag, 2.7);
-  assert.equal(got.p.properties.updated, t + 5 * 60_000);
+  assert.deepEqual(Object.keys(got).sort(), ['q', 'y', 'z']);
   assert.equal(got.q.properties.mag, 3.0);
-  assert.equal(got.u.properties.mag, 3.1);
-  assert.equal(got.u.properties.updated, t + 60_000);
-  assert.equal(got.v.properties.mag, 4.4);
-  assert.equal(r.headers['x-history-revised-later'], '3');
+  assert.equal(got.y.properties.mag, 2.9);
+  assert.equal(got.z.properties.mag, 3.3);
+  assert.equal(got.z.properties.updated, t + 2 * HOUR);
+  assert.equal(r.headers['x-history-revised-later'], '1');
   assert.equal(r.headers['x-history-sources'], 'usgs-archive,usgs-fdsn');
-  assert.equal(normalizeEarthquakeSnapshot(r.json).length, 4);
-  // the same live-only event alone: 1 row, flagged
+  assert.equal(normalizeEarthquakeSnapshot(r.json).length, 3);
+  // the reviewer's live+archive case alone: hidden, no header, no 4.2
+  const mixed = makeApi({
+    'gev-history-quakes': [quake('u', t - HOUR, t + 60_000, { mag: 3.1 })],
+    [ARCH(t)]: [quake('u', t - HOUR, t + DAY, { mag: 4.2 })],
+  });
+  const r2 = await call(mixed.api, slice(`feed=quakes&t=${iso(t)}`));
+  assert.deepEqual(r2.json.features, []);
+  assert.equal(r2.headers['x-history-revised-later'], undefined);
+  // once the live version is <= t it is served strictly (3.1, not 4.2)
+  const r3 = await call(
+    mixed.api,
+    slice(`feed=quakes&t=${iso(t + 2 * 60_000)}`),
+  );
+  assert.deepEqual(
+    r3.json.features.map((f) => [f.id, f.properties.mag]),
+    [['u', 3.1]],
+  );
+  assert.equal(r3.headers['x-history-revised-later'], undefined);
+  // the same event live-only: hidden too
   const only = makeApi({
     'gev-history-quakes': [quake('p', t - HOUR, t + 60_000, { mag: 3.1 })],
   });
-  const r2 = await call(only.api, slice(`feed=quakes&t=${iso(t)}`));
-  assert.deepEqual(
-    r2.json.features.map((f) => f.id),
-    ['p'],
-  );
-  assert.equal(r2.headers['x-history-revised-later'], '1');
-  assert.equal(r2.headers['x-history-sources'], 'usgs-fdsn');
+  const r4 = await call(only.api, slice(`feed=quakes&t=${iso(t)}`));
+  assert.deepEqual(r4.json.features, []);
+  assert.equal(r4.headers['x-history-revised-later'], undefined);
 });
 
-test('quakes ids: a merge recorded only after t (revised-later version) does not hide an event that was separate at t', async () => {
-  const t = Date.UTC(2026, 9, 14, 12);
-  const { api } = makeApi({
-    'gev-history-quakes': [
-      quake('us1', t - 2 * HOUR, t - HOUR, { ids: ['us1'] }),
-      // tx1 is first recorded after t, already listing us1 (merge after t)
-      quake('tx1', t - 2 * HOUR, t + HOUR, { ids: ['us1', 'tx1'] }),
-    ],
-  });
+test('quakes ids: a merge recorded only after t (revised-later archive version) does not hide an event that was separate at t', async () => {
+  const t = Date.parse('2026-03-01T12:00:00Z');
+  const { api } = makeApi(
+    {
+      [ARCH(t)]: [
+        quake('us1', t - 2 * HOUR, t - HOUR, { ids: ['us1'] }),
+        // tx1: archive-only, revised after t, already listing us1
+        quake('tx1', t - 2 * HOUR, t + HOUR, { ids: ['us1', 'tx1'] }),
+      ],
+    },
+    { now: Date.parse('2026-10-14T18:00:00Z') },
+  );
   const r = await call(api, slice(`feed=quakes&t=${iso(t)}`));
   assert.deepEqual(r.json.features.map((f) => f.id).sort(), ['tx1', 'us1']);
   assert.equal(r.headers['x-history-superseded'], undefined);

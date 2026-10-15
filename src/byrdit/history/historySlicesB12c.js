@@ -443,11 +443,15 @@ export function createB12cSlices({
    * superseded version).
    *
    * Revised-later fallback (owner decision 2B, t_bfce1826 / t_a49a1f4a):
-   * an event with no recorded version updated <= t (live collector OR B13
-   * archive) is served from its OLDEST recorded version across both sources,
-   * and the answer carries X-History-Revised-Later: <n>. The strict rule
-   * (newest version with updated <= t) wins whenever such a version exists.
-   * Window and bbox are judged on the served version, as for strict hits.
+   * the strict rule (newest version with updated <= t, live + archive) runs
+   * first. An ARCHIVE-ONLY event (no live-collector version at all) with no
+   * version updated <= t is served from its OLDEST archive version, and the
+   * answer carries X-History-Revised-Later: <n>. An event the live collector
+   * recorded, but only after t, is hidden: its first live record shows USGS
+   * had not published it at t, and a later archive copy never overrides
+   * live data (task-manager decision B on t_a49a1f4a, 2026-10-15; literal
+   * all-source fallback measured +21..130 unpublished events per post-
+   * 2026-10-12 slice). Window and bbox are judged on the served version.
    *
    * Merged events: when the recorder keeps USGS `ids`, an event id listed
    * in another served event's ids is superseded and dropped
@@ -483,7 +487,7 @@ export function createB12cSlices({
         timeField: 'updated',
         _source: ['event_id'],
       }),
-      latestPerKey(es, IDX.quakes, {
+      latestPerKey(es, IDX.quakesArchive, {
         filter: [originRange],
         field: 'event_id',
         timeField: 'updated',
@@ -494,8 +498,8 @@ export function createB12cSlices({
       res.hits
         .map((h) => sourceOf(h).event_id)
         .filter((id) => typeof id === 'string' && id);
-    const recordedIds = new Set(idsOf(recorded));
-    const ids = [...new Set([...idsOf(candidates), ...recordedIds])];
+    const archivedIds = new Set(idsOf(recorded));
+    const ids = [...new Set([...idsOf(candidates), ...archivedIds])];
     const chunks = [];
     for (let i = 0; i < ids.length; i += QUAKE_TERMS_CHUNK)
       chunks.push(ids.slice(i, i + QUAKE_TERMS_CHUNK));
@@ -511,12 +515,26 @@ export function createB12cSlices({
       }),
     );
     const strict = new Set(parts.flatMap(idsOf));
-    const later = [...recordedIds].filter((id) => !strict.has(id));
-    const laterChunks = [];
-    for (let i = 0; i < later.length; i += QUAKE_TERMS_CHUNK)
-      laterChunks.push(later.slice(i, i + QUAKE_TERMS_CHUNK));
-    const oldest = await mapLimit(laterChunks, 2, (chunk) =>
-      latestPerKey(es, IDX.quakes, {
+    const noStrict = [...archivedIds].filter((id) => !strict.has(id));
+    const chunked = (list) => {
+      const out = [];
+      for (let i = 0; i < list.length; i += QUAKE_TERMS_CHUNK)
+        out.push(list.slice(i, i + QUAKE_TERMS_CHUNK));
+      return out;
+    };
+    // any live version at all -> first seen live after t -> hidden
+    const liveSeen = await mapLimit(chunked(noStrict), 2, (chunk) =>
+      latestPerKey(es, IDX.quakesLive, {
+        filter: [{ terms: { event_id: chunk } }],
+        field: 'event_id',
+        timeField: 'updated',
+        _source: ['event_id'],
+      }),
+    );
+    const live = new Set(liveSeen.flatMap(idsOf));
+    const later = noStrict.filter((id) => !live.has(id));
+    const oldest = await mapLimit(chunked(later), 2, (chunk) =>
+      latestPerKey(es, IDX.quakesArchive, {
         filter: [{ terms: { event_id: chunk } }],
         field: 'event_id',
         timeField: 'updated',
@@ -577,6 +595,7 @@ export function createB12cSlices({
       candidates.truncated ||
       recorded.truncated ||
       parts.some((p) => p.truncated) ||
+      liveSeen.some((p) => p.truncated) ||
       oldest.some((p) => p.truncated) ||
       features.length > maxRows;
     features = features.slice(0, maxRows);
