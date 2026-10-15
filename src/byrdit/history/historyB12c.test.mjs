@@ -260,7 +260,6 @@ test('B12c feeds are served by the slice route and read only allowlisted indices
     HISTORY_INDICES.quakes,
     'gev-history-quakes,gev-history-quakes-hist-*',
   );
-  assert.equal(HISTORY_INDICES.quakesArchive, 'gev-history-quakes-hist-*');
   assert.equal(HISTORY_INDICES.cycles, 'gev-history-cycles');
   assert.equal(HISTORY_INDICES.imagery, 'gev-history-imagery');
 });
@@ -705,8 +704,7 @@ test('quakes as of t: newest version with updated <= t; window and bbox judged o
     quake('a', t - HOUR, t - 50 * 60_000, { mag: 3.1 }),
     quake('a', t - HOUR, t - 10 * 60_000, { mag: 3.4 }),
     quake('a', t - HOUR, t + HOUR, { mag: 9.9 }),
-    // b: first published after t -> not shown
-    quake('b', t - 2 * HOUR, t + 60_000),
+    // (an event with NO version <= t is the 2B fallback, tested below)
     // c: origin revised from inside the window to before it -> not shown
     quake('c', t - DAY + 60_000, t - 5 * HOUR),
     quake('c', t - DAY - 20 * 60_000, t - HOUR),
@@ -833,24 +831,73 @@ test('quakes 2B: an archive event with no version updated <= t is served from it
   assert.equal(none.headers['x-history-revised-later'], undefined);
 });
 
-test('quakes 2B: live-collector versions are never a fallback (not yet published at t); strict wins when any version <= t exists', async () => {
+test('quakes 2B: the fallback is the OLDEST recorded version across live + archive; strict wins when any version <= t exists', async () => {
   const t = Date.UTC(2026, 9, 14, 12);
   const { api } = makeApi({
     'gev-history-quakes': [
-      // p: first observed live AFTER t -> hidden (it was not published at t)
-      quake('p', t - HOUR, t + 5 * 60_000),
-      // q: archive copy revised later, but a live version <= t exists
+      // p: live-only, first recorded after t -> served from that version
+      quake('p', t - HOUR, t + 5 * 60_000, { mag: 2.7 }),
+      // q: a live version <= t exists -> strict, archive copy ignored
       quake('q', t - 2 * HOUR, t - 90 * 60_000, { mag: 3.0 }),
+      // u: live revision t+1m is older than the archive revision t+1d
+      quake('u', t - HOUR, t + 60_000, { mag: 3.1 }),
+      // v: live revision t+1h is NEWER than the archive revision t+1m
+      quake('v', t - 3 * HOUR, t + HOUR, { mag: 5.0 }),
+      // o: oldest recorded version moved its origin out of the window
+      quake('o', t - DAY - HOUR, t + 2 * 60_000),
+      quake('o', t - 4 * HOUR, t + HOUR),
     ],
-    [ARCH(t)]: [quake('q', t - 2 * HOUR, t + DAY, { mag: 3.6 })],
+    [ARCH(t)]: [
+      quake('q', t - 2 * HOUR, t + DAY, { mag: 3.6 }),
+      quake('u', t - HOUR, t + DAY, { mag: 4.2 }),
+      quake('v', t - 3 * HOUR, t + 60_000, { mag: 4.4 }),
+    ],
   });
   const r = await call(api, slice(`feed=quakes&t=${iso(t)}`));
+  const got = Object.fromEntries(r.json.features.map((f) => [f.id, f]));
+  assert.deepEqual(Object.keys(got).sort(), ['p', 'q', 'u', 'v']);
+  assert.equal(got.p.properties.mag, 2.7);
+  assert.equal(got.p.properties.updated, t + 5 * 60_000);
+  assert.equal(got.q.properties.mag, 3.0);
+  assert.equal(got.u.properties.mag, 3.1);
+  assert.equal(got.u.properties.updated, t + 60_000);
+  assert.equal(got.v.properties.mag, 4.4);
+  assert.equal(r.headers['x-history-revised-later'], '3');
+  assert.equal(r.headers['x-history-sources'], 'usgs-archive,usgs-fdsn');
+  assert.equal(normalizeEarthquakeSnapshot(r.json).length, 4);
+  // the same live-only event alone: 1 row, flagged
+  const only = makeApi({
+    'gev-history-quakes': [quake('p', t - HOUR, t + 60_000, { mag: 3.1 })],
+  });
+  const r2 = await call(only.api, slice(`feed=quakes&t=${iso(t)}`));
   assert.deepEqual(
-    r.json.features.map((f) => f.id),
-    ['q'],
+    r2.json.features.map((f) => f.id),
+    ['p'],
   );
-  assert.equal(r.json.features[0].properties.mag, 3.0);
-  assert.equal(r.headers['x-history-revised-later'], undefined);
+  assert.equal(r2.headers['x-history-revised-later'], '1');
+  assert.equal(r2.headers['x-history-sources'], 'usgs-fdsn');
+});
+
+test('quakes ids: a merge recorded only after t (revised-later version) does not hide an event that was separate at t', async () => {
+  const t = Date.UTC(2026, 9, 14, 12);
+  const { api } = makeApi({
+    'gev-history-quakes': [
+      quake('us1', t - 2 * HOUR, t - HOUR, { ids: ['us1'] }),
+      // tx1 is first recorded after t, already listing us1 (merge after t)
+      quake('tx1', t - 2 * HOUR, t + HOUR, { ids: ['us1', 'tx1'] }),
+    ],
+  });
+  const r = await call(api, slice(`feed=quakes&t=${iso(t)}`));
+  assert.deepEqual(r.json.features.map((f) => f.id).sort(), ['tx1', 'us1']);
+  assert.equal(r.headers['x-history-superseded'], undefined);
+  assert.equal(r.headers['x-history-revised-later'], '1');
+  // once the merge version is <= t, us1 is dropped
+  const later = await call(api, slice(`feed=quakes&t=${iso(t + 2 * HOUR)}`));
+  assert.deepEqual(
+    later.json.features.map((f) => f.id),
+    ['tx1'],
+  );
+  assert.equal(later.headers['x-history-superseded'], '1');
 });
 
 test('quakes 2B: maxRows truncation counts only the revised-later events kept', async () => {
