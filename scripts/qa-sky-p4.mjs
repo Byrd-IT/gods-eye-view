@@ -365,17 +365,28 @@ function clearAudit() {
   };
 }
 const audit = (page) => page.evaluate(clearAudit);
-const onlySky = (a) =>
-  a.clear &&
-  a.notAllowed.length === 0 &&
-  Object.keys(a.hits).every((k) =>
-    /^(sky|\[data-sky=clear\]|span\.gev-sky-clear-icon)$/.test(k),
-  ) &&
-  a.skyRect[0] === 0 &&
-  a.skyRect[1] === 0 &&
-  a.skyRect[2] === a.viewport[0] &&
-  a.skyRect[3] === a.viewport[1];
-/** Clear view keeps a minimal attribution line while tiles are drawn. */
+// The "Data attribution" link (credits shown only while tiles are drawn) is
+// the one tappable part of the credits: it opens the full credit list
+// (review R1, t_c0f1e535). It may take a tap point, never more than 1 % of
+// them; the rest of the credit text is tap-through.
+const LINK_HIT = 'a.cesium-credit-expand-link';
+const onlySky = (a) => {
+  const total = Object.values(a.hits).reduce((n, v) => n + v, 0);
+  return (
+    a.clear &&
+    a.notAllowed.length === 0 &&
+    Object.keys(a.hits).every(
+      (k) =>
+        /^(sky|\[data-sky=clear\]|span\.gev-sky-clear-icon)$/.test(k) ||
+        (k === LINK_HIT && a.tiles && a.hits[k] <= total / 100),
+    ) &&
+    a.skyRect[0] === 0 &&
+    a.skyRect[1] === 0 &&
+    a.skyRect[2] === a.viewport[0] &&
+    a.skyRect[3] === a.viewport[1]
+  );
+};
+/** Clear view keeps the complete attribution while tiles are drawn. */
 const attributionOk = (a) =>
   a.tiles &&
   a.credits?.visible &&
@@ -584,7 +595,7 @@ let hiddenList = [];
     { note: clearPortrait.note },
   );
   check(
-    'I: Clear view: only the sky canvases, centre circle, eye and message are painted; every tap point hits the sky; the overlay fills the screen',
+    'I: Clear view: only the sky canvases, centre circle, eye and message are painted; every tap point hits the sky (the Data attribution link excepted); the overlay fills the screen',
     onlySky(clearPortrait) && hidden.length >= 8,
     {
       painted: clearPortrait.outer,
