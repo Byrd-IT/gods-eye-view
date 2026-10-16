@@ -238,6 +238,28 @@ const onlySky = (a) =>
   a.skyRect[1] === 0 &&
   a.skyRect[2] === a.viewport[0] &&
   a.skyRect[3] === a.viewport[1];
+/** A point where a tap reaches the sky canvas (nearest the screen centre). */
+const skyPoint = (page) =>
+  page.evaluate(() => {
+    const sky = document.querySelector('.gev-sky-canvas');
+    let best = null;
+    for (let y = 30; y < innerHeight - 30; y += 15)
+      for (let x = 30; x < innerWidth - 30; x += 15) {
+        const ok = [
+          [0, 0],
+          [-12, -12],
+          [12, 12],
+          [-12, 12],
+          [12, -12],
+        ].every(
+          ([dx, dy]) => document.elementFromPoint(x + dx, y + dy) === sky,
+        );
+        if (!ok) continue;
+        const d = Math.hypot(x - innerWidth / 2, y - innerHeight / 2 + 60);
+        if (!best || d < best.d) best = { x, y, d };
+      }
+    return best;
+  });
 async function doubleTap(page, x, y) {
   await page.touchscreen.tap(x, y);
   await sleep(60);
@@ -466,13 +488,15 @@ let hiddenList = [];
   // J: landscape Clear view; double-tap brings the controls back and clears
   const clearLand = await audit(page);
   const viewLand = await handleEval(page, (h) => h.view);
-  await doubleTap(page, 457, 120);
+  const landPt = await skyPoint(page);
+  await doubleTap(page, landPt.x, landPt.y);
   const landControls = await clearOn(page);
   await sleep(1500);
   await page.screenshot({
     path: path.join(OUT, '02b-landscape-controls.png'),
   });
-  await doubleTap(page, 457, 120);
+  const landPt2 = await skyPoint(page); // a sky point with the controls shown
+  await doubleTap(page, landPt2.x, landPt2.y);
   const landAgain = await clearOn(page);
   const viewLand2 = await handleEval(page, (h) => h.view);
   check(
@@ -488,6 +512,7 @@ let hiddenList = [];
       skyRect: clearLand.skyRect,
       landControls,
       landAgain,
+      tapAt: [landPt, landPt2],
       viewLand,
       viewLand2,
     },
@@ -607,13 +632,15 @@ let hiddenList = [];
   await step('eye');
   await sleep(3600);
   const faded = await audit(page);
-  await page.touchscreen.tap(206, 300);
+  const wakePt = await skyPoint(page);
+  await page.touchscreen.tap(wakePt.x, wakePt.y);
   await sleep(700);
   const woken = await audit(page);
   await page.tap('[data-sky=clear]');
   await sleep(300);
   await step('eye');
-  await doubleTap(page, 206, 300);
+  const kPt = await skyPoint(page); // controls shown: tap the sky between them
+  await doubleTap(page, kPt.x, kPt.y);
   await step('double-tap');
   const active = await handleEval(page, (h) => h.active);
   const expected = [false, true, false, true, false, true];

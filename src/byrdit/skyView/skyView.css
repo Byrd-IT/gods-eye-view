@@ -974,6 +974,12 @@ body:not(.gev-sky-clear) .gev-sky-clear-note {
 body.gev-sky-active.gev-sky-clear,
 body.gev-sky-active.gev-sky-clear * {
   visibility: hidden !important;
+  /* app panels that fade (visibility transitions) must go at once */
+  transition-property: none !important;
+}
+
+body.gev-sky-active.gev-sky-clear .gev-sky-clear-btn {
+  transition-property: opacity !important;
 }
 
 body.gev-sky-active.gev-sky-clear

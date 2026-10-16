@@ -888,7 +888,8 @@ test('clear view CSS: everything hidden by visibility (no reflow), only the sky 
   const flat = css.replace(/\s+/g, ' ');
   assert.match(
     flat,
-    /body\.gev-sky-active\.gev-sky-clear, body\.gev-sky-active\.gev-sky-clear \* \{ visibility: hidden !important; \}/,
+    /body\.gev-sky-active\.gev-sky-clear, body\.gev-sky-active\.gev-sky-clear \* \{ visibility: hidden !important;[^}]*transition-property: none !important; \}/,
+    'everything hidden at once (no visibility fade)',
   );
   const shown = flat.match(
     /body\.gev-sky-active\.gev-sky-clear :is\(([^)]*)\) \{ visibility: visible !important; \}/,
