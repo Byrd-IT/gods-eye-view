@@ -666,6 +666,76 @@ sliceDown = false;
 await page.click('.gev-hist-live');
 await sleep(1000);
 
+// ── 7. round 4 (R6): a layer first enabled while history is paused ───
+// is served history by its own enable poll, and LIVE must refresh it once
+// (D4), well before its own interval would
+const LATE = {
+  flights: ['aircraft', LIVE.aircraft, HIST.aircraft],
+  military: ['military', LIVE.military, HIST.military],
+  'ais-live-vessels': ['vessels', LIVE.vessels, HIST.vessels],
+};
+for (const [id, [feed, liveN, histN]] of Object.entries(LATE)) {
+  await page.evaluate(async (ids) => {
+    const dm = window.__godsEyeView.dataManager;
+    for (const l of ids) await dm.setEnabled(l, false);
+  }, LAYERS);
+  await waitFor((s) => s.mode === 'live', 'live before late enable', 10_000);
+  await page.evaluate((t) => {
+    const h = window.__gevHistorySwap.handle;
+    h.expand(true);
+    h.seek(t, { snap: true });
+  }, tAt);
+  await waitFor((s) => s.mode === 'history', 'history (late enable)', 10_000);
+  await sleep(1500); // the release refresh has run with the layer disabled
+  const asked0 = sliceCalls.filter((c) => c.feed === feed).length;
+  await page.evaluate((l) => {
+    window.__godsEyeView.dataManager.setEnabled(l, true);
+  }, id);
+  st = await waitFor(
+    (s) => s[id].count === histN && /^History/.test(s[id].source ?? ''),
+    `late-enabled ${id} drawn from history`,
+    20_000,
+  );
+  check(
+    st[id].count === histN &&
+      sliceCalls.filter((c) => c.feed === feed).length > asked0,
+    `R6 ${id} enabled while paused: history drawn (${st[id].count}, ${st[id].source})`,
+  );
+  const callsBefore = await page.evaluate(
+    () => window.__gevHistorySwap.driver.calls.length,
+  );
+  await page.click('.gev-hist-live');
+  // no interval of these layers fires within 4 s of the enable poll
+  st = await waitFor(
+    (s) =>
+      s.mode === 'live' &&
+      s[id].count === liveN &&
+      !/^History/.test(s[id].source ?? ''),
+    `late-enabled ${id} live after LIVE`,
+    4_000,
+  );
+  const exitCalls = await page.evaluate(
+    (n) => window.__gevHistorySwap.driver.calls.slice(n).map((c) => c.layerId),
+    callsBefore,
+  );
+  check(
+    st.mode === 'live' &&
+      st[id].count === liveN &&
+      !/^History/.test(st[id].source ?? ''),
+    `R6 ${id}: LIVE restores live rows at once (${st[id].count}, ${st[id].source})`,
+  );
+  check(
+    JSON.stringify(exitCalls) === JSON.stringify([id]),
+    `R6 ${id}: LIVE refreshes exactly the late-enabled layer once ${JSON.stringify(exitCalls)}`,
+  );
+  if (id === 'military') await shot('07-late-enable-live-restored');
+}
+await page.evaluate(async (ids) => {
+  const dm = window.__godsEyeView.dataManager;
+  for (const l of ids) await dm.setEnabled(l, true);
+}, LAYERS);
+await sleep(1000);
+
 check(
   errors.length === e0,
   `no console/page error after the first history interaction (${JSON.stringify(errors.slice(e0))})`,

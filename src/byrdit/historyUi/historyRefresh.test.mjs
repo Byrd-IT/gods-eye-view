@@ -408,3 +408,87 @@ test('frame seam: LIVE resets every layer that had a history frame and restores 
   assert.deepEqual(layers['ais-live-vessels'].log, [], 'never in history');
   assert.deepEqual(dm.calls.sort(), ['flights', 'military'], 'D4: once each');
 });
+
+// ── R6 (review round 2): layers first enabled during paused history ──────
+
+const ROUTE = {
+  flights: '/api/flights?view=1,2,3,4',
+  military: '/api/military',
+  'ais-live-vessels': '/api/vessels?maxRows=12000',
+};
+
+for (const id of Object.keys(ROUTE)) {
+  test(`R6: ${id} first enabled while history is paused is refreshed once on LIVE`, async () => {
+    const { clock, dm, driver, sliceCalls, win } = setup({
+      enabled: ['earthquakes'],
+    });
+    const layers = withLayers(dm);
+    driver.onHistory({ active: true, timeMs: T, playing: false });
+    await clock.run(RELEASE_DEBOUNCE_MS + 1);
+    await driver.settle();
+    assert.equal(dm.calls.length, 0, 'nothing swapped at the release');
+    // the user enables the layer: its own enable poll goes through the router
+    dm.enabled.add(id);
+    const before = sliceCalls.length;
+    await win.fetch(ROUTE[id]);
+    assert.equal(sliceCalls.length, before + 1, 'answered from history');
+    // and its own interval poll (still history)
+    await clock.run(20_000);
+    await win.fetch(ROUTE[id]);
+    assert.equal(dm.calls.length, 0, 'no driver refresh while paused');
+    layers[id].log.length = 0;
+    const slices = sliceCalls.length;
+    driver.onHistory({ active: false, timeMs: null });
+    await driver.settle();
+    assert.deepEqual(dm.calls, [id], 'D4: exactly one LIVE refresh');
+    assert.equal(sliceCalls.length, slices, 'the LIVE refresh asks live');
+    assert.deepEqual(layers[id].log, ['reset', 'wall']);
+    // nothing more after LIVE
+    dm.calls.length = 0;
+    await clock.run(10_000);
+    assert.equal(dm.calls.length, 0);
+  });
+}
+
+test('R6 controls: a late-enabled layer disabled again, an enabled never-served layer and a non-history layer are not refreshed on LIVE', async () => {
+  const { clock, dm, driver, win } = setup({ enabled: ['earthquakes'] });
+  withLayers(dm);
+  driver.onHistory({ active: true, timeMs: T, playing: false });
+  await clock.run(RELEASE_DEBOUNCE_MS + 1);
+  await driver.settle();
+  // military: enabled, served history, then disabled before LIVE
+  dm.enabled.add('military');
+  await win.fetch(ROUTE.military);
+  dm.enabled.delete('military');
+  // vessels: enabled but never asked (no answer served)
+  dm.enabled.add('ais-live-vessels');
+  // flights: enabled, served history, still enabled (positive control)
+  dm.enabled.add('flights');
+  await win.fetch(ROUTE.flights);
+  driver.onHistory({ active: false, timeMs: null });
+  await driver.settle();
+  assert.deepEqual(dm.calls, ['flights']);
+});
+
+test('R6: a second history session does not inherit the first session swaps', async () => {
+  const { clock, dm, driver, win } = setup({ enabled: ['earthquakes'] });
+  withLayers(dm);
+  driver.onHistory({ active: true, timeMs: T });
+  await clock.run(RELEASE_DEBOUNCE_MS + 1);
+  dm.enabled.add('military');
+  await win.fetch(ROUTE.military);
+  driver.onHistory({ active: false, timeMs: null });
+  await driver.settle();
+  assert.deepEqual(dm.calls, ['military']);
+  dm.calls.length = 0;
+  // the next session: military stays enabled but is never served history
+  // (the history API is not asked: the release refresh is the only path)
+  dm.enabled.delete('military');
+  driver.onHistory({ active: true, timeMs: T + MIN });
+  await clock.run(RELEASE_DEBOUNCE_MS + 1);
+  await driver.settle();
+  dm.enabled.add('military');
+  driver.onHistory({ active: false, timeMs: null });
+  await driver.settle();
+  assert.deepEqual(dm.calls, [], 'not served in this session');
+});

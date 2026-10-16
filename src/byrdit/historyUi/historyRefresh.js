@@ -13,8 +13,10 @@
  *        (D1), paced to the router's slice budget (the history API allows a
  *        client 60 requests a minute); plus the prefetch of the next 2
  *        frames playback will show (D6)
- *   LIVE -> every layer that was swapped is reset and refreshed once (D4),
- *        so live data comes back straight away
+ *   LIVE -> every still-enabled layer that was swapped or was served a
+ *        history answer by any path (a driver refresh, its own enable or
+ *        interval poll) is reset and refreshed once (D4), so live data
+ *        comes back straight away
  *
  * Frames (owner decision on t_884fea7d, option A: the upstream layer seams
  * resetForHistoryFrame / setMotionClock in src/layers/flights, military and
@@ -141,6 +143,9 @@ export function createRefreshDriver({
     if (event.mode === 'history') {
       frameT.set(adapter.id, event.t);
       lastMode.set(adapter.id, 'history');
+      // D4: every layer actually served history (a driver refresh, or its
+      // own enable / interval poll) is refreshed once on LIVE
+      wasSwapped.add(adapter.id);
       resetLayer(adapter, clockOf(adapter));
     } else if (lastMode.get(adapter.id) === 'history') {
       lastMode.set(adapter.id, 'live');
