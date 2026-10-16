@@ -77,12 +77,15 @@ export function rebaseMs(value, deltaMs) {
 }
 
 /**
- * An epoch-SECONDS number moved by delta (rounded to whole seconds, as the
- * OpenSky fields are); anything else is kept as it is.
+ * An epoch-SECONDS number moved by delta, kept to the millisecond (the live
+ * parser reads seconds x 1000 and accepts a fraction). Whole seconds would
+ * shift a re-served frame by up to 0.5 s against the motion clock, which
+ * dead-reckons from the frame's apply time (historyRefresh.js): a paused
+ * aircraft would hop up to ~125 m at each poll. Anything else is kept.
  */
 export function rebaseSec(value, deltaMs) {
   return typeof value === 'number' && Number.isFinite(value)
-    ? value + Math.round(deltaMs / 1000)
+    ? Math.round(value * 1000 + deltaMs) / 1000
     : value;
 }
 
@@ -329,9 +332,8 @@ function adaptVessels(answers, { t, nowMs }) {
  *   sliceFeed    /api/history/slice?feed=
  *   snapFeed     /api/history/snapshots feed for playback frames, or null
  *   quantumMs    playback frame step when there is no snapFeed
- *   settlePolls  refreshes after a jump so absent records leave the layer
- *                (flights/military keep a missing aircraft for
- *                MISSING_POLL_LIMIT = 3 polls, as STALE)
+ *   trackMatch   the feed's LIVE track route, refused while the feed is
+ *                answered from history (historyRouter.js, D3)
  *   rebased      D2: record/poll times are rebased (motion feed)
  */
 export const HISTORY_ADAPTERS = Object.freeze([
@@ -341,9 +343,9 @@ export const HISTORY_ADAPTERS = Object.freeze([
     sliceFeed: 'aircraft',
     snapFeed: 'aircraft',
     quantumMs: 60_000,
-    settlePolls: 3,
     rebased: true,
     match: /^\/api\/flights\/?$/,
+    trackMatch: /^\/api\/flights\/track\/?$/,
     sliceParams(url) {
       return viewToBboxes(url.searchParams.get('view')).map((bbox) =>
         bbox ? { bbox } : {},
@@ -357,9 +359,9 @@ export const HISTORY_ADAPTERS = Object.freeze([
     sliceFeed: 'military',
     snapFeed: 'military',
     quantumMs: 60_000,
-    settlePolls: 3,
     rebased: true,
     match: /^\/api\/military\/?$/,
+    trackMatch: /^\/api\/military\/track\/?$/,
     sliceParams() {
       return [{}];
     },
@@ -371,9 +373,9 @@ export const HISTORY_ADAPTERS = Object.freeze([
     sliceFeed: 'vessels',
     snapFeed: null,
     quantumMs: 60_000,
-    settlePolls: 1,
     rebased: true,
     match: /^\/api\/vessels\/?$/,
+    trackMatch: /^\/api\/vessels\/track\/?$/,
     sliceParams(url) {
       const q = url.searchParams;
       const bbox = areaToBbox(q.get('lat'), q.get('lon'), q.get('radius_km'));

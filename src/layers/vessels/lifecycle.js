@@ -139,6 +139,16 @@ export function createLifecycle({
     state.trailBackfillToken = 0;
   }
   const methods = {
+    /**
+     * GEV history seam (fork card B12a, touch point; re-check on upstream
+     * merges). Arms the NEXT reconcile as one history frame: complete (a
+     * vessel absent from the frame leaves at once), no selected-vessel pin
+     * across times, and the selected trail starts over at this time.
+     */
+    resetForHistoryFrame() {
+      state.historyFrameArmed = true;
+    },
+
     /** Configure the source before initialization; an active layer keeps its owner. */
     setSource(source) {
       if (state.viewer)

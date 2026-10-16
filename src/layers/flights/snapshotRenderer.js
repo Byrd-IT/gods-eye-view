@@ -25,6 +25,19 @@ export function createFlightSnapshotRenderer({
   const { warmGroundFloor } = groundFloor;
   const { sampleMeshFloorCells } = meshFloor;
   return function applySnapshot(snapshot, viewer) {
+    // GEV history seam (fork card B12a): a history frame replaces the scene
+    // state of another time instead of merging into it (see resetForHistoryFrame).
+    const historyFrame = flightState._historyFrameArmed === true;
+    if (historyFrame) {
+      flightState._historyFrameArmed = false;
+      flightState._historyFrameAppliedAtMs = Date.now();
+      records.beginHistoryFrame();
+      flightState._positionHistory.clear();
+      flightState._displayCourse.clear();
+      flightState._trailPositions = [];
+      flightState._trailBackfillToken += 1;
+      motion._resetTrackedDisplay();
+    }
     const currentIcaos = new Set();
     const acceptedSnapshotIcaos = new Set();
     // Field-test round 3 (2026-07-06, Austin fleet-underground): viewer
@@ -241,10 +254,12 @@ export function createFlightSnapshotRenderer({
     // feed gap, and the full grace left phantom planes parked at airports.
     for (const [icao24, bb] of flightState._billboards) {
       if (currentIcaos.has(icao24)) continue;
-      const absence = records.absence(icao24, {
-        complete: snapshot.complete,
-        likelyLanded: queries._likelyLanded(icao24),
-      });
+      const absence = historyFrame
+        ? 'remove' // GEV history seam: absent from the frame = not there at t
+        : records.absence(icao24, {
+            complete: snapshot.complete,
+            likelyLanded: queries._likelyLanded(icao24),
+          });
       if (absence === 'retain') continue;
       if (absence === 'stale') {
         if (icao24 === flightState._trackedIcao && flightState._trackedEntity) {
@@ -277,6 +292,11 @@ export function createFlightSnapshotRenderer({
       flightState._groundSnap.forget(icao24);
       flightState._displayFloorState.delete(icao24);
     }
+
+    // GEV history seam: no record of another time outlives a history frame.
+    if (historyFrame)
+      for (const id of [...records.data.keys()])
+        if (!currentIcaos.has(id)) records.forget(id);
 
     // Fresh courses arrived — force a rotation pass on the next fleet tick
     flightState._lastCamPoseSig = '';

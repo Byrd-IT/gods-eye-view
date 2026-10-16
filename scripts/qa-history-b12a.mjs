@@ -21,6 +21,13 @@
  * through to live with "LIVE (history unavailable)" chips; no console/page
  * error after the first history interaction. Screenshots after
  * Page.bringToFront. Exit 1 on failure.
+ *
+ * Round 3 (review R1/R3, owner option A): the history aircraft sit at a
+ * place that depends on t (histShift), so the SAME hex moves between
+ * frames: after a seek back in time the drawn position is that frame's
+ * (not the previous one's); paused, dead reckoning is frozen; a TRACKED
+ * aircraft absent from a frame (recorded gap) is released at once; and a
+ * live track route is refused while history is shown.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -72,9 +79,12 @@ const ring = (i, n, r) => {
   const a = (2 * Math.PI * i) / n;
   return [LAT + r * Math.sin(a), LON + r * Math.cos(a)];
 };
-function aircraftStates(prefix, n, tSec, hexBase, source) {
+/** History aircraft move with t: 0.3 deg of longitude per hour (mod 5 h). */
+const histShift = (tMs) => ((tMs / 3_600_000) % 5) * 0.3;
+function aircraftStates(prefix, n, tSec, hexBase, source, shift = 0) {
   return Array.from({ length: n }, (_, i) => {
-    const [la, lo] = ring(i, n, 0.12);
+    const [la, lo0] = ring(i, n, 0.12);
+    const lo = lo0 + shift;
     const hex = (hexBase + i).toString(16).padStart(6, '0');
     return [
       hex,
@@ -212,6 +222,7 @@ page.on('request', (req) => {
             Math.round(t / 1000),
             0xa10000,
             'adsblol',
+            histShift(t),
           );
       return json(
         { time: Math.round(t / 1000), states },
@@ -359,6 +370,7 @@ const layerState = () =>
           failed: swap.failed,
           stats: swap.stats,
           prefetchInFlight: swap.prefetchInFlight,
+          servedFlightsT: swap.served?.flights?.t ?? null,
         }
       : null;
     return out;
@@ -379,6 +391,20 @@ async function waitFor(pred, what, timeoutMs = 45_000) {
 }
 
 const counts = (st) => LAYERS.map((id) => st[id].count);
+const aircraftAt = (hex) =>
+  page.evaluate((h) => {
+    const m = window.__godsEyeView.dataManager.layers.get('flights').module;
+    const d = m.findByQuery(h);
+    return d ? { lat: d.latitude, lon: d.longitude } : null;
+  }, hex);
+/** km between a drawn aircraft and a lat/lon (equirectangular is enough). */
+const kmTo = (p, lat, lon) =>
+  p
+    ? Math.hypot(
+        (p.lat - lat) * 111.32,
+        (p.lon - lon) * 111.32 * Math.cos((lat * Math.PI) / 180),
+      )
+    : Infinity;
 const unswapped = (st) => st.chips.filter((c) => c[1] === 'unswapped');
 
 // ── 1. live ──────────────────────────────────────────────
@@ -464,6 +490,80 @@ check(
   'aircraft slice carries the view bbox',
 );
 await shot('02-history-at-t');
+
+// ── 2b. round 3: same hex across seeks, paused freeze, live track refused ─
+{
+  const tShownMs = Date.parse(st.time);
+  const here = await aircraftAt('a10000');
+  const d0 = kmTo(here, LAT, LON + 0.12 + histShift(tShownMs));
+  check(
+    d0 < 10,
+    `a10000 drawn at its slice position at t (${d0.toFixed(2)} km)`,
+  );
+  await sleep(3_000);
+  const later = await aircraftAt('a10000');
+  const frozenM = kmTo(later, here?.lat ?? 0, here?.lon ?? 0) * 1000;
+  check(frozenM < 50, `paused: no coasting over 3 s (${frozenM.toFixed(1)} m)`);
+  const tBack = tShownMs - 2 * 3_600_000;
+  await page.evaluate(
+    (t) => window.__gevHistorySwap.handle.seek(t, { snap: true }),
+    tBack,
+  );
+  st = await waitFor(
+    (s) =>
+      Math.abs(Date.parse(s.time) - tBack) < 600_000 &&
+      s.router?.servedFlightsT === Date.parse(s.time) &&
+      s.flights.count === HIST.aircraft,
+    'seek back 2 h (frame of the new t served)',
+  );
+  await sleep(500); // the layer applies the served frame
+  const back = await aircraftAt('a10000');
+  const want = LON + 0.12 + histShift(Date.parse(st.time));
+  const d1 = kmTo(back, LAT, want);
+  const dPrev = kmTo(back, LAT, LON + 0.12 + histShift(tShownMs));
+  check(
+    d1 < 10 && dPrev > 30,
+    `seek back: same hex at THAT frame's place (${d1.toFixed(2)} km), not the previous frame's (${dPrev.toFixed(1)} km)`,
+  );
+  const track = await page.evaluate(async () => {
+    const r = await fetch('/api/flights/track?icao24=a10000');
+    return r.status;
+  });
+  check(track === 404, `live track refused in history (${track})`);
+  // a TRACKED aircraft absent from a frame is released at once (R1)
+  await page.evaluate(() =>
+    window.__godsEyeView.dataManager.layers
+      .get('flights')
+      .module.trackById('a10000'),
+  );
+  const tracked = await page.evaluate(
+    () =>
+      window.__godsEyeView.dataManager.layers
+        .get('flights')
+        .module.getTrackedInfo()?.icao24 ?? null,
+  );
+  check(tracked === 'a10000', `tracked a10000 (${tracked})`);
+  await page.evaluate(
+    (t) => window.__gevHistorySwap.handle.seek(t),
+    Math.round((world.gap.from + world.gap.to) / 2),
+  );
+  st = await waitFor((s) => s.flights.count === 0, 'gap with a tracked hex');
+  const after = await page.evaluate(
+    () =>
+      window.__godsEyeView.dataManager.layers
+        .get('flights')
+        .module.getTrackedInfo()?.icao24 ?? null,
+  );
+  check(
+    st.flights.count === 0 && after === null,
+    `gap: tracked aircraft released and gone at once (count ${st.flights.count}, tracked ${after})`,
+  );
+  await page.evaluate(
+    (t) => window.__gevHistorySwap.handle.seek(t, { snap: true }),
+    tAt,
+  );
+  await waitFor((s) => s.flights.count === HIST.aircraft, 'back at t');
+}
 
 // ── 3. recorded gap -> no aircraft ───────────────────────
 const gapT = Math.round((world.gap.from + world.gap.to) / 2);

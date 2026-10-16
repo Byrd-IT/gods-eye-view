@@ -46,7 +46,6 @@ const answer = (body, headers = {}) => ({
 const T = Date.parse('2026-10-13T19:46:40Z');
 const NOW = Date.parse('2026-10-14T18:00:00.250Z');
 const DELTA = NOW - T;
-const DELTA_S = Math.round(DELTA / 1000);
 
 test('rebase arithmetic: delta = now - t, seconds rounded, non-numbers kept', () => {
   assert.equal(rebaseDelta(T, NOW), NOW - T);
@@ -55,9 +54,10 @@ test('rebase arithmetic: delta = now - t, seconds rounded, non-numbers kept', ()
   assert.equal(rebaseMs('x', 500), 'x');
   assert.equal(rebaseMs(Number.NaN, 500), Number.NaN);
   // whole seconds: 1499 ms -> 1 s, 1500 ms -> 2 s
-  assert.equal(rebaseSec(100, 1499), 101);
-  assert.equal(rebaseSec(100, 1500), 102);
-  assert.equal(rebaseSec(100, -1500), 99); // Math.round(-1.5) = -1
+  assert.equal(rebaseSec(100, 1499), 101.499);
+  assert.equal(rebaseSec(100, 1500), 101.5);
+  assert.equal(rebaseSec(100, -1500), 98.5);
+  assert.equal(rebaseSec(1_760_000_000, 3_600_000.4), 1_760_003_600); // ms grid
   assert.equal(rebaseSec(undefined, 1500), undefined);
   assert.equal(
     rebaseIso('2026-10-13T19:46:40.000Z', 60_000),
@@ -165,13 +165,15 @@ test('flights adapter: the live parser reads the slice exactly like an equivalen
     },
   );
   const out = adapter('flights').adapt([slice], { t: T, nowMs: NOW });
-  // what /api/flights would have said had t been now: same rows, times + delta
+  // what /api/flights would have said had t been now: same rows, times +
+  // delta (kept to the millisecond: the motion clock is exact)
+  const plus = (sec) => (sec * 1000 + DELTA) / 1000;
   const live = {
-    time: tSec + DELTA_S,
+    time: plus(tSec),
     states: states.map((r) => {
       const x = r.slice(0, 18);
-      x[3] = r[3] + DELTA_S;
-      x[4] = r[4] + DELTA_S;
+      x[3] = plus(r[3]);
+      x[4] = plus(r[4]);
       return x;
     }),
   };
@@ -184,7 +186,7 @@ test('flights adapter: the live parser reads the slice exactly like an equivalen
   // relative: each position is as old (vs now) as it was vs t
   for (const [i, r] of a.records.entries()) {
     const rec = states.find((s) => s[0].toLowerCase() === r.id);
-    assert.equal(r.positionTimeMs - rec[3] * 1000, DELTA_S * 1000, `row ${i}`);
+    assert.equal(r.positionTimeMs - rec[3] * 1000, DELTA, `row ${i}`);
   }
   // element 18 (source) is kept; the live parser ignores it
   assert.ok(

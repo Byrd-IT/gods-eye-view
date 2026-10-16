@@ -186,24 +186,73 @@ test('history: military and vessels are answered from their slices', async () =>
   );
 });
 
-test('pass-through in history: non-GET, track routes, other routes and gevLive requests', async () => {
+test('pass-through in history: non-GET, other routes and gevLive requests', async () => {
   const { router, srv, win } = setup();
   router.install();
   router.setHistory({ active: true, timeMs: T });
-  await win.fetch('/api/flights/track?icao24=abc123');
   await win.fetch('/api/military', { method: 'POST' });
   await win.fetch('/api/earthquakes');
   await win.fetch('/api/flights?lat=1&lon=2', { [LIVE_ONLY_FLAG]: true });
   assert.equal(sliceCalls(srv).length, 0);
   assert.deepEqual(
     srv.calls.map((c) => c.path),
-    [
-      '/api/flights/track?icao24=abc123',
-      '/api/military',
-      '/api/earthquakes',
-      '/api/flights?lat=1&lon=2',
-    ],
+    ['/api/military', '/api/earthquakes', '/api/flights?lat=1&lon=2'],
   );
+});
+
+test('D3 tracks: a live track of a feed shown from history is refused (404); LIVE and failed feeds pass through', async () => {
+  const { router, srv, win } = setup({
+    slice: (q) =>
+      q.feed === 'military'
+        ? jsonResponse({}, { status: 500 })
+        : defaultSlice(q),
+  });
+  router.install();
+  router.setHistory({ active: true, timeMs: T });
+  for (const path of [
+    '/api/flights/track?icao24=abc123',
+    '/api/vessels/track?mmsi=123456789',
+  ]) {
+    const res = await win.fetch(path);
+    assert.equal(res.status, 404, path);
+    assert.match((await res.json()).error, /history/);
+  }
+  assert.equal(srv.calls.length, 0, 'no live track was asked');
+  // military failed -> its feed is live, so is its track
+  await win.fetch('/api/military');
+  await win.fetch('/api/military/track?hex=ae0001');
+  assert.equal(srv.calls.at(-1).path, '/api/military/track?hex=ae0001');
+  router.setHistory({ active: false });
+  await win.fetch('/api/flights/track?icao24=abc123');
+  assert.equal(srv.calls.at(-1).path, '/api/flights/track?icao24=abc123');
+});
+
+test('onServe: a history answer is announced before the layer reads it; a failure pass-through as live', async () => {
+  let fail = false;
+  const { router, win, clock } = setup({
+    slice: (q) => (fail ? jsonResponse({}, { status: 500 }) : defaultSlice(q)),
+  });
+  router.install();
+  const events = [];
+  const off = router.onServe((e) => events.push(e));
+  await win.fetch('/api/military'); // LIVE: nothing announced
+  router.setHistory({ active: true, timeMs: T });
+  const res = win.fetch('/api/military');
+  await res;
+  assert.deepEqual(events, [
+    { adapterId: 'military', mode: 'history', t: T, nowMs: clock.now() },
+  ]);
+  fail = true;
+  router.setHistory({ active: true, timeMs: T + MIN });
+  await win.fetch('/api/military'); // fails -> live
+  await win.fetch('/api/military'); // failed, retry not due -> live
+  assert.deepEqual(
+    events.slice(1).map((e) => e.mode),
+    ['live', 'live'],
+  );
+  off();
+  await win.fetch('/api/military');
+  assert.equal(events.length, 3, 'unsubscribed');
 });
 
 test('chain: the B11 chip observer still sees live answers, never the history answers', async () => {

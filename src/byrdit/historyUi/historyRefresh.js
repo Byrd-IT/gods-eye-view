@@ -6,19 +6,33 @@
  * the history time:
  *
  *   released time change (seek release, step, ht load, entering history)
- *     -> shell._dataManager.refreshLayer(id) for every ENABLED layer whose
- *        feed is swapped, `settlePolls` times in a row (the slice is cached,
- *        so the extra polls cost no request): flights / military keep an
- *        absent aircraft for MISSING_POLL_LIMIT = 3 polls as STALE, and a
- *        jump to another time must not leave aircraft of the old time (D3)
+ *     -> shell._dataManager.refreshLayer(id) once for every ENABLED layer
+ *        whose feed is swapped
  *   playback -> one refresh when the feed's frame (its recorded snapshot at
  *        or before t, or t floored to a quantum) changes, never overlapping
  *        (D1), paced to the router's slice budget (the history API allows a
  *        client 60 requests a minute); plus the prefetch of the next 2
  *        frames playback will show (D6)
- *   LIVE -> every layer that was swapped is refreshed again (D4), so live
- *        data comes back straight away (settlePolls: the history aircraft
- *        leave at once instead of lingering as STALE)
+ *   LIVE -> every layer that was swapped is reset and refreshed once (D4),
+ *        so live data comes back straight away
+ *
+ * Frames (owner decision on t_884fea7d, option A: the upstream layer seams
+ * resetForHistoryFrame / setMotionClock in src/layers/flights, military and
+ * vessels). Before a layer reads an answer the router gives it
+ * (router.onServe):
+ *   history answer -> layer.resetForHistoryFrame(): the answer is applied as
+ *        one frame (absent records leave at once, selected / tracked ones
+ *        included, no position history of another time), and
+ *        layer.setMotionClock(): dead reckoning runs on the history time,
+ *        frozen at t while paused and rate x wall time while playing:
+ *        clock(frameAppliedAtMs) = frameAppliedAtMs + (tau - frameT), tau
+ *        the history time now and frameT the slice time of that answer. The
+ *        router rebases fix times by the serve time - frameT (D2), and the
+ *        layer stamps frameAppliedAtMs when it applies the frame, so the
+ *        layer's "now - fix time" is "tau - recorded fix time".
+ *   live pass-through after history answers (failure, D3) -> one more
+ *        reset and the wall clock, so live data never merges into a frame
+ *   LIVE -> reset + wall clock for every layer that had a history frame
  *
  * During a scrub drag nothing is refreshed (the B11 control makes no
  * request while dragging either); the release refreshes once, debounced.
@@ -56,6 +70,10 @@ export function createRefreshDriver({
   let destroyed = false;
   let wasSwapped = new Set(); // adapter ids swapped while history was on
   let state = { active: false, timeMs: null, playing: false, rate: 1 };
+  let stateAt = 0; // wall ms the control state was received
+  const frameT = new Map(); // adapter id -> slice time of its last answer
+  const lastMode = new Map(); // adapter id -> 'history' | 'live'
+  const clocks = new Map(); // adapter id -> motion clock function
 
   const dm = () => {
     try {
@@ -73,6 +91,63 @@ export function createRefreshDriver({
       return new Set();
     }
   }
+
+  /** The layer object of an adapter (data-manager registry), or null. */
+  function layerOf(adapter) {
+    try {
+      return dm()?.layers?.get?.(adapter.layerId)?.module ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The history time now: frozen while paused, rate x wall while playing. */
+  function historyNow() {
+    if (!state.active || !Number.isFinite(state.timeMs)) return NaN;
+    const run = state.playing ? state.rate * Math.max(0, now() - stateAt) : 0;
+    return Math.min(state.timeMs + run, now());
+  }
+
+  function clockOf(adapter) {
+    let clock = clocks.get(adapter.id);
+    if (!clock) {
+      clock = (appliedAtMs) => {
+        const t = frameT.get(adapter.id);
+        const tau = historyNow();
+        if (!(appliedAtMs > 0) || !Number.isFinite(t) || !Number.isFinite(tau))
+          return NaN; // the layer falls back to the wall clock
+        return appliedAtMs + (tau - t);
+      };
+      clocks.set(adapter.id, clock);
+    }
+    return clock;
+  }
+
+  function resetLayer(adapter, clock) {
+    const layer = layerOf(adapter);
+    try {
+      layer?.resetForHistoryFrame?.();
+      layer?.setMotionClock?.(clock);
+    } catch {
+      /* a layer without the seam keeps its own behaviour */
+    }
+  }
+
+  /** router.onServe: arm the frame before the layer reads the answer. */
+  function onServe(event = {}) {
+    if (destroyed) return;
+    const adapter = adapters.find((a) => a.id === event.adapterId);
+    if (!adapter) return;
+    if (event.mode === 'history') {
+      frameT.set(adapter.id, event.t);
+      lastMode.set(adapter.id, 'history');
+      resetLayer(adapter, clockOf(adapter));
+    } else if (lastMode.get(adapter.id) === 'history') {
+      lastMode.set(adapter.id, 'live');
+      resetLayer(adapter, null);
+    }
+  }
+  const offServe = router.onServe?.(onServe) ?? null;
 
   /** Enabled layers whose feed is answered from history now. */
   function targets() {
@@ -119,13 +194,13 @@ export function createRefreshDriver({
     return job.running;
   }
 
-  function refreshTargets({ settle = true } = {}) {
+  function refreshTargets() {
     const list = targets();
     for (const a of list) wasSwapped.add(a.id);
     return Promise.all(
       list.map((a) => {
         lastFrame.set(a.id, router.frameTime(a));
-        return refresh(a, settle ? a.settlePolls : 1);
+        return refresh(a, 1);
       }),
     );
   }
@@ -135,7 +210,7 @@ export function createRefreshDriver({
     releaseTimer = timers.setTimeout(() => {
       releaseTimer = null;
       if (destroyed || dragging || !state.active) return;
-      refreshTargets({ settle: true });
+      refreshTargets();
     }, releaseDebounceMs);
   }
 
@@ -250,6 +325,7 @@ export function createRefreshDriver({
   function onHistory(detail = {}) {
     if (destroyed) return;
     const change = router.setHistory(detail);
+    stateAt = now();
     state = {
       active: Boolean(detail.active) && Number.isFinite(detail.timeMs),
       timeMs: detail.timeMs ?? null,
@@ -267,8 +343,13 @@ export function createRefreshDriver({
         (a) => wasSwapped.has(a.id) && enabled.has(a.layerId),
       );
       wasSwapped = new Set();
-      // D4: the router passes through now; ask live again at once
-      for (const a of back) refresh(a, a.settlePolls);
+      // D4: no history frame survives LIVE, dead reckoning is back on the
+      // wall clock, and the router passes through: ask live once at once
+      for (const a of adapters)
+        if (lastMode.has(a.id) || back.includes(a)) resetLayer(a, null);
+      lastMode.clear();
+      frameT.clear();
+      for (const a of back) refresh(a, 1);
       return;
     }
     if (!state.active) return;
@@ -310,8 +391,12 @@ export function createRefreshDriver({
         await Promise.all(running);
       }
     },
+    historyNow,
     destroy() {
       destroyed = true;
+      offServe?.();
+      for (const a of adapters) if (lastMode.has(a.id)) resetLayer(a, null);
+      lastMode.clear();
       stopPlay();
       if (releaseTimer) timers.clearTimeout(releaseTimer);
       releaseTimer = null;

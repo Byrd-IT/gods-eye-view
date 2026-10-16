@@ -42,7 +42,12 @@ export class VesselRecords {
   }
   reconcile(
     rows,
-    { complete = true, selectedRecord = null, cap = Infinity },
+    {
+      complete = true,
+      selectedRecord = null,
+      cap = Infinity,
+      historyFrame = false, // GEV history seam: no selected pin across times
+    },
     effects,
   ) {
     const receivedAtMs = this.now();
@@ -99,7 +104,11 @@ export class VesselRecords {
       }
       if (record === selectedRecord) {
         record.missedRefreshes = (record.missedRefreshes || 0) + 1;
-        if (complete && record.missedRefreshes <= SELECTED_PIN_REFRESHES) {
+        if (
+          complete &&
+          !historyFrame &&
+          record.missedRefreshes <= SELECTED_PIN_REFRESHES
+        ) {
           effects.staleSelected(record);
           continue;
         }

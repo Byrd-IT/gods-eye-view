@@ -280,4 +280,23 @@ export class FlightRecords {
     this.missingPolls.delete(id);
     this.geoidNCache.delete(id);
   }
+
+  /** GEV history seam (fork card B12a): a history frame keeps only each
+   *  aircraft's identity enrichment, never another time's kinematics,
+   *  altitude hold, contact time or missed polls. */
+  beginHistoryFrame() {
+    for (const [id, m] of this.data) {
+      const { sourceReference, typeCode, typeName, registration } = m;
+      const { airline, route } = m;
+      this.data.set(id, {
+        sourceReference,
+        typeCode: typeCode ?? null,
+        typeName: typeName ?? null,
+        registration: registration ?? null,
+        airline: airline ?? null,
+        route: route ?? null,
+      });
+    }
+    this.missingPolls.clear();
+  }
 }

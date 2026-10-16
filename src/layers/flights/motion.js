@@ -150,7 +150,7 @@ export function createMotion({
     // Render one poll interval behind real time so we interpolate between
     // two KNOWN fixes whenever possible (see RENDER_DELAY_SEC rationale).
     const renderTime = Cesium.JulianDate.addSeconds(
-      Cesium.JulianDate.now(),
+      _motionNow(),
       -RENDER_DELAY_SEC,
       flightState._scratchRenderTime,
     );
@@ -294,6 +294,21 @@ export function createMotion({
     return Cesium.Matrix4.multiplyByPoint(enu, flightState._scratchOffset, out);
   }
 
+  /** Motion "now" (GEV history seam, fork card B12a): the wall clock, or the
+   *  history motion clock set through setMotionClock (frozen at t while
+   *  paused, rate x wall time while playing). No allocation per call. */
+
+  function _motionNow() {
+    const ms = flightState._motionClock?.(flightState._historyFrameAppliedAtMs);
+    if (!Number.isFinite(ms))
+      return Cesium.JulianDate.now(flightState._scratchMotionNow);
+    flightState._scratchMotionDate.setTime(ms);
+    return Cesium.JulianDate.fromDate(
+      flightState._scratchMotionDate,
+      flightState._scratchMotionNow,
+    );
+  }
+
   /**
    * True while the tracked aircraft's delayed display time (now − RENDER_DELAY_SEC)
    * predates its oldest real fix — i.e. _deadReckon is extrapolating backward, with no
@@ -307,7 +322,7 @@ export function createMotion({
     const history = flightState._positionHistory.get(flightState._trackedIcao);
     if (!history || history.length === 0) return true;
     const renderTime = Cesium.JulianDate.addSeconds(
-      Cesium.JulianDate.now(),
+      _motionNow(),
       -RENDER_DELAY_SEC,
       flightState._scratchWarmupTime,
     );
@@ -1085,6 +1100,7 @@ export function createMotion({
   }
   return {
     _refloorStaleGroundedContacts,
+    _motionNow,
     _deadReckon,
     _extrapolateFix,
     _isTrackWarmingUp,

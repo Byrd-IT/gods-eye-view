@@ -379,7 +379,7 @@ export function createTracking({
     // would draw the trail in front of the plane. They join the trail via _appendTrailFix
     // as they age past the delay.
     const seedRenderTime = Cesium.JulianDate.addSeconds(
-      Cesium.JulianDate.now(),
+      parts.motion._motionNow(),
       -RENDER_DELAY_SEC,
       flightState._scratchWarmupTime,
     );

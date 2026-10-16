@@ -105,22 +105,20 @@ function setup({
   return { clock, router, dm, driver, sliceCalls, snapCalls, win };
 }
 
-test('released change: refreshLayer only for enabled, swapped layers (settle polls)', async () => {
+test('released change: refreshLayer once, only for enabled, swapped layers', async () => {
   const { clock, dm, driver } = setup();
   driver.onHistory({ active: true, timeMs: T, playing: false });
   assert.equal(dm.calls.length, 0, 'debounced');
   await clock.run(RELEASE_DEBOUNCE_MS + 1);
   await driver.settle();
-  // flights + military are enabled and swapped (3 polls each: absent
-  // aircraft of another time leave at once); vessels is not enabled,
+  // flights + military are enabled and swapped (one refresh each: the frame
+  // seam drops absent aircraft at once); vessels is not enabled,
   // earthquakes has no history swap
-  assert.deepEqual([...new Set(dm.calls)].sort(), ['flights', 'military']);
-  assert.equal(dm.calls.filter((c) => c === 'flights').length, 3);
-  assert.equal(dm.calls.filter((c) => c === 'military').length, 3);
+  assert.deepEqual(dm.calls.sort(), ['flights', 'military']);
   assert.equal(dm.maxConcurrent, 1, 'never overlapping per layer');
 });
 
-test('the settle polls of one time cost one slice request per feed (cache)', async () => {
+test('one released time costs one slice request per feed', async () => {
   const { clock, driver, sliceCalls } = setup();
   driver.onHistory({ active: true, timeMs: T });
   await clock.run(RELEASE_DEBOUNCE_MS + 1);
@@ -161,7 +159,7 @@ test('drag: no refresh until the release, then one debounced refresh', async () 
   driver.setDragging(false);
   await clock.run(RELEASE_DEBOUNCE_MS + 1);
   await driver.settle();
-  assert.deepEqual(dm.calls, ['military', 'military', 'military']);
+  assert.deepEqual(dm.calls, ['military']);
 });
 
 test('steps in quick succession coalesce into one refresh run', async () => {
@@ -171,7 +169,7 @@ test('steps in quick succession coalesce into one refresh run', async () => {
   driver.onHistory({ active: true, timeMs: T + 2 * MIN });
   await clock.run(RELEASE_DEBOUNCE_MS + 1);
   await driver.settle();
-  assert.equal(dm.calls.length, 3);
+  assert.equal(dm.calls.length, 1);
 });
 
 test('playback: one refresh per frame change, paced, never overlapping; next 2 frames prefetched', async () => {
@@ -303,4 +301,110 @@ test('playback pace: all swapped layers together stay inside the slice budget; p
     gaps.filter((g) => g >= 4 * MIN).length >= gaps.length / 2,
     JSON.stringify(gaps),
   );
+});
+
+// ── frame seam (owner decision option A on t_884fea7d) ────────────────
+
+/** A layer stand-in recording the seam calls the driver makes. */
+function seamLayer() {
+  const l = { resets: 0, clock: undefined, log: [] };
+  l.resetForHistoryFrame = () => {
+    l.resets++;
+    l.log.push('reset');
+  };
+  l.setMotionClock = (c) => {
+    l.clock = c;
+    l.log.push(c ? 'clock' : 'wall');
+  };
+  return l;
+}
+
+function withLayers(dm) {
+  const layers = {
+    flights: seamLayer(),
+    military: seamLayer(),
+    'ais-live-vessels': seamLayer(),
+  };
+  dm.layers = new Map(
+    Object.entries(layers).map(([id, module]) => [id, { module }]),
+  );
+  return layers;
+}
+
+test('frame seam: every history answer arms the layer before it reads it; the clock is the history time', async () => {
+  const { clock, dm, driver } = setup({ enabled: ['military'] });
+  const layers = withLayers(dm);
+  driver.onHistory({ active: true, timeMs: T, playing: false });
+  await clock.run(RELEASE_DEBOUNCE_MS + 1);
+  await driver.settle();
+  const mil = layers.military;
+  assert.equal(mil.resets, 1, 'one frame per applied answer');
+  assert.equal(typeof mil.clock, 'function');
+  assert.equal(layers.flights.resets, 0, 'only the answered layer');
+  // paused: the clock is frozen at the frame's apply time
+  const applied = clock.now();
+  assert.equal(mil.clock(applied), applied);
+  await clock.run(30_000);
+  assert.equal(mil.clock(applied), applied, 'frozen while paused');
+  // a re-poll of the same paused time is one more frame
+  await dm.refreshLayer('military');
+  assert.equal(mil.resets, 2);
+  // not applied yet -> NaN (the layer falls back to the wall clock)
+  assert.ok(Number.isNaN(mil.clock(0)));
+});
+
+test('frame seam: playing, the clock runs at rate x wall time from the frame time', async () => {
+  const { clock, dm, driver, router } = setup({ enabled: ['military'] });
+  const layers = withLayers(dm);
+  driver.onHistory({ active: true, timeMs: T, playing: true, rate: 60 });
+  router.pinFrame('military', T - 30_000); // the shown frame is 30 s back
+  await dm.refreshLayer('military');
+  const applied = clock.now();
+  const c = layers.military.clock;
+  // tau - frameT = 30 s at once, then +60 s per wall second
+  assert.equal(c(applied), applied + 30_000);
+  await clock.run(1_000);
+  assert.equal(driver.historyNow(), T + 60_000, '60x: 1 s wall = 60 s');
+  // (a playback tick may have shown a newer frame meanwhile)
+  const frameT = router.getState().served.military.t;
+  assert.equal(c(applied), applied + (T + 60_000 - frameT));
+});
+
+test('frame seam: a failure pass-through after history frames resets once onto the wall clock', async () => {
+  let fail = false;
+  const { clock, dm, driver, win } = setup({
+    enabled: ['military'],
+    slice: (q) =>
+      fail
+        ? jsonResponse({}, { status: 500 })
+        : jsonResponse({ ac: [], now: Date.parse(q.t) }),
+  });
+  const layers = withLayers(dm);
+  driver.onHistory({ active: true, timeMs: T });
+  await clock.run(RELEASE_DEBOUNCE_MS + 1);
+  await driver.settle();
+  assert.deepEqual(layers.military.log, ['reset', 'clock']);
+  fail = true;
+  driver.onHistory({ active: true, timeMs: T + MIN });
+  await win.fetch('/api/military'); // fails -> live
+  await win.fetch('/api/military'); // still failed -> live, no new reset
+  assert.deepEqual(layers.military.log, ['reset', 'clock', 'reset', 'wall']);
+});
+
+test('frame seam: LIVE resets every layer that had a history frame and restores the wall clock, then refreshes once', async () => {
+  const { clock, dm, driver } = setup({
+    enabled: ['flights', 'military', 'earthquakes'],
+  });
+  const layers = withLayers(dm);
+  driver.onHistory({ active: true, timeMs: T });
+  await clock.run(RELEASE_DEBOUNCE_MS + 1);
+  await driver.settle();
+  dm.calls.length = 0;
+  for (const l of Object.values(layers)) l.log.length = 0;
+  driver.onHistory({ active: false, timeMs: null });
+  await driver.settle();
+  assert.deepEqual(layers.flights.log, ['reset', 'wall']);
+  assert.deepEqual(layers.military.log, ['reset', 'wall']);
+  assert.deepEqual(layers['ais-live-vessels'].log, [], 'never in history');
+  assert.deepEqual(dm.calls.sort(), ['flights', 'military'], 'D4: once each');
 });

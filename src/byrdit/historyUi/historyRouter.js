@@ -41,6 +41,19 @@
  *
  * A request carrying init.gevLive (the voice tools: they report "current"
  * data) always passes through.
+ *
+ * Frames (owner decision on t_884fea7d, option A): every answer the router
+ * gives a swapped feed's layer request is announced to onServe listeners
+ * BEFORE the layer reads it: {adapterId, mode: 'history', t, nowMs} for a
+ * history answer, {adapterId, mode: 'live'} for a pass-through while
+ * history is on (failure, D3). The refresh driver arms the layer's
+ * resetForHistoryFrame() / motion clock from it (historyRefresh.js).
+ *
+ * Track routes (adapter.trackMatch: /api/flights/track, /api/military/track,
+ * /api/vessels/track) are LIVE tracks. While a feed is answered from
+ * history they get a 404 (the layers' trail backfill falls back silently to
+ * the history-frame trail), so no live path is drawn behind a history
+ * aircraft or vessel (D3). A failed feed passes them through with the rest.
  */
 import {
   HISTORY_ADAPTERS,
@@ -62,6 +75,8 @@ const SNAPS_KEEP = 2_000;
  * (historyRefresh.js) and a prefetch never spends the last PREFETCH_RESERVE.
  */
 export const SLICE_BUDGET_PER_MIN = 40;
+/** Body of the 404 a live track route gets while its feed is in history. */
+export const TRACK_IN_HISTORY = 'history: no live track at the history time';
 export const PREFETCH_RESERVE = 6;
 
 export class SliceError extends Error {
@@ -178,6 +193,7 @@ export function createHistoryRouter({
   const served = new Map(); // adapter id -> {t, rows, gap}
   const pinned = new Map(); // adapter id -> playback frame (driver)
   const listeners = new Set();
+  const serveListeners = new Set(); // onServe (driver: frame reset / clock)
   const queue = []; // prefetch slice urls
   const running = new Map(); // prefetch url -> AbortController
   const stats = { slices: 0, cacheHits: 0, prefetches: 0, maxInFlight: 0 };
@@ -199,6 +215,17 @@ export function createHistoryRouter({
         fn(st);
       } catch {
         /* keep going */
+      }
+    }
+  }
+
+  /** Announce an answer to a swapped feed's layer request (see module note). */
+  function announce(event) {
+    for (const fn of [...serveListeners]) {
+      try {
+        fn(event);
+      } catch {
+        /* a listener must never break the answer */
       }
     }
   }
@@ -540,12 +567,14 @@ export function createHistoryRouter({
         }
         // D3: any failure, a repeated 429 included -> live + unavailable
         markFailed(adapter);
+        announce({ adapterId: adapter.id, mode: 'live' });
         return inner.call(target, input, init);
       }
       if (!s.active) return inner.call(target, input, init); // LIVE meanwhile
       if (gen !== myGen) continue; // a seek meanwhile: answer the new t
       const wasFailed = failed.delete(adapter.id);
-      const adapted = adapter.adapt(answers, { t, nowMs: now() });
+      const nowMs = now();
+      const adapted = adapter.adapt(answers, { t, nowMs });
       const rows = Number(adapted.headers['X-History-Rows']) || 0;
       const prevServed = served.get(adapter.id);
       served.set(adapter.id, {
@@ -554,6 +583,7 @@ export function createHistoryRouter({
         gap: adapted.headers['X-History-Gap'] === '1',
       });
       if (wasFailed || !prevServed) notify();
+      announce({ adapterId: adapter.id, mode: 'history', t, nowMs });
       return new Response(JSON.stringify(adapted.body), {
         status: 200,
         headers: {
@@ -572,19 +602,32 @@ export function createHistoryRouter({
       let req;
       let url;
       let adapter;
+      let track = null;
       try {
         req = requestOf(input, init);
         url = new URL(req.url, origin());
-        adapter =
-          req.method === 'GET' && !init?.[LIVE_ONLY_FLAG]
-            ? adapterForPath(url.pathname, adapters)
-            : null;
+        const asked = req.method === 'GET' && !init?.[LIVE_ONLY_FLAG];
+        adapter = asked ? adapterForPath(url.pathname, adapters) : null;
+        track = asked
+          ? (adapters.find((a) => a.trackMatch?.test(url.pathname)) ?? null)
+          : null;
       } catch {
         adapter = null;
       }
+      // a live track of a feed shown from history (see module note)
+      if (track && isSwapped(track.id))
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: TRACK_IN_HISTORY }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      if (!adapter) return inner.call(target, input, init);
       // a failed feed passes through until its retry is due (D3)
-      if (!adapter || !retryDue(adapter.id))
+      if (!retryDue(adapter.id)) {
+        announce({ adapterId: adapter.id, mode: 'live' });
         return inner.call(target, input, init);
+      }
       // D6: a new bbox / maxRows drops the prefetched frames
       const key = liveParamsKey(adapter, url);
       const last = lastLive.get(adapter.id);
@@ -624,11 +667,17 @@ export function createHistoryRouter({
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
+    /** Answers to swapped feeds' layer requests (see module note). */
+    onServe(fn) {
+      serveListeners.add(fn);
+      return () => serveListeners.delete(fn);
+    },
     destroy() {
       restore?.();
       restore = null;
       clearCache();
       listeners.clear();
+      serveListeners.clear();
       s.active = false;
     },
   };
