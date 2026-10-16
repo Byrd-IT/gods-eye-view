@@ -52,6 +52,7 @@ import {
   applySkyTime,
   restoreCamera,
   restoreScene,
+  skyTilesShown,
   snapshotCamera,
   snapshotScene,
 } from './skyCamera.js';
@@ -1139,6 +1140,19 @@ export function mountSkyView({
    * atmosphere), Sun altitude / magnitude limit, stars + ephemeris, picker,
    * banners, then a redraw. Satellites read the same time source.
    */
+  /**
+   * body.gev-sky-tiles: map tiles are on screen, so Clear view keeps the
+   * app's attribution line (skyView.css). Written only on change (applyTime
+   * runs every frame while Sky time plays).
+   */
+  let tilesShown = null;
+  function setTilesShown(next) {
+    if (next === tilesShown) return;
+    tilesShown = next;
+    if (next) doc.body?.classList?.add('gev-sky-tiles');
+    else doc.body?.classList?.remove('gev-sky-tiles');
+  }
+
   function applyTime() {
     if (!active || !observer) return;
     const t = time.getTime();
@@ -1149,6 +1163,7 @@ export function mountSkyView({
       flatHorizon: flags.flatHorizon,
       skyBox: skyBoxVisible(lastSunAlt),
     });
+    setTilesShown(skyTilesShown(sceneSnap, { flatHorizon: flags.flatHorizon }));
     if (time.provider === 'history')
       satSky.setSource(historyTime.satelliteSourceAt(t));
     else if (satSky.sourceKey != null) satSky.setSource(null);
@@ -1365,6 +1380,7 @@ export function mountSkyView({
     dom.bar.hidden = true;
     lastTap = null;
     clearView.setActive(false);
+    setTilesShown(null);
     doc.body?.classList?.remove('gev-sky-active');
     timers.clearTimeout?.(urlTimer);
     urlTimer = null;

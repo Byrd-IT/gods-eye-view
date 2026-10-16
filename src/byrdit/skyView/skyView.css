@@ -995,6 +995,52 @@ body.gev-sky-active.gev-sky-clear
   visibility: visible !important;
 }
 
+/* Attribution (t_37cf1f79): third-party imagery and tiles (Google 3D Tiles,
+   Cesium, NAIP/TxGIO, Sentinel/GIBS, OSM...) need their credits on screen.
+   While map tiles are drawn (body.gev-sky-tiles, set by skyView.js: real
+   horizon; the flat horizon hides the globe and every tileset) Clear view
+   keeps the app's own credit line (#cesium-credits: the same Cesium credits
+   as normal mode, no new text) as one small, dim, tap-through line in the
+   bottom-left corner, just above the overlay's compass strip (bottom 34 px):
+   clear of the eye (bottom-right) and of the centre circle.
+   #cesium-credits is a 0x0 fixed box; Cesium's .cesium-widget-credits inside
+   it is absolutely placed at its bottom-left, so the line is capped there. */
+body.gev-sky-active.gev-sky-clear.gev-sky-tiles
+  :is(#cesium-credits, #cesium-credits *) {
+  visibility: visible !important;
+}
+
+body.gev-sky-active.gev-sky-clear #cesium-credits {
+  position: fixed !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: max(38px, calc(env(safe-area-inset-bottom, 0px) + 38px)) !important;
+  left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px)) !important;
+  z-index: 98 !important;
+  opacity: 0.8;
+  pointer-events: none !important;
+}
+
+body.gev-sky-active.gev-sky-clear #cesium-credits .cesium-widget-credits {
+  max-width: calc(
+    100vw - 80px - env(safe-area-inset-left, 0px) -
+      env(safe-area-inset-right, 0px)
+  ) !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+}
+
+body.gev-sky-active.gev-sky-clear #cesium-credits * {
+  pointer-events: none !important;
+}
+
+/* Map-only controls are not part of the sky: the NAIP year slider and its
+   compare divider (basemap/naipSlider.js). */
+body.gev-sky-active :is(#gev-naip-slider, #gev-naip-split-line) {
+  display: none !important;
+}
+
 /* Wider screens: the app's key-setup chip sits in the bottom-right corner
    (provider-settings.css: 0.9rem from the edges, 32 px tall), so the eye
    goes just above it. */

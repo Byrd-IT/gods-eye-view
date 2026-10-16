@@ -694,6 +694,54 @@ test('naip slider: ticks only for years present, keyboard arrows move by tick', 
   assert.equal(doc.getElementById(NAIP_SLIDER_ID), null);
 });
 
+test('naip slider: never wider than its container on a phone; rows wrap and the range shrinks (t_37cf1f79)', () => {
+  const doc = fakeDoc();
+  const container = doc.createElement('div');
+  doc.body.append(container);
+  setup({
+    createSlider: (options) => createNaipSlider({ ...options, container, doc }),
+  });
+  const panel = doc.getElementById(NAIP_SLIDER_ID);
+  // centred, sized to its content but capped by the container (an 824 px
+  // panel on a 412 px phone grew the mobile layout viewport to 618 px)
+  assert.equal(panel.style.position, 'absolute');
+  assert.equal(panel.style.left, '50%');
+  assert.equal(panel.style.transform, 'translateX(-50%)');
+  assert.equal(panel.style.width, 'max-content');
+  assert.equal(panel.style.maxWidth, 'calc(100% - 16px)');
+  assert.equal(panel.style.boxSizing, 'border-box');
+  // every row wraps instead of pushing the panel wider
+  const rows = panel.children;
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.equal(row.style.flexWrap, 'wrap');
+    assert.equal(row.style.minWidth, '0');
+  }
+  const ranges = [...panel.walk()].filter((e) => e.attributes.type === 'range');
+  assert.equal(ranges.length, 2);
+  for (const range of ranges) {
+    // the range follows its column; the column keeps the preferred width
+    // but never exceeds the row
+    assert.equal(range.style.width, '100%');
+    const column = range.parent;
+    assert.match(column.style.width, /^\d+px$/);
+    assert.equal(column.style.maxWidth, '100%');
+    assert.equal(column.style.minWidth, '0');
+    assert.equal(column.parent.style.flexWrap, 'wrap');
+    assert.equal(column.parent.style.maxWidth, '100%');
+  }
+  const out = [...panel.walk()].find((e) => e.tagName === 'OUTPUT');
+  assert.equal(out.style.maxWidth, 'min(340px, 100%)');
+  const ticks = [...panel.walk()].find(
+    (e) => e.attributes.class === 'gev-naip-ticks',
+  );
+  assert.equal(ticks.style.overflow, 'hidden');
+  // no fixed pixel width anywhere above the column
+  for (const e of panel.walk())
+    if (e !== panel && !e.children.some((c) => c.attributes.type === 'range'))
+      assert.doesNotMatch(String(e.style.width ?? ''), /px$/, e.tagName);
+});
+
 test('naip slider: hidden while another stack is on screen', () => {
   const doc = fakeDoc();
   const container = doc.createElement('div');

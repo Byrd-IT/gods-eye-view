@@ -122,10 +122,14 @@ way is what the steps below check (not yet done: see the device card).
     a. In Sky with the controls shown, tap the round eye button
     (bottom-right corner in portrait, top-right in landscape). Everything except the sky disappears: the Sky
     toolbar, time row, satellite panel, Find/Layers, the Sky button, the
-    app's top icons, the HUD text, the voice/command dock, the key chip
-    and the map credits. Stars, lines, names, planets, satellites, the
-    horizon and its compass scale stay exactly where they were (no jump,
-    no reload). SHOT in portrait and in landscape.
+    app's top icons, the HUD text, the voice/command dock and the key
+    chip. Stars, lines, names, planets, satellites, the horizon and its
+    compass scale stay exactly where they were (no jump, no reload). SHOT
+    in portrait and in landscape.
+    The map credits stay as one small, dim line in the bottom-left corner
+    while the ground (map tiles) is drawn: it does not cover the centre
+    circle or the eye, and a tap on it reaches the sky. With the flat
+    horizon (no map tiles) the line goes away (t_37cf1f79).
     b. The eye fades after about 3 seconds; touching the screen anywhere
     brings it back. The notch and the bottom gesture bar do not cover it.
     c. Double-tap the sky: the controls come back. Double-tap again: clear.

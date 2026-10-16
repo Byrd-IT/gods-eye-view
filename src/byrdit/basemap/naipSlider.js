@@ -14,6 +14,12 @@ import { createImagerySplit } from '../../ui/imagerySplit.js';
  * Home oldest, End newest (handled here, so the step is one tick and the
  * globe's own key bindings never see the key).
  *
+ * Narrow screens (t_37cf1f79): the panel is never wider than its container
+ * (max-width calc(100% - 16px), centred), the rows wrap and the year range
+ * shrinks to fit, so the panel cannot push the page wider than a phone (an
+ * 824 px panel on a 412 px phone grew the mobile layout viewport to 618 px).
+ * Sky view hides the panel (skyView.css, body.gev-sky-active).
+ *
  * Plain DOM with inline styles (no stylesheet), text via textContent only.
  */
 
@@ -25,6 +31,15 @@ const KEYS = Object.freeze({
 });
 
 export const NAIP_SLIDER_ID = 'gev-naip-slider';
+
+/** A panel row: wraps (label above the range) when the screen is narrow. */
+const ROW_STYLE = Object.freeze({
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: '4px 8px',
+  minWidth: '0',
+});
 
 function el(doc, tag, parent, { text, style, attrs } = {}) {
   const node = doc.createElement(tag);
@@ -38,11 +53,27 @@ function el(doc, tag, parent, { text, style, attrs } = {}) {
 /** One year range (index into ticks) + its label; keyboard steps by tick. */
 function yearRange(doc, parent, { ticks, label, onYear, showTicks = false }) {
   const row = el(doc, 'div', parent, {
-    style: { display: 'flex', alignItems: 'center', gap: '8px' },
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: '4px 8px',
+      flex: '1 1 auto',
+      minWidth: '0',
+      maxWidth: '100%',
+    },
   });
+  // preferred width; shrinks to the panel on narrow screens
   const width = `${Math.max(160, Math.min(520, ticks.length * 40))}px`;
   const column = el(doc, 'div', row, {
-    style: { display: 'flex', flexDirection: 'column', width },
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      width,
+      maxWidth: '100%',
+      minWidth: '0',
+      flex: '0 1 auto',
+    },
   });
   const range = el(doc, 'input', column, {
     attrs: {
@@ -52,7 +83,7 @@ function yearRange(doc, parent, { ticks, label, onYear, showTicks = false }) {
       step: '1',
       'aria-label': label,
     },
-    style: { width, margin: '0' },
+    style: { width: '100%', minWidth: '0', margin: '0' },
   });
   if (showTicks) {
     // One label per stop, spread like the range's stops.
@@ -61,6 +92,8 @@ function yearRange(doc, parent, { ticks, label, onYear, showTicks = false }) {
       style: {
         display: 'flex',
         justifyContent: 'space-between',
+        gap: '2px',
+        overflow: 'hidden',
         opacity: '0.75',
         fontSize: '10px',
       },
@@ -69,7 +102,8 @@ function yearRange(doc, parent, { ticks, label, onYear, showTicks = false }) {
   }
   const out = el(doc, 'output', row, {
     style: {
-      maxWidth: '340px',
+      maxWidth: 'min(340px, 100%)',
+      minWidth: '0',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
@@ -131,6 +165,9 @@ export function createNaipSlider({
       left: '50%',
       bottom: '118px',
       transform: 'translateX(-50%)',
+      boxSizing: 'border-box',
+      width: 'max-content',
+      maxWidth: 'calc(100% - 16px)',
       padding: '6px 10px',
       background: 'rgba(12, 16, 22, 0.85)',
       color: '#e6edf3',
@@ -144,7 +181,7 @@ export function createNaipSlider({
     },
   });
   const top = el(doc, 'div', panel, {
-    style: { display: 'flex', alignItems: 'center', gap: '8px' },
+    style: ROW_STYLE,
   });
   const toggleLabel = el(doc, 'label', top, { text: ' Aerial' });
   const toggle = el(doc, 'input', null, { attrs: { type: 'checkbox' } });
@@ -157,7 +194,7 @@ export function createNaipSlider({
     showTicks: true,
   });
   const bottom = el(doc, 'div', panel, {
-    style: { display: 'flex', alignItems: 'center', gap: '8px' },
+    style: ROW_STYLE,
   });
   const compareLabel = el(doc, 'label', bottom, { text: ' Compare' });
   const compare = el(doc, 'input', null, { attrs: { type: 'checkbox' } });

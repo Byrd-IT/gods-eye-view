@@ -1085,6 +1085,83 @@ test('clear view: calibration figure 8 is shown over the clear sky while the com
   assert.match(env.doc.body.find('clear-text').textContent, /figure 8/);
 });
 
+test('clear view attribution: body.gev-sky-tiles while map tiles are drawn (real horizon), off with the flat horizon and when leaving the sky; the view does not move (t_37cf1f79)', async () => {
+  const env = setup();
+  const { doc, handle } = env;
+  const tiles = () => doc.body.classList.contains('gev-sky-tiles');
+  assert.equal(tiles(), false, 'not on the map');
+  await handle.enterAt(HOUSTON);
+  await pumpSats(env.worker);
+  assert.equal(tiles(), true, 'real horizon: the globe (tiles) is drawn');
+  click(doc.body.find('clear'));
+  assert.ok(doc.body.classList.contains('gev-sky-clear'));
+  const before = skyState(env);
+  assert.equal(tiles(), true, 'still drawn in Clear view');
+  click(doc.body.find('flat'));
+  assert.equal(env.viewer.scene.globe.show, false);
+  assert.equal(tiles(), false, 'flat horizon: only the sky is drawn');
+  click(doc.body.find('flat'));
+  assert.equal(env.viewer.scene.globe.show, true);
+  assert.equal(tiles(), true);
+  // the flag follows the scene; the camera and the view do not move
+  const after = skyState(env);
+  assert.equal(after.view, before.view, 'same view');
+  for (const k of ['position', 'direction', 'up'])
+    assert.ok(Cesium.Cartesian3.equals(after[k], before[k]), `camera ${k}`);
+  handle.exit();
+  assert.equal(tiles(), false, 'left the sky');
+  // a map that already had its globe off and no tilesets: nothing to credit
+  env.viewer.scene.globe.show = false;
+  await handle.enterAt(HOUSTON);
+  assert.equal(tiles(), false, 'globe off before entering');
+  handle.destroy();
+  assert.equal(tiles(), false);
+});
+
+test('clear view CSS: the attribution line stays while tiles are drawn: small, dim, tap-through, bottom-left, safe-area aware, under the eye; the NAIP slider is not in the sky (t_37cf1f79)', () => {
+  const css = readFileSync(new URL('./skyView.css', import.meta.url), 'utf8');
+  const flat = css.replace(/\s+/g, ' ');
+  assert.match(
+    flat,
+    /body\.gev-sky-active\.gev-sky-clear\.gev-sky-tiles :is\(#cesium-credits, #cesium-credits \*\) \{ visibility: visible !important; \}/,
+    'shown only with body.gev-sky-tiles',
+  );
+  const rule = flat.match(
+    /body\.gev-sky-active\.gev-sky-clear #cesium-credits \{([^}]*)\}/,
+  );
+  assert.ok(rule, 'Clear view credit placement');
+  const body = rule[1];
+  assert.match(body, /pointer-events: none !important/, 'tap-through');
+  assert.match(body, /position: fixed !important/);
+  // just above the overlay's compass strip (bottom 34 px of the canvas)
+  assert.match(body, /bottom: max\(38px, calc\(env\(safe-area-inset-bottom/);
+  assert.match(body, /left: max\(8px, calc\(env\(safe-area-inset-left/);
+  assert.match(body, /right: auto !important/);
+  // the line itself is Cesium's .cesium-widget-credits (absolutely placed
+  // in the 0x0 #cesium-credits box): never clip the container
+  assert.doesNotMatch(body, /overflow/, 'container not clipped (0x0 box)');
+  const line = flat.match(
+    /body\.gev-sky-active\.gev-sky-clear #cesium-credits \.cesium-widget-credits \{([^}]*)\}/,
+  );
+  assert.ok(line, 'one capped line');
+  assert.match(line[1], /white-space: nowrap !important/, 'one line');
+  assert.match(line[1], /overflow: hidden !important/);
+  // room for the eye (44 px at 12 px from the right edge) on the same row
+  assert.match(line[1], /max-width: calc\( 100vw - 80px/);
+  const opacity = Number(body.match(/opacity: ([\d.]+)/)[1]);
+  assert.ok(opacity > 0.3 && opacity < 1, 'dim but legible');
+  const z = Number(body.match(/z-index: (\d+)/)[1]);
+  assert.ok(z < 99, 'under the eye and the message line (99)');
+  assert.match(
+    flat,
+    /body\.gev-sky-active\.gev-sky-clear #cesium-credits \* \{ pointer-events: none !important; \}/,
+  );
+  assert.match(
+    flat,
+    /body\.gev-sky-active :is\(#gev-naip-slider, #gev-naip-split-line\) \{ display: none !important; \}/,
+  );
+});
+
 test('clear view CSS: everything hidden by visibility (no reflow), only the sky canvases, centre circle, eye and message shown; safe-area insets', () => {
   const css = readFileSync(new URL('./skyView.css', import.meta.url), 'utf8');
   const flat = css.replace(/\s+/g, ' ');

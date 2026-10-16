@@ -25,6 +25,10 @@
  *      keydowns) toggles it once and never toggles the HUD (t_71e66e74);
  *      the eye fades after 3 s and a touch wakes it
  *   L. denied and insecure messages stay visible over the clear sky
+ * Attribution in Clear view (t_37cf1f79): while map tiles are drawn the
+ *   app's credit line (#cesium-credits) stays painted: one dim line in the
+ *   bottom-left corner, tap-through, clear of the centre circle and the eye;
+ *   the flat horizon (no tiles) hides it; the Moon stays centred.
  * This is the synthetic part only; real phones: src/byrdit/skyView/PHONE-TEST.md.
  *   node scripts/qa-sky-p4.mjs --url http://127.0.0.1:4338 --out <dir>
  */
@@ -177,8 +181,10 @@ const handleEval = (page, fn, arg) =>
 function clearAudit() {
   const vw = innerWidth;
   const vh = innerHeight;
+  const tiles = document.body.classList.contains('gev-sky-tiles');
   const ALLOWED =
-    '.cesium-widget > canvas, .gev-sky-canvas, .gev-sky-crosshair, .gev-sky-clear-btn, .gev-sky-clear-btn *, .gev-sky-clear-note, .gev-sky-clear-note *';
+    '.cesium-widget > canvas, .gev-sky-canvas, .gev-sky-crosshair, .gev-sky-clear-btn, .gev-sky-clear-btn *, .gev-sky-clear-note, .gev-sky-clear-note *' +
+    (tiles ? ', #cesium-credits, #cesium-credits *' : '');
   const sky = document.querySelector('.gev-sky-canvas');
   const globe = document.querySelector('.cesium-widget > canvas');
   const name = (el) => {
@@ -212,7 +218,65 @@ function clearAudit() {
     }
   const r = sky.getBoundingClientRect();
   const eye = document.querySelector('[data-sky=clear]');
+  const box = (el) => {
+    const q = el?.getBoundingClientRect();
+    return q ? [q.left, q.top, q.right, q.bottom].map(Math.round) : null;
+  };
+  const overlaps = (a, b) =>
+    Boolean(a && b) && a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+  const credits = document.getElementById('cesium-credits');
+  const creditInfo = credits
+    ? (() => {
+        const cs = getComputedStyle(credits);
+        const painted = [...credits.querySelectorAll('*')].filter((e) => {
+          const c = getComputedStyle(e);
+          const q = e.getBoundingClientRect();
+          return (
+            c.visibility === 'visible' &&
+            c.display !== 'none' &&
+            q.width >= 1 &&
+            q.height >= 1 &&
+            q.left < vw &&
+            q.right > 0
+          );
+        });
+        // #cesium-credits is a 0x0 fixed box; the line is Cesium's
+        // absolutely placed .cesium-widget-credits inside it
+        const line = credits.querySelector('.cesium-widget-credits') ?? credits;
+        const rect = box(line);
+        const lineStyle = getComputedStyle(line);
+        const crosshair = document.querySelector('.gev-sky-crosshair');
+        return {
+          visible: cs.visibility === 'visible',
+          painted: painted.length,
+          text: (credits.textContent || '').trim().slice(0, 120),
+          logos: credits.querySelectorAll('img').length,
+          opacity: Number(cs.opacity),
+          pointerEvents: cs.pointerEvents,
+          childPointer: painted.every(
+            (e) => getComputedStyle(e).pointerEvents === 'none',
+          ),
+          rect,
+          inside:
+            Boolean(rect) &&
+            rect[0] >= 0 &&
+            rect[1] >= 0 &&
+            rect[2] <= vw &&
+            rect[3] <= vh,
+          size: rect ? [rect[2] - rect[0], rect[3] - rect[1]] : null,
+          lineVisible: lineStyle.visibility === 'visible',
+          oneLine: Boolean(rect) && rect[3] - rect[1] <= 32,
+          overCircle:
+            crosshair && !crosshair.hidden
+              ? overlaps(rect, box(crosshair))
+              : false,
+          overEye: eye && !eye.hidden ? overlaps(rect, box(eye)) : false,
+        };
+      })()
+    : null;
   return {
+    tiles,
+    credits: creditInfo,
     clear: document.body.classList.contains('gev-sky-clear'),
     outer: [...new Set(outer.map(name))],
     notAllowed: [
@@ -239,6 +303,24 @@ const onlySky = (a) =>
   a.skyRect[1] === 0 &&
   a.skyRect[2] === a.viewport[0] &&
   a.skyRect[3] === a.viewport[1];
+/** Clear view keeps a minimal attribution line while tiles are drawn. */
+const attributionOk = (a) =>
+  a.tiles &&
+  a.credits?.visible &&
+  a.credits.painted > 0 &&
+  a.credits.lineVisible &&
+  a.credits.size[0] >= 20 &&
+  a.credits.size[1] >= 6 &&
+  (a.credits.text.length > 0 || a.credits.logos > 0) &&
+  a.credits.opacity < 1 &&
+  a.credits.pointerEvents === 'none' &&
+  a.credits.childPointer &&
+  a.credits.inside &&
+  a.credits.oneLine &&
+  !a.credits.overCircle &&
+  !a.credits.overEye &&
+  a.credits.rect[0] < a.viewport[0] / 2 &&
+  a.credits.rect[3] > a.viewport[1] / 2;
 /** A point where a tap reaches the sky canvas (nearest the screen centre). */
 const skyPoint = (page) =>
   page.evaluate(() => {
@@ -261,11 +343,27 @@ const skyPoint = (page) =>
       }
     return best;
   });
+/** Two quick taps; returns what each pointerup hit (diagnostics). */
 async function doubleTap(page, x, y) {
+  await page.evaluate(() => {
+    globalThis.__gevQaTaps = [];
+    globalThis.__gevQaTapRec ??= (e) => {
+      const t = e.target;
+      globalThis.__gevQaTaps?.push({
+        type: e.type,
+        t: Math.round(e.timeStamp),
+        target:
+          t?.getAttribute?.('data-sky') || t?.id || t?.className || t?.tagName,
+      });
+    };
+    for (const type of ['pointerdown', 'pointerup'])
+      document.addEventListener(type, globalThis.__gevQaTapRec, true);
+  });
   await page.touchscreen.tap(x, y);
   await sleep(60);
   await page.touchscreen.tap(x, y);
   await sleep(400);
+  return page.evaluate(() => globalThis.__gevQaTaps);
 }
 const clearOn = (page) =>
   page.evaluate(() => document.body.classList.contains('gev-sky-clear'));
@@ -428,6 +526,36 @@ let hiddenList = [];
     Math.abs(clearMissAz) <= 0.1 && Math.abs(clearMissEl) <= 0.1,
     { clearMissAz, clearMissEl },
   );
+  check(
+    'I: attribution: the credit line stays in Clear view while tiles are drawn (one dim line, bottom-left, tap-through, clear of the centre circle and the eye)',
+    attributionOk(clearPortrait),
+    { tiles: clearPortrait.tiles, credits: clearPortrait.credits },
+  );
+  // flat horizon: no tiles, so no credit line; the view does not move
+  await page.evaluate(() => document.querySelector('[data-sky=flat]').click());
+  await sleep(800);
+  const flatClear = await audit(page);
+  await page.evaluate(() => document.querySelector('[data-sky=flat]').click());
+  await sleep(800);
+  const tilesAgain = await audit(page);
+  const afterFlat = await handleEval(page, (h) => h.view);
+  check(
+    'I: attribution: flat horizon (no tiles) hides the credit line; real horizon brings it back; still only the sky; Moon still centred',
+    !flatClear.tiles &&
+      flatClear.credits?.visible === false &&
+      flatClear.credits.painted === 0 &&
+      onlySky(flatClear) &&
+      attributionOk(tilesAgain) &&
+      onlySky(tilesAgain) &&
+      Math.abs(wrap180(afterFlat.azDeg - moon.azDeg)) <= 0.1 &&
+      Math.abs(afterFlat.elDeg - moon.elDeg) <= 0.1,
+    {
+      flat: { tiles: flatClear.tiles, credits: flatClear.credits },
+      again: { tiles: tilesAgain.tiles, painted: tilesAgain.credits?.painted },
+      missAz: wrap180(afterFlat.azDeg - moon.azDeg),
+      missEl: afterFlat.elDeg - moon.elDeg,
+    },
+  );
   await sleep(4000);
   await page.screenshot({
     path: path.join(OUT, '01-pointing-moon-portrait.png'),
@@ -517,6 +645,11 @@ let hiddenList = [];
       viewLand,
       viewLand2,
     },
+  );
+  check(
+    'J: landscape attribution: the credit line stays (one dim line, bottom-left, tap-through, clear of the centre circle and the eye)',
+    attributionOk(clearLand),
+    { tiles: clearLand.tiles, credits: clearLand.credits },
   );
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 412,
@@ -665,7 +798,22 @@ let hiddenList = [];
   await sleep(300);
   await step('eye');
   const kPt = await skyPoint(page); // controls shown: tap the sky between them
-  await doubleTap(page, kPt.x, kPt.y);
+  // Headless software GL can block the page for longer than the 350 ms
+  // double-tap window after the first tap (seen: 739 ms between the two
+  // pointerups with the NAIP basemap on screen). Such a pair is two single
+  // taps by design, so it is retried; a pair inside the window that does not
+  // toggle still fails.
+  const kTries = [];
+  for (let i = 0; i < 3; i++) {
+    const taps = await doubleTap(page, kPt.x, kPt.y);
+    const ups = taps.filter((t) => t.type === 'pointerup').map((t) => t.t);
+    const gap = ups.length === 2 ? ups[1] - ups[0] : null;
+    const toggled = await clearOn(page);
+    kTries.push({ gap, toggled, taps });
+    if (toggled || (gap != null && gap <= 350)) break;
+    await sleep(1000);
+  }
+  const kTaps = kTries;
   await step('double-tap');
   const active = await handleEval(page, (h) => h.active);
   const expected = [false, true, false, true, false, true, false, true];
@@ -681,7 +829,7 @@ let hiddenList = [];
           s.view.elDeg === k0.view.elDeg &&
           s.view.fovDeg === k0.view.fovDeg,
       ),
-    { start: k0, heldRepeats, steps },
+    { start: k0, heldRepeats, steps, kPt, kTaps },
   );
   check(
     'K: the restore handle fades after 3 s and a touch brings it back',
