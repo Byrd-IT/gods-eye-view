@@ -999,10 +999,13 @@ body.gev-sky-active.gev-sky-clear
    Cesium, NAIP/TxGIO, Sentinel/GIBS, OSM...) need their credits on screen.
    While map tiles are drawn (body.gev-sky-tiles, set by skyView.js: real
    horizon; the flat horizon hides the globe and every tileset) Clear view
-   keeps the app's own credit line (#cesium-credits: the same Cesium credits
-   as normal mode, no new text) as one small, dim, tap-through line in the
-   bottom-left corner, just above the overlay's compass strip (bottom 34 px):
+   keeps the app's own credit line (#cesium-credits: the same Cesium credits,
+   dim colours and bottom offset as normal mode; no new text) as one
+   tap-through line in the bottom-left corner, above the compass strip and
    clear of the eye (bottom-right) and of the centre circle.
+   The vertical position is left to the app's credit rules on purpose: the
+   attribution pin (src/creditAttribution.test.mjs) models every
+   position/top/bottom rule on #cesium-credits and fails closed on new ones.
    #cesium-credits is a 0x0 fixed box; Cesium's .cesium-widget-credits inside
    it is absolutely placed at its bottom-left, so the line is capped there. */
 body.gev-sky-active.gev-sky-clear.gev-sky-tiles
@@ -1011,13 +1014,8 @@ body.gev-sky-active.gev-sky-clear.gev-sky-tiles
 }
 
 body.gev-sky-active.gev-sky-clear #cesium-credits {
-  position: fixed !important;
-  top: auto !important;
-  right: auto !important;
-  bottom: max(38px, calc(env(safe-area-inset-bottom, 0px) + 38px)) !important;
-  left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px)) !important;
+  left: max(0.75rem, calc(env(safe-area-inset-left, 0px) + 8px)) !important;
   z-index: 98 !important;
-  opacity: 0.8;
   pointer-events: none !important;
 }
 

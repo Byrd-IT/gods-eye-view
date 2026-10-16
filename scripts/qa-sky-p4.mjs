@@ -27,7 +27,7 @@
  *   L. denied and insecure messages stay visible over the clear sky
  * Attribution in Clear view (t_37cf1f79): while map tiles are drawn the
  *   app's credit line (#cesium-credits) stays painted: one dim line in the
- *   bottom-left corner, tap-through, clear of the centre circle and the eye;
+ *   bottom-left corner (the app's credit placement), tap-through, clear of the centre circle and the eye;
  *   the flat horizon (no tiles) hides it; the Moon stays centred.
  * This is the synthetic part only; real phones: src/byrdit/skyView/PHONE-TEST.md.
  *   node scripts/qa-sky-p4.mjs --url http://127.0.0.1:4338 --out <dir>
@@ -252,6 +252,12 @@ function clearAudit() {
           text: (credits.textContent || '').trim().slice(0, 120),
           logos: credits.querySelectorAll('img').length,
           opacity: Number(cs.opacity),
+          // dim like normal mode: text colour alpha < 1, never faded out
+          colorAlpha: (() => {
+            const m = cs.color.match(/rgba?\(([^)]*)\)/);
+            const parts = m ? m[1].split(/[ ,/]+/).filter(Boolean) : [];
+            return parts.length === 4 ? Number(parts[3]) : 1;
+          })(),
           pointerEvents: cs.pointerEvents,
           childPointer: painted.every(
             (e) => getComputedStyle(e).pointerEvents === 'none',
@@ -312,7 +318,8 @@ const attributionOk = (a) =>
   a.credits.size[0] >= 20 &&
   a.credits.size[1] >= 6 &&
   (a.credits.text.length > 0 || a.credits.logos > 0) &&
-  a.credits.opacity < 1 &&
+  a.credits.opacity === 1 &&
+  a.credits.colorAlpha < 1 &&
   a.credits.pointerEvents === 'none' &&
   a.credits.childPointer &&
   a.credits.inside &&

@@ -1118,7 +1118,7 @@ test('clear view attribution: body.gev-sky-tiles while map tiles are drawn (real
   assert.equal(tiles(), false);
 });
 
-test('clear view CSS: the attribution line stays while tiles are drawn: small, dim, tap-through, bottom-left, safe-area aware, under the eye; the NAIP slider is not in the sky (t_37cf1f79)', () => {
+test('clear view CSS: the attribution line stays while tiles are drawn: tap-through, bottom-left, safe-area aware, under the eye, placed by the app credit rules; the NAIP slider is not in the sky (t_37cf1f79)', () => {
   const css = readFileSync(new URL('./skyView.css', import.meta.url), 'utf8');
   const flat = css.replace(/\s+/g, ' ');
   assert.match(
@@ -1132,11 +1132,15 @@ test('clear view CSS: the attribution line stays while tiles are drawn: small, d
   assert.ok(rule, 'Clear view credit placement');
   const body = rule[1];
   assert.match(body, /pointer-events: none !important/, 'tap-through');
-  assert.match(body, /position: fixed !important/);
-  // just above the overlay's compass strip (bottom 34 px of the canvas)
-  assert.match(body, /bottom: max\(38px, calc\(env\(safe-area-inset-bottom/);
-  assert.match(body, /left: max\(8px, calc\(env\(safe-area-inset-left/);
-  assert.match(body, /right: auto !important/);
+  assert.match(body, /left: max\(0\.75rem, calc\(env\(safe-area-inset-left/);
+  // vertical placement stays with the app's credit rules (bottom-left,
+  // above the dock / compass strip): the attribution pin models every
+  // position/top/bottom rule on #cesium-credits and fails closed on new ones
+  assert.doesNotMatch(
+    body,
+    /(^|;)\s*(position|top|bottom|height|transform)\s*:/,
+  );
+  assert.doesNotMatch(body, /opacity/, 'not faded (attribution pin)');
   // the line itself is Cesium's .cesium-widget-credits (absolutely placed
   // in the 0x0 #cesium-credits box): never clip the container
   assert.doesNotMatch(body, /overflow/, 'container not clipped (0x0 box)');
@@ -1148,10 +1152,8 @@ test('clear view CSS: the attribution line stays while tiles are drawn: small, d
   assert.match(line[1], /overflow: hidden !important/);
   // room for the eye (44 px at 12 px from the right edge) on the same row
   assert.match(line[1], /max-width: calc\( 100vw - 80px/);
-  const opacity = Number(body.match(/opacity: ([\d.]+)/)[1]);
-  assert.ok(opacity > 0.3 && opacity < 1, 'dim but legible');
   const z = Number(body.match(/z-index: (\d+)/)[1]);
-  assert.ok(z < 99, 'under the eye and the message line (99)');
+  assert.ok(z > 96 && z < 99, 'over the sky (96), under the eye (99)');
   assert.match(
     flat,
     /body\.gev-sky-active\.gev-sky-clear #cesium-credits \* \{ pointer-events: none !important; \}/,
