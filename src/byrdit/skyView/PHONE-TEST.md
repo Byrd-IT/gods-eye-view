@@ -11,7 +11,8 @@ What this checks on REAL phones (the synthetic part is in
 3. the LAN http address explains that the https address is needed.
 
 None of these real-device checks has been done yet: they are the device
-card (t_d0655670), after the deploy.
+card (t_d0655670), after the deploy. Clear view (step 14, t_aaae5ed7) has
+only been checked in headless Chromium (`scripts/qa-sky-p4.mjs`, cases I-L).
 
 Record a screenshot for every numbered step marked SHOT and attach them to the
 kanban card with the phone model, OS version and browser version.
@@ -49,6 +50,11 @@ way is what the steps below check (not yet done: see the device card).
 - In GEV: tap Sky, then "Use my location" (allow location). Your own GPS
   position matters: the compass correction (magnetic declination) is taken
   for the sky point, and the status line says so if it is not your location.
+- Clear view: once the view follows the phone, every menu and panel hides
+  by itself so only the sky is left (the first time it says "Double-tap to
+  show controls"). For the steps that tap Align or "Point at the sky",
+  double-tap the sky (or tap the round eye button: bottom-right corner in
+  portrait, top-right in landscape) to bring the controls back first. Step 14 tests Clear view itself.
 
 ## iPhone (Safari)
 
@@ -112,6 +118,32 @@ way is what the steps below check (not yet done: see the device card).
 13. Battery sanity (optional): leave pointing on, phone still on a table for
     5 minutes; the view must not keep redrawing (no visible shimmer) and the
     phone must not get warm.
+14. Clear view (only the sky):
+    a. In Sky with the controls shown, tap the round eye button
+    (bottom-right corner in portrait, top-right in landscape). Everything except the sky disappears: the Sky
+    toolbar, time row, satellite panel, Find/Layers, the Sky button, the
+    app's top icons, the HUD text, the voice/command dock, the key chip
+    and the map credits. Stars, lines, names, planets, satellites, the
+    horizon and its compass scale stay exactly where they were (no jump,
+    no reload). SHOT in portrait and in landscape.
+    b. The eye fades after about 3 seconds; touching the screen anywhere
+    brings it back. The notch and the bottom gesture bar do not cover it.
+    c. Double-tap the sky: the controls come back. Double-tap again: clear.
+    A single tap on a satellite still selects it, a drag still turns the
+    view and a pinch still zooms; none of them toggles Clear view.
+    d. Tap "Point at the sky" (controls shown): once the view follows the
+    phone, Clear view turns on by itself and says "Double-tap to show
+    controls" (only the first time in a browser session). The centre
+    circle stays. Bring the controls back with a double-tap: for the rest
+    of the session pointing no longer clears the screen by itself.
+    e. Messages stay visible in Clear view as one line at the top: the
+    denied path (8 or 11), the LAN address (12) and the compass figure 8
+    (step 2). Check at least one of them with Clear view on. SHOT.
+    f. Leave the sky (double-tap, Back to map) and come back: Clear view is
+    remembered until the browser tab is closed.
+    Desktop: H toggles Clear view in the sky (outside the sky H stays the
+    HUD key), Escape brings the controls back, and a double-click on the sky
+    toggles it as well.
 
 ## What to write on the card
 

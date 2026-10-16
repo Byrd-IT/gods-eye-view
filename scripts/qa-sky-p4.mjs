@@ -13,6 +13,17 @@
  *   F. a drag takes over (state off, roll 0, camera moves)
  *   G. sensors denied (Browser.setPermission) -> "denied" message, drag works
  *   H. insecure http host (not localhost) -> "insecure" message with https URL
+ * Clear view (t_aaae5ed7, clearView.js):
+ *   I. pointing on a touch phone enters Clear view with the one-off hint;
+ *      only the sky canvases, centre circle, eye and message line are
+ *      visible (computed style), every tap point hits the sky, the overlay
+ *      fills the screen, and the Moon is still centred (miss <= 0.1 deg)
+ *   J. landscape: still clear; double-tap brings the controls back and
+ *      clears again; the view does not move
+ *   K. eye, H (the app's H = HUD does not fire), Escape and double-tap
+ *      toggle it with the view unchanged; the eye fades after 3 s and a
+ *      touch wakes it
+ *   L. denied and insecure messages stay visible over the clear sky
  * This is the synthetic part only; real phones: src/byrdit/skyView/PHONE-TEST.md.
  *   node scripts/qa-sky-p4.mjs --url http://127.0.0.1:4338 --out <dir>
  */
@@ -161,6 +172,81 @@ const handleEval = (page, fn, arg) =>
     arg,
   );
 
+/** What is painted (computed style) and what a tap hits, for Clear view. */
+function clearAudit() {
+  const vw = innerWidth;
+  const vh = innerHeight;
+  const ALLOWED =
+    '.cesium-widget > canvas, .gev-sky-canvas, .gev-sky-crosshair, .gev-sky-clear-btn, .gev-sky-clear-btn *, .gev-sky-clear-note, .gev-sky-clear-note *';
+  const sky = document.querySelector('.gev-sky-canvas');
+  const globe = document.querySelector('.cesium-widget > canvas');
+  const name = (el) => {
+    if (el.id) return `#${el.id}`;
+    const ds = el.getAttribute('data-sky');
+    if (ds) return `[data-sky=${ds}]`;
+    const cls = [...el.classList].slice(0, 2).join('.');
+    return `${el.tagName.toLowerCase()}${cls ? `.${cls}` : ''}`;
+  };
+  const shown = [];
+  for (const el of document.querySelectorAll('body *')) {
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility !== 'visible') continue;
+    if (Number(cs.opacity) === 0) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) continue;
+    if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
+    shown.push(el);
+  }
+  const set = new Set(shown);
+  const outer = shown.filter(
+    (el) =>
+      !set.has(el.parentElement) && !el.contains(sky) && !el.contains(globe),
+  );
+  const hits = {};
+  for (let y = 5; y < vh; y += 20)
+    for (let x = 5; x < vw; x += 20) {
+      const e = document.elementFromPoint(x, y);
+      const k = e === sky ? 'sky' : e ? name(e) : 'none';
+      hits[k] = (hits[k] || 0) + 1;
+    }
+  const r = sky.getBoundingClientRect();
+  const eye = document.querySelector('[data-sky=clear]');
+  return {
+    clear: document.body.classList.contains('gev-sky-clear'),
+    outer: [...new Set(outer.map(name))],
+    notAllowed: [
+      ...new Set(shown.filter((el) => !el.matches(ALLOWED)).map(name)),
+    ],
+    hits,
+    skyRect: [r.left, r.top, r.width, r.height],
+    viewport: [vw, vh],
+    note: document.querySelector('[data-sky=clear-note]')?.hidden
+      ? ''
+      : document.querySelector('[data-sky=clear-text]')?.textContent,
+    eyeOpacity: eye ? Number(getComputedStyle(eye).opacity) : null,
+    hud: document.getElementById('intel-hud')?.className ?? null,
+  };
+}
+const audit = (page) => page.evaluate(clearAudit);
+const onlySky = (a) =>
+  a.clear &&
+  a.notAllowed.length === 0 &&
+  Object.keys(a.hits).every((k) =>
+    /^(sky|\[data-sky=clear\]|span\.gev-sky-clear-icon)$/.test(k),
+  ) &&
+  a.skyRect[0] === 0 &&
+  a.skyRect[1] === 0 &&
+  a.skyRect[2] === a.viewport[0] &&
+  a.skyRect[3] === a.viewport[1];
+async function doubleTap(page, x, y) {
+  await page.touchscreen.tap(x, y);
+  await sleep(60);
+  await page.touchscreen.tap(x, y);
+  await sleep(400);
+}
+const clearOn = (page) =>
+  page.evaluate(() => document.body.classList.contains('gev-sky-clear'));
+
 async function ensureEntered(page) {
   for (let i = 0; i < 60; i += 1) {
     const s = await handleEval(page, (h) => ({
@@ -219,6 +305,7 @@ async function sampleViews(page, ms, during) {
 }
 
 // ── A-F: sensors allowed ───────────────────────────────────────────────────
+let hiddenList = [];
 {
   const { page, cdp } = await openSky(BASE);
   await ensureEntered(page);
@@ -236,6 +323,8 @@ async function sampleViews(page, ms, during) {
     offered.hidden === false,
     offered,
   );
+  const withControls = await audit(page);
+  await page.screenshot({ path: path.join(OUT, '00-controls-portrait.png') });
 
   const magAz = moon.azDeg - decl;
   await readSensor(cdp, pose(magAz, moon.elDeg));
@@ -282,6 +371,39 @@ async function sampleViews(page, ms, during) {
       Math.abs(drawn.crosshair.x - drawn.canvas.w / 2) < 2 &&
       drawn.bodies?.includes('Moon'),
     drawn,
+  );
+  // I: pointing entered Clear view by itself (touch phone)
+  const clearPortrait = await audit(page);
+  const hidden = withControls.outer.filter(
+    (n) => !clearPortrait.outer.includes(n),
+  );
+  say('clear view hides', hidden);
+  hiddenList = hidden;
+  check(
+    'I: pointing on a touch phone enters Clear view with the one-off hint',
+    clearPortrait.clear &&
+      /Double-tap to show controls/.test(clearPortrait.note),
+    { note: clearPortrait.note },
+  );
+  check(
+    'I: Clear view: only the sky canvases, centre circle, eye and message are painted; every tap point hits the sky; the overlay fills the screen',
+    onlySky(clearPortrait) && hidden.length >= 8,
+    {
+      painted: clearPortrait.outer,
+      notAllowed: clearPortrait.notAllowed,
+      hits: clearPortrait.hits,
+      skyRect: clearPortrait.skyRect,
+      viewport: clearPortrait.viewport,
+      hiddenCount: hidden.length,
+    },
+  );
+  const inClear = await handleEval(page, (h) => h.view);
+  const clearMissAz = wrap180(inClear.azDeg - moon.azDeg);
+  const clearMissEl = inClear.elDeg - moon.elDeg;
+  check(
+    'I: Moon still centred in Clear view (miss <= 0.1 deg)',
+    Math.abs(clearMissAz) <= 0.1 && Math.abs(clearMissEl) <= 0.1,
+    { clearMissAz, clearMissEl },
   );
   await sleep(4000);
   await page.screenshot({
@@ -341,6 +463,35 @@ async function sampleViews(page, ms, during) {
   await page.screenshot({
     path: path.join(OUT, '02-pointing-moon-landscape.png'),
   });
+  // J: landscape Clear view; double-tap brings the controls back and clears
+  const clearLand = await audit(page);
+  const viewLand = await handleEval(page, (h) => h.view);
+  await doubleTap(page, 457, 120);
+  const landControls = await clearOn(page);
+  await sleep(1500);
+  await page.screenshot({
+    path: path.join(OUT, '02b-landscape-controls.png'),
+  });
+  await doubleTap(page, 457, 120);
+  const landAgain = await clearOn(page);
+  const viewLand2 = await handleEval(page, (h) => h.view);
+  check(
+    'J: landscape: Clear view stays, only the sky is painted; double-tap shows the controls and clears again; view unchanged',
+    onlySky(clearLand) &&
+      landControls === false &&
+      landAgain === true &&
+      Math.abs(wrap180(viewLand2.azDeg - viewLand.azDeg)) < 0.1 &&
+      Math.abs(viewLand2.elDeg - viewLand.elDeg) < 0.1,
+    {
+      notAllowed: clearLand.notAllowed,
+      hits: clearLand.hits,
+      skyRect: clearLand.skyRect,
+      landControls,
+      landAgain,
+      viewLand,
+      viewLand2,
+    },
+  );
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 412,
     height: 915,
@@ -427,6 +578,72 @@ async function sampleViews(page, ms, during) {
     { before, after, later },
   );
   await page.screenshot({ path: path.join(OUT, '03-drag-took-over.png') });
+
+  // K: toggles leave the view alone; H beats the app's HUD key; the eye fades
+  await sleep(2000); // drag inertia from F has died out
+  const k0 = await handleEval(page, (h) => ({
+    view: h.view,
+    clear: h.clearView.on,
+  }));
+  const hud0 = (await audit(page)).hud;
+  const steps = [];
+  const step = async (label) => {
+    const a = await audit(page);
+    const v = await handleEval(page, (h) => h.view);
+    steps.push({ label, clear: a.clear, hud: a.hud === hud0, view: v });
+    return a;
+  };
+  await page.keyboard.press('Escape');
+  await sleep(300);
+  await step('Escape');
+  await page.keyboard.press('h');
+  await sleep(300);
+  await step('H');
+  await page.keyboard.press('h');
+  await sleep(300);
+  await step('H');
+  await page.tap('[data-sky=clear]');
+  await sleep(300);
+  await step('eye');
+  await sleep(3600);
+  const faded = await audit(page);
+  await page.touchscreen.tap(206, 300);
+  await sleep(700);
+  const woken = await audit(page);
+  await page.tap('[data-sky=clear]');
+  await sleep(300);
+  await step('eye');
+  await doubleTap(page, 206, 300);
+  await step('double-tap');
+  const active = await handleEval(page, (h) => h.active);
+  const expected = [false, true, false, true, false, true];
+  check(
+    'K: Escape / H / eye / double-tap toggle Clear view (Escape stays in the sky), H does not toggle the HUD, the view never moves',
+    k0.clear === true &&
+      active &&
+      steps.every((s, i) => s.clear === expected[i] && s.hud) &&
+      steps.every(
+        (s) =>
+          s.view.azDeg === k0.view.azDeg &&
+          s.view.elDeg === k0.view.elDeg &&
+          s.view.fovDeg === k0.view.fovDeg,
+      ),
+    { start: k0, steps },
+  );
+  check(
+    'K: the restore handle fades after 3 s and a touch brings it back',
+    faded.clear &&
+      faded.eyeOpacity <= 0.25 &&
+      woken.clear &&
+      woken.eyeOpacity >= 0.7,
+    { faded: faded.eyeOpacity, woken: woken.eyeOpacity },
+  );
+  await page.screenshot({ path: path.join(OUT, '06-clear-portrait.png') });
+  await page.tap('[data-sky=clear]');
+  await sleep(1500);
+  await page.screenshot({
+    path: path.join(OUT, '06b-controls-portrait.png'),
+  });
   await page.close();
 }
 
@@ -463,6 +680,15 @@ async function sampleViews(page, ms, during) {
     { denied, dragged },
   );
   await page.screenshot({ path: path.join(OUT, '04-denied.png') });
+  await page.tap('[data-sky=clear]');
+  await sleep(600);
+  const deniedClear = await audit(page);
+  check(
+    'L: denied message stays visible over the clear sky',
+    onlySky(deniedClear) && /Motion access is blocked/.test(deniedClear.note),
+    { note: deniedClear.note, notAllowed: deniedClear.notAllowed },
+  );
+  await page.screenshot({ path: path.join(OUT, '04b-denied-clear.png') });
   await bcdp.send('Browser.resetPermissions', {});
   await page.close();
 }
@@ -499,6 +725,16 @@ async function sampleViews(page, ms, during) {
     { secure, ...insecure },
   );
   await page.screenshot({ path: path.join(OUT, '05-insecure-lan.png') });
+  await page.tap('[data-sky=clear]');
+  await sleep(600);
+  const lanClear = await audit(page);
+  check(
+    'L: insecure-address message stays visible over the clear sky',
+    onlySky(lanClear) &&
+      /https:\/\/godseyeview\.byrd-it\.com/.test(lanClear.note),
+    { note: lanClear.note, notAllowed: lanClear.notAllowed },
+  );
+  await page.screenshot({ path: path.join(OUT, '05b-insecure-clear.png') });
   await page.close();
   proxy.close();
 }
@@ -517,6 +753,7 @@ fs.writeFileSync(
       skyTime,
       moon: { az: moon.azDeg, el: moon.elDeg },
       decl,
+      clearViewHides: hiddenList,
       checks,
       errors,
     },

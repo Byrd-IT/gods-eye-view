@@ -22,6 +22,8 @@
  * provider of historyTime.js) is the ONLY time for the overlay, the worker
  * ticks, the ephemeris and viewer.clock; the time control, presets and
  * validity banners live in skyTimeControl.js.
+ * Clear view (clearView.js): the eye button, a double-tap on the sky or H
+ * hides every control so only the sky is left; Escape brings them back.
  */
 import * as Cesium from 'cesium';
 import { observerSolarElevation } from '../../data/satellitePass.js';
@@ -105,6 +107,13 @@ import {
   orientationMessage,
 } from './orientationMath.js';
 import { DEFAULT_SKY_FLAGS, readSkyUrl, writeSkyUrl } from './skyUrl.js';
+import {
+  CLEAR_MESSAGE_STATES,
+  createClearView,
+  clearKeyAction,
+  isDoubleTap,
+  sessionStore,
+} from './clearView.js';
 
 const mounted = new WeakMap();
 const PHASE_TEXT = {
@@ -475,6 +484,8 @@ export function mountSkyView({
   historyTarget = globalThis.window ?? null,
   /** Next ISS pass for the preset (P2b passes engine when merged). */
   nextIssPass = null,
+  /** Clear view: where the session's choice is kept (sessionStorage). */
+  clearStorage,
 } = {}) {
   if (!viewer?.camera || !viewer?.scene || !doc?.createElement) return null;
   const existing = mounted.get(viewer);
@@ -487,6 +498,15 @@ export function mountSkyView({
   host.append(dom.button, dom.panel, dom.bar, satDom.root);
   const canvasHost = viewer.container || host;
   canvasHost.append(dom.canvas, dom.crosshair);
+  const clearView = createClearView({
+    doc,
+    timers,
+    storage: clearStorage ?? sessionStore(),
+    coarse: () => offerPointing(),
+    // the focused control is about to be hidden: H/Escape go to the sky
+    onEnter: () => dom.canvas.focus?.({ preventScroll: true }),
+  });
+  host.append(clearView.button, clearView.note);
   const removers = [];
   const listen = (target, type, handler, options) => {
     if (!target?.addEventListener) return;
@@ -528,6 +548,8 @@ export function mountSkyView({
   let satFrameAt = 0;
   let lookFrame = null;
   let press = null;
+  /** Last finished tap on the sky (double-tap = Clear view). */
+  let lastTap = null;
   // brightness + passes (P2b)
   let nakedEyeOn = Boolean(nakedEyeDefault);
   let magLimit = MAG_LIMIT_DEFAULT;
@@ -747,6 +769,22 @@ export function mountSkyView({
     if (o.status.textContent !== text) o.status.textContent = text;
     const hidden = !(active && parts.length);
     if (o.root.hidden !== hidden) o.root.hidden = hidden;
+    // Clear view keeps what needs the user (permission, denied, insecure,
+    // calibrating, the figure 8, a pointing note) as one line over the sky
+    if (
+      state === 'on' ||
+      (state === 'calibrating' && orientation.reason !== 'relative')
+    )
+      clearView.fireAuto();
+    else if (state !== 'asking') clearView.disarmAuto();
+    clearView.setMessage({
+      note: orientNote,
+      message:
+        active && CLEAR_MESSAGE_STATES.includes(state)
+          ? orientationMessage(state, orientation.reason)
+          : '',
+      figure8: active && !o.figure8.hidden,
+    });
   }
 
   /** Point at the sky / Stop pointing: start() runs inside the tap (iOS). */
@@ -762,6 +800,8 @@ export function mountSkyView({
       );
     cancelInertia();
     cancelLook();
+    // touch phones go to Clear view once the phone leads (clearView.js)
+    if (offerPointing()) clearView.armAuto();
     orientation.start();
     syncOrientationUi();
   }
@@ -1283,6 +1323,7 @@ export function mountSkyView({
       );
       syncPlayLoop();
       dom.canvas.focus?.();
+      clearView.setActive(true);
     });
     if (!entered) setStatus('Sky view is not available in this mode.');
     return entered;
@@ -1322,6 +1363,8 @@ export function mountSkyView({
     pinch = null;
     dom.canvas.hidden = true;
     dom.bar.hidden = true;
+    lastTap = null;
+    clearView.setActive(false);
     doc.body?.classList?.remove('gev-sky-active');
     timers.clearTimeout?.(urlTimer);
     urlTimer = null;
@@ -1534,7 +1577,10 @@ export function mountSkyView({
       vAz: 0,
       vEl: 0,
     });
-    if (pointers.size === 2) pinch = { distance: distance(), view };
+    if (pointers.size === 2) {
+      pinch = { distance: distance(), view };
+      lastTap = null;
+    }
   }
   function onPointerMove(event) {
     const p = pointers.get(event.pointerId);
@@ -1588,12 +1634,32 @@ export function mountSkyView({
       now() - press.t < CLICK_MS
     ) {
       press = null;
+      const tap = { t: now(), x: event.clientX, y: event.clientY };
+      if (isDoubleTap(lastTap, tap)) {
+        // second tap: Clear view on/off, and the first tap's selection
+        // change is undone so a double-tap changes nothing in the sky
+        const before = lastTap.selection;
+        lastTap = null;
+        if (before.index !== selectedIndex || before.pass !== selectedPass) {
+          selectedIndex = before.index;
+          selectedPass = before.pass;
+          updateSatPanel();
+          redraw();
+        }
+        clearView.toggle();
+        return;
+      }
+      lastTap = {
+        ...tap,
+        selection: { index: selectedIndex, pass: selectedPass },
+      };
       const { x, y } = canvasPoint(event);
       const hit = hitTest(satModel, x, y);
       if (hit != null || selectedIndex != null) selectSatellite(hit);
       return;
     }
     press = null;
+    lastTap = null; // a drag or pinch in between: not a double-tap
     if (pointers.size < 2) pinch = null;
     if (!active || !p || pointers.size) return;
     if (
@@ -1652,6 +1718,26 @@ export function mountSkyView({
     submitQuery();
   });
   listen(dom.buttons.back, 'click', () => exit());
+  listen(clearView.button, 'click', () => clearView.toggle());
+  // Clear view keys (H toggles, Escape restores) win over the app's own
+  // shortcuts (H = HUD) while the sky is shown: capture phase, stopped here
+  listen(
+    doc,
+    'keydown',
+    (event) => {
+      if (!active) return;
+      clearView.wake();
+      const action = clearKeyAction(event, { clear: clearView.on });
+      if (!action) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      if (action === 'restore') clearView.set(false);
+      else clearView.toggle();
+    },
+    true,
+  );
+  // any touch or click brings the faded handle back
+  listen(doc, 'pointerdown', () => clearView.wake(), true);
   listen(dom.buttons.point, 'click', () => togglePointing());
   listen(dom.buttons.alignSun, 'click', () => alignOn('sun'));
   listen(dom.buttons.alignMoon, 'click', () => alignOn('moon'));
@@ -1870,6 +1956,10 @@ export function mountSkyView({
       return orientation;
     },
     togglePointing: () => togglePointing(),
+    /** Clear view controller (clearView.js): on, set(), toggle(). */
+    get clearView() {
+      return clearView;
+    },
     alignOn: (which) => alignOn(which),
     /** Stars, constellations, bodies, layers and search (P3b). */
     get content() {
@@ -1937,6 +2027,7 @@ export function mountSkyView({
       content.destroy();
       orientation.destroy();
       timers.clearTimeout?.(noteTimer);
+      clearView.destroy();
       timeControl.destroy();
       time.destroy();
       historyTime.destroy();
