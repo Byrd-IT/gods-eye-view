@@ -171,7 +171,10 @@ export function createIngestion({
       const payload = await source.getLaunches({
         signal: layerState._sourceController.signal,
       });
-      const launches = parts.model.normalizeRocketLaunches(payload);
+      const launches = parts.model.normalizeRocketLaunches(
+        payload,
+        payload?.gevAsOf && new Date(payload.gevAsOf),
+      ); // Byrd-IT B12b: history as-of t
       if (
         !layerState._enabled ||
         token !== layerState._lifecycleToken ||

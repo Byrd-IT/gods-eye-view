@@ -5,10 +5,12 @@
  * While history is active, a GET on a history-capable live route is
  * answered from /api/history/slice?feed=<f>&t=<ISO>. An adapter says how:
  *
- *   sliceParams(liveUrl)  the slice questions (bbox / maxRows) for that
+ *   sliceParams(liveUrl, ctx)
+ *                         the slice questions (bbox / maxRows) for that
  *                         live request; more than one when a view crosses
- *                         the antimeridian (the slice API takes w < e only)
- *   adapt(answers, {t, nowMs})
+ *                         the antimeridian (the slice API takes w < e only).
+ *                         ctx.viewBox() = the camera view box (FIRMS, D7)
+ *   adapt(answers, {t, nowMs, url})
  *                         the slice answers -> the EXACT live body + the
  *                         headers the live source reads, so the existing
  *                         parsers (src/sources/live/*) run unchanged
@@ -29,7 +31,8 @@
  * D3: a gap or an empty slice becomes an EMPTY live answer (nothing drawn);
  * nothing is invented, interpolated or taken from another time.
  *
- * The registry is the extension point: B12b/B12d add entries.
+ * The registry is the extension point: B12b adds the event feeds in
+ * historyEventAdapters.js (ALL_HISTORY_ADAPTERS = this list + those).
  */
 
 /** Live route -> slice: the B9/B10 slice API caps every answer here. */
@@ -173,7 +176,7 @@ function clampRows(value, fallback) {
 const JSON_TYPE = 'application/json; charset=utf-8';
 
 /** The history headers worth keeping on the adapted answer (QA, chips). */
-function passHeaders(answers) {
+export function passHeaders(answers) {
   const out = {};
   const rows = answers.reduce(
     (sum, a) => sum + (Number(a.headers['x-history-rows']) || 0),

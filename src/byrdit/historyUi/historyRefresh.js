@@ -38,6 +38,11 @@
  *
  * During a scrub drag nothing is refreshed (the B11 control makes no
  * request while dragging either); the release refreshes once, debounced.
+ *
+ * Camera (B12b, D7): a view-dependent feed (FIRMS asks its slice with the
+ * camera bbox) is refreshed once, debounced, after a camera move that
+ * changes its slice box, so the area on screen is answered from history
+ * instead of waiting for the layer's own 10-minute poll.
  */
 export const RELEASE_DEBOUNCE_MS = 300;
 export const PLAY_POLL_MS = 250;
@@ -67,6 +72,7 @@ export function createRefreshDriver({
   const snapAsk = new Map(); // snap feed -> {at, pending}
   const calls = []; // refreshLayer log (tests / QA): {layerId, at}
   let releaseTimer = null;
+  let viewTimer = null;
   let playTimer = null;
   let dragging = false;
   let destroyed = false;
@@ -219,6 +225,21 @@ export function createRefreshDriver({
     }, releaseDebounceMs);
   }
 
+  /** The camera stopped moving (shell: viewer.camera.moveEnd). */
+  function viewChanged() {
+    if (destroyed || !state.active) return;
+    if (viewTimer) timers.clearTimeout(viewTimer);
+    viewTimer = timers.setTimeout(() => {
+      viewTimer = null;
+      if (destroyed || dragging || !state.active) return;
+      for (const a of targets())
+        if (a.viewDependent && router.viewMoved?.(a.id)) {
+          wasSwapped.add(a.id);
+          refresh(a, 1);
+        }
+    }, releaseDebounceMs);
+  }
+
   // ── playback ────────────────────────────────────────────
 
   async function askSnaps(adapter, t) {
@@ -341,6 +362,8 @@ export function createRefreshDriver({
       stopPlay();
       if (releaseTimer) timers.clearTimeout(releaseTimer);
       releaseTimer = null;
+      if (viewTimer) timers.clearTimeout(viewTimer);
+      viewTimer = null;
       lastFrame.clear();
       planned.clear();
       const enabled = enabledIds();
@@ -382,6 +405,7 @@ export function createRefreshDriver({
   return {
     onHistory,
     setDragging,
+    viewChanged,
     tick,
     refreshTargets,
     targets,
@@ -405,6 +429,8 @@ export function createRefreshDriver({
       stopPlay();
       if (releaseTimer) timers.clearTimeout(releaseTimer);
       releaseTimer = null;
+      if (viewTimer) timers.clearTimeout(viewTimer);
+      viewTimer = null;
     },
   };
 }

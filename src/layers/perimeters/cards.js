@@ -134,6 +134,7 @@ export function buildIncidentCard(row, nowMs, { link = null } = {}) {
   if (situation.length) details.push(situation.join(' · '));
   if (response.length) details.push(response.join(' · '));
   if (ages.length) details.push(ages.join(' · '));
+  if (row.historyUnknown) details.push(row.historyUnknown); // Byrd-IT B12b
   if (link) details.push('InciWeb ↗ · click card to open');
 
   const title = `FIRE · ${row.name || 'Unnamed incident'}`;

@@ -468,7 +468,16 @@ check(
 );
 check(
   JSON.stringify(st.router?.swapped) ===
-    JSON.stringify(['flights', 'military', 'vessels']),
+    JSON.stringify([
+      'flights',
+      'military',
+      'vessels',
+      // B12b event feeds (swapped whether or not their layer is enabled)
+      'firms',
+      'fire-perimeters',
+      'cyclones',
+      'launches',
+    ]),
   `swapped ${JSON.stringify(st.router?.swapped)}`,
 );
 const un = unswapped(st).map((c) => c[0]);

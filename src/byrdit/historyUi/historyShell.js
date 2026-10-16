@@ -13,6 +13,8 @@
  *     observer (router -> chips -> browser), driven by the control state
  *   - historyRefresh: refreshLayer on released time changes / playback
  *     frames, prefetch of the next 2 frames, the LIVE refresh (D4)
+ * B12b adds the event feeds (historyEventAdapters.js) and the camera view
+ * box FIRMS asks with (D7), refreshed after a camera move.
  *
  * A failure to load or mount is logged and leaves the app live.
  */
@@ -23,6 +25,7 @@ import { createLayerChips } from './layerChips.js';
 import { createHistoryRouter } from './historyRouter.js';
 import { createRefreshDriver } from './historyRefresh.js';
 import { createHistoryClient } from './historyClient.js';
+import { cameraViewBox } from '../history/flightView.js';
 
 const SCRUB_SELECTOR = '.gev-hist-scrub';
 
@@ -44,7 +47,9 @@ export function mountHistoryForShell(
     tileOutlines: shell?.viewer ? createTileOutlines(shell.viewer) : null,
   });
   if (handle.router) return handle; // already mounted on this host
-  router = createHistoryRouter({ target: win });
+  // FIRMS asks its slice with the camera view (D7, B12b)
+  const getViewBox = () => (shell?.viewer ? cameraViewBox(shell.viewer) : null);
+  router = createHistoryRouter({ target: win, getViewBox });
   router.install();
   chips.connect();
   const driver = createRefreshDriver({
@@ -66,6 +71,15 @@ export function mountHistoryForShell(
   root?.addEventListener?.('pointerdown', onDown, true);
   root?.addEventListener?.('pointerup', onUp, true);
   root?.addEventListener?.('pointercancel', onUp, true);
+  // a camera move can change the FIRMS slice box (B12b)
+  const onMoveEnd = () => driver.viewChanged();
+  let offMoveEnd = null;
+  try {
+    offMoveEnd =
+      shell?.viewer?.camera?.moveEnd?.addEventListener?.(onMoveEnd) ?? null;
+  } catch {
+    offMoveEnd = null;
+  }
 
   const destroyControl = handle.destroy.bind(handle);
   let destroyed = false;
@@ -76,6 +90,11 @@ export function mountHistoryForShell(
     root?.removeEventListener?.('pointerdown', onDown, true);
     root?.removeEventListener?.('pointerup', onUp, true);
     root?.removeEventListener?.('pointercancel', onUp, true);
+    try {
+      offMoveEnd?.();
+    } catch {
+      /* the viewer is already gone */
+    }
     driver.destroy();
     router.destroy();
     destroyControl();

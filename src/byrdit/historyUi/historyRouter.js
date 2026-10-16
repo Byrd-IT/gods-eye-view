@@ -55,11 +55,8 @@
  * the history-frame trail), so no live path is drawn behind a history
  * aircraft or vessel (D3). A failed feed passes them through with the rest.
  */
-import {
-  HISTORY_ADAPTERS,
-  adapterForPath,
-  sliceUrl,
-} from './historyAdapters.js';
+import { adapterForPath, sliceUrl } from './historyAdapters.js';
+import { ALL_HISTORY_ADAPTERS } from './historyEventAdapters.js';
 
 export const LIVE_ONLY_FLAG = 'gevLive';
 /** A playback move larger than this (or backwards) is a seek. */
@@ -160,7 +157,8 @@ function floorOf(sorted, t) {
 /**
  * @param {object} options
  *   target               window (fetch owner)
- *   adapters             adapter registry (historyAdapters.js)
+ *   adapters             adapter registry (historyEventAdapters.js)
+ *   getViewBox           camera view box [w, s, e, n] or null (FIRMS, D7)
  *   now                  wall clock ms (the rebase "now")
  *   retryMs              how long a failed feed passes through before retry
  *   busyRetryMs          one retry of a 429 (rate limit / busy) after this
@@ -170,7 +168,8 @@ function floorOf(sorted, t) {
  */
 export function createHistoryRouter({
   target = globalThis.window,
-  adapters = HISTORY_ADAPTERS,
+  adapters = ALL_HISTORY_ADAPTERS,
+  getViewBox = () => null,
   now = () => Date.now(),
   base = '/api/history',
   retryMs = 15_000,
@@ -207,6 +206,17 @@ export function createHistoryRouter({
   }
 
   const origin = () => target?.location?.origin ?? 'http://localhost';
+  /** What an adapter's sliceParams may read besides the live URL. */
+  const ctx = Object.freeze({ viewBox: () => getViewBox() });
+
+  /** The slice questions of a live request (never throws). */
+  function paramsOf(adapter, url) {
+    try {
+      return adapter.sliceParams(url, ctx);
+    } catch {
+      return [{}];
+    }
+  }
 
   function notify() {
     const st = getState();
@@ -384,9 +394,9 @@ export function createHistoryRouter({
     } catch {
       return [];
     }
-    return adapter
-      .sliceParams(url)
-      .map((params) => sliceUrl(adapter, params, t, base));
+    return paramsOf(adapter, url).map((params) =>
+      sliceUrl(adapter, params, t, base),
+    );
   }
 
   /** Queue the slices of `times` for a swapped adapter (cache fill). */
@@ -530,7 +540,23 @@ export function createHistoryRouter({
   // ── the fetch wrapper ───────────────────────────────────
 
   function liveParamsKey(adapter, url) {
-    return JSON.stringify(adapter.sliceParams(url));
+    return JSON.stringify(paramsOf(adapter, url));
+  }
+
+  /**
+   * A view-dependent feed (FIRMS) would now ask other slice params than its
+   * last request (the camera moved past its whole-degree box): the driver
+   * refreshes its layer so the shown area is answered from history.
+   */
+  function viewMoved(adapterId) {
+    const adapter = adapters.find((a) => a.id === adapterId);
+    const last = lastLive.get(adapterId);
+    if (!adapter?.viewDependent || !last) return false;
+    try {
+      return liveParamsKey(adapter, new URL(last.url, origin())) !== last.key;
+    } catch {
+      return false;
+    }
   }
 
   const sleep = (ms) =>
@@ -542,9 +568,9 @@ export function createHistoryRouter({
     for (;;) {
       const myGen = gen;
       const t = requestTime(adapter);
-      const urls = adapter
-        .sliceParams(url)
-        .map((params) => sliceUrl(adapter, params, t, base));
+      const urls = paramsOf(adapter, url).map((params) =>
+        sliceUrl(adapter, params, t, base),
+      );
       let answers;
       try {
         answers = await withSignal(
@@ -574,15 +600,19 @@ export function createHistoryRouter({
       if (gen !== myGen) continue; // a seek meanwhile: answer the new t
       const wasFailed = failed.delete(adapter.id);
       const nowMs = now();
-      const adapted = adapter.adapt(answers, { t, nowMs });
+      const adapted = adapter.adapt(answers, { t, nowMs, url });
       const rows = Number(adapted.headers['X-History-Rows']) || 0;
       const prevServed = served.get(adapter.id);
+      const truncated = adapted.headers['X-History-Truncated'] === '1';
       served.set(adapter.id, {
         t,
         rows,
         gap: adapted.headers['X-History-Gap'] === '1',
+        truncated,
       });
-      if (wasFailed || !prevServed) notify();
+      // the chip strip shows a truncated answer (layerChips.js)
+      if (wasFailed || !prevServed || prevServed.truncated !== truncated)
+        notify();
       announce({ adapterId: adapter.id, mode: 'history', t, nowMs });
       return new Response(JSON.stringify(adapted.body), {
         status: 200,
@@ -648,6 +678,7 @@ export function createHistoryRouter({
     requestTime,
     pinFrame,
     nextFrames,
+    viewMoved,
     setSnaps,
     snapsAfter,
     prefetch,
