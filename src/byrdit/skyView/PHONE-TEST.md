@@ -126,10 +126,15 @@ way is what the steps below check (not yet done: see the device card).
     chip. Stars, lines, names, planets, satellites, the horizon and its
     compass scale stay exactly where they were (no jump, no reload). SHOT
     in portrait and in landscape.
-    The map credits stay as one small, dim line in the bottom-left corner
-    while the ground (map tiles) is drawn: it does not cover the centre
-    circle or the eye, and a tap on it reaches the sky. With the flat
-    horizon (no map tiles) the line goes away (t_37cf1f79).
+    The map credits stay, small and dim, in the bottom-left corner while
+    the ground (map tiles) is drawn, and they stay complete: long credits
+    wrap onto more lines, nothing ends in "..." or runs off the screen.
+    Read the credits to the end (the last item is the "Data attribution"
+    link) and SHOT them. They do not cover the centre circle or the eye,
+    and a tap on the credit text reaches the sky. Tap "Data attribution":
+    the full list of data sources opens over the sky; close it (x) and the
+    clear sky is back, still in Clear view. With the flat horizon (no map
+    tiles) the credits go away (t_37cf1f79, t_c0f1e535).
     b. The eye fades after about 3 seconds; touching the screen anywhere
     brings it back. The notch and the bottom gesture bar do not cover it.
     c. Double-tap the sky: the controls come back. Double-tap again: clear.

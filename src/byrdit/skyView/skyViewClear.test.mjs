@@ -1118,7 +1118,7 @@ test('clear view attribution: body.gev-sky-tiles while map tiles are drawn (real
   assert.equal(tiles(), false);
 });
 
-test('clear view CSS: the attribution line stays while tiles are drawn: tap-through, bottom-left, safe-area aware, under the eye, placed by the app credit rules; the NAIP slider is not in the sky (t_37cf1f79)', () => {
+test('clear view CSS: the attribution stays complete while tiles are drawn: wraps (never clipped or ellipsised), tap-through, bottom-left, safe-area aware, under the eye, placed by the app credit rules; the NAIP slider is not in the sky (t_37cf1f79, review R1 t_c0f1e535)', () => {
   const css = readFileSync(new URL('./skyView.css', import.meta.url), 'utf8');
   const flat = css.replace(/\s+/g, ' ');
   assert.match(
@@ -1147,11 +1147,44 @@ test('clear view CSS: the attribution line stays while tiles are drawn: tap-thro
   const line = flat.match(
     /body\.gev-sky-active\.gev-sky-clear #cesium-credits \.cesium-widget-credits \{([^}]*)\}/,
   );
-  assert.ok(line, 'one capped line');
-  assert.match(line[1], /white-space: nowrap !important/, 'one line');
-  assert.match(line[1], /overflow: hidden !important/);
+  assert.ok(line, 'the credit line in Clear view');
+  // complete attribution (review R1): every credit stays readable in full,
+  // so the line wraps inside the corner instead of being cut off
+  assert.match(line[1], /white-space: normal !important/, 'wraps');
+  assert.match(line[1], /overflow: visible !important/, 'never clipped');
+  assert.match(line[1], /overflow-wrap: anywhere !important/);
+  assert.match(line[1], /text-overflow: clip !important/);
+  // the 0x0 #cesium-credits box would shrink it to one word per row
+  assert.match(line[1], /width: max-content !important/);
   // room for the eye (44 px at 12 px from the right edge) on the same row
   assert.match(line[1], /max-width: calc\( 100vw - 80px/);
+  const inner = flat.match(
+    /body\.gev-sky-active\.gev-sky-clear #cesium-credits \.cesium-widget-credits \* \{([^}]*)\}/,
+  );
+  assert.ok(inner, 'every credit inside the line wraps too');
+  assert.match(inner[1], /white-space: normal !important/);
+  // nothing in this file truncates, clips or ellipsises a credit
+  const creditRules = [
+    ...flat.matchAll(/([^{}]*(?:#cesium-credits|cesium-credit)[^{}]*)\{([^}]*)\}/g),
+  ];
+  assert.ok(creditRules.length >= 5);
+  for (const [, sel, decls] of creditRules) {
+    assert.doesNotMatch(decls, /nowrap/, `${sel}: no single-line cap`);
+    assert.doesNotMatch(decls, /ellipsis/, `${sel}: no ellipsis`);
+    assert.doesNotMatch(decls, /(^|[ ;])overflow(-x|-y)?: (hidden|clip|scroll|auto)/, `${sel}: not clipped`);
+    assert.doesNotMatch(decls, /(display: none|visibility: hidden)/, `${sel}: not hidden`);
+  }
+  // the credits Cesium lists only behind "Data attribution" stay reachable:
+  // the link keeps working (only while the credits are shown) and its list
+  // is shown over the clear sky
+  assert.match(
+    flat,
+    /body\.gev-sky-active\.gev-sky-clear\.gev-sky-tiles #cesium-credits \.cesium-credit-expand-link \{ pointer-events: auto !important;/,
+  );
+  assert.match(
+    flat,
+    /body\.gev-sky-active\.gev-sky-clear :is\(\.cesium-credit-lightbox-overlay, \.cesium-credit-lightbox-overlay \*\) \{ visibility: visible !important; \}/,
+  );
   const z = Number(body.match(/z-index: (\d+)/)[1]);
   assert.ok(z > 96 && z < 99, 'over the sky (96), under the eye (99)');
   assert.match(

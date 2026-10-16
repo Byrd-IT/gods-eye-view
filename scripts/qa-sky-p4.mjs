@@ -25,10 +25,13 @@
  *      keydowns) toggles it once and never toggles the HUD (t_71e66e74);
  *      the eye fades after 3 s and a touch wakes it
  *   L. denied and insecure messages stay visible over the clear sky
- * Attribution in Clear view (t_37cf1f79): while map tiles are drawn the
- *   app's credit line (#cesium-credits) stays painted: one dim line in the
- *   bottom-left corner (the app's credit placement), tap-through, clear of the centre circle and the eye;
- *   the flat horizon (no tiles) hides it; the Moon stays centred.
+ * Attribution in Clear view (t_37cf1f79, review R1 t_c0f1e535): while map
+ *   tiles are drawn the app's credit line (#cesium-credits) stays painted in
+ *   full: dim, bottom-left (the app's credit placement), wrapping inside the
+ *   corner with no credit clipped, cut off or off screen, tap-through, clear
+ *   of the centre circle and the eye; its "Data attribution" link still opens
+ *   the full credit list over the clear sky; the flat horizon (no tiles)
+ *   hides it; the Moon stays centred.
  * This is the synthetic part only; real phones: src/byrdit/skyView/PHONE-TEST.md.
  *   node scripts/qa-sky-p4.mjs --url http://127.0.0.1:4338 --out <dir>
  */
@@ -43,6 +46,7 @@ import {
   quatFromAxes,
   wrap180,
 } from '../src/byrdit/skyView/orientationMath.js';
+import { doubleTapWithRetry } from '../src/byrdit/skyView/qaDoubleTap.js';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -259,9 +263,72 @@ function clearAudit() {
             return parts.length === 4 ? Number(parts[3]) : 1;
           })(),
           pointerEvents: cs.pointerEvents,
+          // tap-through except the "Data attribution" link (the full list)
           childPointer: painted.every(
-            (e) => getComputedStyle(e).pointerEvents === 'none',
+            (e) =>
+              getComputedStyle(e).pointerEvents === 'none' ||
+              e.matches('.cesium-credit-expand-link'),
           ),
+          // completeness (review R1): every painted credit element is fully
+          // on screen and not clipped by its own box or by any box between
+          // it and #cesium-credits (overflow), and nothing is ellipsised
+          clipped: [...credits.querySelectorAll('*')]
+            .filter((e) => {
+              const c = getComputedStyle(e);
+              const q = e.getBoundingClientRect();
+              return (
+                c.visibility === 'visible' &&
+                c.display !== 'none' &&
+                q.width >= 1 &&
+                q.height >= 1
+              );
+            })
+            .filter((e) => {
+              const q = e.getBoundingClientRect();
+              if (q.left < -1 || q.top < -1 || q.right > vw + 1 || q.bottom > vh + 1)
+                return true;
+              const own = getComputedStyle(e);
+              if (own.textOverflow === 'ellipsis' && own.overflowX !== 'visible')
+                return true;
+              if (own.overflowX !== 'visible' && e.scrollWidth > e.clientWidth + 1)
+                return true;
+              if (own.overflowY !== 'visible' && e.scrollHeight > e.clientHeight + 1)
+                return true;
+              for (let a = e.parentElement; a; a = a.parentElement) {
+                const ac = getComputedStyle(a);
+                if (ac.overflowX !== 'visible' || ac.overflowY !== 'visible') {
+                  const b = a.getBoundingClientRect();
+                  if (
+                    q.left < b.left - 1 ||
+                    q.top < b.top - 1 ||
+                    q.right > b.right + 1 ||
+                    q.bottom > b.bottom + 1
+                  )
+                    return true;
+                }
+                if (a === credits) break;
+              }
+              return false;
+            })
+            .map(
+              (e) =>
+                `${e.tagName}.${String(e.className).slice(0, 40)}:${(e.textContent || '').trim().slice(0, 40)}`,
+            ),
+          fullText: (credits.textContent || '').replace(/\s+/g, ' ').trim(),
+          expand: (() => {
+            const e = credits.querySelector('.cesium-credit-expand-link');
+            if (!e || getComputedStyle(e).display === 'none') return null;
+            const q = e.getBoundingClientRect();
+            const cx = (q.left + q.right) / 2;
+            const cy = (q.top + q.bottom) / 2;
+            const hit = document.elementFromPoint(cx, cy);
+            return {
+              point: [Math.round(cx), Math.round(cy)],
+              pointer: getComputedStyle(e).pointerEvents,
+              visible: getComputedStyle(e).visibility === 'visible',
+              onTop: Boolean(hit) && (hit === e || e.contains(hit)),
+            };
+          })(),
           rect,
           inside:
             Boolean(rect) &&
@@ -271,7 +338,6 @@ function clearAudit() {
             rect[3] <= vh,
           size: rect ? [rect[2] - rect[0], rect[3] - rect[1]] : null,
           lineVisible: lineStyle.visibility === 'visible',
-          oneLine: Boolean(rect) && rect[3] - rect[1] <= 32,
           overCircle:
             crosshair && !crosshair.hidden
               ? overlaps(rect, box(crosshair))
@@ -323,7 +389,11 @@ const attributionOk = (a) =>
   a.credits.pointerEvents === 'none' &&
   a.credits.childPointer &&
   a.credits.inside &&
-  a.credits.oneLine &&
+  a.credits.clipped.length === 0 &&
+  (a.credits.expand == null ||
+    (a.credits.expand.visible &&
+      a.credits.expand.pointer === 'auto' &&
+      a.credits.expand.onTop)) &&
   !a.credits.overCircle &&
   !a.credits.overEye &&
   a.credits.rect[0] < a.viewport[0] / 2 &&
@@ -534,7 +604,7 @@ let hiddenList = [];
     { clearMissAz, clearMissEl },
   );
   check(
-    'I: attribution: the credit line stays in Clear view while tiles are drawn (one dim line, bottom-left, tap-through, clear of the centre circle and the eye)',
+    'I: attribution: the credit line stays in Clear view while tiles are drawn, complete (no credit clipped or cut off), dim, bottom-left, tap-through, clear of the centre circle and the eye',
     attributionOk(clearPortrait),
     { tiles: clearPortrait.tiles, credits: clearPortrait.credits },
   );
@@ -562,6 +632,66 @@ let hiddenList = [];
       missAz: wrap180(afterFlat.azDeg - moon.azDeg),
       missEl: afterFlat.elDeg - moon.elDeg,
     },
+  );
+  // the credits Cesium lists only behind "Data attribution" stay reachable:
+  // a tap on the link opens the full list over the clear sky; closing it
+  // returns to the clear sky; the view does not move (review R1, t_c0f1e535)
+  const expandAt = tilesAgain.credits?.expand;
+  let lightbox = null;
+  let lightboxClosed = null;
+  if (expandAt) {
+    await page.touchscreen.tap(expandAt.point[0], expandAt.point[1]);
+    await sleep(800);
+    lightbox = await page.evaluate(() => {
+      const o = document.querySelector('.cesium-credit-lightbox-overlay');
+      const l = o?.querySelector('.cesium-credit-lightbox');
+      const close = l?.querySelector('.cesium-credit-lightbox-close');
+      const shown = (e) =>
+        Boolean(e) &&
+        getComputedStyle(e).display !== 'none' &&
+        getComputedStyle(e).visibility === 'visible';
+      const r = l?.getBoundingClientRect();
+      return {
+        clear: document.body.classList.contains('gev-sky-clear'),
+        overlay: shown(o),
+        box: shown(l),
+        close: shown(close),
+        items: [...(l?.querySelectorAll('li') ?? [])].filter(shown).length,
+        inside:
+          Boolean(r) &&
+          r.left >= -1 &&
+          r.top >= -1 &&
+          r.right <= innerWidth + 1 &&
+          r.bottom <= innerHeight + 1,
+      };
+    });
+    await page.evaluate(() =>
+      document.querySelector('.cesium-credit-lightbox-close')?.click(),
+    );
+    await sleep(500);
+    lightboxClosed = await page.evaluate(() => {
+      const o = document.querySelector('.cesium-credit-lightbox-overlay');
+      return {
+        clear: document.body.classList.contains('gev-sky-clear'),
+        overlay: Boolean(o) && getComputedStyle(o).display !== 'none',
+      };
+    });
+  }
+  const afterList = await handleEval(page, (h) => h.view);
+  check(
+    'I: attribution: "Data attribution" opens the full credit list over the clear sky (still Clear view), it closes again, the view does not move',
+    Boolean(expandAt) &&
+      lightbox?.clear &&
+      lightbox.overlay &&
+      lightbox.box &&
+      lightbox.close &&
+      lightbox.items > 0 &&
+      lightbox.inside &&
+      lightboxClosed?.clear &&
+      lightboxClosed.overlay === false &&
+      Math.abs(wrap180(afterList.azDeg - moon.azDeg)) <= 0.1 &&
+      Math.abs(afterList.elDeg - moon.elDeg) <= 0.1,
+    { expandAt, lightbox, lightboxClosed },
   );
   await sleep(4000);
   await page.screenshot({
@@ -654,7 +784,7 @@ let hiddenList = [];
     },
   );
   check(
-    'J: landscape attribution: the credit line stays (one dim line, bottom-left, tap-through, clear of the centre circle and the eye)',
+    'J: landscape attribution: the credit line stays complete (no credit clipped or cut off), dim, bottom-left, tap-through, clear of the centre circle and the eye',
     attributionOk(clearLand),
     { tiles: clearLand.tiles, credits: clearLand.credits },
   );
@@ -808,25 +938,25 @@ let hiddenList = [];
   // Headless software GL can block the page for longer than the 350 ms
   // double-tap window after the first tap (seen: 739 ms between the two
   // pointerups with the NAIP basemap on screen). Such a pair is two single
-  // taps by design, so it is retried; a pair inside the window that does not
-  // toggle still fails.
-  const kTries = [];
-  for (let i = 0; i < 3; i++) {
-    const taps = await doubleTap(page, kPt.x, kPt.y);
-    const ups = taps.filter((t) => t.type === 'pointerup').map((t) => t.t);
-    const gap = ups.length === 2 ? ups[1] - ups[0] : null;
-    const toggled = await clearOn(page);
-    kTries.push({ gap, toggled, taps });
-    if (toggled || (gap != null && gap <= 350)) break;
-    await sleep(1000);
-  }
-  const kTaps = kTries;
+  // taps by design, so only that case is retried (bounded, 3 tries). Missing
+  // or extra pointerups, and a pair inside the window that does not toggle,
+  // fail at once (qaDoubleTap.js; review R2, t_c0f1e535).
+  const kRun = await doubleTapWithRetry(
+    async () => {
+      const taps = await doubleTap(page, kPt.x, kPt.y);
+      const ups = taps.filter((t) => t.type === 'pointerup').map((t) => t.t);
+      return { ups, toggled: await clearOn(page), taps };
+    },
+    { maxTries: 3, pause: () => sleep(1000) },
+  );
+  const kTaps = { outcome: kRun.outcome, tries: kRun.tries };
   await step('double-tap');
   const active = await handleEval(page, (h) => h.active);
   const expected = [false, true, false, true, false, true, false, true];
   check(
     'K: Escape / H / held H / eye / double-tap toggle Clear view (Escape stays in the sky), H and held-H repeats do not toggle the HUD, the view never moves',
     k0.clear === true &&
+      kRun.ok &&
       active &&
       heldRepeats >= 7 &&
       steps.every((s, i) => s.clear === expected[i] && s.hud) &&

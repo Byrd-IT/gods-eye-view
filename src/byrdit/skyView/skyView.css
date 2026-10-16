@@ -1000,14 +1000,14 @@ body.gev-sky-active.gev-sky-clear
    While map tiles are drawn (body.gev-sky-tiles, set by skyView.js: real
    horizon; the flat horizon hides the globe and every tileset) Clear view
    keeps the app's own credit line (#cesium-credits: the same Cesium credits,
-   dim colours and bottom offset as normal mode; no new text) as one
-   tap-through line in the bottom-left corner, above the compass strip and
+   dim colours and bottom offset as normal mode; no new text) as a
+   tap-through block in the bottom-left corner, above the compass strip and
    clear of the eye (bottom-right) and of the centre circle.
    The vertical position is left to the app's credit rules on purpose: the
    attribution pin (src/creditAttribution.test.mjs) models every
    position/top/bottom rule on #cesium-credits and fails closed on new ones.
    #cesium-credits is a 0x0 fixed box; Cesium's .cesium-widget-credits inside
-   it is absolutely placed at its bottom-left, so the line is capped there. */
+   it is absolutely placed at its bottom-left. */
 body.gev-sky-active.gev-sky-clear.gev-sky-tiles
   :is(#cesium-credits, #cesium-credits *) {
   visibility: visible !important;
@@ -1019,18 +1019,50 @@ body.gev-sky-active.gev-sky-clear #cesium-credits {
   pointer-events: none !important;
 }
 
+/* Complete attribution (review R1, t_c0f1e535): no credit is cut off. The
+   line wraps inside the corner (the width is capped to clear the eye and
+   the safe areas) and grows upwards from the app's credit placement, so
+   every provider credit Cesium puts on screen stays readable in full.
+   #cesium-credits is a 0x0 box, so the line needs an explicit max-content
+   width (otherwise it would shrink to one word per row). */
 body.gev-sky-active.gev-sky-clear #cesium-credits .cesium-widget-credits {
+  width: max-content !important;
   max-width: calc(
     100vw - 80px - env(safe-area-inset-left, 0px) -
       env(safe-area-inset-right, 0px)
   ) !important;
-  overflow: hidden !important;
-  white-space: nowrap !important;
-  text-overflow: ellipsis !important;
+  overflow: visible !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  text-overflow: clip !important;
+  line-height: 1.35;
 }
 
+body.gev-sky-active.gev-sky-clear #cesium-credits .cesium-widget-credits * {
+  max-width: 100%;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+/* The credit text is tap-through: a tap on it reaches the sky. */
 body.gev-sky-active.gev-sky-clear #cesium-credits * {
   pointer-events: none !important;
+}
+
+/* Credits that Cesium lists only behind its "Data attribution" link stay
+   reachable in Clear view: the link keeps working and its list (Cesium's
+   credit lightbox, the same one as in normal mode) is shown over the clear
+   sky. The rest of the line stays tap-through. */
+body.gev-sky-active.gev-sky-clear.gev-sky-tiles
+  #cesium-credits
+  .cesium-credit-expand-link {
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+
+body.gev-sky-active.gev-sky-clear
+  :is(.cesium-credit-lightbox-overlay, .cesium-credit-lightbox-overlay *) {
+  visibility: visible !important;
 }
 
 /* Map-only controls are not part of the sky: the NAIP year slider and its
