@@ -86,9 +86,10 @@ export function isDoubleTap(previous, tap) {
 
 /**
  * What a key does to Clear view while the sky is shown:
- * 'toggle' (H), 'restore' (Escape while clear) or null (not ours: typing in
- * a field, a modifier held, a held-down repeat, or Escape with controls on,
- * which keeps leaving the sky).
+ * 'toggle' (H), 'restore' (Escape while clear), 'consume' (a held-down H
+ * repeat: still ours, so the app H = HUD shortcut must not see it, but it
+ * must not toggle Clear view again) or null (not ours: typing in a field, a
+ * modifier held, or Escape with controls on, which keeps leaving the sky).
  */
 export function clearKeyAction(event, { clear = false } = {}) {
   if (!event || event.defaultPrevented) return null;
@@ -98,8 +99,9 @@ export function clearKeyAction(event, { clear = false } = {}) {
     target?.isContentEditable ||
     Boolean(target?.matches?.('input, select, textarea'));
   if (event.key === 'Escape') return clear ? 'restore' : null;
-  if (typing || event.repeat) return null;
-  if (event.key === 'h' || event.key === 'H') return 'toggle';
+  if (typing) return null;
+  if (event.key === 'h' || event.key === 'H')
+    return event.repeat ? 'consume' : 'toggle';
   return null;
 }
 

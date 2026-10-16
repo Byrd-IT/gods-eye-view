@@ -1720,7 +1720,9 @@ export function mountSkyView({
   listen(dom.buttons.back, 'click', () => exit());
   listen(clearView.button, 'click', () => clearView.toggle());
   // Clear view keys (H toggles, Escape restores) win over the app's own
-  // shortcuts (H = HUD) while the sky is shown: capture phase, stopped here
+  // shortcuts (H = HUD) while the sky is shown: capture phase, stopped here.
+  // A held-down H repeats keydown: each repeat is stopped too (else it flips
+  // the HUD under the clear sky) but does not toggle Clear view again.
   listen(
     doc,
     'keydown',
@@ -1732,7 +1734,7 @@ export function mountSkyView({
       event.preventDefault?.();
       event.stopPropagation?.();
       if (action === 'restore') clearView.set(false);
-      else clearView.toggle();
+      else if (action === 'toggle') clearView.toggle();
     },
     true,
   );

@@ -21,8 +21,9 @@
  *   J. landscape: still clear; double-tap brings the controls back and
  *      clears again; the view does not move
  *   K. eye, H (the app's H = HUD does not fire), Escape and double-tap
- *      toggle it with the view unchanged; the eye fades after 3 s and a
- *      touch wakes it
+ *      toggle it with the view unchanged; holding H down (real autorepeat
+ *      keydowns) toggles it once and never toggles the HUD (t_71e66e74);
+ *      the eye fades after 3 s and a touch wakes it
  *   L. denied and insecure messages stay visible over the clear sky
  * This is the synthetic part only; real phones: src/byrdit/skyView/PHONE-TEST.md.
  *   node scripts/qa-sky-p4.mjs --url http://127.0.0.1:4338 --out <dir>
@@ -627,6 +628,30 @@ let hiddenList = [];
   await page.keyboard.press('h');
   await sleep(300);
   await step('H');
+  // hold H: puppeteer sends repeat keydowns (event.repeat) for a key that is
+  // already down, like a held key; count them before the Sky view sees them
+  await page.evaluate(() => {
+    globalThis.__gevQaRepeats = 0;
+    globalThis.addEventListener(
+      'keydown',
+      (e) => {
+        if (e.key.toLowerCase() === 'h' && e.repeat)
+          globalThis.__gevQaRepeats += 1;
+      },
+      true,
+    );
+  });
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.down('h');
+    await sleep(40);
+  }
+  await page.keyboard.up('h');
+  await sleep(300);
+  const heldRepeats = await page.evaluate(() => globalThis.__gevQaRepeats);
+  await step('hold H');
+  await page.keyboard.press('h');
+  await sleep(300);
+  await step('H');
   await page.tap('[data-sky=clear]');
   await sleep(300);
   await step('eye');
@@ -643,11 +668,12 @@ let hiddenList = [];
   await doubleTap(page, kPt.x, kPt.y);
   await step('double-tap');
   const active = await handleEval(page, (h) => h.active);
-  const expected = [false, true, false, true, false, true];
+  const expected = [false, true, false, true, false, true, false, true];
   check(
-    'K: Escape / H / eye / double-tap toggle Clear view (Escape stays in the sky), H does not toggle the HUD, the view never moves',
+    'K: Escape / H / held H / eye / double-tap toggle Clear view (Escape stays in the sky), H and held-H repeats do not toggle the HUD, the view never moves',
     k0.clear === true &&
       active &&
+      heldRepeats >= 7 &&
       steps.every((s, i) => s.clear === expected[i] && s.hud) &&
       steps.every(
         (s) =>
@@ -655,7 +681,7 @@ let hiddenList = [];
           s.view.elDeg === k0.view.elDeg &&
           s.view.fovDeg === k0.view.fovDeg,
       ),
-    { start: k0, steps },
+    { start: k0, heldRepeats, steps },
   );
   check(
     'K: the restore handle fades after 3 s and a touch brings it back',

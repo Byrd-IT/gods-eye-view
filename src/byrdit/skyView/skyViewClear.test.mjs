@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as Cesium from 'cesium';
 import { readFileSync } from 'node:fs';
 import { mountSkyView } from './skyView.js';
+import { bindApplicationShortcuts } from '../../ui/applicationShortcuts.js';
 import { createSatWorkerHandler } from './satWorker.js';
 import {
   CLEAR_HINT_KEY,
@@ -253,7 +254,7 @@ class InlineSatWorker extends EventTarget {
 }
 
 function setup(options = {}) {
-  const doc = fakeDocument();
+  const doc = options.document ?? fakeDocument();
   const viewer = fakeViewer(options.viewer);
   const timers = fakeTimers();
   const location = { href: 'https://gev.test/#v=2&lat=30&lon=-97' };
@@ -391,6 +392,72 @@ function assertSkyUnchanged(env, before, what) {
   assert.equal(after.selected, before.selected, `${what}: selection kept`);
 }
 
+/**
+ * A fake document with the DOM's capture/target/bubble order for an event
+ * whose target is a node inside it (node's EventTarget has no propagation, so
+ * stopPropagation there would not keep the app's bubbling shortcut away):
+ * document capture listeners, then the target's own listeners, then document
+ * bubble listeners, each later phase skipped once propagation is stopped.
+ */
+function phasedDocument() {
+  const doc = fakeDocument();
+  const listeners = [];
+  const capture = (options) =>
+    options === true || Boolean(options && options.capture);
+  doc.addEventListener = (type, fn, options) => {
+    const entry = { type, fn, capture: capture(options) };
+    if (
+      !listeners.some(
+        (l) => l.type === type && l.fn === fn && l.capture === entry.capture,
+      )
+    )
+      listeners.push(entry);
+  };
+  doc.removeEventListener = (type, fn, options) => {
+    const at = listeners.findIndex(
+      (l) => l.type === type && l.fn === fn && l.capture === capture(options),
+    );
+    if (at >= 0) listeners.splice(at, 1);
+  };
+  const run = (event, phase) => {
+    for (const l of listeners.filter(
+      (x) => x.type === event.type && x.capture === phase,
+    )) {
+      l.fn(event);
+      if (event.immediate) return;
+    }
+  };
+  doc.dispatchEvent = (event) => {
+    // at target on the document itself: capture listeners run first
+    run(event, true);
+    if (!event.stopped) run(event, false);
+    return !event.defaultPrevented;
+  };
+  /** A key event fired at `target` (a node inside the document). */
+  doc.dispatchKeyAt = (target, event) => {
+    run(event, true);
+    if (!event.stopped && target?.dispatchEvent) target.dispatchEvent(event);
+    if (!event.stopped) run(event, false);
+    return !event.defaultPrevented;
+  };
+  doc.keydownListeners = () =>
+    listeners.filter((l) => l.type === 'keydown').length;
+  return doc;
+}
+
+/** A keyboard event that counts stopPropagation/stopImmediatePropagation. */
+function phasedKey(key, extra = {}) {
+  const event = keyEvent(key, extra);
+  const immediate = event.stopImmediatePropagation.bind(event);
+  event.immediate = false;
+  event.stopImmediatePropagation = () => {
+    event.immediate = true;
+    event.stopped += 1;
+    immediate();
+  };
+  return event;
+}
+
 // ── pure helpers ───────────────────────────────────────────────────────────
 test('clear view: double-tap, key and message helpers', () => {
   assert.equal(isDoubleTap(null, { t: 0, x: 0, y: 0 }), false);
@@ -419,7 +486,38 @@ test('clear view: double-tap, key and message helpers', () => {
   assert.equal(clearKeyAction({ key: 'H', target }), 'toggle');
   assert.equal(clearKeyAction({ key: 'h', target, ctrlKey: true }), null);
   assert.equal(clearKeyAction({ key: 'h', target, metaKey: true }), null);
-  assert.equal(clearKeyAction({ key: 'h', target, repeat: true }), null);
+  assert.equal(
+    clearKeyAction({ key: 'h', target, repeat: true }),
+    'consume',
+    'a held-down H repeat is ours (kept from the HUD) but does not toggle',
+  );
+  assert.equal(
+    clearKeyAction({ key: 'H', target, repeat: true }, { clear: true }),
+    'consume',
+  );
+  assert.equal(
+    clearKeyAction({ key: 'h', target, repeat: true, ctrlKey: true }),
+    null,
+    'a modifier repeat is not ours',
+  );
+  assert.equal(
+    clearKeyAction({
+      key: 'h',
+      repeat: true,
+      target: { matches: (s) => /textarea/.test(s) },
+    }),
+    null,
+    'a held H while typing is typing',
+  );
+  assert.equal(
+    clearKeyAction({ key: 'ArrowLeft', target, repeat: true }),
+    null,
+    'other held sky keys are not Clear view keys',
+  );
+  assert.equal(
+    clearKeyAction({ key: 'Escape', target, repeat: true }, { clear: true }),
+    'restore',
+  );
   assert.equal(
     clearKeyAction({ key: 'h', target, defaultPrevented: true }),
     null,
@@ -586,6 +684,110 @@ test('clear view: H toggles and Escape restores (capture phase, the app H = HUD 
   doc.dispatchEvent(map);
   assert.equal(map.stopped, 0);
   assert.equal(handle.clearView.on, false);
+});
+
+test('clear view R1: holding H in the sky toggles Clear view once and never reaches the real app H = HUD shortcut; HUD state is unchanged; off the sky H is the HUD again', async () => {
+  const doc = phasedDocument();
+  const env = setup({ document: doc });
+  const { handle, viewer } = env;
+  // the real shell shortcut handler, bound after the Sky view like the app
+  // (both on the document: the Sky view in capture, the shell bubbling)
+  let hudVisible = true;
+  let hudToggles = 0;
+  const shellCalls = [];
+  const search = new FakeElement('input');
+  search.matches = (sel) => /input/.test(sel);
+  const shortcuts = bindApplicationShortcuts({
+    documentRef: doc,
+    searchInput: search,
+    actions: {
+      setStyle: (style) => shellCalls.push(`style:${style}`),
+      dismissSearch: () => shellCalls.push('dismissSearch'),
+      toggleHud: () => {
+        hudToggles += 1;
+        hudVisible = !hudVisible;
+      },
+      toggleOrbit: () => shellCalls.push('orbit'),
+      toggleCleanView: () => shellCalls.push('cleanView'),
+      toggleLayers: () => shellCalls.push('layers'),
+      cycleDetection: () => shellCalls.push('detection'),
+      toggleCctv: () => shellCalls.push('cctv'),
+    },
+  });
+  await handle.enterAt(HOUSTON);
+  const canvas = viewer.container.find('canvas'); // the Sky key surface
+  canvas.matches = () => false;
+  const hud0 = hudVisible;
+  const before = skyState(env);
+  const press = (key, extra = {}) => {
+    const event = phasedKey(key, { target: canvas, ...extra });
+    doc.dispatchKeyAt(canvas, event);
+    return event;
+  };
+
+  // hold H: one initial keydown, then autorepeat keydowns
+  const first = press('h');
+  assert.equal(handle.clearView.on, true, 'initial H: clear');
+  assert.ok(first.stopped > 0 && first.defaultPrevented);
+  assert.equal(hudToggles, 0, 'initial H: HUD untouched');
+  for (let i = 1; i <= 5; i++) {
+    const repeat = press('h', { repeat: true });
+    assert.equal(handle.clearView.on, true, `repeat ${i}: still clear`);
+    assert.ok(repeat.stopped > 0, `repeat ${i}: stopped in the Sky view`);
+    assert.equal(repeat.defaultPrevented, true, `repeat ${i}: consumed`);
+    assert.equal(hudToggles, 0, `repeat ${i}: HUD untouched`);
+  }
+  assert.equal(hudVisible, hud0, 'HUD state is where it was');
+  // release, then hold H again: controls back once, HUD still untouched
+  press('H');
+  for (let i = 0; i < 3; i++) press('H', { repeat: true });
+  assert.equal(handle.clearView.on, false, 'second hold: controls back');
+  assert.equal(hudToggles, 0, 'second hold: HUD untouched');
+  assert.equal(hudVisible, hud0);
+  assertSkyUnchanged(env, before, 'held H');
+  // a held arrow (a Sky key) is not taken by Clear view and still turns
+  const az0 = handle.view.azDeg;
+  const arrow = press('ArrowRight', { repeat: true });
+  assert.equal(arrow.defaultPrevented, true, 'Sky arrow key handled');
+  assert.notEqual(handle.view.azDeg, az0, 'held arrow still turns the sky');
+  // Escape while clear restores and stays in the sky
+  press('h');
+  const esc = press('Escape');
+  assert.equal(handle.clearView.on, false, 'Escape restores');
+  assert.equal(handle.active, true, '...and stays in the sky');
+  assert.ok(esc.stopped > 0);
+  assert.deepEqual(shellCalls, [], 'no shell shortcut ran inside the sky');
+  assert.equal(hudToggles, 0);
+  // Ctrl+H is not a Clear view key (modifier handling is the shell's)
+  const ctrl = press('h', { ctrlKey: true });
+  assert.equal(ctrl.stopped, 0, 'Ctrl+H not taken by the Sky view');
+  assert.equal(handle.clearView.on, false);
+  assert.equal(hudToggles, 1, 'Ctrl+H reaches the shell as before');
+  press('h', { ctrlKey: true });
+  assert.equal(hudVisible, hud0);
+  hudToggles = 0;
+  // holding H while typing in the search box is just typing
+  const typedFirst = phasedKey('h', { target: search });
+  doc.dispatchKeyAt(search, typedFirst);
+  const typedRepeat = phasedKey('h', { target: search, repeat: true });
+  doc.dispatchKeyAt(search, typedRepeat);
+  assert.equal(typedFirst.stopped + typedRepeat.stopped, 0);
+  assert.equal(typedRepeat.defaultPrevented, false, 'the field gets the key');
+  assert.equal(handle.clearView.on, false);
+  assert.equal(hudToggles, 0, 'the shell ignores typing too');
+
+  // off the sky, H is the app HUD key again, repeats included (unchanged)
+  handle.exit();
+  const map = press('h');
+  assert.equal(map.stopped, 0);
+  assert.equal(hudToggles, 1, 'H toggles the HUD outside the sky');
+  press('h', { repeat: true });
+  assert.equal(hudToggles, 2, "outside the sky a repeat is the shell's");
+  assert.equal(hudVisible, hud0, 'HUD restored after two toggles');
+  assert.equal(handle.clearView.on, false);
+
+  shortcuts.destroy();
+  handle.destroy?.();
 });
 
 test('clear view: double-tap on the sky toggles; single taps, slow taps, drags and pinches do not; the first tap selection is undone', async () => {
