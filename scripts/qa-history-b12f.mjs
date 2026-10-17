@@ -40,6 +40,9 @@
  * ISS card, the 2-D overlay cards, coloured glow images only dimmed, and a
  * one-time 'LOAD FAILED' toast when a layer clears.
  *
+ * Review R1 (run 3): two transit member urls through the real installed
+ * chain - one cleared member empties the live one too; all live resumes.
+ *
  * plus no console / page error. Screenshots after Page.bringToFront.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -83,6 +86,8 @@ const world = fixtureWorld(Date.now());
 // phase of the live bridge: {name, lastOk, staleSince, greyUntil}
 let phase = { name: 'live' };
 const calls = { flights: 0, firms: 0, celestrak: 0, emptiedSeen: 0 };
+// review R1: two transit systems whose bridge state the script sets each
+const members = { 'qa-a': 'live', 'qa-b': 'live' };
 const GP_CSV = readFileSync(
   new URL('../src/byrdit/skyView/reference/satFixture200.csv', import.meta.url),
   'utf8',
@@ -223,6 +228,29 @@ fetchSession.on('Fetch.requestPaused', (ev) => {
       },
       bridgeHeaders(),
     );
+  }
+  const member = /^\/api\/transit\/vehicles\/(qa-[ab])$/.exec(url.pathname);
+  if (member) {
+    const id = member[1];
+    const now = Date.now();
+    const h =
+      members[id] === 'live'
+        ? {
+            'content-type': 'application/json',
+            'x-feed-last-ok': String(now - 4_000),
+            'x-feed-age-ms': '4000',
+            'x-feed-cache': 'HIT',
+          }
+        : {
+            'content-type': 'application/json',
+            'x-feed-last-ok': String(now - 7_200_000),
+            'x-feed-age-ms': '7200000',
+            'x-feed-cache': 'STALE',
+            'x-feed-stale-since': String(now - 7_100_000),
+            'x-feed-grey-until': String(now - 3_500_000),
+            'x-feed-reason': 'collector_down',
+          };
+    return json({ feedId: id, vehicles: [{ id: `${id}-v1` }], count: 1 }, h);
   }
   if (url.pathname.startsWith('/api/celestrak/')) {
     calls.celestrak++;
@@ -673,6 +701,42 @@ check(
 }
 await shot('05-resumed');
 await satShot('05b-sat-resumed');
+
+// ── review R1 in the page: the FEED's draw:false empties every member url
+// through the real installed chain (router -> gate -> chips). The transit
+// layer itself is not drawn here; the unit tests drive its source.
+const askMember = (id) =>
+  page.evaluate(async (p) => {
+    const r = await fetch(p);
+    const body = await r.json();
+    return {
+      cleared: r.headers.get('X-Gev-Feed-Cleared'),
+      vehicles: body.vehicles?.length ?? null,
+      mode: window.__gevHistorySwap.liveDraw.modeOf('transit'),
+    };
+  }, `/api/transit/vehicles/${id}`);
+members['qa-a'] = 'cleared';
+const r1a = await askMember('qa-a');
+const r1b = await askMember('qa-b');
+check(
+  r1a.mode === 'cleared' && r1a.cleared === '1' && r1a.vehicles === 0,
+  `R1: cleared member emptied, feed cleared ${JSON.stringify(r1a)}`,
+);
+check(
+  r1b.cleared === '1' && r1b.vehicles === 0 && r1b.mode === 'cleared',
+  `R1: the LIVE member is emptied too under feed draw:false ${JSON.stringify(r1b)}`,
+);
+members['qa-a'] = 'live';
+const r1c = await askMember('qa-a');
+const r1d = await askMember('qa-b');
+check(
+  r1c.mode === 'live' && r1c.cleared === null && r1c.vehicles === 1,
+  `R1: all members live -> the resuming answer passes ${JSON.stringify(r1c)}`,
+);
+check(
+  r1d.cleared === null && r1d.vehicles === 1,
+  `R1: every member drawn again ${JSON.stringify(r1d)}`,
+);
 
 check(errors.length === 0, `no console/page errors ${JSON.stringify(errors)}`);
 say('forced polls', forced, 'calls', calls);
