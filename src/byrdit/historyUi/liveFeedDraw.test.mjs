@@ -131,7 +131,10 @@ test('every bridged feed has a layer, and the layer is the adapter layer', () =>
     Object.keys(LIVE_DRAW_FEEDS).sort(),
     BRIDGED_FEEDS.map((f) => f.id).sort(),
   );
-  for (const a of ALL_HISTORY_ADAPTERS) {
+  // every BRIDGED history feed (B12d quakes / wind are not bridged: no
+  // collector-bridge headers, so no feed state to draw from)
+  const bridged = new Set(BRIDGED_FEEDS.map((f) => f.id));
+  for (const a of ALL_HISTORY_ADAPTERS.filter((x) => bridged.has(x.id))) {
     assert.equal(layerOfFeed(a.id), a.layerId, a.id);
     assert.equal(feedOfLayer(a.layerId), a.id);
   }

@@ -28,10 +28,12 @@ function fakeManager(win, { enabled, slow = false } = {}) {
     gates: [],
     getEnabledLayerIds: () => new Set(m.enabled),
     getAll: () =>
-      ['flights', 'military', 'ais-live-vessels', 'earthquakes'].map((id) => ({
-        id,
-        name: id,
-      })),
+      ['flights', 'military', 'ais-live-vessels', 'weather-radar'].map(
+        (id) => ({
+          id,
+          name: id,
+        }),
+      ),
     subscribe: () => () => {},
     async refreshLayer(id) {
       m.calls.push(id);
@@ -51,7 +53,7 @@ function fakeManager(win, { enabled, slow = false } = {}) {
 }
 
 function setup({
-  enabled = ['flights', 'military', 'earthquakes'],
+  enabled = ['flights', 'military', 'weather-radar'],
   slice,
   slow,
 } = {}) {
@@ -113,7 +115,7 @@ test('released change: refreshLayer once, only for enabled, swapped layers', asy
   await driver.settle();
   // flights + military are enabled and swapped (one refresh each: the frame
   // seam drops absent aircraft at once); vessels is not enabled,
-  // earthquakes has no history swap
+  // weather-radar has no history swap (B12d: it stays LIVE)
   assert.deepEqual(dm.calls.sort(), ['flights', 'military']);
   assert.equal(dm.maxConcurrent, 1, 'never overlapping per layer');
 });
@@ -218,7 +220,7 @@ test('playback with a slow layer: no overlapping refresh of that layer', async (
 
 test('D4: LIVE refreshes each layer that was swapped (and only those)', async () => {
   const { clock, dm, driver, sliceCalls } = setup({
-    enabled: ['flights', 'military', 'earthquakes'],
+    enabled: ['flights', 'military', 'weather-radar'],
   });
   driver.onHistory({ active: true, timeMs: T });
   await clock.run(RELEASE_DEBOUNCE_MS + 1);
@@ -393,7 +395,7 @@ test('frame seam: a failure pass-through after history frames resets once onto t
 
 test('frame seam: LIVE resets every layer that had a history frame and restores the wall clock, then refreshes once', async () => {
   const { clock, dm, driver } = setup({
-    enabled: ['flights', 'military', 'earthquakes'],
+    enabled: ['flights', 'military', 'weather-radar'],
   });
   const layers = withLayers(dm);
   driver.onHistory({ active: true, timeMs: T });
@@ -420,7 +422,7 @@ const ROUTE = {
 for (const id of Object.keys(ROUTE)) {
   test(`R6: ${id} first enabled while history is paused is refreshed once on LIVE`, async () => {
     const { clock, dm, driver, sliceCalls, win } = setup({
-      enabled: ['earthquakes'],
+      enabled: ['weather-radar'],
     });
     const layers = withLayers(dm);
     driver.onHistory({ active: true, timeMs: T, playing: false });
@@ -451,7 +453,7 @@ for (const id of Object.keys(ROUTE)) {
 }
 
 test('R6 controls: a late-enabled layer disabled again, an enabled never-served layer and a non-history layer are not refreshed on LIVE', async () => {
-  const { clock, dm, driver, win } = setup({ enabled: ['earthquakes'] });
+  const { clock, dm, driver, win } = setup({ enabled: ['weather-radar'] });
   withLayers(dm);
   driver.onHistory({ active: true, timeMs: T, playing: false });
   await clock.run(RELEASE_DEBOUNCE_MS + 1);
@@ -471,7 +473,7 @@ test('R6 controls: a late-enabled layer disabled again, an enabled never-served 
 });
 
 test('R6: a second history session does not inherit the first session swaps', async () => {
-  const { clock, dm, driver, win } = setup({ enabled: ['earthquakes'] });
+  const { clock, dm, driver, win } = setup({ enabled: ['weather-radar'] });
   withLayers(dm);
   driver.onHistory({ active: true, timeMs: T });
   await clock.run(RELEASE_DEBOUNCE_MS + 1);

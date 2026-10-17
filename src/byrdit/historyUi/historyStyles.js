@@ -109,6 +109,8 @@ export const HISTORY_CSS = `
 .gev-hist-chip-truncated { border-color: rgba(255, 196, 0, 0.75); color: #ffd666; background: rgba(90, 70, 10, 0.35); }
 .gev-hist-chip-track { border-color: rgba(57, 208, 255, 0.7); color: #8fe3ff; background: rgba(10, 60, 90, 0.35); }
 .gev-hist-chip-track-warn { border-color: rgba(255, 196, 0, 0.75); color: #ffd666; background: rgba(10, 60, 90, 0.35); }
+.gev-hist-chip-history-empty { border-color: rgba(190, 160, 255, 0.75); color: #d4c4ff; background: rgba(50, 30, 90, 0.35); font-style: italic; }
+.gev-hist-chip-history-note { border-color: rgba(190, 160, 255, 0.6); color: #d4c4ff; background: rgba(50, 30, 90, 0.25); }
 @media (max-width: 900px) {
   .gev-hist { left: 12px; width: calc(100vw - 24px); min-width: 0; max-width: none; bottom: 232px; }
   .gev-hist[data-expanded='false'] { width: auto; max-width: calc(100vw - 24px); }

@@ -46,6 +46,7 @@ import {
   rebaseSec,
   viewToBboxes,
 } from './historyAdapters.js';
+import { FIELD_ADAPTERS } from './historyFieldAdapters.js';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 const MIN = 60_000;
@@ -450,10 +451,15 @@ export const EVENT_ADAPTERS = Object.freeze([
   BIKESHARE_ADAPTER,
 ]);
 
-/** The active registry: B12a motion feeds + the B12b feeds. */
+/**
+ * The active registry: B12a motion feeds + the B12b feeds + the B12d quakes
+ * and wind (historyFieldAdapters.js). Satellites, the weather imagery
+ * layers and recent imagery have no adapter: they stay LIVE (D5, B12d).
+ */
 export const ALL_HISTORY_ADAPTERS = Object.freeze([
   ...HISTORY_ADAPTERS,
   ...EVENT_ADAPTERS,
+  ...FIELD_ADAPTERS,
 ]);
 
 export { historySourceLabel };

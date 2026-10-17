@@ -403,9 +403,24 @@ export const HISTORY_ADAPTERS = Object.freeze([
   }),
 ]);
 
-/** The adapter of a request path, or null. */
+/** The adapter of a request path, or null (same-origin adapters only). */
 export function adapterForPath(path, adapters = HISTORY_ADAPTERS) {
-  return adapters.find((a) => a.match.test(path)) ?? null;
+  return adapters.find((a) => !a.host && a.match.test(path)) ?? null;
+}
+
+/**
+ * The adapter of a request URL, or null. An adapter with `host` (B12d: the
+ * browser-direct USGS feed) matches only that host; the others match the
+ * path as before.
+ */
+export function adapterForUrl(url, adapters = HISTORY_ADAPTERS) {
+  return (
+    adapters.find((a) =>
+      a.host
+        ? url.hostname === a.host && a.match.test(url.pathname)
+        : a.match.test(url.pathname),
+    ) ?? null
+  );
 }
 
 /** /api/history/slice URL (path + query) of one slice question at t. */

@@ -14,7 +14,8 @@
  *
  * Checks: flights, military and vessels show the recorded slice at t (count
  * + "History: ..." source label) and NOT the live rows; the chip strip shows
- * a LIVE chip for the other enabled layer (earthquakes) and none for the
+ * a LIVE chip for the other enabled layer (weather radar, which stays LIVE
+ * after B12d) and none for the
  * three swapped ones; a recorded gap draws no aircraft; 60x playback asks
  * minute frames and prefetches (<= 2 in flight); LIVE restores the live
  * rows and removes the LIVE chips; a failing slice API passes the layers
@@ -342,7 +343,7 @@ const layerState = () =>
   page.evaluate((ids) => {
     const dm = window.__godsEyeView.dataManager;
     const out = {};
-    for (const id of [...ids, 'earthquakes']) {
+    for (const id of [...ids, 'weather-radar']) {
       const entry = dm.layers.get(id);
       const stats = entry?.module?.getStats?.() ?? {};
       out[id] = {
@@ -422,7 +423,7 @@ await sleep(SETTLE_MS);
 await page.keyboard.press('Escape');
 await page.evaluate(async () => {
   const dm = window.__godsEyeView.dataManager;
-  for (const id of ['flights', 'military', 'ais-live-vessels', 'earthquakes'])
+  for (const id of ['flights', 'military', 'ais-live-vessels', 'weather-radar'])
     await dm.setEnabled(id, true);
 });
 let st = await waitFor(
@@ -484,9 +485,9 @@ check(
 );
 const un = unswapped(st).map((c) => c[0]);
 check(
-  un.includes('layer:earthquakes') &&
+  un.includes('layer:weather-radar') &&
     !un.some((f) => /flights|military|vessels/.test(f)),
-  `LIVE chip on earthquakes only ${JSON.stringify(unswapped(st))}`,
+  `LIVE chip on weather-radar only ${JSON.stringify(unswapped(st))}`,
 );
 const tShown = Date.parse(st.time);
 const asked = sliceCalls

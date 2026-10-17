@@ -102,6 +102,8 @@ test('registry: B12a feeds + FIRMS/perimeters/cyclones/launches + transit/bike s
       ['launches', 'rocket-launches', 'launches', false],
       ['transit', 'transit', 'transit', true],
       ['bikeshare', 'bikeshare', 'bikeshare', false],
+      ['quakes', 'earthquakes', 'quakes', false],
+      ['wind', 'wind', 'wind', false],
     ],
   );
   const find = (p) => adapterForPath(p, ALL_HISTORY_ADAPTERS)?.id ?? null;

@@ -42,6 +42,10 @@ export const TRUNCATED_CHIP = 'HISTORY truncated (newest 15,000 rows)';
 export const TRACK_STATE = 'track';
 export const TRACK_WARN_STATE = 'track-warn';
 
+/** B12d: the reason a swapped layer shows nothing at t / a note on it. */
+export const EMPTY_NOTE_STATE = 'history-empty';
+export const NOTE_STATE = 'history-note';
+
 export function createLayerChips({
   feedChips,
   getRouter = () => null,
@@ -108,6 +112,24 @@ export function createLayerChips({
     ];
     for (const a of adapters) {
       if (!swappedFeeds.has(a.id) || !enabled.has(a.layerId)) continue;
+      // B12d: a swapped layer's empty answer says why (D3: nothing is
+      // drawn, never silently), or a note on what is drawn
+      const note = rs.served?.[a.id]?.chip;
+      if (note?.text)
+        out.push({
+          feed: `history-note:${a.id}`,
+          layerId: a.layerId,
+          label: all.find((l) => l.id === a.layerId)?.name || a.layerId,
+          state:
+            note.state === EMPTY_NOTE_STATE ? EMPTY_NOTE_STATE : NOTE_STATE,
+          draw: note.state !== EMPTY_NOTE_STATE,
+          chip: note.text,
+          age: null,
+          lastOkAt: null,
+          staleSince: null,
+          greyUntil: null,
+          reason: note.reason ?? null,
+        });
       if (!rs.served?.[a.id]?.truncated) continue;
       out.push({
         feed: `history:${a.id}`,

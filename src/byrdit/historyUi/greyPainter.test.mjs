@@ -74,7 +74,12 @@ test('greyColor: desaturated, faded to the flights stale alpha', () => {
 });
 
 test('targets cover every swappable layer, plus satellites (tagged)', () => {
-  const layers = new Set(ALL_HISTORY_ADAPTERS.map((a) => a.layerId));
+  // B12d quakes / wind are swapped but not bridged (no feed state to grey)
+  const layers = new Set(
+    ALL_HISTORY_ADAPTERS.filter((a) => !['quakes', 'wind'].includes(a.id)).map(
+      (a) => a.layerId,
+    ),
+  );
   layers.add('satellites');
   assert.deepEqual(new Set(Object.keys(GREY_TARGETS)), layers);
   assert.deepEqual(GREY_TARGETS.satellites.tagged, ['satellites']);

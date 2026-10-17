@@ -26,9 +26,9 @@ const LAYERS = [
   { id: 'flights', name: 'Live Flights' },
   { id: 'military', name: 'Military Flights' },
   { id: 'ais-live-vessels', name: 'Live AIS Vessels' },
-  { id: 'earthquakes', name: 'Earthquakes' },
+  { id: 'weather-radar', name: 'Rain radar' },
   { id: 'weather-cyclones', name: 'Tropical Cyclones' },
-  { id: 'wind', name: 'Wind' },
+  { id: 'recent-imagery', name: 'Recent imagery' },
   { id: 'satellites', name: 'Satellites' },
 ];
 
@@ -51,7 +51,9 @@ function manager(enabled) {
   return m;
 }
 
-function setup(enabled = ['flights', 'earthquakes', 'wind', 'military']) {
+function setup(
+  enabled = ['flights', 'weather-radar', 'recent-imagery', 'military'],
+) {
   const win = fakeWindow('https://gev.example/', async (input) => {
     const url = new URL(String(input), 'https://gev.example');
     if (url.pathname === '/api/history/slice')
@@ -82,11 +84,11 @@ test('D5: enabled non-history layers get a LIVE chip, swapped ones do not; LIVE 
   assert.deepEqual(live(chips.states()), [], 'no chips while live');
   router.setHistory({ active: true, timeMs: T });
   assert.deepEqual(live(chips.states()), [
-    ['earthquakes', LIVE_CHIP],
-    ['wind', LIVE_CHIP],
+    ['weather-radar', LIVE_CHIP],
+    ['recent-imagery', LIVE_CHIP],
   ]);
-  const quake = chips.states().find((c) => c.layerId === 'earthquakes');
-  assert.equal(quake.label, 'Earthquakes');
+  const quake = chips.states().find((c) => c.layerId === 'weather-radar');
+  assert.equal(quake.label, 'Rain radar');
   assert.equal(quake.draw, true);
   router.setHistory({ active: false });
   assert.deepEqual(live(chips.states()), []);
@@ -202,7 +204,7 @@ test('the control renders the LIVE chips, visible even collapsed, and clears the
   const world = fixtureWorld(NOW);
   const doc = fakeDocument();
   const win = fakeWindow('https://gev.example/', fixtureFetch(world));
-  const dm = manager(['flights', 'earthquakes']);
+  const dm = manager(['flights', 'weather-radar']);
   let router = null;
   const chips = createLayerChips({
     feedChips: createFeedChips({ target: win, monotonic: clock.monotonic }),
@@ -233,7 +235,7 @@ test('the control renders the LIVE chips, visible even collapsed, and clears the
   control.seek(T);
   await flush();
   assert.equal(control.getState().expanded, false);
-  assert.deepEqual(chipTexts(), [[UNSWAPPED_STATE, 'Earthquakes: LIVE']]);
+  assert.deepEqual(chipTexts(), [[UNSWAPPED_STATE, 'Rain radar: LIVE']]);
   control.leave();
   await flush();
   assert.deepEqual(chipTexts(), []);
@@ -256,7 +258,7 @@ test('mountHistoryForShell wires router + chips + driver: a seek refreshes the s
     if (url.pathname.startsWith('/api/history/')) return fixture(input, init);
     return jsonResponse({ ac: [], now: Date.now() });
   });
-  const dm = manager(['military', 'earthquakes']);
+  const dm = manager(['military', 'weather-radar']);
   dm.refreshLayer = async (id) => {
     if (id === 'military') await win.fetch('/api/military');
     return true;
@@ -273,9 +275,9 @@ test('mountHistoryForShell wires router + chips + driver: a seek refreshes the s
     assert.ok(asked.includes('/api/history/slice'));
     assert.ok(handle.router.isSwapped('military'));
     const chip = handle.root.find(
-      (n) => n.getAttribute?.('data-feed') === 'layer:earthquakes',
+      (n) => n.getAttribute?.('data-feed') === 'layer:weather-radar',
     );
-    assert.ok(chip, 'earthquakes LIVE chip');
+    assert.ok(chip, 'weather-radar LIVE chip');
     asked.length = 0;
     handle.leave();
     await handle.driver.settle();

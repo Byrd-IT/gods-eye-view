@@ -83,6 +83,7 @@ export function createRefreshDriver({
   const lastMode = new Map(); // adapter id -> 'history' | 'live'
   const clocks = new Map(); // adapter id -> motion clock function
   const reloadedFor = new Map(); // reloadOnFrame adapter id -> frame t | 'live'
+  const retried = new Set(); // B12d: 'adapter@t' asked again once (refresh)
 
   const dm = () => {
     try {
@@ -157,6 +158,19 @@ export function createRefreshDriver({
     if (destroyed) return;
     const adapter = adapters.find((a) => a.id === event.adapterId);
     if (!adapter) return;
+    if (event.mode === 'refresh') {
+      // B12d: the answer was refused (a wind grid of another read): ask the
+      // layer once more for this frame, never in a loop
+      const key = `${adapter.id}@${event.t}`;
+      if (retried.has(key)) return;
+      retried.add(key);
+      if (retried.size > 64) retried.delete(retried.values().next().value);
+      timers.setTimeout(() => {
+        if (!destroyed && state.active && router.isSwapped(adapter.id))
+          refresh(adapter, 1);
+      }, 0);
+      return;
+    }
     if (event.mode === 'history') {
       frameT.set(adapter.id, event.t);
       lastMode.set(adapter.id, 'history');

@@ -67,8 +67,19 @@
  *   vessels -> a 404 (the trail backfill falls back silently to the
  *        history-frame trail).
  * A failed feed passes them through with the rest.
+ *
+ * B12d (quakes, wind; historyFieldAdapters.js): an adapter may match a
+ * browser-direct third-party URL by `host` (the USGS feed); take a B12c
+ * 'nothing recorded' 404 as an EMPTY answer (`accept.notRecorded`, D3: the
+ * reason goes to the chip, never live) or a binary slice (`accept.bytes`,
+ * the wind grid); bind a request to the slice time of an earlier answer
+ * (`boundKey` / adapted.bindKey: the grid of the manifest the layer just
+ * read); keep one cache across its request kinds (`paramsKey`) and
+ * prefetch every request of a frame (`prefetchParams`). adapted.chip is
+ * kept per feed for the chip strip; adapted.refresh (a refused answer)
+ * drops the cache and asks the driver for one more refresh of that frame.
  */
-import { adapterForPath, sliceUrl } from './historyAdapters.js';
+import { adapterForUrl, sliceUrl } from './historyAdapters.js';
 import { ALL_HISTORY_ADAPTERS } from './historyEventAdapters.js';
 import {
   TRACK_CACHE_MAX,
@@ -213,6 +224,10 @@ export function createHistoryRouter({
   const failed = new Map(); // adapter id -> {retryAt} (latched, D3)
   const served = new Map(); // adapter id -> {t, rows, gap}
   const pinned = new Map(); // adapter id -> playback frame (driver)
+  // B12d: a request bound to the slice time of an earlier answer (the wind
+  // grid id of the manifest served at t) -> that t
+  const bound = new Map();
+  const BOUND_KEEP = 64;
   const listeners = new Set();
   const serveListeners = new Set(); // onServe (driver: frame reset / clock)
   const queue = []; // prefetch slice urls
@@ -333,7 +348,7 @@ export function createHistoryRouter({
     }
   }
 
-  async function fetchSlice(url, signal) {
+  async function fetchSlice(url, signal, accept = {}) {
     let response;
     try {
       response = await inner.call(target, url, {
@@ -346,8 +361,28 @@ export function createHistoryRouter({
       throw new SliceError('failed');
     }
     if (response?.status === 429) throw new SliceError('busy', 429);
-    if (!response?.ok) throw new SliceError('failed', response?.status ?? null);
-    const type = String(response.headers?.get?.('content-type') ?? '');
+    const type = String(response?.headers?.get?.('content-type') ?? '');
+    // B12d: an adapter that takes it gets a B12c 'nothing recorded' 404
+    // (D3: an empty answer + reason, never a failure that goes live)
+    const notRecorded = accept.notRecorded && response?.status === 404;
+    if (!response?.ok && !notRecorded)
+      throw new SliceError('failed', response?.status ?? null);
+    // B12d: a binary slice (the wind grid) for an adapter that takes it
+    if (response.ok && accept.bytes && /octet-stream/i.test(type)) {
+      let buffer;
+      try {
+        buffer = await response.arrayBuffer();
+      } catch (error) {
+        if (isAbort(error)) throw error;
+        throw new SliceError('failed', response.status);
+      }
+      return {
+        body: null,
+        bytes: new Uint8Array(buffer),
+        status: response.status,
+        headers: headerObject(response),
+      };
+    }
     if (!/\bjson\b/i.test(type))
       throw new SliceError('failed', response.status);
     let body;
@@ -359,11 +394,17 @@ export function createHistoryRouter({
     }
     if (!body || typeof body !== 'object')
       throw new SliceError('failed', response.status);
-    return { body, headers: headerObject(response) };
+    if (notRecorded && body.error !== 'not_recorded')
+      throw new SliceError('failed', response.status);
+    return {
+      body,
+      ...(notRecorded ? { status: 404 } : {}),
+      headers: headerObject(response),
+    };
   }
 
   /** One slice answer, from the cache or the network (shared in flight). */
-  function getSlice(url, { signal = null, prefetch = false } = {}) {
+  function getSlice(url, { signal = null, prefetch = false, accept } = {}) {
     const hit = cache.get(url);
     if (hit) {
       if (!prefetch) stats.cacheHits++;
@@ -375,7 +416,7 @@ export function createHistoryRouter({
     stats.slices++;
     spent.push(monotonic());
     const entry = {};
-    entry.promise = fetchSlice(url, signal).then(
+    entry.promise = fetchSlice(url, signal, accept).then(
       (value) => {
         entry.value = value;
         return value;
@@ -406,13 +447,13 @@ export function createHistoryRouter({
         queue.length = 0;
         return;
       }
-      const url = queue.shift();
+      const { url, accept } = queue.shift();
       if (cache.has(url) || running.has(url)) continue;
       const controller = new AbortController();
       running.set(url, controller);
       stats.prefetches++;
       stats.maxInFlight = Math.max(stats.maxInFlight, running.size);
-      getSlice(url, { signal: controller.signal, prefetch: true })
+      getSlice(url, { signal: controller.signal, prefetch: true, accept })
         .catch(() => {})
         .finally(() => {
           if (running.get(url) === controller) running.delete(url);
@@ -431,9 +472,15 @@ export function createHistoryRouter({
     } catch {
       return [];
     }
-    return paramsOf(adapter, url).map((params) =>
-      sliceUrl(adapter, params, t, base),
-    );
+    // B12d: an adapter whose frame is more than one request (the wind
+    // manifest + grid) names every slice of the frame
+    let params;
+    try {
+      params = adapter.prefetchParams?.(url) ?? paramsOf(adapter, url);
+    } catch {
+      params = paramsOf(adapter, url);
+    }
+    return params.map((p) => sliceUrl(adapter, p, t, base));
   }
 
   /** Queue the slices of `times` for a swapped adapter (cache fill). */
@@ -443,8 +490,12 @@ export function createHistoryRouter({
     const urls = [];
     for (const t of times)
       for (const url of urlsAt(adapter, t))
-        if (!cache.has(url) && !running.has(url) && !queue.includes(url)) {
-          queue.push(url);
+        if (
+          !cache.has(url) &&
+          !running.has(url) &&
+          !queue.some((q) => q.url === url)
+        ) {
+          queue.push({ url, accept: adapter.accept });
           urls.push(url);
         }
     pump();
@@ -544,6 +595,7 @@ export function createHistoryRouter({
         failed.clear();
         served.clear();
         pinned.clear();
+        bound.clear();
         clearTrack();
         notify();
       }
@@ -580,6 +632,13 @@ export function createHistoryRouter({
   // ── the fetch wrapper ───────────────────────────────────
 
   function liveParamsKey(adapter, url) {
+    if (typeof adapter.paramsKey === 'function') {
+      try {
+        return String(adapter.paramsKey(url));
+      } catch {
+        /* fall back to the slice params */
+      }
+    }
     return JSON.stringify(paramsOf(adapter, url));
   }
 
@@ -604,17 +663,29 @@ export function createHistoryRouter({
 
   async function answer(adapter, url, input, init, signal) {
     let busyRetried = false;
+    const accept = adapter.accept ?? {};
+    // B12d: a request bound to an earlier answer's slice time (the wind
+    // grid of the manifest the layer just read) asks that time
+    let boundKey = null;
+    try {
+      boundKey = adapter.boundKey?.(url) ?? null;
+    } catch {
+      boundKey = null;
+    }
     // loops only when a seek / LIVE happened while the slice was pending
     for (;;) {
       const myGen = gen;
-      const t = requestTime(adapter);
+      const t =
+        boundKey !== null && bound.has(boundKey)
+          ? bound.get(boundKey)
+          : requestTime(adapter);
       const urls = paramsOf(adapter, url).map((params) =>
         sliceUrl(adapter, params, t, base),
       );
       let answers;
       try {
         answers = await withSignal(
-          Promise.all(urls.map((u) => getSlice(u))),
+          Promise.all(urls.map((u) => getSlice(u, { accept }))),
           signal,
         );
       } catch (error) {
@@ -644,19 +715,40 @@ export function createHistoryRouter({
       const rows = Number(adapted.headers['X-History-Rows']) || 0;
       const prevServed = served.get(adapter.id);
       const truncated = adapted.headers['X-History-Truncated'] === '1';
+      const chip = adapted.chip ?? null;
       served.set(adapter.id, {
         t,
         nowMs,
         rows,
         gap: adapted.headers['X-History-Gap'] === '1',
         truncated,
+        chip,
       });
-      // the chip strip shows a truncated answer (layerChips.js)
-      if (wasFailed || !prevServed || prevServed.truncated !== truncated)
+      if (adapted.bindKey) {
+        bound.delete(adapted.bindKey);
+        bound.set(adapted.bindKey, t);
+        while (bound.size > BOUND_KEEP) bound.delete(bound.keys().next().value);
+      }
+      // the chip strip shows a truncated answer and a B12d reason / note
+      // (layerChips.js)
+      if (
+        wasFailed ||
+        !prevServed ||
+        prevServed.truncated !== truncated ||
+        JSON.stringify(prevServed.chip ?? null) !== JSON.stringify(chip)
+      )
         notify();
       announce({ adapterId: adapter.id, mode: 'history', t, nowMs });
-      return new Response(JSON.stringify(adapted.body), {
-        status: 200,
+      // B12d: an answer the layer must not combine (a wind grid of another
+      // read): the layer is asked again
+      if (adapted.refresh) {
+        // never the same pair again from the cache
+        if (boundKey !== null) bound.delete(boundKey);
+        clearCache();
+        announce({ adapterId: adapter.id, mode: 'refresh', t });
+      }
+      return new Response(adapted.raw ?? JSON.stringify(adapted.body), {
+        status: adapted.status ?? 200,
         headers: {
           ...adapted.headers,
           'X-History-T': new Date(t).toISOString(),
@@ -865,7 +957,7 @@ export function createHistoryRouter({
         req = requestOf(input, init);
         url = new URL(req.url, origin());
         const asked = req.method === 'GET' && !init?.[LIVE_ONLY_FLAG];
-        adapter = asked ? adapterForPath(url.pathname, adapters) : null;
+        adapter = asked ? adapterForUrl(url, adapters) : null;
         trackAdapter = asked
           ? (adapters.find((a) => a.trackMatch?.test(url.pathname)) ?? null)
           : null;
