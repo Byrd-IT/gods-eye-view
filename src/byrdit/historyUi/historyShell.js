@@ -15,6 +15,9 @@
  *     frames, prefetch of the next 2 frames, the LIVE refresh (D4)
  * B12b adds the event feeds (historyEventAdapters.js) and the camera view
  * box FIRMS asks with (D7), refreshed after a camera move.
+ * B12f adds the N5 live-layer drawing: liveFeedDraw (a fetch gate BELOW the
+ * router, router -> gate -> chips -> browser: a cleared feed's live answer
+ * is emptied) and greyPainter (a grey feed's layer is drawn grey).
  *
  * A failure to load or mount is logged and leaves the app live.
  */
@@ -26,6 +29,8 @@ import { createHistoryRouter } from './historyRouter.js';
 import { createRefreshDriver } from './historyRefresh.js';
 import { createHistoryClient } from './historyClient.js';
 import { cameraViewBox } from '../history/flightView.js';
+import { createLiveFeedDraw } from './liveFeedDraw.js';
+import { createGreyPainter } from './greyPainter.js';
 
 const SCRUB_SELECTOR = '.gev-hist-scrub';
 
@@ -50,7 +55,24 @@ export function mountHistoryForShell(
   // FIRMS asks its slice with the camera view (D7, B12b)
   const getViewBox = () => (shell?.viewer ? cameraViewBox(shell.viewer) : null);
   router = createHistoryRouter({ target: win, getViewBox });
+  // N5 (B12f): the gate goes in first, so the router sits above it
+  const liveDraw = createLiveFeedDraw({
+    target: win,
+    getRouter: () => router,
+    getDataManager,
+  });
+  liveDraw.install();
   router.install();
+  const painter = shell?.viewer
+    ? createGreyPainter({
+        viewer: shell.viewer,
+        modeOf: (layerId) => liveDraw.paintModeOf(layerId),
+      })
+    : null;
+  painter?.start();
+  const offLiveDraw = liveDraw.subscribe(() => painter?.changed());
+  // entering / leaving history changes which layers the painter may touch
+  const offRouterPaint = router.subscribe(() => painter?.changed());
   chips.connect();
   const driver = createRefreshDriver({
     router,
@@ -96,12 +118,22 @@ export function mountHistoryForShell(
       /* the viewer is already gone */
     }
     driver.destroy();
+    offLiveDraw?.();
+    offRouterPaint?.();
+    painter?.destroy();
     router.destroy();
+    liveDraw.destroy();
     destroyControl();
     if (win?.__gevHistorySwap?.router === router) delete win.__gevHistorySwap;
   };
   shell?._lifetime?.removers?.add?.(destroyAll);
   // QA / console hook (read-only use): the router and driver state
-  if (win) win.__gevHistorySwap = { router, driver, handle };
-  return Object.assign(handle, { router, driver, destroy: destroyAll });
+  if (win) win.__gevHistorySwap = { router, driver, handle, liveDraw, painter };
+  return Object.assign(handle, {
+    router,
+    driver,
+    liveDraw,
+    painter,
+    destroy: destroyAll,
+  });
 }
