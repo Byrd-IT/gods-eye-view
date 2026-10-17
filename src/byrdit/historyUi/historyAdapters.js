@@ -51,8 +51,9 @@ const SOURCE_NAMES = Object.freeze({
   'noaa-marinecadastre': 'MarineCadastre',
 });
 
-export function historySourceLabel(sources, extra = '') {
-  const names = [
+/** Display names of a comma list of history sources (none dropped). */
+export function historySourceNames(sources) {
+  return [
     ...new Set(
       String(sources ?? '')
         .split(',')
@@ -61,6 +62,10 @@ export function historySourceLabel(sources, extra = '') {
         .map((s) => SOURCE_NAMES[s.toLowerCase()] ?? s),
     ),
   ];
+}
+
+export function historySourceLabel(sources, extra = '') {
+  const names = historySourceNames(sources);
   const label = `History${names.length ? `: ${names.join(' + ')}` : ''}${extra}`;
   return label.slice(0, 80);
 }
@@ -335,8 +340,10 @@ function adaptVessels(answers, { t, nowMs }) {
  *   sliceFeed    /api/history/slice?feed=
  *   snapFeed     /api/history/snapshots feed for playback frames, or null
  *   quantumMs    playback frame step when there is no snapFeed
- *   trackMatch   the feed's LIVE track route, refused while the feed is
- *                answered from history (historyRouter.js, D3)
+ *   trackMatch   the feed's LIVE track route. While the feed is answered
+ *                from history it is answered from /api/history/track
+ *                (flights, military: historyTrackAdapters.js, B12e) or
+ *                refused (vessels) (historyRouter.js, D3)
  *   rebased      D2: record/poll times are rebased (motion feed)
  *   reloadOnFrame  the layer caches per-time data: the driver asks
  *                layer.reloadForHistoryFrame() once per frame time and once

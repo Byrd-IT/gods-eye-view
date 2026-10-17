@@ -18,7 +18,15 @@
  *
  * A swapped layer whose last history answer was truncated by the slice
  * cap gets a 'HISTORY truncated' chip (B12b: FIRMS, X-History-Truncated).
+ *
+ * B12e: the recorded track of the selected aircraft (router state `track`)
+ * gets a chip on its layer: the hex, the point count and the sources of
+ * the merged track (adsb.lol / OpenSky), and, never silently, whether the
+ * answer was SAMPLED or TRUNCATED, every recorded GAP inside [t-6h, t]
+ * (the trail is one polyline and joins across it), no recording at all, or
+ * the history track being unavailable.
  */
+import { trackChipText, trackNeedsWarning } from './historyTrackAdapters.js';
 
 export const UNSWAPPED_STATE = 'unswapped';
 /** Chip text (named constants: no lowercase literal in a textContent=). */
@@ -30,6 +38,9 @@ export const LIVE_CHIP_UNAVAILABLE = 'LIVE (history unavailable)';
  */
 export const TRUNCATED_STATE = 'truncated';
 export const TRUNCATED_CHIP = 'HISTORY truncated (newest 15,000 rows)';
+/** B12e: the selected aircraft's recorded track (warn: flagged / none). */
+export const TRACK_STATE = 'track';
+export const TRACK_WARN_STATE = 'track-warn';
 
 export function createLayerChips({
   feedChips,
@@ -112,6 +123,21 @@ export function createLayerChips({
         reason: null,
       });
     }
+    const tr = rs.track;
+    if (tr && swappedFeeds.has(tr.adapterId) && enabled.has(tr.layerId))
+      out.push({
+        feed: `history-track:${tr.adapterId}`,
+        layerId: tr.layerId,
+        label: all.find((l) => l.id === tr.layerId)?.name || tr.layerId,
+        state: trackNeedsWarning(tr) ? TRACK_WARN_STATE : TRACK_STATE,
+        draw: true,
+        chip: trackChipText(tr),
+        age: null,
+        lastOkAt: null,
+        staleSince: null,
+        greyUntil: null,
+        reason: null,
+      });
     for (const id of ids) {
       if (swappedLayers.has(id)) continue;
       const label = all.find((l) => l.id === id)?.name || id;

@@ -50,13 +50,33 @@
  * resetForHistoryFrame() / motion clock from it (historyRefresh.js).
  *
  * Track routes (adapter.trackMatch: /api/flights/track, /api/military/track,
- * /api/vessels/track) are LIVE tracks. While a feed is answered from
- * history they get a 404 (the layers' trail backfill falls back silently to
- * the history-frame trail), so no live path is drawn behind a history
- * aircraft or vessel (D3). A failed feed passes them through with the rest.
+ * /api/vessels/track) are LIVE tracks; no live path is ever drawn behind a
+ * history aircraft or vessel (D3). While a feed is answered from history:
+ *   flights, military (B12e) -> the RECORDED track [t-6h, t] from
+ *        /api/history/track, t = the time of the frame the layer shows,
+ *        rebased with that frame's delta and adapted to the live shape
+ *        (historyTrackAdapters.js). Answers are kept per exact URL for the
+ *        history time (a re-served paused frame asks the same window) and
+ *        count against the slice budget. What was served (sources, sampled
+ *        / truncated, recorded gaps) is getState().track for the chip; the
+ *        chip goes when the aircraft is deselected, on a seek or LIVE. A
+ *        failed track request is a 404 (the layer keeps its frame trail),
+ *        never a live track;
+ *   vessels -> a 404 (the trail backfill falls back silently to the
+ *        history-frame trail).
+ * A failed feed passes them through with the rest.
  */
 import { adapterForPath, sliceUrl } from './historyAdapters.js';
 import { ALL_HISTORY_ADAPTERS } from './historyEventAdapters.js';
+import {
+  TRACK_CACHE_MAX,
+  TRACK_SPECS,
+  TRACK_UNAVAILABLE,
+  historyTrackUrl,
+  trackIdOf,
+  trackSummary,
+  trackWindow,
+} from './historyTrackAdapters.js';
 
 export const LIVE_ONLY_FLAG = 'gevLive';
 /** A playback move larger than this (or backwards) is a seek. */
@@ -195,7 +215,16 @@ export function createHistoryRouter({
   const serveListeners = new Set(); // onServe (driver: frame reset / clock)
   const queue = []; // prefetch slice urls
   const running = new Map(); // prefetch url -> AbortController
-  const stats = { slices: 0, cacheHits: 0, prefetches: 0, maxInFlight: 0 };
+  const stats = {
+    slices: 0,
+    cacheHits: 0,
+    prefetches: 0,
+    maxInFlight: 0,
+    tracks: 0,
+    trackCacheHits: 0,
+  };
+  const trackCache = new Map(); // track url -> {gen, promise, value}
+  let track = null; // summary of the last served track (chip), or null
   const spent = []; // monotonic ms of slice network requests (last minute)
 
   /** Slice requests left in the rolling minute. */
@@ -248,6 +277,7 @@ export function createHistoryRouter({
       swapped: adapters.filter((a) => isSwapped(a.id)).map((a) => a.id),
       failed: adapters.filter((a) => isFailed(a.id)).map((a) => a.id),
       served: Object.fromEntries(served),
+      track,
       cacheSize: cache.size,
       prefetchInFlight: running.size,
       prefetchQueued: queue.length,
@@ -507,6 +537,7 @@ export function createHistoryRouter({
         failed.clear();
         served.clear();
         pinned.clear();
+        clearTrack();
         notify();
       }
       return out;
@@ -517,6 +548,7 @@ export function createHistoryRouter({
       out.entered = true;
       gen++;
       clearCache();
+      clearTrack();
     } else if (timeMs !== prev) {
       out.moved = true;
       const jump =
@@ -527,6 +559,7 @@ export function createHistoryRouter({
         out.seeked = true;
         gen++;
         clearCache();
+        if (clearTrack()) notify();
       }
     }
     s.active = true;
@@ -606,6 +639,7 @@ export function createHistoryRouter({
       const truncated = adapted.headers['X-History-Truncated'] === '1';
       served.set(adapter.id, {
         t,
+        nowMs,
         rows,
         gap: adapted.headers['X-History-Gap'] === '1',
         truncated,
@@ -624,6 +658,140 @@ export function createHistoryRouter({
     }
   }
 
+  // ── recorded tracks (B12e) ──────────────────────────────
+
+  /** Drop the track chip and the cached tracks; true if a chip was shown. */
+  function clearTrack() {
+    trackCache.clear();
+    const had = track !== null;
+    track = null;
+    return had;
+  }
+
+  function setTrack(summary) {
+    track = summary;
+    notify();
+  }
+
+  async function fetchTrack(url) {
+    let response;
+    try {
+      response = await inner.call(target, url, {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+    } catch {
+      throw new SliceError('failed');
+    }
+    if (!response?.ok) throw new SliceError('failed', response?.status ?? null);
+    const type = String(response.headers?.get?.('content-type') ?? '');
+    if (!/\bjson\b/i.test(type))
+      throw new SliceError('failed', response.status);
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      throw new SliceError('failed', response.status);
+    }
+    if (!body || typeof body !== 'object')
+      throw new SliceError('failed', response.status);
+    return { body, headers: headerObject(response) };
+  }
+
+  /** One track answer: cached for this history time, or the network. */
+  function getTrack(url) {
+    const hit = trackCache.get(url);
+    if (hit && hit.gen === gen) {
+      stats.trackCacheHits++;
+      return { promise: hit.promise, cached: true };
+    }
+    stats.tracks++;
+    spent.push(monotonic());
+    const entry = { gen };
+    entry.promise = fetchTrack(url).catch((error) => {
+      if (trackCache.get(url) === entry) trackCache.delete(url);
+      throw error;
+    });
+    trackCache.delete(url);
+    trackCache.set(url, entry);
+    while (trackCache.size > TRACK_CACHE_MAX)
+      trackCache.delete(trackCache.keys().next().value);
+    return { promise: entry.promise, cached: false };
+  }
+
+  const refuseTrack = (error) =>
+    new Response(JSON.stringify({ error }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  /** A selected aircraft's track route answered from history (B12e). */
+  async function answerTrack(adapter, spec, url, signal) {
+    const id = trackIdOf(spec, url);
+    if (!id) return refuseTrack(TRACK_UNAVAILABLE);
+    // the frame the layer shows: the track ends at its icon, same rebase
+    const frame = served.get(adapter.id);
+    const to = Number.isFinite(frame?.t) ? frame.t : requestTime(adapter);
+    const deltaMs = Number.isFinite(frame?.nowMs)
+      ? frame.nowMs - frame.t
+      : now() - to;
+    const { from } = trackWindow(to);
+    const turl = historyTrackUrl(spec.feed, id, { from, to }, base);
+    const myGen = gen;
+    const base0 = {
+      adapterId: adapter.id,
+      layerId: adapter.layerId,
+      id,
+      from,
+      to,
+    };
+    const started = monotonic();
+    const { promise, cached } = getTrack(turl);
+    let got;
+    try {
+      got = await withSignal(promise, signal);
+    } catch (error) {
+      if (signal?.aborted || isAbort(error)) throw abortError();
+      if (s.active && gen === myGen)
+        setTrack(trackSummary({ ...base0, status: 'unavailable' }));
+      return refuseTrack(TRACK_UNAVAILABLE);
+    }
+    // a seek / LIVE meanwhile: never a track of another time (the new
+    // frame asks again)
+    if (!s.active || gen !== myGen) return refuseTrack(TRACK_UNAVAILABLE);
+    const ms = Math.round(monotonic() - started);
+    setTrack(
+      trackSummary({
+        ...base0,
+        body: got.body,
+        headers: got.headers,
+        ms,
+        cached,
+      }),
+    );
+    const out = spec.adapt(got.body, { deltaMs });
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-History-T': new Date(to).toISOString(),
+      'X-History-From': new Date(from).toISOString(),
+      'X-History-Rows': got.headers['x-history-rows'] ?? '0',
+    };
+    for (const h of ['sampled', 'truncated', 'gap', 'source'])
+      if (got.headers[`x-history-${h}`])
+        headers[`X-History-${h[0].toUpperCase()}${h.slice(1)}`] =
+          got.headers[`x-history-${h}`];
+    return new Response(JSON.stringify(out), { status: 200, headers });
+  }
+
+  /** Deselecting the aircraft removes its track chip. */
+  function onSubjectCleared(event) {
+    const d = event?.detail ?? {};
+    if (track && d.layerId === track.layerId && (!d.id || d.id === track.id)) {
+      track = null;
+      notify();
+    }
+  }
+
   function install() {
     if (restore || typeof target?.fetch !== 'function') return;
     inner = target.fetch;
@@ -632,26 +800,24 @@ export function createHistoryRouter({
       let req;
       let url;
       let adapter;
-      let track = null;
+      let trackAdapter = null;
       try {
         req = requestOf(input, init);
         url = new URL(req.url, origin());
         const asked = req.method === 'GET' && !init?.[LIVE_ONLY_FLAG];
         adapter = asked ? adapterForPath(url.pathname, adapters) : null;
-        track = asked
+        trackAdapter = asked
           ? (adapters.find((a) => a.trackMatch?.test(url.pathname)) ?? null)
           : null;
       } catch {
         adapter = null;
       }
       // a live track of a feed shown from history (see module note)
-      if (track && isSwapped(track.id))
-        return Promise.resolve(
-          new Response(JSON.stringify({ error: TRACK_IN_HISTORY }), {
-            status: 404,
-            headers: { 'Content-Type': 'application/json' },
-          }),
-        );
+      if (trackAdapter && isSwapped(trackAdapter.id)) {
+        const spec = TRACK_SPECS[trackAdapter.id];
+        if (spec) return answerTrack(trackAdapter, spec, url, req.signal);
+        return Promise.resolve(refuseTrack(TRACK_IN_HISTORY));
+      }
       if (!adapter) return inner.call(target, input, init);
       // a failed feed passes through until its retry is due (D3)
       if (!retryDue(adapter.id)) {
@@ -666,8 +832,16 @@ export function createHistoryRouter({
       return answer(adapter, url, input, init, req.signal);
     };
     target.fetch = wrapped;
+    target.addEventListener?.(
+      'gev:awareness-subject-cleared',
+      onSubjectCleared,
+    );
     restore = () => {
       if (target.fetch === wrapped) target.fetch = inner;
+      target.removeEventListener?.(
+        'gev:awareness-subject-cleared',
+        onSubjectCleared,
+      );
     };
   }
 
@@ -707,6 +881,7 @@ export function createHistoryRouter({
       restore?.();
       restore = null;
       clearCache();
+      clearTrack();
       listeners.clear();
       serveListeners.clear();
       s.active = false;

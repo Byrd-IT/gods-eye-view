@@ -236,7 +236,7 @@ export function createFlightSnapshotRenderer({
       // Takeoff while TRACKED: ground traffic drew no trail, so start one
       // from the fresh airborne history (touchdown needs no action — the
       // append gate above simply freezes the existing trail).
-      if (isTracked && groundFlipped && !meta.onGround)
+      if (isTracked && (historyFrame || (groundFlipped && !meta.onGround)))
         tracking._startTrail(icao24);
 
       // If this is the tracked aircraft, update label text

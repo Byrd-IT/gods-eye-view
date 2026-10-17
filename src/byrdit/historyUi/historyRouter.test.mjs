@@ -206,7 +206,7 @@ test('pass-through in history: non-GET, other routes and gevLive requests', asyn
   );
 });
 
-test('D3 tracks: a live track of a feed shown from history is refused (404); LIVE and failed feeds pass through', async () => {
+test('D3 tracks: no live track of a feed shown from history (vessels 404, flights recorded track B12e); LIVE and failed feeds pass through', async () => {
   const { router, srv, win } = setup({
     slice: (q) =>
       q.feed === 'military'
@@ -215,15 +215,17 @@ test('D3 tracks: a live track of a feed shown from history is refused (404); LIV
   });
   router.install();
   router.setHistory({ active: true, timeMs: T });
-  for (const path of [
-    '/api/flights/track?icao24=abc123',
-    '/api/vessels/track?mmsi=123456789',
-  ]) {
-    const res = await win.fetch(path);
-    assert.equal(res.status, 404, path);
-    assert.match((await res.json()).error, /history/);
-  }
+  const res = await win.fetch('/api/vessels/track?mmsi=123456789');
+  assert.equal(res.status, 404);
+  assert.match((await res.json()).error, /history/);
   assert.equal(srv.calls.length, 0, 'no live track was asked');
+  // B12e: the flights track is the recorded one (historyTrack.test.mjs)
+  await win.fetch('/api/flights/track?icao24=abc123');
+  assert.deepEqual(
+    srv.calls.map((c) => c.path.split('?')[0]),
+    ['/api/history/track'],
+    'no live track was asked',
+  );
   // military failed -> its feed is live, so is its track
   await win.fetch('/api/military');
   await win.fetch('/api/military/track?hex=ae0001');
