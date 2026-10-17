@@ -82,6 +82,7 @@ export function createRefreshDriver({
   const frameT = new Map(); // adapter id -> slice time of its last answer
   const lastMode = new Map(); // adapter id -> 'history' | 'live'
   const clocks = new Map(); // adapter id -> motion clock function
+  const reloadedFor = new Map(); // reloadOnFrame adapter id -> frame t | 'live'
 
   const dm = () => {
     try {
@@ -131,9 +132,19 @@ export function createRefreshDriver({
     return clock;
   }
 
-  function resetLayer(adapter, clock) {
+  function resetLayer(adapter, clock, t = null) {
     const layer = layerOf(adapter);
     try {
+      if (adapter.reloadOnFrame) {
+        // B12b: a layer that caches per-time data (bike share station
+        // information) reloads once per frame time and once back on live;
+        // a reload on every serve would abort and re-ask for ever
+        const key = clock ? t : 'live';
+        if (reloadedFor.get(adapter.id) === key) return;
+        reloadedFor.set(adapter.id, key);
+        layer?.reloadForHistoryFrame?.();
+        return;
+      }
       layer?.resetForHistoryFrame?.();
       layer?.setMotionClock?.(clock);
     } catch {
@@ -152,7 +163,7 @@ export function createRefreshDriver({
       // D4: every layer actually served history (a driver refresh, or its
       // own enable / interval poll) is refreshed once on LIVE
       wasSwapped.add(adapter.id);
-      resetLayer(adapter, clockOf(adapter));
+      resetLayer(adapter, clockOf(adapter), event.t);
     } else if (lastMode.get(adapter.id) === 'history') {
       lastMode.set(adapter.id, 'live');
       resetLayer(adapter, null);
@@ -190,6 +201,11 @@ export function createRefreshDriver({
         for (let i = 0; i < n && !destroyed; i++) {
           const manager = dm();
           if (!manager?.refreshLayer) return;
+          // a reloadOnFrame layer (bike share) reloads for the frame it is
+          // refreshed to, even when its own update would ask nothing (a city
+          // dropped after a gap answer is loaded again)
+          if (adapter.reloadOnFrame && router.isSwapped(adapter.id))
+            resetLayer(adapter, clockOf(adapter), router.requestTime(adapter));
           calls.push({ layerId: adapter.layerId, at: monotonic() });
           lastRefreshAt.set(adapter.id, monotonic());
           try {

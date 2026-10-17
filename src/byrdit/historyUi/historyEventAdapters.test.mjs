@@ -89,7 +89,7 @@ const liveFetch = (body) => async () =>
 
 // ── registry ──────────────────────────────────────────────
 
-test('registry: B12a feeds + FIRMS/perimeters/cyclones/launches; transit and bike share stay LIVE (owner decision)', () => {
+test('registry: B12a feeds + FIRMS/perimeters/cyclones/launches + transit/bike share (owner decision option A)', () => {
   assert.deepEqual(
     ALL_HISTORY_ADAPTERS.map((a) => [a.id, a.layerId, a.sliceFeed, a.rebased]),
     [
@@ -100,6 +100,8 @@ test('registry: B12a feeds + FIRMS/perimeters/cyclones/launches; transit and bik
       ['fire-perimeters', 'fire-perimeters', 'fire-perimeters', false],
       ['cyclones', 'weather-cyclones', 'cyclones', false],
       ['launches', 'rocket-launches', 'launches', false],
+      ['transit', 'transit', 'transit', true],
+      ['bikeshare', 'bikeshare', 'bikeshare', false],
     ],
   );
   const find = (p) => adapterForPath(p, ALL_HISTORY_ADAPTERS)?.id ?? null;
@@ -108,10 +110,20 @@ test('registry: B12a feeds + FIRMS/perimeters/cyclones/launches; transit and bik
   assert.equal(find('/api/cyclones'), 'cyclones');
   assert.equal(find('/api/launches'), 'launches');
   assert.equal(find('/api/launches/'), 'launches');
-  assert.equal(find('/api/transit/vehicles/translink-seq'), null);
-  assert.equal(find('/api/gbfs/x'), null);
+  assert.equal(find('/api/transit/vehicles/translink-seq'), 'transit');
+  assert.equal(find('/api/transit/feeds'), null);
+  assert.equal(find('/api/transit/trail/a/b'), null);
+  assert.equal(find('/api/gbfs/x'), 'bikeshare');
   assert.equal(find('/api/celestrak/active'), null);
-  assert.equal(EVENT_ADAPTERS.length, 4);
+  assert.equal(EVENT_ADAPTERS.length, 6);
+  // per-time station information: reload once per frame (historyRefresh)
+  assert.equal(BIKESHARE_ADAPTER.reloadOnFrame, true);
+  assert.equal(
+    ALL_HISTORY_ADAPTERS.filter((a) => a.reloadOnFrame)
+      .map((a) => a.id)
+      .join(),
+    'bikeshare',
+  );
   assert.equal(TRANSIT_ADAPTER.match.test('/api/transit/vehicles/a%2Fb'), true);
   assert.equal(TRANSIT_ADAPTER.rebased, true);
   assert.equal(BIKESHARE_ADAPTER.match.test('/api/gbfs/https%3A%2F%2Fx'), true);
@@ -456,7 +468,7 @@ test('launches gap -> nothing', async () => {
   assert.equal(adapted.headers['X-History-Gap'], '1');
 });
 
-// ── transit (built, not active) ───────────────────────────
+// ── transit ───────────────────────────────────────────────
 
 const transitSlice = () => {
   const vehicles = (feedId, n) =>
@@ -559,7 +571,7 @@ test('transit gap: a feed absent from the slice -> an empty snapshot (nothing), 
   assert.deepEqual(empty.body.vehicles, []);
 });
 
-// ── bike share (built, not active) ────────────────────────
+// ── bike share ─────────────────────────────────────────────
 
 test('bike share: the upstream GBFS URL maps to its registry systemId (the recorder system_id) and file', () => {
   const madison = GBFS_CITY_REGISTRY.find((e) => e.id === 'madison-bcycle');
@@ -782,10 +794,10 @@ test('chips: a truncated FIRMS history answer shows in the layer chip; a non-tru
       truncated,
     });
     const dm = {
-      getEnabledLayerIds: () => new Set(['local-firms', 'transit']),
+      getEnabledLayerIds: () => new Set(['local-firms', 'satellites']),
       getAll: () => [
         { id: 'local-firms', name: 'FIRMS Active Fires' },
-        { id: 'transit', name: 'Transit' },
+        { id: 'satellites', name: 'Satellites' },
       ],
       subscribe: () => () => {},
     };
@@ -803,7 +815,7 @@ test('chips: a truncated FIRMS history answer shows in the layer chip; a non-tru
         ...(truncated
           ? [['history:firms', 'FIRMS Active Fires', TRUNCATED_CHIP]]
           : []),
-        ['layer:transit', 'Transit', 'LIVE'],
+        ['layer:satellites', 'Satellites', 'LIVE'],
       ],
       `truncated=${truncated}`,
     );

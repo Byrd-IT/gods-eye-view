@@ -400,14 +400,14 @@ export const LAUNCHES_ADAPTER = Object.freeze({
 });
 
 /**
- * Transit and bike share adapters: built and tested, NOT in the active
- * registry yet. Their layers keep state the router cannot replace between
- * history frames (transit: the fix-plausibility gate and missed-poll
- * eviction keep earlier-time vehicles after a seek; bike share: station
- * information is cached for the page's life, so a recorded gap still
- * draws today's stations and a history answer would be kept after LIVE).
- * Until the owner decides (B12b card), those layers stay LIVE with a LIVE
- * chip (D5).
+ * Transit and bike share (owner decision on the B12b card, option A: the
+ * upstream frame seams). Transit is a motion feed (D2 rebase): every history
+ * answer arms the layer (resetForHistoryFrame, src/layers/transit), so the
+ * snapshot replaces the feed's fleet instead of passing the fix-plausibility
+ * gate and the 2-poll eviction. Bike share caches station information for
+ * the page's life, so the driver asks reloadForHistoryFrame
+ * (src/layers/bikeshare) once per frame time and once back on live
+ * (reloadOnFrame, historyRefresh.js).
  */
 export const TRANSIT_ADAPTER = Object.freeze({
   id: 'transit',
@@ -432,6 +432,7 @@ export const BIKESHARE_ADAPTER = Object.freeze({
   snapFeed: null,
   quantumMs: 5 * MIN,
   rebased: false,
+  reloadOnFrame: true,
   match: GBFS_RE,
   sliceParams() {
     // the server's default window (B10 R4 window decision t_c2cba35e)
@@ -445,9 +446,11 @@ export const EVENT_ADAPTERS = Object.freeze([
   PERIMETERS_ADAPTER,
   CYCLONES_ADAPTER,
   LAUNCHES_ADAPTER,
+  TRANSIT_ADAPTER,
+  BIKESHARE_ADAPTER,
 ]);
 
-/** The active registry: B12a motion feeds + the B12b event feeds. */
+/** The active registry: B12a motion feeds + the B12b feeds. */
 export const ALL_HISTORY_ADAPTERS = Object.freeze([
   ...HISTORY_ADAPTERS,
   ...EVENT_ADAPTERS,

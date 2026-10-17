@@ -202,6 +202,16 @@ export function createIngestion({ state, services, parts, source }) {
     let seen = 0;
     let rejectedFixes = 0;
 
+    // GEV history seam (fork card B12b; see lifecycle resetForHistoryFrame):
+    // an armed snapshot replaces this feed's fleet, the selection kept.
+    const historyFrame = state._historyFrameFeeds?.delete(feed.id) === true;
+    const keepSelected = historyFrame ? state._selectedKey : null;
+    if (historyFrame) {
+      removeFeedVehicles(feed.id);
+      status.lag = null;
+      status.snapshotAt = null;
+    }
+
     const records = snapshot.vehicles || [];
     if (!status.lag) status.lag = createLagReservoir();
     const replayed = status.snapshotAt === fetchedAt || stale === true;
@@ -382,6 +392,12 @@ export function createIngestion({ state, services, parts, source }) {
       }
     }
     sweepAgedVehicles(now);
+    if (
+      keepSelected &&
+      !state._selectedKey &&
+      state._vehicles.has(keepSelected)
+    )
+      parts.selection.selectVehicle(keepSelected);
 
     status.count = seen;
     status.lastUpdate = fetchedAt;

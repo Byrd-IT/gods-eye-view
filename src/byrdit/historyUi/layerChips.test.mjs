@@ -29,7 +29,7 @@ const LAYERS = [
   { id: 'earthquakes', name: 'Earthquakes' },
   { id: 'weather-cyclones', name: 'Tropical Cyclones' },
   { id: 'wind', name: 'Wind' },
-  { id: 'transit', name: 'Transit' },
+  { id: 'satellites', name: 'Satellites' },
 ];
 
 function manager(enabled) {
@@ -99,8 +99,8 @@ test('D5: enabled set changes are followed (data manager subscribe)', () => {
   router.setHistory({ active: true, timeMs: T });
   chips.refresh();
   assert.deepEqual(seen.at(-1), []);
-  dm.set(['flights', 'transit']); // not swapped (B12b: owner decision)
-  assert.deepEqual(seen.at(-1), ['transit']);
+  dm.set(['flights', 'satellites']); // not swapped (satellites: B12d)
+  assert.deepEqual(seen.at(-1), ['satellites']);
   dm.set(['ais-live-vessels']);
   assert.deepEqual(seen.at(-1), []);
 });
@@ -128,7 +128,7 @@ test('in history a green live feed chip is replaced by the layer LIVE chip (no d
     ),
   );
   const router = createHistoryRouter({ target: win });
-  const dm = manager(['transit']);
+  const dm = manager(['satellites']);
   const chips = createLayerChips({
     feedChips: createFeedChips({ target: win, monotonic: () => 0 }),
     getRouter: () => router,
@@ -137,16 +137,16 @@ test('in history a green live feed chip is replaced by the layer LIVE chip (no d
   chips.install();
   router.install();
   chips.connect();
-  await win.fetch('/api/transit/vehicles/x');
+  await win.fetch('/api/celestrak/active');
   await flush();
   assert.deepEqual(
     chips.states().map((c) => [c.feed, c.state]),
-    [['transit', 'live']],
+    [['satellites', 'live']],
   );
   router.setHistory({ active: true, timeMs: T });
   assert.deepEqual(
     chips.states().map((c) => [c.feed, c.state]),
-    [['layer:transit', UNSWAPPED_STATE]],
+    [['layer:satellites', UNSWAPPED_STATE]],
   );
 });
 
@@ -168,7 +168,7 @@ test('in history the live staleness chip of a swapped feed is dropped; others st
     );
   });
   const router = createHistoryRouter({ target: win });
-  const dm = manager(['flights', 'transit']);
+  const dm = manager(['flights', 'satellites']);
   const chips = createLayerChips({
     feedChips: createFeedChips({ target: win, monotonic: () => 0 }),
     getRouter: () => router,
@@ -177,13 +177,13 @@ test('in history the live staleness chip of a swapped feed is dropped; others st
   chips.install();
   router.install();
   await win.fetch('/api/flights');
-  await win.fetch('/api/transit/vehicles/x');
+  await win.fetch('/api/celestrak/active');
   await flush();
   assert.deepEqual(
     chips.states().map((c) => [c.feed, c.state]),
     [
       ['flights', 'grey'],
-      ['transit', 'grey'],
+      ['satellites', 'grey'],
     ],
   );
   router.setHistory({ active: true, timeMs: T });
@@ -191,8 +191,8 @@ test('in history the live staleness chip of a swapped feed is dropped; others st
   assert.deepEqual(
     chips.states().map((c) => [c.feed, c.state]),
     [
-      ['transit', 'grey'],
-      ['layer:transit', UNSWAPPED_STATE],
+      ['satellites', 'grey'],
+      ['layer:satellites', UNSWAPPED_STATE],
     ],
   );
 });

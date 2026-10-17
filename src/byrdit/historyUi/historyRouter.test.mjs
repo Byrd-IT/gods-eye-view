@@ -165,6 +165,8 @@ test('history: /api/flights is answered from the slice at t with the view bbox; 
     'fire-perimeters',
     'cyclones',
     'launches',
+    'transit',
+    'bikeshare',
   ]);
   assert.equal(router.getState().served.flights.rows, states.length);
 });

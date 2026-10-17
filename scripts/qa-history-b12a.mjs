@@ -472,11 +472,13 @@ check(
       'flights',
       'military',
       'vessels',
-      // B12b event feeds (swapped whether or not their layer is enabled)
+      // B12b feeds (swapped whether or not their layer is enabled)
       'firms',
       'fire-perimeters',
       'cyclones',
       'launches',
+      'transit',
+      'bikeshare',
     ]),
   `swapped ${JSON.stringify(st.router?.swapped)}`,
 );

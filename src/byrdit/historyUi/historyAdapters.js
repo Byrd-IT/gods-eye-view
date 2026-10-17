@@ -338,6 +338,9 @@ function adaptVessels(answers, { t, nowMs }) {
  *   trackMatch   the feed's LIVE track route, refused while the feed is
  *                answered from history (historyRouter.js, D3)
  *   rebased      D2: record/poll times are rebased (motion feed)
+ *   reloadOnFrame  the layer caches per-time data: the driver asks
+ *                layer.reloadForHistoryFrame() once per frame time and once
+ *                back on live instead of resetForHistoryFrame per answer
  */
 export const HISTORY_ADAPTERS = Object.freeze([
   Object.freeze({

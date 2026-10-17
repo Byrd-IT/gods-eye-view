@@ -19,10 +19,11 @@
  * at t and not the live rows; FIRMS asks with the camera bbox and its
  * truncated answer is in the chip strip; perimeter rows carry the "not
  * recorded (unknown)" line and no invented values; cyclones draw positions
- * only (Track/cone unavailable); transit and bike share stay LIVE with a
- * LIVE chip (owner decision pending); a recorded gap draws nothing for the
- * four swapped layers; LIVE restores every live count; no console/page
- * error. One screenshot per layer at t, after Page.bringToFront. Exit 1 on
+ * only (Track/cone unavailable); transit (capmetro-austin) and bike share
+ * (austin-capmetro) show the recorded vehicles / stations at t, not the
+ * live ones (owner decision option A: the frame seams), with no LIVE chip;
+ * a recorded gap draws nothing for the six swapped layers; LIVE restores
+ * every live count; no console/page error. One screenshot per layer at t, after Page.bringToFront. Exit 1 on
  * failure.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -63,8 +64,23 @@ const check = (ok, what) => {
 
 const world = fixtureWorld(Date.now());
 const inGap = (t) => t >= world.gap.from && t < world.gap.to;
-const HIST = { firms: 7, perimeters: 2, cyclones: 1, launches: 3 };
-const LIVE = { firms: 3, perimeters: 1, cyclones: 1, launches: 2 };
+const HIST = {
+  firms: 7,
+  perimeters: 2,
+  cyclones: 1,
+  launches: 3,
+  transit: 4,
+  bikeshare: 5,
+};
+const LIVE = {
+  firms: 3,
+  perimeters: 1,
+  cyclones: 1,
+  launches: 2,
+  transit: 2,
+  bikeshare: 3,
+};
+const ALT = 30_000; // bike share loads below ~48 km
 
 // ── fixtures ────────────────────────────────────────────
 const iso = (ms) => new Date(ms).toISOString();
@@ -315,6 +331,91 @@ page.on('request', (req) => {
         h(results.length),
       );
     }
+    if (q.feed === 'transit') {
+      const vehicles = gap
+        ? []
+        : Array.from({ length: HIST.transit }, (_, i) => ({
+            id: `hist-bus-${i}`,
+            lat: LAT - 0.02 - 0.01 * i,
+            lon: LON - 0.02,
+            bearing: 180,
+            speedMps: 4,
+            timestamp: Math.floor((t - 20_000) / 1000),
+            routeId: '801',
+            tripId: `hist-trip-${i}`,
+            directionId: 1,
+            label: `H${i}`,
+            stopId: null,
+            status: 'IN_TRANSIT_TO',
+            occupancy: null,
+            timestampSource: 'recorded',
+          }));
+      return json(
+        {
+          fetchedAt: t,
+          feeds: gap
+            ? []
+            : [
+                {
+                  feedId: 'capmetro-austin',
+                  name: 'CapMetro',
+                  fetchedAt: t,
+                  feedTimestamp: Math.floor(t / 1000),
+                  version: '2.0',
+                  entityCount: vehicles.length,
+                  truncated: false,
+                  count: vehicles.length,
+                  vehicles,
+                },
+              ],
+        },
+        h(vehicles.length),
+      );
+    }
+    if (q.feed === 'bikeshare') {
+      const ids = gap
+        ? []
+        : Array.from({ length: HIST.bikeshare }, (_, i) => `hist-${i}`);
+      const env = (stations) => ({
+        last_updated: Math.floor(t / 1000),
+        ttl: 0,
+        version: '2.3',
+        data: { stations },
+      });
+      return json(
+        {
+          fetchedAt: t,
+          systems: gap
+            ? []
+            : [
+                {
+                  systemId: 'austin-capmetro',
+                  station_information: env(
+                    ids.map((id, i) => ({
+                      station_id: id,
+                      name: `HIST Dock ${i}`,
+                      lat: LAT - 0.004 * i,
+                      lon: LON + 0.004 * i,
+                      capacity: 15,
+                    })),
+                  ),
+                  station_status: env(
+                    ids.map((id) => ({
+                      station_id: id,
+                      num_bikes_available: 9,
+                      num_docks_available: 6,
+                      is_installed: true,
+                      is_renting: true,
+                      is_returning: true,
+                      last_reported: Math.floor((t - 120_000) / 1000),
+                    })),
+                  ),
+                },
+              ],
+        },
+        h(ids.length),
+      );
+    }
     return json({ error: 'unknown_feed' }, undefined, 400);
   }
   if (url.pathname === '/api/history/coverage')
@@ -488,6 +589,10 @@ const layerState = () =>
         lastUpdate: stats.lastUpdate ?? null,
       };
     }
+    const tr = dm.layers.get(ids.transit)?.module;
+    out.transitIds = [
+      ...(tr?._transitStateForTest?.()._vehicles.values() ?? []),
+    ].map((e) => e.record.id);
     const per = dm.layers.get(ids.perimeters)?.module;
     out.perimeterRows = per?.getAnalystRecords?.() ?? [];
     const cyc = dm.layers.get(ids.cyclones)?.module;
@@ -529,13 +634,16 @@ async function waitFor(pred, what, timeoutMs = 45_000) {
     await sleep(500);
   }
 }
-const four = (st) => [
-  st.firms.count,
-  st.perimeters.count,
-  st.cyclones.count,
-  st.launches.count,
+const SIX = [
+  'firms',
+  'perimeters',
+  'cyclones',
+  'launches',
+  'transit',
+  'bikeshare',
 ];
-const want = (o) => [o.firms, o.perimeters, o.cyclones, o.launches].join();
+const six = (st) => SIX.map((k) => st[k].count);
+const want = (o) => SIX.map((k) => o[k]).join();
 const chipFeeds = (st, state) =>
   st.chips.filter((c) => c[1] === state).map((c) => c[0]);
 async function view(lat, lon, alt) {
@@ -561,7 +669,7 @@ async function view(lat, lon, alt) {
 
 // ── 1. live ──────────────────────────────────────────────
 await page.goto(
-  `${BASE}/?welcome=0#v=2&lat=${LAT}&lon=${LON}&alt=250000&heading=360&pitch=-90&roll=0&map=esri-imagery`,
+  `${BASE}/?welcome=0#v=2&lat=${LAT}&lon=${LON}&alt=30000&heading=360&pitch=-90&roll=0&map=esri-imagery`,
   { waitUntil: 'domcontentloaded', timeout: 120000 },
 );
 await page.waitForFunction(
@@ -575,13 +683,13 @@ await page.evaluate(async (ids) => {
   for (const id of Object.values(ids)) await dm.setEnabled(id, true);
 }, IDS);
 let st = await waitFor(
-  (s) => four(s).join() === want(LIVE),
+  (s) => six(s).join() === want(LIVE),
   'live counts',
   90_000,
 );
 check(
-  four(st).join() === want(LIVE),
-  `live rows drawn ${JSON.stringify(four(st))}`,
+  six(st).join() === want(LIVE),
+  `live rows drawn ${JSON.stringify(six(st))}`,
 );
 check(
   st.mode === 'live' && chipFeeds(st, 'unswapped').length === 0,
@@ -591,7 +699,7 @@ await shot('01-live');
 
 // ── 2. history at t = now - 35 d ─────────────────────────
 // a regional camera first: a whole-globe view correctly asks the world box
-await view(LAT, LON, 250_000);
+await view(LAT, LON, ALT);
 const T = Date.now() - 35 * DAY;
 await page.evaluate((t) => {
   const h = window.__gevHistorySwap.handle;
@@ -599,22 +707,25 @@ await page.evaluate((t) => {
   h.seek(t);
 }, T);
 st = await waitFor(
-  (s) => s.mode === 'history' && four(s).join() === want(HIST),
+  (s) => s.mode === 'history' && six(s).join() === want(HIST),
   'history counts',
   60_000,
 );
 check(
-  four(st).join() === want(HIST),
-  `history rows at t drawn, live rows gone ${JSON.stringify(four(st))}`,
+  six(st).join() === want(HIST),
+  `history rows at t drawn, live rows gone ${JSON.stringify(six(st))}`,
 );
 const tShown = Date.parse(st.time);
 check(Math.abs(tShown - T) < 5 * 60_000, `history time ${st.time}`);
 check(
-  ['firms', 'fire-perimeters', 'cyclones', 'launches'].every((f) =>
-    st.router?.swapped?.includes(f),
-  ) &&
-    !st.router?.swapped?.includes('transit') &&
-    !st.router?.swapped?.includes('bikeshare'),
+  [
+    'firms',
+    'fire-perimeters',
+    'cyclones',
+    'launches',
+    'transit',
+    'bikeshare',
+  ].every((f) => st.router?.swapped?.includes(f)),
   `swapped ${JSON.stringify(st.router?.swapped)}`,
 );
 const firmsAsk = sliceCalls.filter((c) => c.feed === 'firms').at(-1);
@@ -626,10 +737,19 @@ check(
 );
 const un = chipFeeds(st, 'unswapped');
 check(
-  un.includes('layer:transit') &&
-    un.includes('layer:bikeshare') &&
-    !un.some((f) => /firms|perimeters|cyclones|launches/.test(f)),
-  `LIVE chips on transit + bike share only ${JSON.stringify(un)}`,
+  !un.some((f) =>
+    /firms|perimeters|cyclones|launches|transit|bikeshare/.test(f),
+  ),
+  `no LIVE chip on the six swapped layers ${JSON.stringify(un)}`,
+);
+check(
+  st.transitIds.length === HIST.transit &&
+    st.transitIds.every((id) => /^hist-bus-/.test(id)),
+  `transit: the recorded buses at t, no live bus ${JSON.stringify(st.transitIds)}`,
+);
+check(
+  !st.transit.error,
+  `transit: the rebased frame is current, not stale (D2) ${st.transit.error}`,
 );
 const trunc = st.chips.find((c) => c[0] === 'history:firms');
 check(
@@ -665,22 +785,23 @@ check(
   `FIRMS data time = t (event feed, not rebased) ${st.firms.lastUpdate} vs ${tShown}`,
 );
 // one screenshot per layer at t
-await view(LAT, LON, 250_000);
+await view(LAT, LON, ALT);
 await shot('02-firms-at-t');
 await shot('03-perimeters-at-t');
 await view(LAT - 0.7, LON + 1.1, 700_000);
 await shot('04-cyclones-at-t');
 await view(LAT, LON - 0.3, 300_000);
 await shot('05-launches-at-t');
-await view(LAT, LON, 30_000);
-await shot('06-transit-live-chip-at-t');
-await shot('07-bikeshare-live-chip-at-t');
+await view(LAT - 0.035, LON - 0.02, 9_000);
+await shot('06-transit-at-t');
+await view(LAT - 0.008, LON + 0.008, 6_000);
+await shot('07-bikeshare-at-t');
 st = await layerState();
 check(
-  chipFeeds(st, 'unswapped').includes('layer:transit') &&
-    chipFeeds(st, 'unswapped').includes('layer:bikeshare'),
-  'transit + bike share LIVE chips visible at t',
+  st.transit.count === HIST.transit && st.bikeshare.count === HIST.bikeshare,
+  `transit + bike share recorded at t on screen ${st.transit.count}/${st.bikeshare.count}`,
 );
+await view(LAT, LON, ALT);
 
 // ── 3. camera move: FIRMS asks the new box ───────────────
 const firmsBefore = sliceCalls.filter((c) => c.feed === 'firms').length;
@@ -691,19 +812,19 @@ check(
   firmsAfter.length > firmsBefore && firmsAfter.at(-1).bbox !== firmsAsk?.bbox,
   `camera move refreshes FIRMS with the new box ${firmsAfter.at(-1)?.bbox}`,
 );
-await view(LAT, LON, 250_000);
+await view(LAT, LON, ALT);
 
 // ── 4. recorded gap: nothing for the swapped layers ──────
 const gapT = Math.round((world.gap.from + world.gap.to) / 2);
 await page.evaluate((t) => window.__gevHistorySwap.handle.seek(t), gapT);
 st = await waitFor(
-  (s) => four(s).join() === '0,0,0,0',
+  (s) => six(s).join() === '0,0,0,0,0,0',
   'gap -> nothing',
   45_000,
 );
 check(
-  four(st).join() === '0,0,0,0',
-  `gap: FIRMS/perimeters/cyclones/launches draw nothing ${JSON.stringify(four(st))}`,
+  six(st).join() === '0,0,0,0,0,0',
+  `gap: all six swapped layers draw nothing ${JSON.stringify(six(st))}`,
 );
 check(
   /No NHC advisory recorded/.test(JSON.stringify(st.cycloneRow)),
@@ -714,13 +835,13 @@ await shot('08-gap-nothing');
 // ── 5. LIVE restores the live data ───────────────────────
 await page.click('.gev-hist-live');
 st = await waitFor(
-  (s) => s.mode === 'live' && four(s).join() === want(LIVE),
+  (s) => s.mode === 'live' && six(s).join() === want(LIVE),
   'LIVE restore',
   60_000,
 );
 check(
-  four(st).join() === want(LIVE),
-  `LIVE restores live rows ${JSON.stringify(four(st))}`,
+  six(st).join() === want(LIVE),
+  `LIVE restores live rows ${JSON.stringify(six(st))}`,
 );
 check(chipFeeds(st, 'unswapped').length === 0, 'LIVE chips gone on LIVE');
 check(
