@@ -1,4 +1,5 @@
 import { CONFIG_BUDGET, DEFAULT_BUILDINGS, DEFAULT_SWITCH } from './config.js';
+import { composeNaip, naipEnabled, resolveNaipTile } from './naipProxy.js';
 
 /**
  * Same-origin /basemap/* for the Byrd-IT Open map (BASEMAP.md 3.2, 4.2, 4.5).
@@ -37,6 +38,11 @@ import { CONFIG_BUDGET, DEFAULT_BUILDINGS, DEFAULT_SWITCH } from './config.js';
  *     200 {available:false, state:'unknown'}: health is advice and never
  *     changes whether the stack is offered (that is config.json's job).
  *     Cached 30 s (10 s when unknown); Cache-Control max-age=30.
+ *   - GET /basemap/naip/<year>/<z>/<x>/<y>.webp and
+ *         /basemap/naip/regional/<id>/<z>/<x>/<y>.webp (N6 NAIP time slider,
+ *     only with GEV_BASEMAP_NAIP=1; see naipProxy.js). The year or id must be
+ *     in the composed naip block, else 404 without an upstream request. Tiles
+ *     follow the imagery cache policy (30 d, missing 1 d).
  *   - URL lists are tried in order. The next one is tried on a network
  *     error, a timeout, a 5xx or a failure while reading the body
  *     (truncation, reset) - S4 active, then S5 standby. When every URL
@@ -61,6 +67,10 @@ import { CONFIG_BUDGET, DEFAULT_BUILDINGS, DEFAULT_SWITCH } from './config.js';
  *   GEV_BASEMAP_BUILDINGS_BELOW_M      show buildings at or below this camera
  *                                      height (default 8000; hidden again
  *                                      above 1.25x)
+ *   GEV_BASEMAP_NAIP=1                 NAIP time slider (default OFF), with
+ *   GEV_BASEMAP_NAIP_CONFIG=x[,y]      NAIP config.json (URL or absolute path)
+ *   GEV_BASEMAP_NAIP_URLS=a,b          statewide NAIP tile servers
+ *   GEV_BASEMAP_HIRES_URLS=a,b         regional (Wood+Upshur) tile servers
  *   GEV_BASEMAP_AUTO=0|1               auto-switch (default 1)
  *   GEV_BASEMAP_ENTER_M, GEV_BASEMAP_LEAVE_M, GEV_BASEMAP_DWELL_MS
  *   GEV_BASEMAP_TIMEOUT_MS             per-upstream tile timeout (default 10000;
@@ -124,6 +134,13 @@ export function basemapSettingsFromEnv(env = process.env) {
       .filter(Boolean),
     buildingsUrls: urlList(env.GEV_BASEMAP_BUILDINGS_URLS),
     healthUrls: urlList(env.GEV_BASEMAP_HEALTH_URLS),
+    naip: naipEnabled(env),
+    naipConfig: String(env.GEV_BASEMAP_NAIP_CONFIG ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    naipUrls: urlList(env.GEV_BASEMAP_NAIP_URLS),
+    hiresUrls: urlList(env.GEV_BASEMAP_HIRES_URLS),
     buildings: buildingsSettings(env),
     timeoutMs: num(env.GEV_BASEMAP_TIMEOUT_MS, 10_000),
     // Not env-tunable: the browser's timeout is built from the same numbers.
@@ -614,14 +631,59 @@ export function createBasemapHandler(
     }
   }
 
+  const naipOn = settings.naip === true;
+  const naipUrls = settings.naipUrls ?? [];
+  const hiresUrls = settings.hiresUrls ?? [];
+  /** Routes of the config the browser was last given (naipProxy.js). */
+  let naipRoutes = null;
+
+  /**
+   * NAIP config.json (N1 schema) -> {browser, routes}. Sources are tried in
+   * order like the imagery publish config; any failure is "unavailable"
+   * and never touches the rest of the stack.
+   */
+  async function naipConfig(deadline) {
+    const none = { browser: { available: false }, routes: null };
+    if (!naipUrls.length && !hiresUrls.length) return none;
+    for (const source of settings.naipConfig ?? []) {
+      if (deadline.aborted) break;
+      try {
+        let raw;
+        if (/^https?:\/\//i.test(source)) {
+          raw = await upstream([source], '', {
+            timeoutMs: configAttemptMs,
+            deadline,
+            read: readJson,
+          });
+        } else {
+          if (!source.startsWith('/'))
+            throw new Error('config path must be absolute');
+          raw = JSON.parse(
+            await beforeDeadline(readFileImpl(source, 'utf8'), deadline),
+          );
+        }
+        const naip = composeNaip(raw, {
+          statewide: naipUrls.length > 0,
+          regional: hiresUrls.length > 0,
+        });
+        if (naip.browser.available) return naip;
+        throw new Error('invalid naip config');
+      } catch (error) {
+        log('[basemap] naip config unavailable:', error?.message || error);
+      }
+    }
+    return none;
+  }
+
   async function compose() {
     const deadline = AbortSignal.timeout(budgetMs);
-    const [terrain, imagery, buildings] = await Promise.all([
+    const [terrain, imagery, buildings, naip] = await Promise.all([
       terrainConfig(deadline),
       imageryConfig(deadline),
       buildingsConfig(deadline),
+      naipOn ? naipConfig(deadline) : null,
     ]);
-    return {
+    const value = {
       schema: 1,
       generated: new Date(now()).toISOString(),
       terrain,
@@ -629,6 +691,12 @@ export function createBasemapHandler(
       buildings,
       switch: { ...settings.switch },
     };
+    // Flag off: no naip key at all (the P3 config, byte for byte).
+    if (naip) {
+      value.naip = naip.browser;
+      naipRoutes = naip.routes;
+    }
+    return value;
   }
 
   /** Cached 60 s when complete, 10 s when not; concurrent cold misses share one compose. */
@@ -639,7 +707,8 @@ export function createBasemapHandler(
         const ok =
           value.terrain.available &&
           value.imagery.available &&
-          (value.buildings.available || !buildingsUrls.length);
+          (value.buildings.available || !buildingsUrls.length) &&
+          (!naipOn || value.naip?.available === true);
         cached = { value, until: now() + (ok ? 60_000 : 10_000) };
         return value;
       })
@@ -785,6 +854,18 @@ export function createBasemapHandler(
           },
         );
         return;
+      }
+      if (naipOn && url.pathname.startsWith('/basemap/naip/')) {
+        // The composed (cached) config says which years and ids exist.
+        await config();
+        const tile = resolveNaipTile(url.pathname, naipRoutes, {
+          naipUrls,
+          hiresUrls,
+        });
+        if (tile) {
+          await relay(req, res, tile.bases, tile.path, { kind: 'naip' });
+          return;
+        }
       }
       const buildings = BUILDINGS_ROUTE.exec(url.pathname);
       if (buildings) {

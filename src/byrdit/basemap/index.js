@@ -10,6 +10,8 @@ import {
 import { createGoogleSession } from './googleSession.js';
 import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
 import { attachBuildings } from './buildings.js';
+import { attachNaip } from './naip.js';
+import { createNaipSlider, createNaipSplit } from './naipSlider.js';
 import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
 
 /**
@@ -30,6 +32,10 @@ import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
  *   is available and the config offers buildings; it lives inside the open
  *   stack and follows the switch (never shown with Google, destroyed on any
  *   stack switch away from Byrd-IT Open).
+ *
+ *   NAIP year slider (naip.js, N6): only when the server's config carries
+ *   an available `naip` block (GEV_BASEMAP_NAIP=1). Its layers live inside
+ *   the open stack like buildings and are destroyed on any switch away.
  *
  *   Health (health.js, P9 follow-up): only when the stack is available,
  *   /basemap/health.json is polled in the background (never awaited). When
@@ -154,13 +160,28 @@ export async function openBasemap({
               config: config.buildings,
             })
           : null;
+      // N6: NAIP year slider (only when the server offers a naip block).
+      const naip =
+        config.available && config.naip?.available
+          ? attachNaip({
+              Cesium,
+              viewer,
+              controller,
+              session,
+              naip: config.naip,
+              createSlider: createNaipSlider,
+              createSplit: createNaipSplit,
+            })
+          : null;
       const detach = () => {
         if (health) health.onChange = null;
+        naip?.();
         buildings?.();
         detachSwitch();
       };
       detach.evaluate = detachSwitch.evaluate;
       detach.buildings = buildings;
+      detach.naip = naip;
       return detach;
     },
     destroy() {

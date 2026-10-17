@@ -95,7 +95,12 @@
   "basemap": {
     "runtime": "node",
     "exports": ["./server/byrdit/basemap"],
-    "modules": ["src/byrdit/basemap/proxy.js", "src/byrdit/basemap/config.js"],
+    "modules": [
+      "src/byrdit/basemap/proxy.js",
+      "src/byrdit/basemap/config.js",
+      "src/byrdit/basemap/naipConfig.js",
+      "src/byrdit/basemap/naipProxy.js"
+    ],
     "external": []
   },
   "adsb-lol-source": {
@@ -639,6 +644,7 @@
       "src/byrdit/history/flightView.js",
       "src/layers/bikeshare/registry.js",
       "src/byrdit/history/staleness.js",
+      "src/byrdit/skyView/clearView.js",
       "src/keylessGeocoder.js",
       "src/data/satellitePass.js",
       "src/data/satelliteClass.js",
@@ -1586,6 +1592,7 @@
       "src/byrdit/history/flightView.js",
       "src/layers/bikeshare/registry.js",
       "src/byrdit/history/staleness.js",
+      "src/byrdit/skyView/clearView.js",
       "src/cyberSonarScene.js",
       "src/cyberSonar.js",
       "src/hudLayouts.js",
@@ -2382,7 +2389,10 @@
       "src/byrdit/basemap/googleSession.js",
       "src/byrdit/basemap/autoSwitch.js",
       "src/byrdit/basemap/buildings.js",
-      "src/byrdit/basemap/health.js"
+      "src/byrdit/basemap/health.js",
+      "src/byrdit/basemap/naip.js",
+      "src/byrdit/basemap/naipConfig.js",
+      "src/byrdit/basemap/naipSlider.js"
     ],
     "external": [
       "hls.js",

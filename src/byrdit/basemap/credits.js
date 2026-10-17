@@ -4,7 +4,9 @@
  * only while this stack is the one on screen (src/maps/credits.js), so
  * the credits come and go with the stack.
  *
- * NAIP was dropped (owner decision O2), so no NAIP credit. The buildings
+ * NAIP is not part of the stack credit: the N6 NAIP year layers register
+ * "USDA NAIP <year> via TxGIO" (and each regional layer's own text)
+ * themselves, only while that layer is on screen (naip.js). The buildings
  * credit is not part of the stack credit: the buildings layer registers
  * BUILDINGS_CREDIT_HTML itself, only while buildings are on screen
  * (buildings.js), because the layer comes and goes with the camera height.

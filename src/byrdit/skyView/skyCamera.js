@@ -219,6 +219,22 @@ export function applySkyScene(
   scene.requestRender?.();
 }
 
+/**
+ * Whether Sky mode leaves third-party map tiles on screen (imagery and
+ * terrain on the globe, Google / buildings 3D tiles), i.e. whether their
+ * attribution must stay visible in Clear view (t_37cf1f79). Flat horizon
+ * hides the globe and every tileset (applySkyScene), so only Sky's own
+ * star/planet canvas is drawn. A real horizon keeps them as they were.
+ * When it cannot tell (no snapshot, globe flag unknown) the answer is true.
+ */
+export function skyTilesShown(snap, { flatHorizon = false } = {}) {
+  if (flatHorizon) return false;
+  if (!snap || snap.globeShow !== false) return true;
+  return (snap.tilesets ?? []).some(
+    ({ primitive, show }) => show && !primitive?.isDestroyed?.(),
+  );
+}
+
 /** Drive Cesium's clock from Sky time (stopped; Sky owns time while active). */
 export function applySkyTime(Cesium, viewer, timeMs) {
   const clock = viewer.clock;
