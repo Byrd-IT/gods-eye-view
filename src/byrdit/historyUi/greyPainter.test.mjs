@@ -1,13 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import * as Cesium from 'cesium';
 import {
   GREY_ALPHA,
   GREY_TARGETS,
+  LAYER_TAG,
   createGreyPainter,
   greyColor,
 } from './greyPainter.js';
-import { createLiveFeedDraw, MODE_GREY, MODE_LIVE } from './liveFeedDraw.js';
+import {
+  createLiveFeedDraw,
+  MODE_CLEARED,
+  MODE_GREY,
+  MODE_LIVE,
+} from './liveFeedDraw.js';
 import { FEED_STATE_EVENT } from './feedChips.js';
 import { ALL_HISTORY_ADAPTERS } from './historyEventAdapters.js';
 import { fakeWindow } from './fakeDom.mjs';
@@ -66,9 +73,138 @@ test('greyColor: desaturated, faded to the flights stale alpha', () => {
   );
 });
 
-test('targets cover every swappable layer but satellites (chip only)', () => {
+test('targets cover every swappable layer, plus satellites (tagged)', () => {
   const layers = new Set(ALL_HISTORY_ADAPTERS.map((a) => a.layerId));
+  layers.add('satellites');
   assert.deepEqual(new Set(Object.keys(GREY_TARGETS)), layers);
+  assert.deepEqual(GREY_TARGETS.satellites.tagged, ['satellites']);
+  assert.equal(GREY_TARGETS.satellites.hideWhenCleared, true);
+  // only satellites is hidden by the painter; the others clear by answer
+  for (const [id, t] of Object.entries(GREY_TARGETS))
+    if (id !== 'satellites') assert.notEqual(t.hideWhenCleared, true, id);
+});
+
+test('satellites touch point: ONE upstream line tags its point collection', () => {
+  const src = readFileSync(
+    new URL('../../layers/satellites/lifecycle.js', import.meta.url),
+    'utf8',
+  );
+  const hits = src.split('\n').filter((l) => l.includes(LAYER_TAG));
+  assert.equal(hits.length, 1);
+  assert.match(hits[0], /_pointCollection\.gevLayerId = 'satellites';/);
+});
+
+/** A real point collection, tagged like the satellites layer does. */
+function satellitePoints(colors, tag = 'satellites') {
+  const c = new Cesium.PointPrimitiveCollection();
+  for (const color of colors)
+    c.add({
+      id: 25544,
+      position: Cesium.Cartesian3.fromDegrees(0, 0, 400000),
+      color,
+      outlineColor: Cesium.Color.BLACK,
+    });
+  let updates = 0;
+  c.update = () => updates++;
+  if (tag) c[LAYER_TAG] = tag;
+  return { c, updates: () => updates };
+}
+
+test('satellites: grey while grey, NOT drawn while cleared, back when live', () => {
+  let mode = MODE_LIVE;
+  const sat = satellitePoints([Cesium.Color.WHITE, Cesium.Color.CYAN]);
+  const untagged = satellitePoints([RED], null);
+  const foreign = satellitePoints([RED], 'something-else');
+  const viewer = fakeViewer();
+  const top = [untagged.c, sat.c, foreign.c];
+  viewer.scene.primitives = { length: top.length, get: (i) => top[i] };
+  const painter = createGreyPainter({
+    viewer,
+    modeOf: (id) => (id === 'satellites' ? mode : MODE_LIVE),
+    collectionOf: () => null,
+  });
+  painter.start();
+  viewer.frame(); // adopts the tagged collection only
+  sat.c.update({});
+  assert.equal(sat.updates(), 1, 'live: drawn');
+  assert.ok(Cesium.Color.equals(sat.c.get(1).color, Cesium.Color.CYAN));
+  mode = MODE_GREY;
+  sat.c.update({});
+  assert.equal(sat.updates(), 2, 'grey: still drawn');
+  const g = sat.c.get(1).color;
+  assert.equal(g.red, g.blue);
+  assert.ok(g.alpha < 0.5);
+  mode = MODE_CLEARED;
+  sat.c.update({});
+  sat.c.update({});
+  assert.equal(sat.updates(), 2, 'cleared: no draw commands at all');
+  assert.equal(painter.hidden.count, 2);
+  assert.equal(sat.c.get(0).show, true, "the layer's own point show untouched");
+  mode = MODE_LIVE;
+  sat.c.update({});
+  assert.equal(sat.updates(), 3, 'resumed: drawn again');
+  assert.ok(Cesium.Color.equals(sat.c.get(1).color, Cesium.Color.CYAN));
+  // other collections were never wrapped
+  mode = MODE_CLEARED;
+  untagged.c.update({});
+  foreign.c.update({});
+  assert.equal(untagged.updates(), 1);
+  assert.equal(foreign.updates(), 1);
+  assert.ok(Cesium.Color.equals(untagged.c.get(0).color, RED));
+  // a re-init adds a NEW tagged collection: adopted on the next frame
+  const again = satellitePoints([Cesium.Color.WHITE]);
+  top.push(again.c);
+  viewer.scene.primitives.length = top.length;
+  viewer.frame();
+  again.c.update({});
+  assert.equal(again.updates(), 0, 'the new collection is hidden too');
+  painter.destroy();
+  again.c.update({});
+  assert.equal(again.updates(), 1, 'destroy: drawn again');
+});
+
+test('satellites via the gate: cleared hides, no refresh, swapped untouched', async () => {
+  const win = fakeWindow('http://gev.test/', async () => new Response('{}'));
+  const swapped = new Set();
+  const refreshed = [];
+  const gate = createLiveFeedDraw({
+    target: win,
+    getRouter: () => ({ isSwapped: (id) => swapped.has(id) }),
+    getDataManager: () => ({
+      getEnabledLayerIds: () => new Set(['satellites']),
+      refreshLayer: (id) => refreshed.push(id),
+    }),
+  });
+  gate.install();
+  const sat = satellitePoints([Cesium.Color.WHITE]);
+  const viewer = fakeViewer();
+  viewer.scene.primitives = { length: 1, get: () => sat.c };
+  const painter = createGreyPainter({
+    viewer,
+    modeOf: (id) => gate.paintModeOf(id),
+    collectionOf: () => null,
+  });
+  painter.start();
+  gate.subscribe(() => painter.changed());
+  win.dispatchEvent({
+    type: FEED_STATE_EVENT,
+    detail: { feed: 'satellites', state: 'cleared', draw: false },
+  });
+  sat.c.update({});
+  assert.equal(sat.updates(), 0, 'cleared: hidden');
+  assert.deepEqual(refreshed, [], 'no refresh: its answer is never emptied');
+  swapped.add('satellites'); // history shows the recording: drawn
+  sat.c.update({});
+  assert.equal(sat.updates(), 1);
+  swapped.delete('satellites');
+  win.dispatchEvent({
+    type: FEED_STATE_EVENT,
+    detail: { feed: 'satellites', state: 'live', draw: true },
+  });
+  sat.c.update({});
+  assert.equal(sat.updates(), 2, 'resumed');
+  assert.deepEqual(refreshed, []);
+  gate.destroy();
 });
 
 test('spriteCollectionOf reads the sprite registry (one-line touch point)', () => {

@@ -40,9 +40,11 @@
  * re-asks through this gate).
  *
  * Satellites: its layer keeps the old catalog when every group answers
- * empty (the CelesTrak outage guard), so an empty body cannot clear it and
- * its point collection is not reachable without an upstream line; it gets
- * the chip only (listed on the card).
+ * empty (the CelesTrak outage guard), so an empty body cannot clear it. Its
+ * answers pass unchanged and no refresh is asked; greyPainter greys its
+ * point collection while grey and draws it NOT AT ALL while cleared (owner
+ * decision: one upstream line tags the collection). Orbit paths, labels
+ * and the ISS card are not covered (owner-accepted, documented).
  */
 import { feedDisplayState } from '../history/staleness.js';
 import { FEED_STATE_EVENT, feedOfUrl, isBridgeAnswer } from './feedChips.js';
@@ -63,7 +65,8 @@ export const CYCLONE_CLEARED_REASON =
  *   seam   'reset'  arm resetForHistoryFrame once when it is cleared, so
  *                   the empty answer drops every item at once
  *          'reload' reloadForHistoryFrame once on clearing and on resuming
- *   empty  false    an empty body cannot clear the layer (chip only)
+ *   empty  false    an empty body cannot clear the layer: the answer passes,
+ *                   no refresh is asked, greyPainter hides it (satellites)
  */
 export const LIVE_DRAW_FEEDS = Object.freeze({
   flights: Object.freeze({ layerId: 'flights', seam: 'reset', empty: true }),
@@ -269,6 +272,8 @@ export function createLiveFeedDraw({
   }
 
   function refreshOnce(feed) {
+    // a re-ask cannot change a layer whose answer is never emptied
+    if (!LIVE_DRAW_FEEDS[feed]?.empty) return;
     const layerId = layerOfFeed(feed);
     if (!layerId || !isEnabled(layerId)) return;
     const manager = dm();
@@ -301,7 +306,7 @@ export function createLiveFeedDraw({
       }
       return response;
     }
-    if (!spec.empty) return response; // chip only (see module note)
+    if (!spec.empty) return response; // greyPainter hides it (module note)
     if (!blanked.has(key)) {
       const first = !feedBlank();
       blanked.add(key);

@@ -48,6 +48,7 @@ export function createLifecycle({
       // Point primitives for satellite dots
       layerState._pointCollection = new Cesium.PointPrimitiveCollection();
       viewer.scene.primitives.add(layerState._pointCollection);
+      layerState._pointCollection.gevLayerId = 'satellites';
 
       parts.interaction._installClickHandler(viewer);
 

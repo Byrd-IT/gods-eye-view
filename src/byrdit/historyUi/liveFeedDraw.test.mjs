@@ -338,6 +338,14 @@ test('refreshLayer runs once per drawn <-> cleared transition, never on grey', a
   dm.enabled.delete('military');
   send('military', 'cleared', false);
   assert.equal(dm.refreshed.includes('military'), false);
+  // satellites: its answer is never emptied, so no re-ask on either edge
+  dm.enabled.add('satellites');
+  send('satellites', 'cleared', false);
+  send('satellites', 'live', true);
+  assert.equal(dm.refreshed.includes('satellites'), false);
+  assert.equal(gate.paintModeOf('satellites'), MODE_LIVE);
+  send('satellites', 'paused', false);
+  assert.equal(gate.paintModeOf('satellites'), MODE_CLEARED);
   await flush();
 });
 

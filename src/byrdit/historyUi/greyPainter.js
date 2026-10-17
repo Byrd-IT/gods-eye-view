@@ -30,13 +30,27 @@
  * layer's sprites (the flights / military close-range model handoff) is
  * the same layer's; models get the grey mixed in (ColorBlendMode.MIX).
  *
- * NOT reached (no public handle; listed on the card): the tracked aircraft
- * entity, launch trajectory polylines, the satellites points, and the 2-D
- * world-overlay cards of any layer.
+ * Satellites (owner decision on the card): its PointPrimitiveCollection
+ * carries gevLayerId 'satellites' (ONE upstream line in
+ * src/layers/satellites/lifecycle.js, a listed touch point); it is found
+ * among the top-level scene primitives by that tag. An empty answer cannot
+ * clear satellites (its outage guard keeps the old catalog), so its target
+ * is hideWhenCleared: while cleared the wrapped update draws nothing (as if
+ * show were false; the layer's own show and points are left alone), and the
+ * points come back on the first live frame.
+ *
+ * NOT reached (owner-accepted, documented in the KB and QA notes): the
+ * tracked aircraft entity, launch trajectory polylines, the satellite orbit
+ * paths and labels / ISS card, the 2-D world-overlay cards of any layer;
+ * coloured sprite IMAGES (e.g. the FIRMS glow) are only faded + tinted, a
+ * multiply tint cannot desaturate a texture.
  */
 import * as Cesium from 'cesium';
 import { spriteCollectionOf } from '../../data/spriteOrder.js';
-import { MODE_LIVE } from './liveFeedDraw.js';
+import { MODE_CLEARED, MODE_LIVE } from './liveFeedDraw.js';
+
+/** The property the one-line upstream touch point sets on a collection. */
+export const LAYER_TAG = 'gevLayerId';
 
 /** Alpha kept on grey items: the flights stale fade (policy.js, 45 %). */
 export const GREY_ALPHA = 0.45;
@@ -74,6 +88,12 @@ export const GREY_TARGETS = Object.freeze({
     dataSources: [],
   }),
   bikeshare: Object.freeze({ sprites: ['bikeshare'], dataSources: [] }),
+  satellites: Object.freeze({
+    sprites: [],
+    dataSources: [],
+    tagged: ['satellites'],
+    hideWhenCleared: true,
+  }),
 });
 
 /** The grey of a colour (a new Cesium.Color; alpha x GREY_ALPHA). */
@@ -142,6 +162,16 @@ export function createGreyPainter({
       return false;
     }
   };
+  // draws nothing at all: cleared, for a layer an empty answer cannot clear
+  const isHidden = (layerId) => {
+    if (destroyed || !targets[layerId]?.hideWhenCleared) return false;
+    try {
+      return modeOf(layerId) === MODE_CLEARED;
+    } catch {
+      return false;
+    }
+  };
+  const hidden = { count: 0 };
 
   // ── primitives ──────────────────────────────────────────
 
@@ -248,6 +278,11 @@ export function createGreyPainter({
     const original = collection.update;
     collection.update = function greyPainterUpdate(...args) {
       try {
+        // no draw (or pick) commands this frame: the same as show=false
+        if (isHidden(st.layerId)) {
+          hidden.count++;
+          return undefined;
+        }
         if (isGrey(st.layerId)) {
           paintCollection(this, true);
           st.painted = true;
@@ -341,6 +376,20 @@ export function createGreyPainter({
     }
   }
 
+  // ── tagged collections (satellites) ─────────────────────
+
+  /** Top-level scene primitives carrying LAYER_TAG === tag. */
+  function taggedCollections(tag) {
+    const out = [];
+    const prims = viewer?.scene?.primitives;
+    const m = Number(prims?.length) || 0;
+    for (let i = 0; i < m; i++) {
+      const p = prims.get(i);
+      if (p && p[LAYER_TAG] === tag && !p.isDestroyed?.()) out.push(p);
+    }
+    return out;
+  }
+
   // ── the frame pass ──────────────────────────────────────
 
   /** Adopt the layers' collections and grey / restore their entities. */
@@ -348,6 +397,9 @@ export function createGreyPainter({
     frame++;
     const full = frame % REPASS_FRAMES === 0;
     for (const [layerId, t] of Object.entries(targets)) {
+      // a re-init adds a new tagged collection: adopt is once per instance
+      for (const tag of t.tagged ?? [])
+        for (const c of taggedCollections(tag)) adopt(c, layerId);
       for (const id of t.sprites) {
         let c = null;
         try {
@@ -397,6 +449,7 @@ export function createGreyPainter({
     paintCollection,
     adopt,
     stats,
+    hidden,
     destroy() {
       destroyed = true; // wrapped collections restore on their next frame
       try {

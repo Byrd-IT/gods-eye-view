@@ -25,9 +25,24 @@
  *   history  while cleared live, a history seek draws the RECORDED rows in
  *            their own colours (the swapped layer is untouched); LIVE
  *            empties it again (cleared live answer)
+ * Satellites (owner decision, run 2): /api/celestrak/<group> answers the
+ * 200-object reference GP CSV with the same bridge headers. Its answer is
+ * never emptied (the layer keeps its catalog on empty); instead:
+ *   grey     every satellite point grey (the tagged point collection)
+ *   cleared  the point collection draws NOTHING (greyPainter skips its
+ *            update every frame), catalog kept, NO gate refreshLayer
+ *   resumed  points drawn again in their own colours
+ * Extra screenshots sat-* from far out (satellites are above the camera
+ * used for flights / FIRMS); the camera is put back afterwards.
+ *
+ * Accepted by the owner and NOT checked here (documented): the tracked
+ * aircraft entity, launch trajectory lines, satellite orbit paths / labels /
+ * ISS card, the 2-D overlay cards, coloured glow images only dimmed, and a
+ * one-time 'LOAD FAILED' toast when a layer clears.
+ *
  * plus no console / page error. Screenshots after Page.bringToFront.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import puppeteer from 'puppeteer';
 import {
@@ -67,7 +82,11 @@ const check = (ok, what) => {
 const world = fixtureWorld(Date.now());
 // phase of the live bridge: {name, lastOk, staleSince, greyUntil}
 let phase = { name: 'live' };
-const calls = { flights: 0, firms: 0, emptiedSeen: 0 };
+const calls = { flights: 0, firms: 0, celestrak: 0, emptiedSeen: 0 };
+const GP_CSV = readFileSync(
+  new URL('../src/byrdit/skyView/reference/satFixture200.csv', import.meta.url),
+  'utf8',
+);
 
 const iso = (ms) => new Date(ms).toISOString();
 function aircraft(prefix, n, tSec, hexBase) {
@@ -205,6 +224,15 @@ fetchSession.on('Fetch.requestPaused', (ev) => {
       bridgeHeaders(),
     );
   }
+  if (url.pathname.startsWith('/api/celestrak/')) {
+    calls.celestrak++;
+    // the last good catalog again while stopped (bridge STALE answer)
+    return respond(
+      200,
+      { ...bridgeHeaders(), 'content-type': 'text/csv; charset=utf-8' },
+      GP_CSV,
+    );
+  }
   if (url.pathname === '/api/history/slice') {
     const t = Date.parse(q.t);
     const h = {
@@ -307,6 +335,22 @@ const state = () =>
       }
       return out;
     };
+    /** The satellites point collection (tagged by the one upstream line). */
+    const satPoints = () => {
+      const prims = window.__godsEyeView.viewer.scene.primitives;
+      let c = null;
+      for (let i = 0; i < prims.length; i++)
+        if (prims.get(i)?.gevLayerId === 'satellites') c = prims.get(i);
+      const out = { tagged: Boolean(c), shown: 0, grey: 0, colour: 0 };
+      for (let i = 0; i < (c?.length ?? 0); i++) {
+        const p = c.get(i);
+        if (!p.show) continue;
+        out.shown++;
+        if (isGrey(p.color)) out.grey++;
+        else out.colour++;
+      }
+      return out;
+    };
     const stats = (id) => dm.layers.get(id)?.module?.getStats?.() ?? {};
     const swap = window.__gevHistorySwap;
     const root = document.querySelector('[data-gev-history]');
@@ -320,6 +364,9 @@ const state = () =>
       firmsSprites: sprites('firms', (b) =>
         /^firms-/.test(String(b.id?.id ?? b.id)),
       ),
+      sats: stats('satellites').count ?? null,
+      satPoints: satPoints(),
+      satHiddenFrames: swap.painter?.hidden?.count ?? null,
       feeds: (swap.liveDraw?.getState?.() ?? {}).modes ?? {},
       gate: (swap.liveDraw?.getState?.() ?? {}).stats ?? {},
       chips,
@@ -354,6 +401,35 @@ async function watchRefreshes() {
 }
 const refreshLog = () => page.evaluate(() => [...window.__qaRefreshes]);
 
+/** A screenshot from far out (satellites), then the camera is put back. */
+async function satShot(name) {
+  await page.evaluate(() => {
+    const v = window.__godsEyeView.viewer;
+    const cam = v.camera;
+    window.__qaCam = {
+      destination: cam.positionWC.clone(),
+      orientation: { heading: cam.heading, pitch: cam.pitch, roll: cam.roll },
+    };
+    // Cartesian3 from the live camera (no Cesium global in the page)
+    const C3 = cam.positionWC.constructor;
+    cam.setView({ destination: C3.fromDegrees(-97.7, 30.3, 25_000_000) });
+  });
+  await sleep(1500);
+  await shot(name);
+  await page.evaluate(() => {
+    const v = window.__godsEyeView.viewer;
+    v.camera.setView(window.__qaCam);
+  });
+  await sleep(1000);
+}
+const satHidden = async (ms = 2000) => {
+  const a = (await state()).satHiddenFrames;
+  await page.evaluate(() => window.__godsEyeView.viewer.scene.requestRender());
+  await sleep(ms);
+  const b = (await state()).satHiddenFrames;
+  return b - a;
+};
+
 // ── setup + live ─────────────────────────────────────────
 await page.goto(
   `${BASE}/?welcome=0#v=2&lat=${LAT}&lon=${LON}&alt=150000&heading=360&pitch=-90&roll=0&map=esri-imagery`,
@@ -367,14 +443,22 @@ await sleep(SETTLE_MS);
 await page.keyboard.press('Escape');
 await page.evaluate(async () => {
   const dm = window.__godsEyeView.dataManager;
-  for (const id of ['flights', 'local-firms']) await dm.setEnabled(id, true);
+  for (const id of ['flights', 'local-firms', 'satellites'])
+    await dm.setEnabled(id, true);
 });
 let st = await waitFor(
   (s) =>
     s.flights === N.flights &&
     s.firms === N.firms &&
-    s.flightSprites.colour >= N.flights,
+    s.flightSprites.colour >= N.flights &&
+    s.sats > 0 &&
+    s.satPoints.colour > 0,
   'live',
+);
+const SATS = st.sats;
+check(
+  st.satPoints.tagged && st.satPoints.grey === 0 && st.satPoints.colour > 0,
+  `live: satellites drawn in their own colours n=${st.sats} ${JSON.stringify(st.satPoints)}`,
 );
 check(
   st.flights === N.flights && st.firms === N.firms,
@@ -385,6 +469,7 @@ check(
   `live: own colours ${JSON.stringify([st.flightSprites, st.firmsSprites])}`,
 );
 await shot('01-live');
+await satShot('01b-sat-live');
 await watchRefreshes();
 
 // ── stopped -> grey ──────────────────────────────────────
@@ -403,6 +488,7 @@ await page.evaluate(async () => {
   const dm = window.__godsEyeView.dataManager;
   await dm.refreshLayer('flights');
   await dm.refreshLayer('local-firms');
+  await dm.refreshLayer('satellites');
 });
 const forced = (await refreshLog()).length;
 st = await waitFor(
@@ -410,8 +496,19 @@ st = await waitFor(
     s.feeds.flights === 'grey' &&
     s.feeds.firms === 'grey' &&
     s.flightSprites.grey >= N.flights &&
-    s.firmsSprites.grey >= 1,
+    s.firmsSprites.grey >= 1 &&
+    s.feeds.satellites === 'grey' &&
+    s.satPoints.grey > 0 &&
+    s.satPoints.colour === 0,
   'grey',
+);
+check(
+  st.feeds.satellites === 'grey' &&
+    st.sats === SATS &&
+    st.satPoints.colour === 0 &&
+    st.satPoints.grey === st.satPoints.shown &&
+    st.satPoints.shown > 0,
+  `grey: every satellite point grey, catalog kept n=${st.sats} ${JSON.stringify(st.satPoints)}`,
 );
 check(
   st.feeds.flights === 'grey' && st.feeds.firms === 'grey',
@@ -436,6 +533,7 @@ check(
   `grey: chip ${JSON.stringify(st.chips)}`,
 );
 await shot('02-grey');
+await satShot('02b-sat-grey');
 
 // ── cleared on the server clock, no forced poll ──────────
 const beforeClear = await refreshLog();
@@ -443,6 +541,7 @@ st = await waitFor(
   (s) =>
     s.feeds.flights === 'cleared' &&
     s.feeds.firms === 'cleared' &&
+    s.feeds.satellites === 'cleared' &&
     s.flights === 0 &&
     s.firms === 0,
   'cleared',
@@ -473,7 +572,24 @@ check(
   st.gate.emptied > 0,
   `cleared: answers emptied ${JSON.stringify(st.gate)}`,
 );
+{
+  const hiddenFrames = await satHidden();
+  check(
+    hiddenFrames > 0 && st.sats === SATS,
+    `cleared: satellite points draw NOTHING (${hiddenFrames} frames skipped), catalog kept n=${st.sats}`,
+  );
+  check(
+    !clearRefresh.includes('satellites'),
+    `cleared: no gate refreshLayer for satellites (${JSON.stringify(clearRefresh)})`,
+  );
+  const sat = (await refreshLog()).filter((x) => x === 'satellites');
+  check(
+    sat.length === 1,
+    `satellites: only the one forced poll (${sat.length})`,
+  );
+}
 await shot('03-cleared');
+await satShot('03b-sat-cleared');
 // it stays cleared over more polls
 await sleep(8_000);
 st = await state();
@@ -508,15 +624,19 @@ check(
 // ── resumed ──────────────────────────────────────────────
 phase = { name: 'live' };
 const beforeResume = await refreshLog();
-await page.evaluate(() =>
-  window.__godsEyeView.dataManager.refreshLayer('local-firms'),
-);
+await page.evaluate(async () => {
+  const dm = window.__godsEyeView.dataManager;
+  await dm.refreshLayer('local-firms');
+  await dm.refreshLayer('satellites');
+});
 st = await waitFor(
   (s) =>
     s.flights === N.flights &&
     s.firms === N.firms &&
     s.feeds.flights === 'live' &&
     s.feeds.firms === 'live' &&
+    s.feeds.satellites === 'live' &&
+    s.satPoints.colour > 0 &&
     s.flightSprites.colour >= N.flights,
   'resumed',
   60_000,
@@ -538,7 +658,21 @@ check(
   resumeRefresh.filter((x) => x === 'local-firms').length === 2,
   `resumed: FIRMS = the forced next poll + ONE gate refresh`,
 );
+{
+  const hiddenFrames = await satHidden();
+  check(
+    hiddenFrames === 0 &&
+      st.satPoints.grey === 0 &&
+      st.satPoints.colour === st.satPoints.shown,
+    `resumed: satellites drawn in their own colours (hidden frames ${hiddenFrames}) ${JSON.stringify(st.satPoints)}`,
+  );
+  check(
+    resumeRefresh.filter((x) => x === 'satellites').length === 1,
+    `resumed: satellites = the forced poll only, no gate refresh (${JSON.stringify(resumeRefresh)})`,
+  );
+}
 await shot('05-resumed');
+await satShot('05b-sat-resumed');
 
 check(errors.length === 0, `no console/page errors ${JSON.stringify(errors)}`);
 say('forced polls', forced, 'calls', calls);
