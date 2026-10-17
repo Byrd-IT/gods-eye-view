@@ -72,12 +72,23 @@
  * browser-direct third-party URL by `host` (the USGS feed); take a B12c
  * 'nothing recorded' 404 as an EMPTY answer (`accept.notRecorded`, D3: the
  * reason goes to the chip, never live) or a binary slice (`accept.bytes`,
- * the wind grid); bind a request to the slice time of an earlier answer
- * (`boundKey` / adapted.bindKey: the grid of the manifest the layer just
- * read); keep one cache across its request kinds (`paramsKey`) and
- * prefetch every request of a frame (`prefetchParams`). adapted.chip is
- * kept per feed for the chip strip; adapted.refresh (a refused answer)
+ * the wind grid); keep one cache across its request kinds (`paramsKey`)
+ * and prefetch every request of a frame (`prefetchParams`). adapted.chip
+ * is kept per feed for the chip strip; adapted.refresh (a refused answer)
  * drops the cache and asks the driver for one more refresh of that frame.
+ *
+ * Multipart frames (wind manifest + grid; review R1 on t_215e62e1): the
+ * frame is ONE snapshot decided at its first request. `companionParams`
+ * names the slices read together with the manifest; the history manifest
+ * is served only when all of them succeed and agree (adapted.inconsistent
+ * re-reads once, then fails the whole manifest -> live, D3), and the
+ * companion answer is OWED (adapted.owe) to the layer's next dependent
+ * request (`boundKey`: the grid id). An owed request is answered from that
+ * answer whatever happened in between (seek, history failure, LIVE): a
+ * history grid id is never sent to the live provider and the layer never
+ * keeps a history field under a LIVE chip. A first request of a frame
+ * (the manifest) drops anything owed; a dependent request with nothing
+ * owed belongs to a live manifest and passes through to live.
  */
 import { adapterForUrl, sliceUrl } from './historyAdapters.js';
 import { ALL_HISTORY_ADAPTERS } from './historyEventAdapters.js';
@@ -224,10 +235,10 @@ export function createHistoryRouter({
   const failed = new Map(); // adapter id -> {retryAt} (latched, D3)
   const served = new Map(); // adapter id -> {t, rows, gap}
   const pinned = new Map(); // adapter id -> playback frame (driver)
-  // B12d: a request bound to the slice time of an earlier answer (the wind
-  // grid id of the manifest served at t) -> that t
-  const bound = new Map();
-  const BOUND_KEEP = 64;
+  // R1: adapter id -> {key, t, answers}: the companion answer of the
+  // history frame the layer is reading (the wind grid of the manifest it
+  // was served), owed to its dependent request
+  const owed = new Map();
   const listeners = new Set();
   const serveListeners = new Set(); // onServe (driver: frame reset / clock)
   const queue = []; // prefetch slice urls
@@ -595,7 +606,8 @@ export function createHistoryRouter({
         failed.clear();
         served.clear();
         pinned.clear();
-        bound.clear();
+        // owed answers are NOT dropped: a layer between the halves of a
+        // history frame completes that frame, then D4 refreshes it live
         clearTrack();
         notify();
       }
@@ -658,36 +670,122 @@ export function createHistoryRouter({
     }
   }
 
+  /** Companion slice params of a request (never throws). */
+  function companionsOf(adapter, url, answers) {
+    try {
+      return adapter.companionParams?.(url, answers) ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** The dependent-request key of a URL (the wind grid id), or null. */
+  function boundKeyOf(adapter, url) {
+    try {
+      return adapter.boundKey?.(url) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * R1: a dependent request (the wind grid) is answered from what its
+   * history frame owes it, in any mode; with nothing owed it belongs to a
+   * live manifest and goes to live. A first request of a frame drops what
+   * was owed (a new read supersedes it). Returns a Response promise, or
+   * null when the request is not a multipart request.
+   */
+  function multipart(adapter, url, input, init, signal) {
+    if (typeof adapter?.boundKey !== 'function') return null;
+    const key = boundKeyOf(adapter, url);
+    if (key === null) {
+      owed.delete(adapter.id);
+      return null;
+    }
+    const due = owed.get(adapter.id);
+    owed.delete(adapter.id);
+    if (!due || due.key !== key) return inner.call(target, input, init);
+    if (signal?.aborted) return Promise.reject(abortError());
+    let adapted;
+    try {
+      adapted = adapter.adapt(due.answers, { t: due.t, nowMs: now(), url });
+    } catch {
+      adapted = null;
+    }
+    if (!adapted || adapted.refresh || adapted.inconsistent) {
+      // cannot happen for a verified frame; never live, ask the layer again
+      if (s.active) {
+        clearCache();
+        announce({ adapterId: adapter.id, mode: 'refresh', t: due.t });
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(adapted?.body ?? {}), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    }
+    return Promise.resolve(
+      new Response(adapted.raw ?? JSON.stringify(adapted.body), {
+        status: adapted.status ?? 200,
+        headers: {
+          ...adapted.headers,
+          'X-History-T': new Date(due.t).toISOString(),
+        },
+      }),
+    );
+  }
+
   const sleep = (ms) =>
     new Promise((resolve) => timers.setTimeout(resolve, ms));
 
   async function answer(adapter, url, input, init, signal) {
     let busyRetried = false;
     const accept = adapter.accept ?? {};
-    // B12d: a request bound to an earlier answer's slice time (the wind
-    // grid of the manifest the layer just read) asks that time
-    let boundKey = null;
-    try {
-      boundKey = adapter.boundKey?.(url) ?? null;
-    } catch {
-      boundKey = null;
-    }
+    let reread = false; // R1: one re-read of an inconsistent frame
     // loops only when a seek / LIVE happened while the slice was pending
     for (;;) {
       const myGen = gen;
-      const t =
-        boundKey !== null && bound.has(boundKey)
-          ? bound.get(boundKey)
-          : requestTime(adapter);
+      const t = requestTime(adapter);
       const urls = paramsOf(adapter, url).map((params) =>
         sliceUrl(adapter, params, t, base),
       );
       let answers;
+      let adapted = null;
       try {
         answers = await withSignal(
           Promise.all(urls.map((u) => getSlice(u, { accept }))),
           signal,
         );
+        // R1: the slices read with this request (the wind grid of the
+        // manifest): the frame is served only when all of them are there
+        const more = companionsOf(adapter, url, answers).map((params) =>
+          sliceUrl(adapter, params, t, base),
+        );
+        if (more.length) {
+          urls.push(...more);
+          answers = [
+            ...answers,
+            ...(await withSignal(
+              Promise.all(more.map((u) => getSlice(u, { accept }))),
+              signal,
+            )),
+          ];
+        }
+        if (s.active && gen === myGen) {
+          adapted = adapter.adapt(answers, { t, nowMs: now(), url });
+          if (adapted?.inconsistent) {
+            // the halves do not belong together (the server re-read
+            // another field in between): read the frame once more, then
+            // the whole request fails (live, D3)
+            for (const u of urls) cache.delete(u);
+            if (!reread) {
+              reread = true;
+              continue;
+            }
+            throw new SliceError('failed');
+          }
+        }
       } catch (error) {
         if (signal?.aborted) throw abortError();
         if (!s.active) return inner.call(target, input, init);
@@ -711,7 +809,7 @@ export function createHistoryRouter({
       if (gen !== myGen) continue; // a seek meanwhile: answer the new t
       const wasFailed = failed.delete(adapter.id);
       const nowMs = now();
-      const adapted = adapter.adapt(answers, { t, nowMs, url });
+      adapted ??= adapter.adapt(answers, { t, nowMs, url });
       const rows = Number(adapted.headers['X-History-Rows']) || 0;
       const prevServed = served.get(adapter.id);
       const truncated = adapted.headers['X-History-Truncated'] === '1';
@@ -724,11 +822,13 @@ export function createHistoryRouter({
         truncated,
         chip,
       });
-      if (adapted.bindKey) {
-        bound.delete(adapted.bindKey);
-        bound.set(adapted.bindKey, t);
-        while (bound.size > BOUND_KEEP) bound.delete(bound.keys().next().value);
-      }
+      // R1: the dependent request of this frame is answered from these
+      if (adapted.owe?.key)
+        owed.set(adapter.id, {
+          key: adapted.owe.key,
+          t,
+          answers: adapted.owe.answers,
+        });
       // the chip strip shows a truncated answer and a B12d reason / note
       // (layerChips.js)
       if (
@@ -743,7 +843,6 @@ export function createHistoryRouter({
       // read): the layer is asked again
       if (adapted.refresh) {
         // never the same pair again from the cache
-        if (boundKey !== null) bound.delete(boundKey);
         clearCache();
         announce({ adapterId: adapter.id, mode: 'refresh', t });
       }
@@ -948,7 +1047,9 @@ export function createHistoryRouter({
     if (restore || typeof target?.fetch !== 'function') return;
     inner = target.fetch;
     const wrapped = function historyRouterFetch(input, init) {
-      if (!s.active) return inner.call(target, input, init);
+      // LIVE: straight through, unless a history frame still owes its
+      // dependent request an answer (R1: LIVE between the wind halves)
+      if (!s.active && !owed.size) return inner.call(target, input, init);
       let req;
       let url;
       let adapter;
@@ -964,6 +1065,12 @@ export function createHistoryRouter({
       } catch {
         adapter = null;
       }
+      // R1: the dependent half of a multipart frame (any mode)
+      const part = adapter
+        ? multipart(adapter, url, input, init, req.signal)
+        : null;
+      if (part) return part;
+      if (!s.active) return inner.call(target, input, init);
       // a live track of a feed shown from history (see module note)
       if (trackAdapter && isSwapped(trackAdapter.id)) {
         const spec = TRACK_SPECS[trackAdapter.id];
@@ -1042,6 +1149,7 @@ export function createHistoryRouter({
       restore = null;
       clearCache();
       clearTrack();
+      owed.clear();
       listeners.clear();
       serveListeners.clear();
       s.active = false;

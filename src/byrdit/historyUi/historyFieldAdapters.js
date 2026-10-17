@@ -22,14 +22,21 @@
  *           after t) and a recording start inside the 24 h window are
  *           named on the chip.
  *   wind    /api/wind/manifest + /api/wind/grid/<id>.bin -> slice
- *           feed=wind part=manifest|grid, the cycle in effect at t. The
- *           grid is the one of the manifest the layer just read: the router
- *           binds the grid id to the slice time of its manifest
- *           (boundKey), and a grid whose X-History-Wind-Id is not the id
- *           asked (the server re-read a degraded field in between) is
- *           refused and the layer refreshed, never mixed with another
- *           manifest. A 404 not_recorded answer becomes the live
- *           'unavailable' manifest: the layer clears its field.
+ *           feed=wind part=manifest|grid, the cycle in effect at t.
+ *           Review R1: the frame is ONE snapshot decided at the manifest.
+ *           The router reads the grid slice (companionParams) together
+ *           with the manifest slice, and serves the history manifest only
+ *           when the grid's X-History-Wind-Id is the manifest's grid id.
+ *           The grid answer is then OWED to the layer's grid request
+ *           (owe), which is answered from it even if t moved, history
+ *           failed or LIVE came in between: the layer never sends a history
+ *           grid id to the live provider, and never combines halves of two
+ *           reads. A grid that fails or does not match (the server re-read
+ *           a degraded field in between) fails the whole manifest after
+ *           one re-read (inconsistent), so the manifest request goes live
+ *           and the layer gets a complete live snapshot. A 404
+ *           not_recorded manifest becomes the live 'unavailable' manifest:
+ *           the layer clears its field (no grid is asked).
  */
 import { passHeaders } from './historyAdapters.js';
 
@@ -192,7 +199,7 @@ function adaptWind(answers, { url }) {
       )
     : null;
   const keep = {
-    ...passHeaders(answers),
+    ...passHeaders([a]),
     ...Object.fromEntries(
       [
         ['x-history-cycle', 'X-History-Cycle'],
@@ -238,13 +245,32 @@ function adaptWind(answers, { url }) {
       chip,
     };
   const manifest = a.body ?? {};
+  // R1: the manifest is served only with the grid of the same read
+  const key = windIdOfGridUrl(manifest.gridUrl);
+  const grid = answers[1];
+  if (
+    !key ||
+    !grid ||
+    grid.status === 404 ||
+    !(grid.bytes instanceof Uint8Array) ||
+    header(grid, 'x-history-wind-id') !== key
+  )
+    return { inconsistent: true, headers: {}, chip: null };
   return {
     body: manifest,
     headers: { 'Content-Type': JSON_TYPE, ...keep, 'X-History-Rows': '1' },
     chip: null,
-    // the grid request that follows belongs to this manifest's slice time
-    bindKey: windIdOfGridUrl(manifest.gridUrl),
+    // the grid request that follows is answered from this grid answer
+    owe: { key, answers: [grid] },
   };
+}
+
+/** The grid slice read with a recorded manifest (none for an empty one). */
+function windCompanion(url, answers) {
+  if (windGridIdOf(url?.pathname)) return null;
+  if (answers[0]?.status === 404) return null;
+  const { model, overlay } = windQuery(url);
+  return [{ model, overlay, part: 'grid' }];
 }
 
 // ── registry entries ──────────────────────────────────────
@@ -295,7 +321,9 @@ export const WIND_ADAPTER = Object.freeze({
       { model, overlay, part: 'grid' },
     ];
   },
-  /** The grid id of a grid request (bound to its manifest's slice time). */
+  /** The grid slice read with the manifest (one snapshot, review R1). */
+  companionParams: windCompanion,
+  /** The grid id of a grid request (owed by its history manifest). */
   boundKey(url) {
     return windGridIdOf(url.pathname);
   },

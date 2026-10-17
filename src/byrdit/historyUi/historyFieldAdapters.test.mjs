@@ -13,20 +13,24 @@ import {
   USGS_HOST,
   WIND_ADAPTER,
   WIND_EMPTY_ROW,
-  WIND_GRID_CHANGED,
   windGridIdOf,
 } from './historyFieldAdapters.js';
 import { ALL_HISTORY_ADAPTERS } from './historyEventAdapters.js';
 import { adapterForPath, adapterForUrl } from './historyAdapters.js';
 import { createHistoryRouter } from './historyRouter.js';
 import { createRefreshDriver, RELEASE_DEBOUNCE_MS } from './historyRefresh.js';
-import { createLayerChips, LIVE_CHIP } from './layerChips.js';
+import {
+  createLayerChips,
+  LIVE_CHIP,
+  LIVE_CHIP_UNAVAILABLE,
+} from './layerChips.js';
 import { createFeedChips } from './feedChips.js';
 import { fakeClock, fakeWindow, flush, jsonResponse } from './fakeDom.mjs';
 import { createSliceServer } from './b12dSliceServer.mjs';
 import { createUsgsEarthquakeSource } from '../../layers/earthquakes/source.js';
 import { normalizeEarthquakeSnapshot } from '../../layers/earthquakes/records.js';
 import { createWindSource } from '../../layers/wind/source.js';
+import { createWindLayer } from '../../layers/wind/index.js';
 import { createSatelliteSource } from '../../layers/satellites/source.js';
 import { CATALOG_GROUPS } from '../../layers/satellites/policy.js';
 import { windStep } from '../../../server/byrdit/historyWind.js';
@@ -444,40 +448,71 @@ test('wind with nothing recorded (IFS never recorded, before the first cycle, pa
   }
 });
 
-test('wind: the grid is bound to the manifest time even if t moved in between; a grid of another read is refused, never combined', async () => {
+test('wind: the grid is answered from the read of its manifest even if t moved in between; a mismatched re-read fails the frame to live, never combined', async () => {
   const reader = fakeWindReader();
   const env = setup({
     data: { 'gev-history-cycles': CYCLES },
     windReader: reader,
   });
   enter(env, T_WIND);
+  // a grid no history manifest owes (the grid of a live manifest the
+  // layer read while wind passed through) is live, never a history field
+  const liveGrid = await env.win.fetch(
+    `/api/wind/grid/${windIdOfLive()}.bin?model=gfs`,
+  );
+  assert.equal(liveGrid.status, 200);
+  assert.equal(liveGrid.headers.get('x-history-t'), null);
+  assert.deepEqual(
+    env.live.map((u) => new URL(u).pathname),
+    [`/api/wind/grid/${windIdOfLive()}.bin`],
+  );
+  assert.equal(env.srv.asked.length, 0);
+  env.live.length = 0;
   const m = await (await env.win.fetch('/api/wind/manifest?model=gfs')).json();
+  // the grid slice was read WITH the manifest (one snapshot, R1)
+  assert.deepEqual(
+    env.srv.asked.filter((q) => q.feed === 'wind').map((q) => [q.part, q.t]),
+    [
+      ['manifest', iso(T_WIND)],
+      ['grid', iso(T_WIND)],
+    ],
+  );
   // a seek before the layer asks the grid of that manifest
   enter(env, T_WIND + 30 * HOUR);
+  const n = env.srv.asked.length;
   const g = await env.win.fetch(m.gridUrl);
   assert.equal(g.status, 200);
   assert.equal(g.headers.get('x-history-t'), iso(T_WIND));
   assert.equal((await g.arrayBuffer()).byteLength, 360 * 181 * 8);
-  // the server now reads another field for the same t (degraded <-> full)
+  assert.equal(env.srv.asked.length, n, 'answered from the owed read');
+  assert.deepEqual(env.live, [], 'no history grid id sent to live');
+  // the server alternates fields between reads (degraded <-> full): the
+  // manifest and grid of one read never agree -> one re-read, then the
+  // whole manifest goes live (D3) and its live grid with it
   enter(env, T_WIND);
-  await env.clock.run(RELEASE_DEBOUNCE_MS + 1);
-  await env.driver.settle();
-  env.refreshed.length = 0;
-  reader.idSuffix = '-wind-only';
   env.router.clearCache();
-  const refused = await env.win.fetch(m.gridUrl);
-  assert.equal(refused.status, 409);
-  assert.equal((await refused.json()).error, WIND_GRID_CHANGED);
-  // the driver asks the layer once more (and only once for that frame)
-  await env.clock.run(1);
-  await env.driver.settle();
-  assert.deepEqual(env.refreshed, ['wind']);
-  const again = await env.win.fetch(m.gridUrl);
-  assert.equal(again.status, 409);
-  await env.clock.run(1);
-  await env.driver.settle();
-  assert.deepEqual(env.refreshed, ['wind']);
+  const read = reader.read.bind(reader);
+  let k = 0;
+  reader.read = async (q) => {
+    reader.idSuffix = k++ % 2 ? '-wind-only' : '';
+    return read(q);
+  };
+  const before = env.srv.asked.length;
+  const snap = await env.wind.getSnapshot({ model: 'gfs', overlay: 'none' });
+  assert.equal(env.srv.asked.length - before, 4, 'manifest+grid read twice');
+  assert.equal(snap.cycle.runIso, '2026-10-17T12:00:00.000Z', 'live snapshot');
+  assert.equal(env.router.isFailed('wind'), true);
+  assert.deepEqual(
+    env.live.map((u) => new URL(u).pathname),
+    ['/api/wind/manifest', `/api/wind/grid/${windIdOfLive()}.bin`],
+  );
+  assert.equal(chipOf(env, 'wind')[0]?.chip, LIVE_CHIP_UNAVAILABLE);
 });
+
+/** The grid id of the live wind double's current cycle. */
+function windIdOfLive() {
+  return 'gfs-20261017-12-f6-1';
+}
 
 test('wind playback: the manifest and grid of the next frames are prefetched together; alternating halves never drop the cache', async () => {
   const env = setup({ data: { 'gev-history-cycles': CYCLES } });
@@ -518,6 +553,228 @@ test('LIVE exit: quakes and wind go straight back to live and are refreshed once
   assert.ok(env.live.includes(USGS_URL));
   assert.ok(env.live.some((u) => u.includes('/api/wind/manifest')));
   assert.deepEqual(chipOf(env, 'earthquakes'), []);
+});
+
+// ── review R1: the real wind source + layer across a multipart frame ────
+
+/**
+ * The production router, refresh driver, wind source and wind LAYER over a
+ * deterministic transport (the review R1 probe): the history slice of t
+ * answers a manifest + grid of cycle t (id gfs-<t>-1), the live provider
+ * only knows its current cycle (a history grid id is a 404, like
+ * server/providers/wind.js). refreshLayer waits for a running update and
+ * then runs a new one, like DataManager.refreshLayer (lifecycle.js).
+ */
+function windLayerEnv() {
+  const clock = fakeClock(NOW);
+  const state = { failGrid: false, beforeGrid: null };
+  const calls = [];
+  const id = (t) => `gfs-${t}-1`;
+  const manifest = (t) => ({
+    model: 'gfs',
+    schemaVersion: 1,
+    cycle: { runIso: iso(t), validIso: iso(t) },
+    grid: { nx: 2, ny: 2, lo1: 0, la1: 90, dx: 180, dy: 90 },
+    gridUrl: `/api/wind/grid/${id(t)}.bin?model=gfs`,
+  });
+  const bytes = (t) =>
+    new Response(new Float32Array(8).fill(t === NOW ? 9 : 3), {
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-history-wind-id': id(t),
+      },
+    });
+  const win = fakeWindow(`${ORIGIN}/`, async (input) => {
+    const u = new URL(String(input?.url ?? input), ORIGIN);
+    calls.push(u.pathname + u.search);
+    if (u.pathname === '/api/history/slice') {
+      const t = Date.parse(u.searchParams.get('t'));
+      if (u.searchParams.get('part') === 'manifest')
+        return jsonResponse(manifest(t));
+      if (state.failGrid)
+        return jsonResponse({ error: 'unavailable' }, { status: 503 });
+      return bytes(t);
+    }
+    if (u.pathname === '/api/wind/manifest') return jsonResponse(manifest(NOW));
+    if (u.pathname === `/api/wind/grid/${id(NOW)}.bin`) return bytes(NOW);
+    return jsonResponse({ error: 'unknown_grid' }, { status: 404 });
+  });
+  const router = createHistoryRouter({
+    target: win,
+    now: clock.now,
+    timers: clock.timers,
+    monotonic: clock.monotonic,
+  });
+  const feedChips = createFeedChips({ target: win });
+  feedChips.install();
+  router.install();
+  const drawn = [];
+  const rendering = {
+    attach() {},
+    start() {},
+    stop() {},
+    clear() {
+      drawn.push(null);
+    },
+    destroy() {},
+    setField(snapshot) {
+      drawn.push(snapshot.cycle.validIso);
+    },
+  };
+  const feed = createWindSource({
+    fetchImpl: async (url, init) => {
+      // a test hook exactly between the halves the layer reads
+      if (String(url).startsWith('/api/wind/grid/') && state.beforeGrid) {
+        const hook = state.beforeGrid;
+        state.beforeGrid = null;
+        await hook();
+      }
+      return win.fetch(url, init);
+    },
+  });
+  const layer = createWindLayer({ feed, createRendering: () => rendering });
+  layer.init({ container: {} });
+  layer.enable();
+  let chain = Promise.resolve();
+  const dm = {
+    layers: new Map([['wind', { module: layer }]]),
+    getEnabledLayerIds: () => new Set(['wind']),
+    getAll: () => [{ id: 'wind', name: 'Wind' }],
+    subscribe: () => () => {},
+    refreshLayer: () => (chain = chain.then(() => layer.update())),
+  };
+  const driver = createRefreshDriver({
+    router,
+    getDataManager: () => dm,
+    timers: clock.timers,
+    now: clock.now,
+    monotonic: clock.monotonic,
+  });
+  const chips = createLayerChips({
+    feedChips,
+    getRouter: () => router,
+    getDataManager: () => dm,
+  });
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) {
+      await env.clock.run(RELEASE_DEBOUNCE_MS + 1);
+      await driver.settle();
+      await chain;
+      await flush();
+    }
+  };
+  const env = {
+    clock,
+    state,
+    calls,
+    id,
+    drawn,
+    layer,
+    dm,
+    driver,
+    router,
+    chips,
+    settle,
+    shown: () => drawn.at(-1),
+    liveCalls: () => calls.filter((c) => c.startsWith('/api/wind/')),
+    seek: async (t) => {
+      driver.onHistory({ active: true, timeMs: t, playing: false });
+      await settle();
+    },
+  };
+  return env;
+}
+
+const T1 = NOW - 24 * HOUR;
+const T2 = T1 + HOUR;
+
+test('review R1: a history wind grid failure installs a complete LIVE snapshot under the LIVE chip, never a history field and never a history grid id sent to live', async () => {
+  const env = windLayerEnv();
+  await env.dm.refreshLayer('wind');
+  assert.equal(env.shown(), iso(NOW));
+  await env.seek(T1);
+  assert.equal(env.shown(), iso(T1), 'history frame drawn');
+  assert.deepEqual(env.chips.states(), []);
+  env.state.failGrid = true;
+  env.calls.length = 0;
+  await env.seek(T2);
+  // the whole frame failed at the manifest: live manifest + its live grid
+  assert.equal(env.shown(), iso(NOW), 'live field installed at once');
+  assert.equal(env.router.isFailed('wind'), true);
+  const states = env.chips.states().filter((c) => c.layerId === 'wind');
+  assert.equal(states.length, 1);
+  assert.equal(states[0].chip, LIVE_CHIP_UNAVAILABLE);
+  assert.deepEqual(env.calls, [
+    `/api/history/slice?feed=wind&t=${encodeURIComponent(iso(T2))}&model=gfs&overlay=none&part=manifest`,
+    `/api/history/slice?feed=wind&t=${encodeURIComponent(iso(T2))}&model=gfs&overlay=none&part=grid`,
+    '/api/wind/manifest?model=gfs',
+    `/api/wind/grid/${env.id(NOW)}.bin?model=gfs`,
+  ]);
+  // history back: after the retry delay the layer's own next poll is
+  // answered from history again (B12a latch: retry on the layer's request)
+  env.state.failGrid = false;
+  await env.clock.run(20_000);
+  await env.seek(T1);
+  await env.dm.refreshLayer('wind');
+  await env.settle();
+  assert.equal(env.shown(), iso(T1));
+  assert.deepEqual(env.chips.states(), []);
+  env.driver.destroy();
+  env.layer.destroy();
+  env.router.destroy();
+});
+
+test('review R1: LIVE between the wind manifest and grid completes the history frame from its own read, then D4 installs live; no history grid id reaches the live provider', async () => {
+  const env = windLayerEnv();
+  await env.seek(T1);
+  assert.equal(env.shown(), iso(T1));
+  env.calls.length = 0;
+  env.drawn.length = 0;
+  // the layer polls in history; LIVE arrives after it read the manifest
+  env.state.beforeGrid = async () => {
+    env.driver.onHistory({ active: false });
+  };
+  await env.dm.refreshLayer('wind');
+  await env.settle();
+  assert.deepEqual(
+    env.drawn,
+    [iso(T1), iso(NOW)],
+    'the whole T1 frame, then live',
+  );
+  assert.equal(env.shown(), iso(NOW));
+  assert.deepEqual(env.chips.states(), []);
+  // the poll's manifest and grid came from the T1 frame already read (no
+  // network); after LIVE only the live manifest and ITS grid were asked
+  assert.deepEqual(env.calls, [
+    '/api/wind/manifest?model=gfs',
+    `/api/wind/grid/${env.id(NOW)}.bin?model=gfs`,
+  ]);
+  assert.ok(
+    !env.calls.some((c) => c.includes(`/api/wind/grid/${env.id(T1)}`)),
+    'the history grid id never went to live',
+  );
+  env.driver.destroy();
+  env.layer.destroy();
+  env.router.destroy();
+});
+
+test('review R1: a seek between the wind manifest and grid keeps the frame the layer read (never the grid of another time)', async () => {
+  const env = windLayerEnv();
+  await env.seek(T1);
+  env.drawn.length = 0;
+  env.calls.length = 0;
+  env.state.beforeGrid = async () => {
+    env.driver.onHistory({ active: true, timeMs: T2, playing: false });
+  };
+  await env.dm.refreshLayer('wind');
+  // the in-flight update draws the frame it read; the seek then draws T2
+  await env.settle();
+  assert.equal(env.drawn[0], iso(T1));
+  assert.equal(env.shown(), iso(T2));
+  assert.ok(!env.calls.some((c) => c.startsWith('/api/wind/')), 'no live wind');
+  env.driver.destroy();
+  env.layer.destroy();
+  env.router.destroy();
 });
 
 // ── satellites ────────────────────────────────────────────

@@ -78,7 +78,9 @@ const GP_CSV = readFileSync(
   new URL('../src/byrdit/skyView/reference/satFixture200.csv', import.meta.url),
   'utf8',
 );
-const calls = { usgs: 0, windLive: 0, celestrak: 0, slices: [] };
+const calls = { usgs: 0, windLive: 0, celestrak: 0, slices: [], liveGrids: [] };
+/** Review R1: the history wind grid slice answers 503 while set. */
+let failWindGrid = false;
 
 function quakes(prefix, n, atMs) {
   return {
@@ -209,6 +211,10 @@ fetchSession.on('Fetch.requestPaused', (ev) => {
   }
   if (url.pathname.startsWith('/api/wind/grid/')) {
     calls.windLive++;
+    calls.liveGrids.push(url.pathname);
+    // like server/providers/wind.js: only the live cycle's grid is known
+    if (url.pathname !== `/api/wind/grid/${windId(liveWind)}.bin`)
+      return json({ error: 'unknown_grid' }, {}, 404);
     return respond(
       200,
       { 'content-type': 'application/octet-stream' },
@@ -250,6 +256,8 @@ fetchSession.on('Fetch.requestPaused', (ev) => {
         'x-history-valid-time': m.cycle.validIso,
         'x-history-wind-id': windId(m),
       };
+      if (q.part === 'grid' && failWindGrid)
+        return json({ error: 'unavailable' }, {}, 503);
       return q.part === 'grid'
         ? respond(
             200,
@@ -450,6 +458,44 @@ check(
 }
 await shot('02-history-quakes-wind');
 await farShot('02b-history-satellites-live');
+
+// ── review R1: the history wind grid fails -> a complete LIVE snapshot ──
+{
+  failWindGrid = true;
+  const g0 = calls.liveGrids.length;
+  await page.evaluate(
+    (t) => window.__gevHistorySwap.handle.seek(t),
+    T + 7 * HOUR,
+  );
+  st = await waitFor(
+    (s) =>
+      s.windRun === liveWind.cycle.runIso &&
+      /LIVE \(history unavailable\)/.test(chipText(s, 'layer:wind') ?? ''),
+    'wind grid failure',
+  );
+  const grids = calls.liveGrids.slice(g0);
+  check(
+    st.windRun === liveWind.cycle.runIso &&
+      st.windValid === liveWind.cycle.validIso,
+    `grid failure: wind shows the complete LIVE snapshot issued ${st.windRun} valid ${st.windValid}`,
+  );
+  check(
+    /LIVE \(history unavailable\)/.test(chipText(st, 'layer:wind') ?? ''),
+    `grid failure: wind chip ${chipText(st, 'layer:wind')}`,
+  );
+  check(
+    grids.length > 0 &&
+      grids.every((g) => g === `/api/wind/grid/${windId(liveWind)}.bin`),
+    `grid failure: only the live grid id went to live ${JSON.stringify(grids)}`,
+  );
+  await shot('02c-history-wind-grid-failed-live');
+  failWindGrid = false;
+  await page.evaluate(() => window.__gevHistorySwap.handle.leave());
+  await waitFor(
+    (s) => s.mode !== 'history' && s.windRun === liveWind.cycle.runIso,
+    'LIVE after grid failure',
+  );
+}
 
 // ── before the recording start ───────────────────────────
 await page.evaluate((t) => window.__gevHistorySwap.handle.seek(t), T_BEFORE);
