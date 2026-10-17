@@ -25,6 +25,27 @@
  * a recorded gap draws nothing for the six swapped layers; LIVE restores
  * every live count; no console/page error. One screenshot per layer at t, after Page.bringToFront. Exit 1 on
  * failure.
+ *
+ * What is DRAWN is checked, not only the layer counts (review R1): the world
+ * overlay entries and painted cards per source, the FIRMS glow sprites, the
+ * layer entities, and a pixel readback of the world-overlay canvas.
+ *
+ * Capture path: Chromium runs with --disable-accelerated-2d-canvas (a
+ * software 2-D canvas; WebGL stays on SwiftShader). With the accelerated
+ * SwiftShader 2-D canvas, the world-overlay canvas (getContext('2d',
+ * {desynchronized: true}), src/overlays/worldOverlay.js, unchanged by B12)
+ * re-presents an OLDER buffer every few frames: its getImageData flips
+ * between 0 and the same earlier ink count while the host has 0 entries and
+ * paints 0 cards. The same steps with a software 2-D canvas, or with
+ * desynchronized:false, stay at 0 ink. --accel-2d-canvas reproduces the old
+ * path. Not verified on a hardware GPU. A software 2-D canvas made
+ * {desynchronized: true} is not composited into page screenshots, so
+ * shot() lays the overlay canvas readback over it for the capture (see
+ * shot()).
+ *
+ * Only /api/* is intercepted, so the globe imagery loads (a blanket
+ * interception rendered the globe white). The screenshots certify the
+ * fixture rendering of the swapped layers, not map fidelity.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -227,6 +248,11 @@ const browser = await puppeteer.launch({
     '--enable-unsafe-swiftshader',
     '--ignore-gpu-blocklist',
     '--font-render-hinting=none',
+    // the reliable capture path (see the header); --accel-2d-canvas keeps
+    // the accelerated 2-D canvas to reproduce the stale-buffer artefact
+    ...(process.argv.includes('--accel-2d-canvas')
+      ? []
+      : ['--disable-accelerated-2d-canvas']),
   ],
 });
 const page = await browser.newPage();
@@ -238,8 +264,40 @@ page.on('console', (m) => {
   if (m.type() === 'error' && !/Failed to load resource/.test(m.text()))
     errors.push(`console: ${m.text().slice(0, 300)}`);
 });
-await page.setRequestInterception(true);
-page.on('request', (req) => {
+/**
+ * Only /api/* is intercepted (CDP Fetch with a URL pattern). Puppeteer's
+ * blanket setRequestInterception also pauses every imagery tile, and the
+ * globe then renders white (checked on this branch: the same page without
+ * interception shows the Esri imagery), so the screenshots showed nothing to
+ * read the layers against.
+ */
+const fetchSession = await page.target().createCDPSession();
+await fetchSession.send('Fetch.enable', {
+  patterns: [{ urlPattern: `${new URL(BASE).origin}/api/*` }],
+});
+fetchSession.on('Fetch.requestPaused', (ev) => {
+  const req = {
+    url: () => ev.request.url,
+    respond: ({ status, headers = {}, body = '' }) =>
+      fetchSession
+        .send('Fetch.fulfillRequest', {
+          requestId: ev.requestId,
+          responseCode: status,
+          responseHeaders: Object.entries(headers).map(([name, value]) => ({
+            name,
+            value: String(value),
+          })),
+          body: Buffer.from(body).toString('base64'),
+        })
+        .catch(() => {}),
+    continue: () =>
+      fetchSession
+        .send('Fetch.continueRequest', { requestId: ev.requestId })
+        .catch(() => {}),
+  };
+  onApiRequest(req);
+});
+function onApiRequest(req) {
   const url = new URL(req.url());
   const json = (
     body,
@@ -558,13 +616,55 @@ page.on('request', (req) => {
     );
   }
   return req.continue();
-});
+}
 
+/**
+ * Page screenshot with the world-overlay canvas included. Headless Chromium
+ * with a software 2-D canvas does not composite a {desynchronized: true}
+ * canvas into page screenshots (checked with a one-file page: the canvas
+ * holds the pixels, the screenshot has none; a synchronized canvas shows).
+ * So its backing store is read back (toDataURL), saved as <name>-overlay.png,
+ * and laid over the canvas as an <img> at the same place in the DOM for the
+ * capture, then removed. The pixels are exactly what the overlay host drew.
+ */
 async function shot(name) {
   await page.bringToFront();
+  const overlay = await page.evaluate(async () => {
+    const c = document.getElementById('world-overlay-canvas');
+    if (!c?.width) return null;
+    const url = c.toDataURL('image/png');
+    const img = document.createElement('img');
+    img.id = 'qa-overlay-readback';
+    const cs = getComputedStyle(c);
+    for (const k of [
+      'position',
+      'left',
+      'top',
+      'width',
+      'height',
+      'zIndex',
+      'transform',
+      'opacity',
+      'mixBlendMode',
+    ])
+      img.style[k] = cs[k];
+    img.style.pointerEvents = 'none';
+    img.src = url;
+    c.after(img);
+    await img.decode();
+    return url;
+  });
   const file = path.join(OUT, `${name}.png`);
   await page.screenshot({ path: file });
-  say('screenshot', file);
+  await page.evaluate(() =>
+    document.getElementById('qa-overlay-readback')?.remove(),
+  );
+  if (overlay)
+    writeFileSync(
+      path.join(OUT, `${name}-overlay.png`),
+      Buffer.from(overlay.split(',')[1], 'base64'),
+    );
+  say('screenshot', file, overlay ? '(+ overlay readback)' : '');
 }
 
 const IDS = {
@@ -665,6 +765,91 @@ async function view(lat, lon, alt) {
     { lat, lon, alt },
   );
   await sleep(1_500);
+}
+
+/** The world-overlay sources of the six swapped layers. */
+const OVERLAY_SOURCES = [
+  'firms',
+  'fire-perimeters',
+  'weather-cyclones',
+  'rocket-missions',
+  'rocket-mission-selected',
+  'transit-selected',
+  'bikeshare-selected',
+];
+const LAYER_DATA_SOURCES = [
+  'local-firms',
+  'rocket-launches',
+  'fire-perimeters',
+  'weather-cyclones',
+];
+
+/**
+ * What is DRAWN right now, beyond the counts: overlay entries and painted
+ * cards per source, FIRMS glow sprites, entities of the layer data sources,
+ * and the opaque pixels of the world-overlay canvas.
+ */
+const drawn = () =>
+  page.evaluate(
+    ({ sources, dataSources }) => {
+      const v = window.__godsEyeView.viewer;
+      const d = window.__gevWorldOverlay?.getDiagnostics?.() ?? {};
+      const pick = (o) =>
+        Object.fromEntries(sources.map((s) => [s, o?.[s] ?? 0]));
+      let firmsSprites = 0;
+      const walk = (col, depth) => {
+        for (let i = 0; i < col.length; i++) {
+          const p = col.get(i);
+          if (!p || typeof p.length !== 'number' || !p.get) continue;
+          if (/Billboard/.test(p.constructor?.name ?? '')) {
+            for (let k = 0; k < p.length; k++) {
+              const id = p.get(k).id;
+              if (/^firms-/.test(String(id?.id ?? id))) firmsSprites++;
+            }
+          } else if (depth < 3) walk(p, depth + 1);
+        }
+      };
+      walk(v.scene.primitives, 0);
+      const entities = {};
+      for (let i = 0; i < v.dataSources.length; i++) {
+        const ds = v.dataSources.get(i);
+        if (dataSources.includes(ds.name))
+          entities[ds.name] = ds.show ? ds.entities.values.length : 0;
+      }
+      const c = document.getElementById('world-overlay-canvas');
+      let ink = 0;
+      if (c?.width) {
+        const px = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+        for (let i = 3; i < px.data.length; i += 4) if (px.data[i]) ink++;
+      }
+      return {
+        entries: pick(d.entriesBySource),
+        painted: pick(d.paintedBySource),
+        firmsSprites,
+        entities,
+        ink,
+      };
+    },
+    { sources: OVERLAY_SOURCES, dataSources: LAYER_DATA_SOURCES },
+  );
+const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+const render = () =>
+  page.evaluate(() => window.__godsEyeView.viewer.scene.requestRender());
+
+/** Poll drawn() (with a render each time) until pred holds. */
+async function waitDrawn(pred, what, timeoutMs = 30_000) {
+  const end = Date.now() + timeoutMs;
+  let d;
+  for (;;) {
+    await render();
+    await sleep(400);
+    d = await drawn();
+    if (pred(d)) return d;
+    if (Date.now() > end) {
+      say('timeout waiting for', what, JSON.stringify(d));
+      return d;
+    }
+  }
 }
 
 // ── 1. live ──────────────────────────────────────────────
@@ -784,10 +969,32 @@ check(
   st.firms.lastUpdate === tShown,
   `FIRMS data time = t (event feed, not rebased) ${st.firms.lastUpdate} vs ${tShown}`,
 );
-// one screenshot per layer at t
-await view(LAT, LON, ALT);
+// one screenshot per layer at t, each after its content is DRAWN
+// FIRMS: the recorded detections (glow sprites + cards "… 35d · N21")
+await view(LAT, LON, 120_000);
+let dr = await waitDrawn(
+  (d) => d.firmsSprites >= 5 && d.painted.firms >= 3 && d.ink > 0,
+  'FIRMS drawn at t',
+);
+check(
+  dr.firmsSprites >= 5 && dr.painted.firms >= 3 && dr.ink > 0,
+  `FIRMS at t drawn: ${dr.firmsSprites} sprites, ${dr.painted.firms} cards painted, overlay ink ${dr.ink}`,
+);
 await shot('02-firms-at-t');
+// perimeters: HIST Fire A selected (a click on its polygon), its card names
+// the unrecorded fields as unknown
+await view(LAT + 0.2, LON - 0.3, 40_000);
+await page.mouse.click(720, 450);
+dr = await waitDrawn(
+  (d) => d.painted['fire-perimeters'] >= 1 && d.entities['fire-perimeters'] > 0,
+  'perimeter card at t',
+);
+check(
+  dr.painted['fire-perimeters'] >= 1 && dr.entities['fire-perimeters'] > 0,
+  `perimeters at t drawn: ${dr.entities['fire-perimeters']} polygon entities, selected card painted ${dr.painted['fire-perimeters']}`,
+);
 await shot('03-perimeters-at-t');
+await page.mouse.click(1300, 120); // empty space: deselect
 await view(LAT - 0.7, LON + 1.1, 700_000);
 await shot('04-cyclones-at-t');
 await view(LAT, LON - 0.3, 300_000);
@@ -829,6 +1036,34 @@ check(
 check(
   /No NHC advisory recorded/.test(JSON.stringify(st.cycloneRow)),
   'gap: cyclones say no advisory was recorded (not "no active storms")',
+);
+// review R1: what is DRAWN in the gap (the counts alone passed while sprites
+// and cards of t were still drawn). Let the next frames render (SwiftShader
+// draws a few frames a second), then it must STAY empty for ~4 s.
+const empty = (d) =>
+  sum(d.entries) === 0 &&
+  sum(d.painted) === 0 &&
+  d.firmsSprites === 0 &&
+  sum(d.entities) === 0;
+await waitDrawn((d) => empty(d) && d.ink === 0, 'gap drawn empty', 10_000);
+const gapDrawn = [];
+for (let i = 0; i < 10; i++) {
+  await render();
+  await sleep(400);
+  gapDrawn.push(await drawn());
+}
+say(
+  'gap drawn samples',
+  gapDrawn.at(-1),
+  gapDrawn.map((d) => d.ink),
+);
+check(
+  gapDrawn.every(empty),
+  'gap: no overlay entry or painted card of the six layers, no FIRMS sprite, no layer entity',
+);
+check(
+  gapDrawn.every((d) => d.ink === 0),
+  `gap: the world-overlay canvas holds no pixel in every sample ${JSON.stringify(gapDrawn.map((d) => d.ink))}`,
 );
 await shot('08-gap-nothing');
 

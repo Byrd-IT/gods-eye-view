@@ -8,6 +8,13 @@
  *   reloadForHistoryFrame once per frame time and once back on live)
  *
  * using the production transit and bike share layers.
+ *
+ * Review R1: FIRMS through the same path with the production FIRMS layer.
+ * A recorded gap must clear what the layer DRAWS (glow sprites, heat cells,
+ * overlay cards, voice context), not only its count. The upstream
+ * renderCurrentLod skipped the rebuild on an empty answer, so the sprites
+ * and cards of the previous time stayed (one-statement touch point in
+ * src/layers/firms/rendering.js).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +23,11 @@ import { createTransitLayer } from '../../layers/transit/index.js';
 import { createTransitSource } from '../../layers/transit/source.js';
 import { createBikeshareLayer } from '../../layers/bikeshare/index.js';
 import { createBikeshareSource } from '../../layers/bikeshare/source.js';
+import {
+  createFirmsHeatmapLayer,
+  createFirmsSource,
+  FIRMS_OVERLAY_SOURCE_ID,
+} from '../../layers/firms/index.js';
 import { GBFS_CITY_REGISTRY } from '../../layers/bikeshare/registry.js';
 import {
   gbfsEnvelope,
@@ -612,3 +624,231 @@ test('bike share seam: reloadForHistoryFrame on a disabled layer drops the cache
   );
   assert.equal(app.points().length, 3);
 });
+
+// ── FIRMS (review R1: a gap must clear what is DRAWN, not only the count) ──
+
+const AUSTIN = { lat: 30.2672, lon: -97.7431 };
+
+/** A recorded FIRMS row (the live /api/firms row keys, B9 firmsRow). */
+function fireRow(i, atMs) {
+  const iso = new Date(atMs - i * HOUR).toISOString();
+  return {
+    lat: AUSTIN.lat + 0.02 * i,
+    lon: AUSTIN.lon + 0.03 * i,
+    frp: 10 + i * 6,
+    confidence: 'n',
+    brightness: 330 + i,
+    brightnessTi5: 290,
+    daynight: 'D',
+    acqDate: iso.slice(0, 10),
+    acqTime: iso.slice(11, 16).replace(':', ''),
+    satellite: 'N21',
+    instrument: 'VIIRS',
+  };
+}
+
+const RECORDED_FIRES = { [T1]: 3, [T2]: 2 };
+
+function firmsSlice(feed, t) {
+  assert.equal(feed, 'firms');
+  const n = RECORDED_FIRES[t] ?? 0; // T0: a recorded gap (no row)
+  const fires = Array.from({ length: n }, (_, i) => fireRow(i, t));
+  return {
+    fetchedAt: t,
+    stale: false,
+    ttlMs: 1_800_000,
+    sources: n ? [{ source: 'VIIRS_NOAA21_NRT', count: n, ok: true }] : [],
+    count: n,
+    fires,
+  };
+}
+
+function firmsLive(url) {
+  if (url.pathname === '/api/firms') {
+    const now = Date.now();
+    return jsonResponse({
+      fetchedAt: now,
+      stale: false,
+      fires: [0, 1, 2, 3].map((i) => ({
+        ...fireRow(i, now),
+        lat: AUSTIN.lat - 0.02 * (i + 1),
+      })),
+    });
+  }
+  return jsonResponse({ error: 'not found' }, { status: 404 });
+}
+
+/**
+ * The production FIRMS layer (createFirmsHeatmapLayer) on a fake viewer,
+ * with a recording overlay host: what it would PAINT is the overlay source
+ * entries, the billboard sprites (detection bands) and the heat-cell
+ * entities (cell bands), plus the voice context registrations.
+ */
+function firmsHarness(t, { altitude }) {
+  const originalDocument = globalThis.document;
+  // glowSprite draws on a 2-D canvas; no canvas in node -> an empty image
+  globalThis.document = { createElement: () => ({ getContext: () => null }) };
+  const originalProject = Cesium.SceneTransforms.worldToWindowCoordinates;
+  // a flat projection keeps every in-view fire (or cell) on screen and apart
+  const pxPerDeg = altitude < 1_000_000 ? 4000 : 200;
+  Cesium.SceneTransforms.worldToWindowCoordinates = (_scene, position) => {
+    const c = Cesium.Cartographic.fromCartesian(position);
+    return new Cesium.Cartesian2(
+      700 + (Cesium.Math.toDegrees(c.longitude) - AUSTIN.lon) * pxPerDeg,
+      450 - (Cesium.Math.toDegrees(c.latitude) - AUSTIN.lat) * pxPerDeg,
+    );
+  };
+  const primitives = [];
+  const viewer = sceneViewer({ at: AUSTIN, altitude, primitives });
+  viewer.camera.moveEnd = new Cesium.Event();
+  // the real BillboardCollection reads the scene mode when a sprite is added
+  viewer.scene.frameState = { mode: Cesium.SceneMode.SCENE3D };
+  viewer.scene.canvas = {
+    clientWidth: 1400,
+    clientHeight: 900,
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const dataSources = [];
+  viewer.dataSources = {
+    add: (d) => (dataSources.push(d), d),
+    remove(d) {
+      const i = dataSources.indexOf(d);
+      if (i >= 0) dataSources.splice(i, 1);
+      return i >= 0;
+    },
+  };
+  const overlay = new Map();
+  const overlayHost = {
+    setEntries: (sourceId, entries) => overlay.set(sourceId, entries),
+    setVisible() {},
+    clearSource: (sourceId) => overlay.set(sourceId, []),
+    hitTest: () => null,
+  };
+  const store = { entities: new Map() };
+  const sprites = new Map();
+  const layer = createFirmsHeatmapLayer({
+    id: 'local-firms',
+    name: 'Fires',
+    feed: createFirmsSource(),
+    overlayHost,
+    screenSpaceEventHandlerFactory: () => ({
+      setInputAction() {},
+      removeInputAction() {},
+      destroy() {},
+    }),
+    services: {
+      ...baseServices(sprites),
+      sprites: {
+        registerSpriteCollection: (id, c) => sprites.set(id, c),
+        restoreSpriteOrder() {},
+        restoreSpriteOrderOnEnable() {},
+      },
+      context: {
+        selectEntityContext() {},
+        clearSelectedEntityContextForLayer() {},
+        getContextStore: () => store,
+        registerEntityContext: (_entity, record) =>
+          store.entities.set(record.id, record),
+      },
+      picking: {
+        registerPickOwner() {},
+        unregisterPickOwner() {},
+        resolvePickId: () => null,
+        isOwnedByOtherLayer: () => false,
+      },
+      focus: { requestWorldFocus() {} },
+      anchors: {
+        fireAnchorHeight: () => 0,
+        warmFireAnchorFloors: async () => false,
+      },
+    },
+  });
+  layer.init(viewer);
+  const stack = historyStack(t, {
+    slice: firmsSlice,
+    live: firmsLive,
+    layerId: 'local-firms',
+    module: layer,
+  });
+  t.after(() => {
+    try {
+      layer.destroy(viewer);
+    } catch {
+      /* already destroyed */
+    }
+    Cesium.SceneTransforms.worldToWindowCoordinates = originalProject;
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  });
+  const billboards = () => sprites.get('firms');
+  return {
+    ...stack,
+    layer,
+    viewer,
+    /** what the layer draws right now, beyond its count */
+    drawn: () => ({
+      count: layer.getStats().count,
+      cards: (overlay.get(FIRMS_OVERLAY_SOURCE_ID) ?? []).length,
+      sprites: billboards()?.length ?? 0,
+      cells: dataSources[0]?.entities.values.length ?? 0,
+      context: store.entities.size,
+    }),
+  };
+}
+
+for (const [band, altitude, drawnAt] of [
+  // close band: glow sprites + ambient cards (the review R1 screenshot)
+  ['detections', 20_000, (n) => ({ sprites: n, cells: 0 })],
+  // regional band: heat-cell rectangles + cell cards
+  ['cells', 4_000_000, () => ({ sprites: 0 })],
+]) {
+  test(`FIRMS frames (${band} band): a recorded gap clears the drawn sprites, cells, cards and context, not only the count; LIVE draws the live fires again`, async (t) => {
+    const app = firmsHarness(t, { altitude });
+    await app.layer.enable(app.viewer);
+    let d = app.drawn();
+    assert.equal(d.count, 4, 'live fires');
+    assert.ok(d.cards > 0, 'live cards');
+
+    app.driver.onHistory({ active: true, timeMs: T1, playing: false });
+    await app.layer.update();
+    d = app.drawn();
+    assert.equal(d.count, RECORDED_FIRES[T1]);
+    assert.ok(d.cards > 0, 'cards of the recorded fires at t');
+    assert.ok(d.context > 0, 'context registrations at t');
+    for (const [k, v] of Object.entries(drawnAt(RECORDED_FIRES[T1])))
+      assert.equal(d[k], v);
+    if (band === 'cells') assert.ok(d.cells > 0, 'heat cells at t');
+
+    // the recorded gap (D3): NOTHING drawn, not the sprites/cards of T1
+    app.driver.onHistory({ active: true, timeMs: T0, playing: false });
+    await app.layer.update();
+    assert.deepEqual(app.drawn(), {
+      count: 0,
+      cards: 0,
+      sprites: 0,
+      cells: 0,
+      context: 0,
+    });
+    // a camera move in the gap must not bring the old cards back
+    app.viewer.camera.moveEnd.raiseEvent();
+    assert.equal(app.drawn().cards, 0, 'no stale card after moveEnd');
+
+    // a frame with fires again draws them
+    app.driver.onHistory({ active: true, timeMs: T2, playing: false });
+    await app.layer.update();
+    assert.equal(app.drawn().count, RECORDED_FIRES[T2]);
+    assert.ok(app.drawn().cards > 0);
+
+    // LIVE (D4): the driver refreshes the layer once
+    app.driver.onHistory({ active: false });
+    for (let i = 0; i < 50 && app.drawn().count !== 4; i++) await flush();
+    d = app.drawn();
+    assert.equal(d.count, 4);
+    assert.ok(d.cards > 0);
+    assert.ok(
+      app.slices().length > 0 &&
+        app.slices().every((p) => /feed=firms/.test(p)),
+    );
+  });
+}
