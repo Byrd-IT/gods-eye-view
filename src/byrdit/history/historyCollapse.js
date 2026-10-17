@@ -96,6 +96,7 @@ function partitionFilter(field, { lo, hi }) {
  * @param {object[]} options.filter bool filter clauses (parsed values only)
  * @param {string} options.field keyword field to collapse on
  * @param {string} [options.timeField] newest = max of this field
+ * @param {'desc'|'asc'} [options.order] 'asc' keeps the OLDEST per key
  * @param {string[]} [options._source]
  * @param {number} [options.pageSize]
  * @param {number} [options.maxQueries]
@@ -112,6 +113,7 @@ export async function latestPerKey(
     filter,
     field,
     timeField = '@timestamp',
+    order = 'desc',
     _source,
     pageSize = COLLAPSE_PAGE,
     maxQueries = COLLAPSE_MAX_QUERIES,
@@ -139,7 +141,7 @@ export async function latestPerKey(
         bool: { filter: [...filter, ...partitionFilter(field, part)] },
       },
       collapse: { field },
-      sort: [{ [timeField]: 'desc' }],
+      sort: [{ [timeField]: order === 'asc' ? 'asc' : 'desc' }],
     });
     const page = json?.hits?.hits ?? [];
     if (page.length < pageSize) {

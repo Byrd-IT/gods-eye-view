@@ -82,6 +82,7 @@
       "src/byrdit/history/historyTrack.js",
       "src/byrdit/history/historyCache.js",
       "src/byrdit/history/historyHealth.js",
+      "src/byrdit/history/historySlicesB12c.js",
       "src/data/transitFeeds.js",
       "src/data/gbfsSource.js",
       "src/layers/bikeshare/registry.js",

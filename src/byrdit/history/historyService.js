@@ -29,6 +29,7 @@ import { DAY_MS } from './historyParams.js';
 import { createLatestSlices } from './historyLatest.js';
 import { createTrackService } from './historyTrack.js';
 import { latestPerKey } from './historyCollapse.js';
+import { createB12cSlices } from './historySlicesB12c.js';
 
 /**
  * /api/history query orchestration (gev-history DESIGN 4.3; card B9).
@@ -191,7 +192,12 @@ function tileOf(bboxArray) {
  * @param {ReturnType<import('./historyEs.js').createHistoryEsClient>} options.es
  * @param {() => number} [options.now]
  */
-export function createHistoryService({ es, now = () => Date.now() }) {
+export function createHistoryService({
+  es,
+  now = () => Date.now(),
+  windReader = null,
+  weatherTimes = null,
+}) {
   /**
    * B10 performance gate (card t_7d16a765, DESIGN 4.3 benchmark): the
    * poll/bucket reads page with collapse partitions (historyCollapse.js),
@@ -918,6 +924,7 @@ export function createHistoryService({ es, now = () => Date.now() }) {
   }
 
   const latestSlices = createLatestSlices({ es });
+  const b12c = createB12cSlices({ es, now, windReader, weatherTimes });
   const SLICES = {
     aircraft: sliceAircraft,
     military: sliceMilitary,
@@ -929,6 +936,11 @@ export function createHistoryService({ es, now = () => Date.now() }) {
     vessels: latestSlices.sliceVessels,
     transit: latestSlices.sliceTransit,
     bikeshare: latestSlices.sliceBikeshare,
+    // B12c
+    gp: b12c.sliceGp,
+    quakes: b12c.sliceQuakes,
+    wind: b12c.sliceWind,
+    imagery: b12c.sliceImagery,
   };
 
   async function slice(params) {
