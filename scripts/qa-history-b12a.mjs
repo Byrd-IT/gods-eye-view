@@ -480,6 +480,9 @@ check(
       'launches',
       'transit',
       'bikeshare',
+      // B12d feeds
+      'quakes',
+      'wind',
     ]),
   `swapped ${JSON.stringify(st.router?.swapped)}`,
 );
