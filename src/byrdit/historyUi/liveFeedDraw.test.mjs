@@ -469,3 +469,204 @@ test('with the real router in history the slice answer is served, never emptied'
   const back = await win.fetch('/api/flights');
   assert.equal(back.headers.get(CLEARED_HEADER), '1');
 });
+
+// ── review R1: the FEED's draw is authoritative over every member url ──
+
+test('R1 transit: one cleared system clears EVERY system until all resume', async () => {
+  const { b, win, chips, gate, dm } = setup();
+  const capmetro = '/api/transit/vehicles/capmetro-austin';
+  const mbta = '/api/transit/vehicles/mbta';
+  const vehicles = (feedId) => ({
+    feedId,
+    vehicles: [{ id: `${feedId}-v1` }],
+    count: 1,
+  });
+  b.answers.set(capmetro, {
+    body: vehicles('capmetro-austin'),
+    headers: bridge('cleared'),
+  });
+  b.answers.set(mbta, { body: vehicles('mbta'), headers: bridge('live') });
+  const source = createTransitSource({ fetchImpl: (...a) => win.fetch(...a) });
+  const ask = async (id) => (await source.requestSnapshot(id)).json();
+  assert.deepEqual((await ask('capmetro-austin')).vehicles, []);
+  const chip = chips.states().find((c) => c.feed === 'transit');
+  assert.equal(chip.draw, false, 'the chip shows the worst member');
+  assert.equal(gate.modeOf('transit'), MODE_CLEARED);
+  assert.deepEqual(dm.refreshed, ['transit'], 'one re-ask on the feed edge');
+  // the LIVE system is emptied too: nothing drawn under feed draw:false
+  const r = await win.fetch(mbta);
+  assert.equal(r.headers.get(CLEARED_HEADER), '1');
+  const body = await r.json();
+  assert.equal(body.feedId, 'mbta', 'the live shape of that system');
+  assert.deepEqual(body.vehicles, []);
+  assert.deepEqual((await ask('mbta')).vehicles, []);
+  assert.ok(
+    gate.getState().blanked.includes(`transit ${mbta}`),
+    'the live member is blanked as well',
+  );
+  // the chips below still saw MBTA's REAL (live) answer
+  await flush();
+  assert.equal(chips.states().find((c) => c.feed === 'transit').draw, false);
+  // all members resume: the resuming answer passes, the feed refreshes once
+  b.answers.set(capmetro, {
+    body: vehicles('capmetro-austin'),
+    headers: bridge('live'),
+  });
+  const back = await ask('capmetro-austin');
+  assert.equal(back.vehicles.length, 1, 'the resuming answer is drawn');
+  assert.equal(gate.modeOf('transit'), MODE_LIVE);
+  assert.deepEqual(dm.refreshed, ['transit', 'transit']);
+  assert.equal((await ask('mbta')).vehicles.length, 1, 'every member back');
+  assert.deepEqual(gate.getState().blanked, [], 'nothing left blanked');
+  await flush();
+});
+
+test('R1 bike share: one cleared member url clears the feed; recovery releases all', async () => {
+  const { b, win, chips, gate, dm } = setup();
+  const madison = GBFS_CITY_REGISTRY.find((e) => e.id === 'madison-bcycle');
+  const info = `/api/gbfs/${encodeURIComponent(madison.stationInformationUrl)}`;
+  const status = `/api/gbfs/${encodeURIComponent(madison.stationStatusUrl)}`;
+  const stations = {
+    last_updated: 1,
+    ttl: 0,
+    data: { stations: [{ station_id: 's', num_bikes_available: 3 }] },
+  };
+  b.answers.set(info, { body: stations, headers: bridge('cleared') });
+  b.answers.set(status, { body: stations, headers: bridge('live') });
+  const src = createBikeshareSource({ fetchImpl: (...a) => win.fetch(...a) });
+  await win.fetch(info);
+  assert.equal(chips.states().find((c) => c.feed === 'bikeshare').draw, false);
+  assert.deepEqual(dm.seams, [['reload', 'bikeshare']], 'cleared edge');
+  const st = await src.getStations(madison.stationStatusUrl);
+  assert.equal(parseStationStatus(st).size, 0, 'live status url emptied too');
+  // an emptied station information is not cached by the layer (it throws
+  // "No station information"), so the layer asks it again: the chips see
+  // its REAL answer and the feed resumes - the resuming answer passes
+  b.answers.set(info, { body: stations, headers: bridge('live') });
+  const infoBack = await win.fetch(info);
+  assert.equal(infoBack.headers.get(CLEARED_HEADER), null, 'not hidden');
+  assert.equal(chips.states().find((c) => c.feed === 'bikeshare').draw, true);
+  assert.equal(gate.modeOf('bikeshare'), MODE_LIVE);
+  assert.deepEqual(dm.refreshed, ['bikeshare', 'bikeshare'], 'clear + resume');
+  const st2 = await src.getStations(madison.stationStatusUrl);
+  assert.equal(parseStationStatus(st2).size, 1, 'drawn again');
+  assert.deepEqual(gate.getState().blanked, []);
+  assert.deepEqual(
+    dm.seams,
+    [
+      ['reload', 'bikeshare'],
+      ['reload', 'bikeshare'],
+    ],
+    'one reload on resume drops the emptied station cache',
+  );
+});
+
+test('R1 a plain (non-bridge) data answer under a cleared feed is emptied; errors pass', async () => {
+  const { b, win } = setup();
+  win.dispatchEvent(
+    feedEvent({ feed: 'launches', state: 'cleared', draw: false }),
+  );
+  b.answers.set('/api/launches', { body: liveLaunches });
+  const r = await win.fetch('/api/launches');
+  assert.equal(r.headers.get(CLEARED_HEADER), '1');
+  assert.deepEqual((await r.json()).results, []);
+  b.answers.set('/api/launches', { body: { error: 'x' }, status: 503 });
+  const e = await win.fetch('/api/launches');
+  assert.equal(e.status, 503, "the layer's own error path");
+  assert.equal(e.headers.get(CLEARED_HEADER), null);
+});
+
+// ── review R2: authority is judged when the answer SETTLES ──
+
+/** window -> gate -> chips -> a browser whose answers the test releases. */
+function deferredSetup({ router, dm = manager() } = {}) {
+  const pending = [];
+  const win = fakeWindow(
+    `${ORIGIN}/`,
+    () => new Promise((resolve) => pending.push(resolve)),
+  );
+  const chips = createFeedChips({ target: win, timeZone: 'UTC' });
+  chips.install();
+  const gate = createLiveFeedDraw({
+    target: win,
+    getRouter: () => router,
+    getDataManager: () => dm,
+  });
+  gate.install();
+  return { win, chips, gate, dm, pending };
+}
+
+test('R2 a live answer that settles after history took the layer moves nothing', async () => {
+  const swapped = new Set();
+  const router = { isSwapped: (id) => swapped.has(id) };
+  const { win, gate, dm, pending } = deferredSetup({ router });
+  const asked = win.fetch('/api/flights');
+  swapped.add('flights'); // history entered while the live ask was out
+  pending.shift()(jsonResponse(flightsBody, { headers: bridge('cleared') }));
+  const r = await asked;
+  assert.deepEqual(dm.seams, [], 'no frame reset on the history layer');
+  assert.deepEqual(dm.refreshed, []);
+  assert.equal(r.headers.get(CLEARED_HEADER), null, 'passed untouched');
+  assert.deepEqual(gate.getState().blanked, []);
+  assert.equal(gate.getState().stats.emptied, 0);
+  // bike share: a late RESUMING answer must not reload the history layer
+  const madison = GBFS_CITY_REGISTRY.find((e) => e.id === 'madison-bcycle');
+  const status = `/api/gbfs/${encodeURIComponent(madison.stationStatusUrl)}`;
+  const clearing = win.fetch(status);
+  pending.shift()(
+    jsonResponse({ data: { stations: [] } }, { headers: bridge('cleared') }),
+  );
+  await clearing;
+  assert.deepEqual(dm.seams, [['reload', 'bikeshare']], 'live: normal clear');
+  const late = win.fetch(status);
+  swapped.add('bikeshare');
+  pending.shift()(
+    jsonResponse({ data: { stations: [] } }, { headers: bridge('live') }),
+  );
+  await late;
+  assert.deepEqual(dm.seams, [['reload', 'bikeshare']], 'no reload in history');
+  assert.ok(gate.getState().blanked.length === 1, 'live bookkeeping kept');
+  // back to LIVE: the normal clear/resume behaviour is unchanged
+  swapped.clear();
+  const again = win.fetch('/api/flights');
+  pending.shift()(jsonResponse(flightsBody, { headers: bridge('cleared') }));
+  assert.equal((await again).headers.get(CLEARED_HEADER), '1');
+  assert.deepEqual(dm.seams.at(-1), ['reset', 'flights']);
+  const resumed = win.fetch(status);
+  pending.shift()(
+    jsonResponse({ data: { stations: [] } }, { headers: bridge('live') }),
+  );
+  await resumed;
+  assert.deepEqual(dm.seams.at(-1), ['reload', 'bikeshare'], 'resume reload');
+  await flush();
+});
+
+test('R2 a live answer that settles after destroy passes and moves nothing', async () => {
+  const { win, gate, dm, pending } = deferredSetup();
+  const inner = win.fetch;
+  const asked = win.fetch('/api/flights');
+  const askedBike = win.fetch(
+    `/api/gbfs/${encodeURIComponent('https://x.test/station_status.json')}`,
+  );
+  let ticks = 0;
+  gate.subscribe(() => ticks++);
+  gate.destroy();
+  assert.notEqual(win.fetch, inner, 'the gate is unwrapped');
+  pending.shift()(jsonResponse(flightsBody, { headers: bridge('cleared') }));
+  pending.shift()(
+    jsonResponse({ data: { stations: [] } }, { headers: bridge('cleared') }),
+  );
+  const r = await asked;
+  await askedBike;
+  assert.equal(r.headers.get(CLEARED_HEADER), null);
+  assert.equal((await r.json()).states.length, 1);
+  assert.deepEqual(dm.seams, []);
+  assert.deepEqual(dm.refreshed, []);
+  assert.equal(ticks, 0, 'no notify after teardown');
+  assert.deepEqual(gate.getState().blanked, []);
+  // a feed-state event after teardown is ignored
+  win.dispatchEvent(
+    feedEvent({ feed: 'flights', state: 'cleared', draw: false }),
+  );
+  assert.deepEqual(dm.refreshed, [], 'no event handling after destroy');
+});

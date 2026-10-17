@@ -15,8 +15,11 @@
  *
  *   layer source -> history router -> this gate -> feedChips -> browser
  *
- * answers a bridged live request whose bridge answer says draw:false with an
- * EMPTY body of the exact live shape (the B12a/B12b adapters' recorded-gap
+ * answers a bridged live request whose bridge answer says draw:false - or ANY
+ * member request of a feed whose 'gev:feed-state' is draw:false (transit /
+ * bike share ask one url per system; the feed's draw is authoritative,
+ * review R1) - with an EMPTY body of the exact live shape (the B12a/B12b
+ * adapters' recorded-gap
  * shape, which every layer already draws as nothing) and the bridge's own
  * X-Feed-* headers. The chips still see the real answer, so the chip and
  * the resume stay right. The layers that would otherwise keep absent items
@@ -37,7 +40,9 @@
  * HISTORY (D3): a feed that the router answers from history is never
  * touched: its requests never reach this gate, the painter leaves its layer
  * alone and its transitions are only recorded (the LIVE exit refresh, D4,
- * re-asks through this gate).
+ * re-asks through this gate). Authority is judged when an answer SETTLES:
+ * a live answer asked before history took the layer (or before destroy)
+ * passes untouched and moves no seam or state (review R2).
  *
  * Satellites: its layer keeps the old catalog when every group answers
  * empty (the CelesTrak outage guard), so an empty body cannot clear it. Its
@@ -290,25 +295,55 @@ export function createLiveFeedDraw({
     for (const fn of [...listeners]) safe(() => fn(getState()));
   }
 
-  /** One bridged answer: pass it, or empty it (draw:false). */
+  /** Is any url of this feed answered empty right now? */
+  const feedBlank = (feed) =>
+    [...blanked].some((k) => k.startsWith(`${feed} `));
+
+  /**
+   * One live answer of a bridged feed, at the moment it SETTLES: pass it,
+   * or empty it.
+   *
+   * AUTHORITY (review R2): the answer may have been asked long before. Who
+   * owns the layer is judged NOW, not when it was asked: after destroy, or
+   * while the router answers this feed from history (D3), the answer passes
+   * untouched and nothing here moves (no seam, no reload, no state).
+   *
+   * FEED-LEVEL DRAW (review R1): the 'gev:feed-state' draw of the FEED is
+   * authoritative. Transit and bike share ask one url per system; B11 shows
+   * the WORST member, so while the feed is draw:false EVERY member answer
+   * is emptied, even one whose own headers are live. The chips sit below
+   * this gate and always see the real answers, so the feed resumes (and
+   * the event refresh re-asks every member) as soon as every member is
+   * drawn again - nothing here hides a real answer from them. The chips
+   * observe and announce before this runs (their then is attached first).
+   */
   function gate(feed, url, response) {
     const spec = LIVE_DRAW_FEEDS[feed];
-    if (!spec || !response || !isBridgeAnswer(response)) return response;
+    if (destroyed || !spec || !response) return response;
+    if (isSwapped(feed)) return response; // history owns the layer (D3)
+    const feedCleared = modes.get(feed) === MODE_CLEARED;
+    const bridge = isBridgeAnswer(response);
+    // a plain answer is only emptied under a cleared feed, and only when it
+    // carries data (an error answer keeps the layer's own error path)
+    if (!bridge && !(feedCleared && response.ok)) return response;
     // per url (transit / bike share ask one url per system); the seams run
     // per FEED edge, so a reload that re-asks every url runs once
     const key = `${feed} ${url.pathname}`;
-    const feedBlank = () => [...blanked].some((k) => k.startsWith(`${feed} `));
-    if (answerDraws(response, { greyMs })) {
-      if (blanked.delete(key)) {
-        // drawn again: bike share drops its emptied station cache
-        if (!feedBlank()) seam(feed, 'reload');
+    if (!feedCleared && answerDraws(response, { greyMs })) {
+      if (feedBlank(feed)) {
+        // the feed is drawn again: every member is released at once (bike
+        // share's station information is cached for the page life and may
+        // never be asked again), and bike share drops its emptied cache
+        for (const k of [...blanked])
+          if (k.startsWith(`${feed} `)) blanked.delete(k);
+        seam(feed, 'reload');
         notify();
       }
       return response;
     }
     if (!spec.empty) return response; // greyPainter hides it (module note)
     if (!blanked.has(key)) {
-      const first = !feedBlank();
+      const first = !feedBlank(feed);
       blanked.add(key);
       // the empty answer must drop what is drawn at once (no grace); the
       // frame arm is per url (over-arming is harmless), the reload per feed
