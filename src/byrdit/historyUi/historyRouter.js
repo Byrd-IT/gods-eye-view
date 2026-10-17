@@ -59,7 +59,9 @@
  *        history time (a re-served paused frame asks the same window) and
  *        count against the slice budget. What was served (sources, sampled
  *        / truncated, recorded gaps) is getState().track for the chip; the
- *        chip goes when the aircraft is deselected, on a seek or LIVE. A
+ *        chip goes when the aircraft is deselected, on a seek or LIVE;
+ *        only the newest request, still on the shown frame and still the
+ *        selected aircraft, may publish it (a late answer never does). A
  *        failed track request is a 404 (the layer keeps its frame trail),
  *        never a live track;
  *   vessels -> a 404 (the trail backfill falls back silently to the
@@ -225,6 +227,11 @@ export function createHistoryRouter({
   };
   const trackCache = new Map(); // track url -> {gen, promise, value}
   let track = null; // summary of the last served track (chip), or null
+  // The newest track request ({seq, layerId, id}); only it may publish the
+  // chip, and only while its frame is still the one shown (R1, see
+  // answerTrack). A deselect / other selection / seek / LIVE bumps trackSeq.
+  let trackSeq = 0;
+  let trackWant = null;
   const spent = []; // monotonic ms of slice network requests (last minute)
 
   /** Slice requests left in the rolling minute. */
@@ -663,9 +670,22 @@ export function createHistoryRouter({
   /** Drop the track chip and the cached tracks; true if a chip was shown. */
   function clearTrack() {
     trackCache.clear();
+    dropPendingTrack();
     const had = track !== null;
     track = null;
     return had;
+  }
+
+  /** No pending track request may publish its chip any more. */
+  function dropPendingTrack() {
+    trackSeq++;
+    trackWant = null;
+  }
+
+  /** The time of the frame the layer shows (the track ends there). */
+  function shownFrameT(adapter) {
+    const frame = served.get(adapter.id);
+    return Number.isFinite(frame?.t) ? frame.t : requestTime(adapter);
   }
 
   function setTrack(summary) {
@@ -738,6 +758,17 @@ export function createHistoryRouter({
     const { from } = trackWindow(to);
     const turl = historyTrackUrl(spec.feed, id, { from, to }, base);
     const myGen = gen;
+    // R1: this is now the newest track request. A deselect, another
+    // aircraft (either layer), a newer frame, a seek or LIVE while it is
+    // pending means its answer (success or failure) must not publish the
+    // chip: an old aircraft or an old frame would describe what is drawn.
+    const mySeq = ++trackSeq;
+    trackWant = { seq: mySeq, layerId: adapter.layerId, id };
+    const current = () =>
+      s.active &&
+      gen === myGen &&
+      trackSeq === mySeq &&
+      shownFrameT(adapter) === to;
     const base0 = {
       adapterId: adapter.id,
       layerId: adapter.layerId,
@@ -752,7 +783,7 @@ export function createHistoryRouter({
       got = await withSignal(promise, signal);
     } catch (error) {
       if (signal?.aborted || isAbort(error)) throw abortError();
-      if (s.active && gen === myGen)
+      if (current())
         setTrack(trackSummary({ ...base0, status: 'unavailable' }));
       return refuseTrack(TRACK_UNAVAILABLE);
     }
@@ -760,15 +791,18 @@ export function createHistoryRouter({
     // frame asks again)
     if (!s.active || gen !== myGen) return refuseTrack(TRACK_UNAVAILABLE);
     const ms = Math.round(monotonic() - started);
-    setTrack(
-      trackSummary({
-        ...base0,
-        body: got.body,
-        headers: got.headers,
-        ms,
-        cached,
-      }),
-    );
+    // a superseded answer still goes to its caller (the layer's own
+    // backfill token drops it); it never becomes the chip
+    if (current())
+      setTrack(
+        trackSummary({
+          ...base0,
+          body: got.body,
+          headers: got.headers,
+          ms,
+          cached,
+        }),
+      );
     const out = spec.adapt(got.body, { deltaMs });
     const headers = {
       'Content-Type': 'application/json',
@@ -783,10 +817,36 @@ export function createHistoryRouter({
     return new Response(JSON.stringify(out), { status: 200, headers });
   }
 
-  /** Deselecting the aircraft removes its track chip. */
-  function onSubjectCleared(event) {
+  const subjectOf = (event) => {
     const d = event?.detail ?? {};
-    if (track && d.layerId === track.layerId && (!d.id || d.id === track.id)) {
+    return {
+      layerId: d.layerId,
+      id: d.id == null ? '' : String(d.id).trim().toLowerCase(),
+    };
+  };
+  const sameSubject = (d, x) =>
+    Boolean(x) && d.layerId === x.layerId && (!d.id || d.id === x.id);
+
+  /**
+   * Deselecting the aircraft removes its track chip and drops its pending
+   * track request (R1: a late answer never brings the chip back).
+   */
+  function onSubjectCleared(event) {
+    const d = subjectOf(event);
+    if (sameSubject(d, trackWant)) dropPendingTrack();
+    if (sameSubject(d, track)) {
+      track = null;
+      notify();
+    }
+  }
+
+  /** Selecting anything else (any layer) does the same for the old one. */
+  function onSubjectSelected(event) {
+    const d = subjectOf(event);
+    if (!d.layerId || !d.id) return;
+    const other = (x) => Boolean(x) && !sameSubject(d, x);
+    if (other(trackWant)) dropPendingTrack();
+    if (other(track)) {
       track = null;
       notify();
     }
@@ -836,11 +896,19 @@ export function createHistoryRouter({
       'gev:awareness-subject-cleared',
       onSubjectCleared,
     );
+    target.addEventListener?.(
+      'gev:awareness-subject-selected',
+      onSubjectSelected,
+    );
     restore = () => {
       if (target.fetch === wrapped) target.fetch = inner;
       target.removeEventListener?.(
         'gev:awareness-subject-cleared',
         onSubjectCleared,
+      );
+      target.removeEventListener?.(
+        'gev:awareness-subject-selected',
+        onSubjectSelected,
       );
     };
   }
