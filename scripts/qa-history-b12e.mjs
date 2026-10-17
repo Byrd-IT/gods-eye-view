@@ -24,7 +24,9 @@
  * names the sources and the gap; moving t asks the new [t-6h, t] and the
  * trail follows; a sampled answer says SAMPLED; nothing is asked while
  * nothing is selected (no prefetch, no polling); deselect removes the chip;
- * LIVE removes it and the live track comes back. Track request latency is
+ * LIVE removes it and the live track comes back. Review R1: a track answer
+ * held back until after a deselect, or until after another aircraft was
+ * selected, never publishes the chip. Track request latency is
  * measured from the browser's resource timing (FIXTURE timing: the answer
  * is made in the page, so this is the browser + router cost only). No
  * console/page error after the first history interaction. Screenshots after
@@ -167,6 +169,13 @@ await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
 const errors = [];
 const trackCalls = [];
 const liveTrackCalls = [];
+// R1: track answers of these ids are held until released (id -> [respond])
+const holdTrack = new Set();
+const held = new Map();
+const release = (id) => {
+  for (const respond of held.get(id) ?? []) respond();
+  held.delete(id);
+};
 page.on('pageerror', (e) => errors.push(`page: ${String(e).slice(0, 300)}`));
 page.on('console', (m) => {
   if (m.type() === 'error' && !/Failed to load resource/.test(m.text()))
@@ -221,12 +230,18 @@ page.on('request', (req) => {
     if (!(i >= 0 && i < HIST))
       return json({ error: 'not_found' }, undefined, 404);
     const body = trackBody(i, q.id, Date.parse(q.to));
-    return json(body, {
-      'content-type': 'application/json',
-      'x-history-source': 'adsblol,opensky',
-      'x-history-rows': String(body.path.length),
-      ...(q.id === 'a10001' ? { 'x-history-sampled': '1' } : {}),
-    });
+    const respond = () =>
+      json(body, {
+        'content-type': 'application/json',
+        'x-history-source': 'adsblol,opensky',
+        'x-history-rows': String(body.path.length),
+        ...(q.id === 'a10001' ? { 'x-history-sampled': '1' } : {}),
+      });
+    if (holdTrack.has(q.id)) {
+      held.set(q.id, [...(held.get(q.id) ?? []), respond]);
+      return undefined;
+    }
+    return respond();
   }
   if (url.pathname === '/api/history/coverage')
     return json(
@@ -514,16 +529,29 @@ check(
 
 // ── 6. latency (FIXTURE timing) ──────────────────────────
 // 10 distinct selections at the same t: each is a new [t-6h, t] request,
-// timed by the router from the request to the parsed answer (resource
-// timing does not list intercepted requests)
+// timed from the layer's track call (above the router) to the parsed
+// answer (resource timing does not list intercepted requests). The FIRST
+// call of each id is its network request; a re-served frame then hits the
+// router cache. (Not the chip's ms: since review R1 only the newest request
+// publishes the chip, which may be that cache hit.)
 await page.evaluate(() => {
   window.__b12eTimings = {};
-  window.__gevHistorySwap.router.subscribe((st) => {
-    const t = st.track;
-    // the network answer of each id (a re-served frame then hits the cache)
-    if (t && t.cached === false && t.status === 'ok')
-      window.__b12eTimings[t.id] ??= t.ms;
-  });
+  const below = window.fetch;
+  window.fetch = async function b12eTimedFetch(input, init) {
+    const u = new URL(String(input?.url ?? input), location.href);
+    if (u.pathname !== '/api/flights/track')
+      return below.call(this, input, init);
+    const id = u.searchParams.get('icao24');
+    const first = !(id in window.__b12eTimings);
+    if (first) window.__b12eTimings[id] = null;
+    const t0 = performance.now();
+    const res = await below.call(this, input, init);
+    if (first && res.ok) {
+      await res.clone().json();
+      window.__b12eTimings[id] = Math.round(performance.now() - t0);
+    }
+    return res;
+  };
 });
 for (let i = 2; i < 12; i++) {
   const hex = (0xa10000 + i).toString(16);
@@ -535,11 +563,13 @@ for (let i = 2; i < 12; i++) {
   );
 }
 const timings = await page.evaluate(() => window.__b12eTimings);
-const sorted = Object.values(timings).sort((a, b) => a - b);
+const sorted = Object.values(timings)
+  .filter((x) => Number.isFinite(x))
+  .sort((a, b) => a - b);
 const p95 =
   sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)];
 say(
-  'FIXTURE track timing ms (router: request -> parsed answer, answer made in-page by the fixture, no server, no hop):',
+  'FIXTURE track timing ms (layer track call -> parsed answer through the router; answer made by the headless request interception, no server, no hop):',
   {
     n: sorted.length,
     p50: sorted[Math.floor(sorted.length / 2)],
@@ -551,6 +581,63 @@ check(
   sorted.length === 10,
   `10 distinct track requests timed (${sorted.length})`,
 );
+
+// ── 6b. review R1: a late track answer never makes the chip ──
+async function untilHeld(id, timeoutMs = 20_000) {
+  const end = Date.now() + timeoutMs;
+  while (!held.has(id) && Date.now() < end) await sleep(200);
+  return held.has(id);
+}
+await page.keyboard.press('Escape');
+await waitFor((s) => s.tracked === null && !trackChip(s), 'deselect (6b)');
+// a fresh history time: no track of it is cached yet
+let t3 = Date.parse(st.time) - 20 * MIN;
+if (inGap(t3) || inGap(t3 - 30 * MIN)) t3 = Date.parse(st.time) + 20 * MIN;
+await page.evaluate(
+  (t) => window.__gevHistorySwap.handle.seek(t, { snap: true }),
+  t3,
+);
+st = await waitFor(
+  (s) => s.mode === 'history' && s.count === HIST && Date.parse(s.time) !== t2,
+  'history at t3',
+);
+holdTrack.add('a10002');
+holdTrack.add('a10003');
+// deselect before the answer arrives
+await select('a10002');
+check(await untilHeld('a10002'), 'a10002 track asked and held');
+await page.keyboard.press('Escape');
+st = await waitFor((s) => s.tracked === null, 'deselect a10002');
+release('a10002');
+await sleep(2_500);
+st = await state();
+check(
+  !trackChip(st) && st.track === null,
+  `R1: a track answer after deselect publishes no chip (${trackChip(st)?.[2] ?? 'none'})`,
+);
+// another aircraft selected before the old answer arrives
+await select('a10003');
+check(await untilHeld('a10003'), 'a10003 track asked and held');
+await select('a10004');
+st = await waitFor(
+  (s) =>
+    s.tracked === 'a10004' &&
+    s.track?.id === 'a10004' &&
+    /TRACK A10004/.test(trackChip(s)?.[2] ?? ''),
+  'a10004 chip',
+);
+release('a10003');
+await sleep(2_500);
+st = await state();
+check(
+  st.tracked === 'a10004' &&
+    st.track?.id === 'a10004' &&
+    /TRACK A10004/.test(trackChip(st)?.[2] ?? ''),
+  `R1: old a10003 answering last keeps the a10004 chip (${trackChip(st)?.[2]})`,
+);
+await viewTrack(...CAM);
+await shot('05-late-old-answer-keeps-new-chip');
+holdTrack.clear();
 
 // ── 7. LIVE: chip gone, live track back ──────────────────
 await select('a10000');
