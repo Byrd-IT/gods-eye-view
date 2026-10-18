@@ -28,7 +28,11 @@ import {
 import { DAY_MS } from './historyParams.js';
 import { createLatestSlices } from './historyLatest.js';
 import { createTrackService } from './historyTrack.js';
-import { latestPerKey } from './historyCollapse.js';
+import {
+  COLLAPSE_FANOUT,
+  createCutMemo,
+  latestPerKey,
+} from './historyCollapse.js';
 import { createB12cSlices } from './historySlicesB12c.js';
 
 /**
@@ -107,6 +111,40 @@ const AIRCRAFT_SOURCE = [
   'db_flags',
   'source',
 ];
+
+/**
+ * The same fields with their mapped types (every one has doc values; field
+ * caps over all adsb.lol backing indices, 2026-10-18): the bucket reads them
+ * from doc values, not the stored _source (historyCollapse.js FETCH COST).
+ * `hex` is not mapped in adsb.lol (absent, as from _source).
+ */
+export const AIRCRAFT_DOC_VALUES = Object.freeze({
+  icao24: 'keyword',
+  hex: 'keyword',
+  '@timestamp': 'date',
+  snap: 'long',
+  location: 'geo_point',
+  callsign: 'keyword',
+  origin_country: 'keyword',
+  baro_alt_m: 'float',
+  geo_alt_m: 'float',
+  on_ground: 'boolean',
+  velocity_ms: 'float',
+  track_deg: 'float',
+  vert_rate_ms: 'float',
+  squawk: 'keyword',
+  position_source: 'byte',
+  category: 'keyword',
+  registration: 'keyword',
+  type: 'keyword',
+  db_flags: 'integer',
+  source: 'keyword',
+});
+
+/** Memo lane of a bbox (cuts learned per view; null = no box). */
+export function bboxLane(bbox) {
+  return bbox ? `${bbox.w},${bbox.s},${bbox.e},${bbox.n}` : 'all';
+}
 
 /** Range on a date field, bounds in epoch ms (inclusive; undefined = open). */
 const range = (field, gte, lte) => ({
@@ -213,12 +251,23 @@ export function createHistoryService({
    * the hop). The `snap` term stays the filter (same answer as B9); one doc
    * per icao24 per bucket, so collapse on it loses nothing. B9 semantics
    * kept: at most maxRows rows, X-History-Truncated beyond.
+   *
+   * t_5dc0e0c3 (adsb.lol write index grown to 70.6 M docs, global bucket
+   * 2.9-12 s): the docs come from doc values (AIRCRAFT_DOC_VALUES), the
+   * first answer of a lane (feed + bbox) probes keys only, later answers
+   * start from the cuts the lane learned (cutMemo), and the partitions run
+   * COLLAPSE_FANOUT wide. Same rows as before (exact partitions).
    */
-  async function rowsPerId(index, filter, field, maxRows) {
+  const cutMemo = createCutMemo();
+  async function rowsPerId(index, filter, field, maxRows, lane) {
     const r = await latestPerKey(es, index, {
       filter,
       field,
       _source: AIRCRAFT_SOURCE,
+      docValues: AIRCRAFT_DOC_VALUES,
+      probe: true,
+      concurrency: COLLAPSE_FANOUT,
+      memo: cutMemo.lane(lane),
     });
     // B10 review R2: latestPerKey appends partitions in COMPLETION order
     // (concurrent requests), so cut maxRows only after a deterministic
@@ -455,7 +504,13 @@ export function createHistoryService({
   }
 
   /** adsb.lol rows of the 60 s bucket ending at or before t. */
-  async function adsblolBucket(tMs, bbox, maxRows, extraFilter = []) {
+  async function adsblolBucket(
+    tMs,
+    bbox,
+    maxRows,
+    extraFilter = [],
+    lane = '',
+  ) {
     const snapS = adsblolSnapAtOrBefore(tMs);
     const snapMs = snapS * 1000;
     const res = await rowsPerId(
@@ -468,6 +523,7 @@ export function createHistoryService({
       ],
       'icao24',
       maxRows,
+      `adsblol${lane}|${bboxLane(bbox)}`,
     );
     return { snapMs, ...res };
   }
@@ -650,7 +706,7 @@ export function createHistoryService({
     }
     // Recording gap / before the recorder: adsb.lol archive, dbFlags & 1.
     const military = { terms: { db_flags: [1, 3, 5, 7, 9, 11, 13, 15] } };
-    const a = await adsblolBucket(t, bbox, maxRows, [military]);
+    const a = await adsblolBucket(t, bbox, maxRows, [military], ':military');
     const ac = a.hits
       .map((hit) =>
         readsbRow({ ...sourceOf(hit), source: 'adsblol' }, a.snapMs),
