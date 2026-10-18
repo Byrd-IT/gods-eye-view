@@ -124,6 +124,21 @@ export function celestrakProxy() {
   // While one runs, the file can briefly be empty or half-written, so the
   // admission check trusts the in-memory latch and does not read the disk.
   let haltWrites = 0;
+  // Write generation: bumped when a halt-file write starts AND when it ends.
+  // An admission read whose generation changed while it was pending may
+  // hold a torn or superseded snapshot (even if the write has finished by
+  // the time the read returns, when haltWrites is back to 0), so isHalted
+  // discards it and reads again instead of trusting it.
+  let haltEpoch = 0;
+  const HALT_READ_ATTEMPTS = 3;
+  const beginHaltWrite = () => {
+    haltWrites += 1;
+    haltEpoch += 1;
+  };
+  const endHaltWrite = () => {
+    haltWrites -= 1;
+    haltEpoch += 1;
+  };
 
   // --- Failure evidence (STANDARD R3/R8) ----------------------------------
   // The halt records WHAT CelesTrak answered so a human can tell a firewall
@@ -378,7 +393,7 @@ export function celestrakProxy() {
       );
       return;
     }
-    haltWrites += 1;
+    beginHaltWrite();
     try {
       let stage = 'open';
       try {
@@ -459,7 +474,7 @@ export function celestrakProxy() {
         }
       }
     } finally {
-      haltWrites -= 1;
+      endHaltWrite();
     }
     const detail = Object.entries(fields)
       .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
@@ -497,12 +512,30 @@ export function celestrakProxy() {
    * True if upstream calls are forbidden. The in-memory latch is cleared only
    * when the file is gone, i.e. a human removed it. While this process is
    * writing the halt file, the in-memory latch decides (the file may be
-   * mid-write). If an evidence update damaged the file and could not restore
-   * it, the latch also stays in memory until the file is deleted.
+   * mid-write). A disk read that a halt-file write overlapped (detected by
+   * `haltEpoch`, even if the write finished before the read returned) is
+   * discarded and re-read, never used to clear or replace the latch. If an
+   * evidence update damaged the file and could not restore it, the latch
+   * also stays in memory until the file is deleted.
    */
   async function isHalted() {
-    if (haltWrites > 0 && haltState) return true;
-    const onDisk = await readHalt();
+    let onDisk;
+    for (let attempt = 1; ; attempt += 1) {
+      if (haltWrites > 0 && haltState) return true;
+      const epoch = haltEpoch;
+      onDisk = await readHalt();
+      if (haltEpoch === epoch && haltWrites === 0) break;
+      // A halt-file write by this process overlapped this read (it was
+      // running, or ran and finished, while the read was pending). The
+      // snapshot may be torn, stale or an I/O error caused by the write, so
+      // it must neither clear nor replace the in-memory latch. Read again
+      // once the write is over (an operator deletion is still seen then);
+      // while a write is still running, or if writes keep overlapping, the
+      // in-memory latch answers. No in-memory latch at all while this
+      // process writes the halt file cannot normally happen (the latch is
+      // set before any write); fail closed for this request only.
+      if (haltWrites > 0 || attempt >= HALT_READ_ATTEMPTS) return true;
+    }
     if (onDisk.halt) {
       haltState = onDisk.halt;
       return true;
@@ -575,7 +608,7 @@ export function celestrakProxy() {
         ` — ALL CelesTrak requests HALTED ` +
         `until an operator deletes ${HALT_FILE}; serving cache if any`,
     );
-    haltWrites += 1;
+    beginHaltWrite();
     try {
       await fsp.mkdir(CACHE_DIR, { recursive: true });
       await fsp.writeFile(HALT_FILE, JSON.stringify(latched), 'utf8');
@@ -585,7 +618,7 @@ export function celestrakProxy() {
         `[celestrak-proxy] halt file write failed code=${ioCode(err)} — halted in memory only`,
       );
     } finally {
-      haltWrites -= 1;
+      endHaltWrite();
     }
     return latched;
   }
