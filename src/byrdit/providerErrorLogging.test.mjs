@@ -178,10 +178,10 @@ test('mcp api fetch: timeout is logged with class=timeout and the error is re-th
     },
   });
   await assert.rejects(apiFetch('/api/military'), { name: 'TimeoutError' });
-  assert.deepEqual(requested, [30_000]);
+  assert.deepEqual(requested, [120_000]);
   assert.equal(logs.length, 1);
   assert.match(logs[0], /method=GET url=http:\/\/localhost:4173\/api\/military/);
-  assert.match(logs[0], /class=timeout elapsed_ms=\d+ timeout_ms=30000/);
+  assert.match(logs[0], /class=timeout elapsed_ms=\d+ timeout_ms=120000/);
 });
 
 test('mcp api fetch: network error is logged with its code and re-thrown as-is', async () => {

@@ -12,8 +12,14 @@ const BUNDLED_DATA = new URL('../../src/data/local_data/', import.meta.url);
 
 export const DEFAULT_API_BASE = 'http://localhost:4173';
 
-/** Upper bound for one local `/api` request a tool makes (ms). */
-export const API_FETCH_TIMEOUT_MS = 30_000;
+/**
+ * Backstop for one local `/api` request a tool makes (ms). It only has to
+ * catch a hung local server: it sits above the slowest server-side upstream
+ * chain a route can legitimately take (Overpass tries each configured
+ * endpoint for up to 22 s; other providers cap at 10-60 s), so a slow but
+ * valid answer is never cut off here.
+ */
+export const API_FETCH_TIMEOUT_MS = 120_000;
 
 // Failure logs go to stderr: under `npm run mcp` stdout carries the MCP
 // protocol, so a console.log here would corrupt the stdio stream.
