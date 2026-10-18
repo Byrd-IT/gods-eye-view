@@ -3,9 +3,11 @@
 // the failure class) but never the request's API key, HUD context or prompt,
 // whether they are reflected raw, embedded, re-cased, hex or base64 encoded.
 // error.type/code/param are logged only as allow-listed constants (else
-// `unlisted`); the request id only as req_<hex> sharing nothing with the
-// request secrets (else `withheld`). Status, target, elapsed and the client
-// reply are unchanged. fetch is mocked: nothing here reaches the network.
+// `unlisted`). r6 (review t_49610c02 r5 finding, repair t_a67a04d7): the
+// request id value is never logged (`request_id=withheld` when sent), and a
+// thrown error's code/name only as a fixed class table constant (else
+// `code=OTHER` / `error`). Status, target, elapsed and the client reply are
+// unchanged. fetch is mocked: nothing here reaches the network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
@@ -149,7 +151,7 @@ test('HUD r5: allow-listed identifiers are still logged', async (t) => {
   assert.match(
     logs[0],
     new RegExp(
-      `status=401 elapsed_ms=\\d+ body_bytes=\\d+ error_type=invalid_request_error error_code=invalid_api_key error_param=input request_id=${REQ_ID}$`,
+      `status=401 elapsed_ms=\\d+ body_bytes=\\d+ error_type=invalid_request_error error_code=invalid_api_key error_param=input request_id=withheld$`,
     ),
   );
 });
@@ -222,7 +224,7 @@ for (const [label, [id, opts]] of Object.entries(REQUEST_IDS))
     assertNoSecrets(logs, [opts?.key || KEY, 'PRIVATE-CONTEXT-CANARY']);
   });
 
-test('HUD r5: a realistic request id unrelated to the request is logged', async (t) => {
+test('HUD r6: even a realistic request id is withheld, never logged', async (t) => {
   const logs = captureLogs(t);
   await hud(t, () =>
     Response.json(
@@ -230,7 +232,8 @@ test('HUD r5: a realistic request id unrelated to the request is logged', async 
       { status: 500, headers: { 'x-request-id': REQ_ID } },
     ),
   );
-  assert.match(logs[0], new RegExp(`status=500 .*request_id=${REQ_ID}$`));
+  assert.match(logs[0], /status=500 .*request_id=withheld$/);
+  assert.ok(!logs[0].includes(REQ_ID.slice(4)), logs[0]);
 });
 
 test('HUD r5: no request-id header adds no request_id fact', async (t) => {
@@ -306,7 +309,7 @@ test('HUD r5: no-summary-200 path logs only allow-listed facts', async (t) => {
   assertNoSecrets(logs, [KEY, 'PRIVATE-CONTEXT-CANARY', PROMPT_FRAGMENT]);
 });
 
-test('HUD r5: a thrown error never logs a non-errno code or odd class name', async (t) => {
+test('HUD r5: a thrown error never logs an unlisted code', async (t) => {
   const logs = captureLogs(t);
   const res = await hud(t, () => {
     throw Object.assign(new TypeError('fetch failed'), {
@@ -319,7 +322,7 @@ test('HUD r5: a thrown error never logs a non-errno code or odd class name', asy
   });
   assert.match(
     logs[0],
-    /request failed stage=upstream class=network code=OTHER target=.* status=none elapsed_ms=\d+ timeout_ms=15000$/,
+    /request failed stage=upstream class=error code=OTHER target=.* status=none elapsed_ms=\d+ timeout_ms=15000$/,
   );
   assertNoSecrets(logs, [KEY]);
 });
@@ -360,4 +363,292 @@ test('HUD r5: every reflected form at once leaves only constants in the log', as
     /status=401 elapsed_ms=\d+ body_bytes=\d+ error_type=unlisted error_code=unlisted error_param=unlisted request_id=withheld$/,
   );
   assertNoSecrets(logs, [KEY, 'PRIVATE-CONTEXT-CANARY', PROMPT_FRAGMENT]);
+});
+
+// r6: the reviewer's embedded-fragment cases. Request-id values are omitted
+// outright, so no reflection or encoding of the context can reach the log.
+const R6_IDS = {
+  'raw hex context value inside a padded id': [
+    '0123456789abcdef',
+    { accessCode: '0123456789abcdef' },
+    'req_aa0123456789abcdefbb',
+  ],
+  'hex-encoded context value inside a padded id': [
+    b('PrivateSite').toString('hex'),
+    { site: 'PrivateSite' },
+    `req_aa${b('PrivateSite').toString('hex')}bb`,
+  ],
+};
+for (const [label, [secret, context, id]] of Object.entries(R6_IDS))
+  for (const [site, reply] of [
+    [
+      'HTTP error',
+      () =>
+        Response.json(
+          { error: { message: 'x' } },
+          { status: 401, headers: { 'x-request-id': id } },
+        ),
+    ],
+    ['body read failure', () => bodyFails(200, { 'x-request-id': id })],
+    [
+      'malformed 200',
+      () =>
+        new Response('{"output_text": "', {
+          status: 200,
+          headers: { 'x-request-id': id },
+        }),
+    ],
+    [
+      'no-summary 200',
+      () =>
+        Response.json(
+          { output: [] },
+          { status: 200, headers: { 'x-request-id': id } },
+        ),
+    ],
+  ])
+    test(`HUD r6: ${label} is withheld on the ${site} path`, async (t) => {
+      const logs = captureLogs(t);
+      await hud(t, reply, { context });
+      assert.ok(logs.length >= 1, 'the failure stays logged');
+      assert.match(logs.join('\n'), /request_id=withheld/);
+      assert.ok(!logs.join('\n').includes(secret), logs.join('\n'));
+      assert.ok(!logs.join('\n').includes(id), logs.join('\n'));
+    });
+
+// r6: thrown-error code/name map onto a fixed class table, at BOTH the fetch
+// and the body-read call sites. Anything unlisted is a constant.
+function thrown(fields) {
+  return Object.assign(new TypeError('fetch failed'), fields);
+}
+function bodyThrowsError(error, status = 200) {
+  const body = new ReadableStream({
+    pull() {
+      throw error;
+    },
+  });
+  return new Response(body, { status });
+}
+const R6_THROWN = {
+  'identifier-shaped name': [
+    'PrivateSiteCanary',
+    () => Object.assign(new Error('x'), { name: 'PrivateSiteCanary' }),
+    'error',
+  ],
+  'errno-shaped cause code': [
+    'PRIVATE_SITE_CANARY',
+    () => thrown({ cause: { code: 'PRIVATE_SITE_CANARY' } }),
+    'error code=OTHER',
+  ],
+  'errno-shaped own code': [
+    'PRIVATE_SITE_CANARY',
+    () => Object.assign(new Error('x'), { code: 'PRIVATE_SITE_CANARY' }),
+    'error code=OTHER',
+  ],
+  'E-prefixed errno-like code': [
+    'EPRIVATESITE',
+    () => thrown({ cause: { code: 'EPRIVATESITE' } }),
+    'error code=OTHER',
+  ],
+  'UND_ERR-prefixed code': [
+    'UND_ERR_PRIVATE_SITE',
+    () => thrown({ cause: { code: 'UND_ERR_PRIVATE_SITE' } }),
+    'error code=OTHER',
+  ],
+  'name and code both reflected': [
+    'PrivateSiteCanary',
+    () =>
+      Object.assign(new Error('x'), {
+        name: 'PrivateSiteCanary',
+        cause: { code: 'PrivateSiteCanary' },
+      }),
+    'error code=OTHER',
+  ],
+};
+for (const [label, [secret, make, cls]] of Object.entries(R6_THROWN)) {
+  test(`HUD r6: fetch exception with ${label} logs class=${cls}`, async (t) => {
+    const logs = captureLogs(t);
+    const res = await hud(
+      t,
+      () => {
+        throw make();
+      },
+      { context: { site: secret } },
+    );
+    assert.deepEqual(res, {
+      status: 502,
+      body: { error: 'OpenAI HUD summary request failed' },
+    });
+    assert.equal(logs.length, 1);
+    assert.match(
+      logs[0],
+      new RegExp(
+        `^\\[hud-summary\\] request failed stage=upstream class=${cls} target="POST https://api\\.openai\\.com/v1/responses" status=none elapsed_ms=\\d+ timeout_ms=15000$`,
+      ),
+    );
+    assert.ok(!logs[0].includes(secret), logs[0]);
+  });
+  test(`HUD r6: body-read exception with ${label} logs class=${cls}`, async (t) => {
+    const logs = captureLogs(t);
+    const res = await hud(t, () => bodyThrowsError(make()), {
+      context: { site: secret },
+    });
+    assert.deepEqual(res, {
+      status: 200,
+      body: { summary: null, error: null },
+    });
+    assert.equal(logs.length, 1);
+    assert.match(
+      logs[0],
+      new RegExp(
+        `^\\[hud-summary\\] upstream body read failed class=${cls} target="POST https://api\\.openai\\.com/v1/responses" status=200 elapsed_ms=\\d+ timeout_ms=15000$`,
+      ),
+    );
+    assert.ok(!logs[0].includes(secret), logs[0]);
+  });
+}
+
+// r6: the useful normal classes survive, at both call sites.
+const R6_KNOWN = {
+  'AbortSignal timeout': [
+    () =>
+      new DOMException(
+        'The operation was aborted due to timeout',
+        'TimeoutError',
+      ),
+    'timeout',
+  ],
+  'undici connect timeout': [
+    () => thrown({ cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }),
+    'timeout code=UND_ERR_CONNECT_TIMEOUT',
+  ],
+  'undici body timeout': [
+    () => thrown({ cause: { code: 'UND_ERR_BODY_TIMEOUT' } }),
+    'timeout code=UND_ERR_BODY_TIMEOUT',
+  ],
+  ETIMEDOUT: [
+    () => thrown({ cause: { code: 'ETIMEDOUT' } }),
+    'timeout code=ETIMEDOUT',
+  ],
+  'DNS ENOTFOUND': [
+    () => thrown({ cause: { code: 'ENOTFOUND' } }),
+    'dns code=ENOTFOUND',
+  ],
+  'DNS EAI_AGAIN': [
+    () => thrown({ cause: { code: 'EAI_AGAIN' } }),
+    'dns code=EAI_AGAIN',
+  ],
+  ECONNRESET: [
+    () => thrown({ cause: { code: 'ECONNRESET' } }),
+    'network code=ECONNRESET',
+  ],
+  ECONNREFUSED: [
+    () => thrown({ cause: { code: 'ECONNREFUSED' } }),
+    'network code=ECONNREFUSED',
+  ],
+  'undici socket': [
+    () => thrown({ cause: { code: 'UND_ERR_SOCKET' } }),
+    'network code=UND_ERR_SOCKET',
+  ],
+  'TLS cert expired': [
+    () => thrown({ cause: { code: 'CERT_HAS_EXPIRED' } }),
+    'network code=CERT_HAS_EXPIRED',
+  ],
+  'AbortError name': [
+    () => new DOMException('aborted', 'AbortError'),
+    'AbortError',
+  ],
+  'plain TypeError': [() => new TypeError('fetch failed'), 'TypeError'],
+  'numeric DOMException code is ignored': [
+    () => Object.assign(new Error('x'), { code: 23 }),
+    'Error',
+  ],
+};
+for (const [label, [make, cls]] of Object.entries(R6_KNOWN)) {
+  test(`HUD r6: fetch exception ${label} keeps class=${cls}`, async (t) => {
+    const logs = captureLogs(t);
+    await hud(t, () => {
+      throw make();
+    });
+    assert.match(
+      logs[0],
+      new RegExp(`request failed stage=upstream class=${cls} target=`),
+    );
+  });
+  test(`HUD r6: body-read exception ${label} keeps class=${cls}`, async (t) => {
+    const logs = captureLogs(t);
+    await hud(t, () => bodyThrowsError(make()));
+    assert.match(
+      logs[0],
+      new RegExp(`upstream body read failed class=${cls} target=`),
+    );
+  });
+}
+
+test('HUD r6: an oversized client body logs the fixed local class', async (t) => {
+  const logs = captureLogs(t);
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('fetch must not be reached');
+  });
+  const prior = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = KEY;
+  t.after(() => {
+    if (prior === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = prior;
+  });
+  const req = Readable.from([Buffer.alloc(64 * 1024 + 1, 0x61)]);
+  Object.assign(req, {
+    method: 'POST',
+    url: '/',
+    headers: { host: 'localhost:4173' },
+    socket: { remoteAddress: nextPeer() },
+  });
+  const res = {
+    statusCode: 200,
+    setHeader() {},
+    end(body) {
+      this.body = body;
+    },
+  };
+  await handleHudSummary(req, res);
+  assert.equal(res.statusCode, 502);
+  assert.equal(globalThis.fetch.mock.callCount(), 0);
+  assert.match(
+    logs[0],
+    /^\[hud-summary\] request failed stage=client-body class=local code=BODY_TOO_LARGE$/,
+  );
+});
+
+test('HUD r6: malformed client JSON still logs class=malformed', async (t) => {
+  const logs = captureLogs(t);
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('fetch must not be reached');
+  });
+  const prior = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = KEY;
+  t.after(() => {
+    if (prior === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = prior;
+  });
+  const req = Readable.from([Buffer.from('{"site": "PrivateSite')]);
+  Object.assign(req, {
+    method: 'POST',
+    url: '/',
+    headers: { host: 'localhost:4173' },
+    socket: { remoteAddress: nextPeer() },
+  });
+  const res = {
+    statusCode: 200,
+    setHeader() {},
+    end(body) {
+      this.body = body;
+    },
+  };
+  await handleHudSummary(req, res);
+  assert.equal(res.statusCode, 502);
+  assert.match(
+    logs[0],
+    /^\[hud-summary\] request failed stage=client-body class=malformed$/,
+  );
+  assert.ok(!logs[0].includes('PrivateSite'), logs[0]);
 });

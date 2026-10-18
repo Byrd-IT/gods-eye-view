@@ -531,7 +531,8 @@ test('HUD: identifier facts that are not in the context are kept', async (t) => 
       { status: 429, headers: { 'x-request-id': 'req_abc123' } },
     ),
   );
-  assert.match(logs[0], /status=429 elapsed_ms=\d+ body_bytes=\d+ error_type=insufficient_quota error_code=insufficient_quota request_id=req_abc123/);
+  assert.match(logs[0], /status=429 elapsed_ms=\d+ body_bytes=\d+ error_type=insufficient_quota error_code=insufficient_quota request_id=withheld$/);
+  assert.ok(!logs[0].includes('abc123'), logs[0]);
 });
 
 const HUD_EMPTY_200 = { status: 200, body: { summary: null, error: null } };

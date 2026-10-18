@@ -130,74 +130,75 @@ function openAiBodyFacts(raw) {
   return facts.join(' ');
 }
 
-/** Lower-case hex of a string's UTF-8 bytes. */
-function hexOf(text) {
-  return Buffer.from(text, 'utf8').toString('hex');
-}
-
 /**
- * Forms in which a secret could be reflected inside a request id: the text
- * itself (lower case), its UTF-8 hex, base64 and base64url.
+ * OpenAI's x-request-id is never logged, in any form: only whether one was
+ * sent (`request_id=withheld`; no header: nothing). The header is upstream
+ * bytes, and no shape, substring or encoding check can prove it carries none
+ * of the API key, the HUD context or the prompt, so it is omitted rather
+ * than filtered. Correlate with OpenAI through status, target and time.
  */
-function secretForms(text) {
-  const value = String(text || '');
-  if (!value) return [];
-  const bytes = Buffer.from(value, 'utf8');
-  return [
-    value.toLowerCase(),
-    bytes.toString('hex'),
-    bytes.toString('base64'),
-    bytes.toString('base64url'),
-  ];
-}
-
-/**
- * OpenAI's request id, logged only when it is `req_` + lower-case hex (the
- * form OpenAI request ids are observed to take; any other value is logged as
- * `request_id=withheld`) AND its hex part shares nothing with the request's
- * secrets: the API key, the HUD context and the prompt, raw or hex/base64
- * encoded, in either direction (id inside a secret form, or a secret form
- * inside the id). A shape check alone would admit a reflected key or context.
- */
-function requestIdFact(response, secrets) {
+function requestIdFact(response) {
   const id = response?.headers?.get?.('x-request-id');
-  if (typeof id !== 'string' || !id) return '';
-  const match = /^req_([0-9a-f]{1,64})$/.exec(id);
-  if (!match) return ' request_id=withheld';
-  const hex = match[1];
-  for (const secret of secrets)
-    for (const form of secretForms(secret))
-      if (form.includes(hex) || hex.includes(form))
-        return ' request_id=withheld';
-  return ` request_id=${id}`;
+  return typeof id === 'string' && id ? ' request_id=withheld' : '';
 }
 
-/** Cause class of a thrown error: never its message. */
+/**
+ * Thrown-error classes the HUD logs, as fixed constants of this file. The
+ * error's `cause.code`/`code` and `name` are only looked up here, never
+ * printed: a code or name outside these tables (any library, any shape) is
+ * logged as the constant `code=OTHER` / `error`, so the log never carries a
+ * string from the error object itself.
+ */
+const TIMEOUT_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'ETIMEDOUT',
+]);
+const DNS_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN']);
+const NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'EPIPE',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'EHOSTDOWN',
+  'EPROTO',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CLOSED',
+  'UND_ERR_DESTROYED',
+  'UND_ERR_ABORTED',
+  'UND_ERR_INFO',
+  'UND_ERR_RES_CONTENT_LENGTH_MISMATCH',
+  'UND_ERR_REQ_CONTENT_LENGTH_MISMATCH',
+  'UND_ERR_RES_EXCEEDED_MAX_SIZE',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'CERT_HAS_EXPIRED',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'ERR_SSL_WRONG_VERSION_NUMBER',
+]);
+/** Local (client-body stage) codes from ../common/request.js. */
+const LOCAL_CODES = new Set(['BODY_TOO_LARGE']);
+const ERROR_NAMES = new Set(['AbortError', 'TypeError', 'RangeError', 'Error']);
+
+/** Cause class of a thrown error: constants only, never its message, code or name. */
 function failureClass(error) {
   // String codes only: DOMException carries a numeric legacy `code`.
-  // Only errno-style codes (ECONNRESET, UND_ERR_*, BODY_TOO_LARGE) and plain
-  // class names are logged; anything else is reduced to a constant.
   const rawCode =
     [error?.cause?.code, error?.code].find((c) => typeof c === 'string') || '';
-  const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(rawCode)
-    ? rawCode
-    : rawCode
-      ? 'OTHER'
-      : '';
-  if (
-    error?.name === 'TimeoutError' ||
-    code === 'UND_ERR_CONNECT_TIMEOUT' ||
-    code === 'UND_ERR_HEADERS_TIMEOUT' ||
-    code === 'ETIMEDOUT'
-  )
-    return `timeout${code ? ` code=${code}` : ''}`;
-  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `dns code=${code}`;
+  const name = typeof error?.name === 'string' ? error.name : '';
+  if (name === 'TimeoutError' || TIMEOUT_CODES.has(rawCode))
+    return `timeout${TIMEOUT_CODES.has(rawCode) ? ` code=${rawCode}` : ''}`;
+  if (DNS_CODES.has(rawCode)) return `dns code=${rawCode}`;
+  if (NETWORK_CODES.has(rawCode)) return `network code=${rawCode}`;
+  if (LOCAL_CODES.has(rawCode)) return `local code=${rawCode}`;
   if (error instanceof SyntaxError) return 'malformed';
-  if (code) return `network code=${code}`;
-  const name = error?.name;
-  return typeof name === 'string' && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name)
-    ? name
-    : 'error';
+  if (rawCode) return 'error code=OTHER';
+  return ERROR_NAMES.has(name) ? name : 'error';
 }
 
 function extractOpenAiResponseText(data) {
@@ -258,8 +259,6 @@ async function handleHudSummary(req, res) {
     const body = await readRequestBody(req, 64 * 1024);
     const context = JSON.parse(body || '{}');
     const input = JSON.stringify(context);
-    // Never logged, in any form: diagnostics are checked against these.
-    const secrets = [apiKey, body, input, HUD_SUMMARY_INSTRUCTIONS];
     stage = 'upstream';
     startedAt = performance.now();
     const response = await fetch(OPENAI_RESPONSES_URL, {
@@ -291,7 +290,7 @@ async function handleHudSummary(req, res) {
       console.warn(
         `[hud-summary] upstream body read failed class=${failureClass(error)} ${target} ` +
           `status=${response.status} elapsed_ms=${elapsed()} timeout_ms=${timeoutMs}` +
-          requestIdFact(response, secrets),
+          requestIdFact(response),
       );
     }
     let data = {};
@@ -307,7 +306,7 @@ async function handleHudSummary(req, res) {
             `[hud-summary] upstream body malformed class=malformed ${target} ` +
               `status=${response.status} elapsed_ms=${elapsed()} ` +
               openAiBodyFacts(raw) +
-              requestIdFact(response, secrets),
+              requestIdFact(response),
           );
       }
     }
@@ -320,14 +319,14 @@ async function handleHudSummary(req, res) {
         `[hud-summary] upstream HTTP ${response.status} ${target} ` +
           `status=${response.status} elapsed_ms=${elapsed()} ` +
           openAiBodyFacts(raw) +
-          requestIdFact(response, secrets),
+          requestIdFact(response),
       );
     else if (parsed && !summary)
       console.warn(
         `[hud-summary] upstream reply has no summary text ${target} ` +
           `status=${response.status} elapsed_ms=${elapsed()} ` +
           openAiBodyFacts(raw) +
-          requestIdFact(response, secrets),
+          requestIdFact(response),
       );
     res.end(
       JSON.stringify({
