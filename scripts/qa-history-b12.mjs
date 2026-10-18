@@ -6,7 +6,8 @@
  *
  *   QA_AUTH_USER=qa QA_AUTH_PASSWORD=<pw> node scripts/qa-history-b12.mjs \
  *     --url https://127.0.0.1:15444 --out <dir> [--minutes 10] [--rate 60]
- *     [--t0 <ISO>] [--settle-ms 20000] [--gpu] [--skip-playback]
+ *     [--t0 <ISO>] [--settle-ms 20000] [--gpu]
+ *     [--skip-playback] [--disable a,b] [--no-select]   (diagnostic only)
  *
  * --url is a GEV origin whose /api/history/* answers from Elasticsearch:
  * before a deploy, the QA hop (scripts/qa-history-hop.mjs, TLS + Basic
@@ -37,11 +38,28 @@
  * Screenshots after Page.bringToFront, with the world-overlay canvas
  * readback laid over the capture and saved beside it (see shot()).
  * results.json + qa-log.txt + frames.json (every timed request) in --out.
- * Exit 1 on any failed check.
+ *
+ * Fail closed (t_3ae4aec7, verdicts in scripts/qa-history-b12-checks.mjs):
+ * every registered layer must be enabled without an enable error; ANY
+ * playback history request answered outside HTTP 200-399 (4xx included),
+ * failed on the network or left without a status fails the run; every
+ * sample at which playback had stopped by itself fails the run (the QA
+ * still resumes so the rest is measured). --skip-playback, --disable,
+ * --no-select, --minutes < 10 and --rate other than 60 stay usable for
+ * diagnosis but make the run DIAGNOSTIC, never acceptance.
+ * Exit 0 = acceptance PASS, 1 = a failed check, 2 = diagnostic run whose
+ * checks passed (results.json: verdict, acceptance, diagnostic).
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import puppeteer from 'puppeteer';
+import {
+  diagnosticReasons,
+  failedHistoryRequests,
+  layerEnableProblems,
+  unexpectedStops,
+  verdict,
+} from './qa-history-b12-checks.mjs';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -96,6 +114,19 @@ const pct = (a, p) =>
       ]
     : null;
 const results = { base: BASE, t0: iso(T0), minutes: MINUTES, rate: RATE };
+// --disable a,b: leave these history layers off for the playback (diagnosis)
+const DISABLE = new Set(
+  (arg('--disable', '') || '').split(',').filter(Boolean),
+);
+const NO_SELECT = flag('--no-select');
+const SKIP_PLAYBACK = flag('--skip-playback');
+results.diagnostic = diagnosticReasons({
+  skipPlayback: SKIP_PLAYBACK,
+  disable: [...DISABLE],
+  noSelect: NO_SELECT,
+  minutes: MINUTES,
+  rate: RATE,
+});
 const save = () => {
   writeFileSync(
     path.join(OUT, 'results.json'),
@@ -103,6 +134,9 @@ const save = () => {
   );
   writeFileSync(path.join(OUT, 'qa-log.txt'), log.join('\n') + '\n');
 };
+
+if (results.diagnostic.length)
+  say('DIAGNOSTIC run (never acceptance):', results.diagnostic);
 
 const gpuArgs = flag('--gpu')
   ? [
@@ -432,9 +466,23 @@ const enableErrors = await page.evaluate(async (ids) => {
 }, all);
 await sleep(15_000);
 let st = await state();
-results.layers = { registered: all.length, enabled: st.enabled.length };
+const enableProblems = layerEnableProblems({
+  registered: all,
+  enabled: st.enabled,
+  enableErrors,
+});
+results.layers = {
+  registered: all.length,
+  enabled: st.enabled.length,
+  enableErrors,
+  problems: enableProblems,
+};
 say('layers registered', all.length, 'enabled', st.enabled.length);
 say('enable errors', enableErrors);
+check(
+  enableProblems.length === 0,
+  `every registered layer enabled (${st.enabled.length}/${all.length}) ${JSON.stringify(enableProblems)}`,
+);
 check(st.mode === 'live', `live mode at start (${st.mode})`);
 check(
   !st.chips.some((c) => c.state === 'unswapped'),
@@ -495,10 +543,6 @@ await shot('02-history-every-layer-live-chips');
 
 // ── 3. history-capable layers only; select an aircraft ───────
 phase = 'select';
-// --disable a,b: leave these history layers off for the playback (diagnosis)
-const DISABLE = new Set(
-  (arg('--disable', '') || '').split(',').filter(Boolean),
-);
 const keep = new Set(
   st.adapters.map((a) => a.layerId).filter((id) => !DISABLE.has(id)),
 );
@@ -531,7 +575,6 @@ async function aircraftOfLatestFrame(skip = new Set()) {
     return null;
   }
 }
-const NO_SELECT = flag('--no-select');
 const selectAircraft = (h) =>
   NO_SELECT
     ? Promise.resolve(false)
@@ -576,7 +619,7 @@ const halves = [
   { name: 'texas', at: TEXAS },
   { name: 'globe', at: GLOBE },
 ];
-if (!flag('--skip-playback')) {
+if (!SKIP_PLAYBACK) {
   await page.evaluate(
     (t, rate) => {
       const h = window.__gevHistorySwap.handle;
@@ -618,7 +661,9 @@ if (!flag('--skip-playback')) {
       results.samples = samples;
       save();
       if (!st.playing) {
-        say('playback stopped by itself; resuming');
+        // a failure (counted by unexpectedStops below); resume so the rest
+        // of the run is still measured
+        say('FAIL event: playback stopped by itself; resuming', sample);
         await page.evaluate(() => window.__gevHistorySwap.handle.play());
       }
       // every ~60 s select another aircraft of the shown frame: its
@@ -645,7 +690,19 @@ if (!flag('--skip-playback')) {
     speed: Math.round((histS / wallS) * 10) / 10,
     stats: st.router?.stats ?? null,
   };
+  const stops = unexpectedStops(samples);
+  results.playback.samples = samples.length;
+  results.playback.unexpectedStops = stops.map((s) => ({
+    phase: s.phase,
+    wallS: s.wallS,
+    timeMs: s.timeMs,
+  }));
   say('playback', results.playback);
+  check(samples.length > 0, `playback was sampled (${samples.length})`);
+  check(
+    stops.length === 0,
+    `playback never stopped by itself (${stops.length} of ${samples.length} samples stopped: ${JSON.stringify(results.playback.unexpectedStops.slice(0, 5))})`,
+  );
   check(
     wallS >= MINUTES * 60 - 5,
     `played ${Math.round(wallS)} s of wall clock`,
@@ -720,7 +777,7 @@ check(
   unauth === 0,
   `no history request was refused by the auth hop (${unauth} x 401)`,
 );
-if (!flag('--skip-playback')) {
+if (!SKIP_PLAYBACK) {
   for (const [k, target] of Object.entries(TARGETS)) {
     const row = results.frameFetch[k];
     if (!row || !row.ok) {
@@ -732,9 +789,10 @@ if (!flag('--skip-playback')) {
       `${k} p95 ${row.p95} ms < ${target} ms (n=${row.ok}, MISS p95 ${row.missP95} n=${row.missN})`,
     );
   }
-  const bad = played.filter(
-    (f) => !f.canceled && (f.failed || f.status >= 500),
-  );
+  // fail closed: any status outside 200-399 (4xx too), network failure
+  // or missing status; only the page's own cancellations are excused
+  const bad = failedHistoryRequests(played);
+  results.failedPlaybackRequests = bad.length;
   check(
     bad.length === 0,
     `no failed history request during playback (${bad.length}: ${JSON.stringify(bad.slice(0, 5).map((f) => [classify(f.url), f.status, f.failed]))})`,
@@ -812,6 +870,9 @@ results.errorsAfterHistory = errors.slice(e0);
 results.consoleDiag = diag.slice(0, 50);
 save();
 await browser.close();
-say(failures.length ? `QA B12 FAIL (${failures.length})` : 'QA B12 PASS');
+const outcome = verdict({ failures, diagnostic: results.diagnostic });
+results.verdict = outcome.status;
+results.acceptance = outcome.acceptance;
+say(outcome.line);
 save();
-process.exit(failures.length ? 1 : 0);
+process.exit(outcome.exitCode);
