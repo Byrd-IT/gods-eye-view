@@ -132,19 +132,61 @@ export function _routeInflightCountForTest() {
   return _routeInflight.size;
 }
 
-/** First 300 bytes of an upstream body for a log line, markup and secrets removed. */
-function redactSnippet(text, max = 300) {
-  return String(text ?? '')
-    .slice(0, 4096)
+/**
+ * Log-safe upstream body snippet (b12, STANDARD R3). In order:
+ * 1. the request's own secrets/inputs (`secrets`) are masked literally, in
+ *    raw, JSON-escaped and URL-encoded form, wherever the upstream echoed them;
+ * 2. markup is stripped, `\/` is unescaped, and URL userinfo, Bearer/Basic
+ *    credentials, JSON / query / header style secret fields (key, token,
+ *    secret, password, auth, credential, sig, session, cookie ...) in plain or
+ *    escaped JSON, and well-known key shapes (sk-, AIza, ghp_, xox?-, JWT) are
+ *    masked;
+ * 3. whitespace is collapsed and the result is cut to at most `maxBytes`
+ *    UTF-8 bytes without splitting a code point.
+ * The same text is copied into every b12 provider file (there is no shared
+ * runtime module); src/byrdit/providerErrorLogging.test.mjs checks that the
+ * copies stay identical and attacks each one.
+ */
+function redactSnippet(text, secrets = [], maxBytes = 300) {
+  let s = String(text ?? '');
+  for (const secret of secrets) {
+    const raw = String(secret ?? '');
+    if (raw.length < 4) continue;
+    const forms = new Set([raw, JSON.stringify(raw).slice(1, -1)]);
+    try {
+      forms.add(encodeURIComponent(raw));
+    } catch {
+      /* lone surrogate: raw + JSON forms only */
+    }
+    for (const form of forms) s = s.split(form).join('REDACTED');
+  }
+  s = s
+    .slice(0, 65536)
     .replace(/<[^>]*>/g, ' ')
-    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+    .replace(/\\+\//g, '/')
+    .replace(/\b([a-z][a-z0-9+.-]{0,30}:\/\/)[^\s/?#@"'<>]*@/gi, '$1REDACTED@')
+    .replace(/\b(Bearer|Basic|Token)\s+[^\s"'\\,;]+/gi, '$1 REDACTED')
     .replace(
-      /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+      /((?:\\*["'])?(?<![\w.-])[\w.-]{0,40}(?:key|token|secret|passw(?:or)?d|pwd|pass|auth|credential|signature|sig|session|cookie)[\w.-]{0,40}(?:\\*["'])?\s*[:=]\s*)(?:"(?:[^"\\]|\\.)*"?|\\+"[\s\S]*?(?:\\+"(?=\s*[,}\]])|$)|'[^']*'?|[^\s,&;}\]"'<>]+)/gi,
       '$1REDACTED',
     )
+    .replace(
+      /\b(?:sk-[\w*.-]{4,}|AIza[\w-]{10,}|gh[pousr]_\w{10,}|xox[abprs]-[\w-]{10,}|eyJ[\w-]{6,}\.[\w-]{6,}\.[\w-]*)/g,
+      'REDACTED',
+    )
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max);
+    .trim();
+  const encoder = new TextEncoder();
+  if (encoder.encode(s).length <= maxBytes) return s;
+  let out = '';
+  let bytes = 0;
+  for (const ch of s) {
+    const size = encoder.encode(ch).length;
+    if (bytes + size > maxBytes) break;
+    out += ch;
+    bytes += size;
+  }
+  return out;
 }
 
 /** Cause class of a thrown error: never its message. */
@@ -234,12 +276,26 @@ async function fetchRoute({
   let upstreamStatus = 0;
   const elapsed = () =>
     startedAt ? Math.round(performance.now() - startedAt) : 0;
+  // The request's own coordinates (a user's start/end points) and any
+  // endpoint userinfo are masked if the upstream echoes them in a body.
+  const secrets = String(coords).split(/[;,]/);
+  try {
+    const url = new URL(base);
+    secrets.push(
+      decodeURIComponent(url.username),
+      decodeURIComponent(url.password),
+    );
+  } catch {
+    /* invalid endpoint: nothing to add */
+  }
+  const snippet = (body) => JSON.stringify(redactSnippet(body, secrets));
   const logRefusal = (reason, body) =>
     console.warn(
       `[Route Proxy] upstream ${reason} target="${target}" status=${upstreamStatus} ` +
-        `elapsed_ms=${elapsed()} body=${JSON.stringify(redactSnippet(body))}`,
+        `elapsed_ms=${elapsed()} body=${snippet(body)}`,
     );
   let osrm;
+  let text = null;
   try {
     const upstreamRes = await throughUpstreamGate(() => {
       startedAt = performance.now();
@@ -271,10 +327,7 @@ async function fetchRoute({
       );
       return { payload: null, error: 'no route found' };
     }
-    const text = await readResponseTextCapped(
-      upstreamRes,
-      ROUTE_MAX_RESPONSE_BYTES,
-    );
+    text = await readResponseTextCapped(upstreamRes, ROUTE_MAX_RESPONSE_BYTES);
     osrm = JSON.parse(text);
   } catch (error) {
     // Local refusals (queue full) and the 429 above are not upstream faults
@@ -285,7 +338,9 @@ async function fetchRoute({
     )
       console.warn(
         `[Route Proxy] upstream request failed target="${target}" class=${failureClass(error)} ` +
-          `status=${upstreamStatus || 'none'} elapsed_ms=${elapsed()} timeout_ms=12000`,
+          `status=${upstreamStatus || 'none'} elapsed_ms=${elapsed()} timeout_ms=12000` +
+          // A body that was read but did not parse is the evidence.
+          (text !== null ? ` body=${snippet(text)}` : ''),
       );
     throw error;
   } finally {

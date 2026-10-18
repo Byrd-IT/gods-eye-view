@@ -1,6 +1,23 @@
 const ADSB_LOL_MIL_URL = 'https://api.adsb.lol/v2/mil';
-/** Upstream request timeout (ms); bounds the headers AND the body read. */
-export const ADSB_LOL_TIMEOUT_MS = 10_000;
+/**
+ * Default upstream backstop (ms); bounds the headers AND the body read. The
+ * baseline had no timeout. Existing telemetry for this exact upstream
+ * (gev-collector polls https://api.adsb.lol/v2/mil once a minute from the
+ * same S4/S5 egress; ES gev-history-ingest-log feed=military, 7753 ok polls
+ * 2026-10-11..18): whole-poll duration (fetch + parse + ES write, so an upper
+ * bound on the fetch) p50 0.7 s, p90 2.0 s, p99 15.1 s, max 29.0 s; 237
+ * (3.1 %) took >= 10 s. 30 s covers that maximum. The browser feed has no
+ * deadline of its own. Override with GEV_ADSB_LOL_TIMEOUT_MS (1000-600000).
+ */
+export const ADSB_LOL_TIMEOUT_MS = 30_000;
+
+/** Effective adsb.lol timeout: GEV_ADSB_LOL_TIMEOUT_MS when valid, else the default. */
+export function adsbLolTimeoutMs(env = process.env) {
+  const ms = Number(env?.GEV_ADSB_LOL_TIMEOUT_MS);
+  return Number.isInteger(ms) && ms >= 1000 && ms <= 600_000
+    ? ms
+    : ADSB_LOL_TIMEOUT_MS;
+}
 
 /** Longest wait for a failing body's first bytes once stale data is served (ms). */
 const STALE_BODY_PEEK_MS = 1000;
@@ -43,19 +60,61 @@ async function peekAndCancel(response, ms = STALE_BODY_PEEK_MS) {
   return text;
 }
 
-/** First 300 bytes of an upstream body for a log line, markup and secrets removed. */
-function redactSnippet(text, max = 300) {
-  return String(text ?? '')
-    .slice(0, 4096)
+/**
+ * Log-safe upstream body snippet (b12, STANDARD R3). In order:
+ * 1. the request's own secrets/inputs (`secrets`) are masked literally, in
+ *    raw, JSON-escaped and URL-encoded form, wherever the upstream echoed them;
+ * 2. markup is stripped, `\/` is unescaped, and URL userinfo, Bearer/Basic
+ *    credentials, JSON / query / header style secret fields (key, token,
+ *    secret, password, auth, credential, sig, session, cookie ...) in plain or
+ *    escaped JSON, and well-known key shapes (sk-, AIza, ghp_, xox?-, JWT) are
+ *    masked;
+ * 3. whitespace is collapsed and the result is cut to at most `maxBytes`
+ *    UTF-8 bytes without splitting a code point.
+ * The same text is copied into every b12 provider file (there is no shared
+ * runtime module); src/byrdit/providerErrorLogging.test.mjs checks that the
+ * copies stay identical and attacks each one.
+ */
+function redactSnippet(text, secrets = [], maxBytes = 300) {
+  let s = String(text ?? '');
+  for (const secret of secrets) {
+    const raw = String(secret ?? '');
+    if (raw.length < 4) continue;
+    const forms = new Set([raw, JSON.stringify(raw).slice(1, -1)]);
+    try {
+      forms.add(encodeURIComponent(raw));
+    } catch {
+      /* lone surrogate: raw + JSON forms only */
+    }
+    for (const form of forms) s = s.split(form).join('REDACTED');
+  }
+  s = s
+    .slice(0, 65536)
     .replace(/<[^>]*>/g, ' ')
-    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+    .replace(/\\+\//g, '/')
+    .replace(/\b([a-z][a-z0-9+.-]{0,30}:\/\/)[^\s/?#@"'<>]*@/gi, '$1REDACTED@')
+    .replace(/\b(Bearer|Basic|Token)\s+[^\s"'\\,;]+/gi, '$1 REDACTED')
     .replace(
-      /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+      /((?:\\*["'])?(?<![\w.-])[\w.-]{0,40}(?:key|token|secret|passw(?:or)?d|pwd|pass|auth|credential|signature|sig|session|cookie)[\w.-]{0,40}(?:\\*["'])?\s*[:=]\s*)(?:"(?:[^"\\]|\\.)*"?|\\+"[\s\S]*?(?:\\+"(?=\s*[,}\]])|$)|'[^']*'?|[^\s,&;}\]"'<>]+)/gi,
       '$1REDACTED',
     )
+    .replace(
+      /\b(?:sk-[\w*.-]{4,}|AIza[\w-]{10,}|gh[pousr]_\w{10,}|xox[abprs]-[\w-]{10,}|eyJ[\w-]{6,}\.[\w-]{6,}\.[\w-]*)/g,
+      'REDACTED',
+    )
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max);
+    .trim();
+  const encoder = new TextEncoder();
+  if (encoder.encode(s).length <= maxBytes) return s;
+  let out = '';
+  let bytes = 0;
+  for (const ch of s) {
+    const size = encoder.encode(ch).length;
+    if (bytes + size > maxBytes) break;
+    out += ch;
+    bytes += size;
+  }
+  return out;
 }
 
 /** Cause class of a thrown fetch/read error: never its message (it can carry URLs). */
@@ -152,6 +211,7 @@ export function adsbLolProxy() {
     server.middlewares.use('/api/military', async (req, res, next) => {
       let startedAt = 0;
       let upstreamStatus = 0;
+      const timeoutMs = adsbLolTimeoutMs();
       try {
         // This mount also matches its /track route, served by its own handler.
         if (new URL(req.url || '/', 'http://localhost').pathname !== '/')
@@ -184,7 +244,7 @@ export function adsbLolProxy() {
         startedAt = performance.now();
         const upstream = await fetch(ADSB_LOL_MIL_URL, {
           headers: { 'User-Agent': 'gods-eye-view-adsblol-proxy/1.0' },
-          signal: AbortSignal.timeout(ADSB_LOL_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs),
         });
         upstreamStatus = upstream.status;
         if (upstream.ok) {
@@ -248,7 +308,7 @@ export function adsbLolProxy() {
           `[adsb.lol Proxy] upstream request failed target="GET ${ADSB_LOL_MIL_URL}" ` +
             `class=${failureClass(e)} status=${upstreamStatus || 'none'} ` +
             `elapsed_ms=${startedAt ? Math.round(performance.now() - startedAt) : 0} ` +
-            `timeout_ms=${ADSB_LOL_TIMEOUT_MS}${_cache ? '; serving stale' : '; relaying 502'}`,
+            `timeout_ms=${timeoutMs}${_cache ? '; serving stale' : '; relaying 502'}`,
         );
         if (_cache) {
           serve(res, 200, _cache, 'STALE');

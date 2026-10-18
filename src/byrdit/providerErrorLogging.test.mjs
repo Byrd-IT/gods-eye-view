@@ -103,7 +103,8 @@ function assertHttpFailureLine(line, { target, status = 500 }) {
   assert.match(line, /elapsed_ms=\d+/);
   assert.ok(line.includes(target), `target ${target} in: ${line}`);
   const body = loggedBody(line);
-  assert.ok(body.length > 0 && body.length <= 300, `body length ${body.length}`);
+  const bytes = Buffer.byteLength(body);
+  assert.ok(bytes > 0 && bytes <= 300, `body bytes ${bytes}`);
   assert.match(body, /upstream exploded; trace=42/);
   assert.doesNotMatch(body, /<html>|<h1>/);
 }
@@ -271,10 +272,10 @@ test('adsb.lol: timeout returns the same 502 and logs class=timeout', async (t) 
   const logs = captureLogs(t);
   t.mock.method(globalThis, 'fetch', (_url, init) => hangUntilAbort(init));
   const res = await military(installPlugin(adsbLolProxy()).get('/api/military'));
-  assert.deepEqual(requested, [10_000]);
+  assert.deepEqual(requested, [30_000]);
   assert.equal(res.statusCode, 502);
   assert.deepEqual(JSON.parse(res.body), { error: 'ADS-B proxy error' });
-  assert.match(logs[0], /target="GET https:\/\/api\.adsb\.lol\/v2\/mil" class=timeout status=none elapsed_ms=\d+ timeout_ms=10000/);
+  assert.match(logs[0], /target="GET https:\/\/api\.adsb\.lol\/v2\/mil" class=timeout status=none elapsed_ms=\d+ timeout_ms=30000/);
 });
 
 test('adsb.lol: network error returns the same 502 and logs the cause code', async (t) => {
@@ -318,7 +319,7 @@ function assertHudLogsClean(logs) {
   assert.ok(!logs.join('\n').includes('PROMPT-CANARY-77'), 'prompt/context leaked');
 }
 
-test('HUD summary: 500 keeps the generic reply and logs status/elapsed/redacted body', async (t) => {
+test('HUD summary: 500 keeps the generic reply and logs status/elapsed/body facts, never body text', async (t) => {
   const logs = captureLogs(t);
   t.mock.method(globalThis, 'fetch', async () =>
     new Response(
@@ -333,8 +334,9 @@ test('HUD summary: 500 keeps the generic reply and logs status/elapsed/redacted 
     error: 'OpenAI HUD summary request failed',
   });
   assert.equal(logs.length, 1);
-  assert.match(logs[0], /target="POST https:\/\/api\.openai\.com\/v1\/responses" status=500 elapsed_ms=\d+/);
-  assert.match(loggedBody(logs[0]), /Incorrect API key provided: REDACTED/);
+  assert.match(logs[0], /target="POST https:\/\/api\.openai\.com\/v1\/responses" status=500 elapsed_ms=\d+ body_bytes=\d+/);
+  // An OpenAI error message can quote the request: the HUD logs no body text.
+  assert.doesNotMatch(logs[0], /body=|Incorrect API key|exploded/);
   assertHudLogsClean(logs);
 });
 
@@ -471,11 +473,11 @@ test('Google Places: timeout keeps the 502 contract and logs class=timeout', asy
   const logs = captureLogs(t);
   const handler = googleRoute((_url, init) => hangUntilAbort(init));
   const res = await callGoogle(handler, '/?lat=30.27&lon=-97.74', '10.88.0.2');
-  assert.deepEqual(requested, [10_000]);
+  assert.deepEqual(requested, [60_000]);
   assert.equal(res.status, 502);
   assert.deepEqual(res.body.places, []);
   assert.equal(res.body.error, 'The operation was aborted due to timeout');
-  assert.match(logs[0], /nearby-places request failed target="POST https:\/\/places\.googleapis\.com\/v1\/places:searchNearby" class=timeout status=none elapsed_ms=\d+ timeout_ms=10000/);
+  assert.match(logs[0], /nearby-places request failed target="POST https:\/\/places\.googleapis\.com\/v1\/places:searchNearby" class=timeout status=none elapsed_ms=\d+ timeout_ms=60000/);
   assertNoSecrets(logs);
 });
 
@@ -571,6 +573,27 @@ function memoryDisk(t) {
     files.set(String(p), String(data));
   });
   t.mock.method(fsp, 'mkdir', async () => {});
+  // Inode-like 'r+' handle: writes after an unlink never re-create the file.
+  t.mock.method(fsp, 'open', async (p, flags) => {
+    const key = String(p);
+    assert.equal(flags, 'r+', 'the halt file is only ever opened r+');
+    if (!files.has(key))
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    let content = files.get(key);
+    const linked = () => files.has(key);
+    return {
+      readFile: async () => content,
+      truncate: async () => {
+        content = '';
+        if (linked()) files.set(key, content);
+      },
+      write: async (text) => {
+        content = String(text);
+        if (linked()) files.set(key, content);
+      },
+      close: async () => {},
+    };
+  });
   t.mock.method(fsp, 'stat', async () => {
     throw new Error('no stat');
   });
@@ -612,15 +635,20 @@ test('CelesTrak: 500 halts as before and records url/status/elapsed/body in the 
     'https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=csv',
   );
   assert.ok(Number.isInteger(halt.elapsed_ms));
-  assert.ok(halt.body.length <= 300);
+  assert.ok(Buffer.byteLength(halt.body) <= 300);
   assert.match(halt.body, /upstream exploded; trace=42/);
   assert.doesNotMatch(halt.body, /<html>/);
   assert.match(halt.clear, /delete .*celestrak-HALT\.json/);
-  assert.equal(logs.length, 1);
-  assertHttpFailureLine(logs[0], {
-    target: 'url="https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=csv"',
-  });
+  // Line 1 is written when the refusal headers latch the halt (before the
+  // body is read); line 2 adds the body evidence to that same latch.
+  assert.equal(logs.length, 2);
+  assert.match(
+    logs[0],
+    /url="https:\/\/celestrak\.org\/NORAD\/elements\/gp\.php\?GROUP=stations&FORMAT=csv" status=500 elapsed_ms=\d+ body=\(follows in a halt evidence line\)/,
+  );
   assert.match(logs[0], /HALTED until an operator deletes/);
+  assert.match(logs[1], /stations halt evidence \(HTTP 500\) status=500 body=/);
+  assert.match(loggedBody(logs[1]), /upstream exploded; trace=42/);
   // Halt policy unchanged: a second group is refused without a request.
   const second = await celestrak('/starlink');
   assert.equal(second.statusCode, 503);

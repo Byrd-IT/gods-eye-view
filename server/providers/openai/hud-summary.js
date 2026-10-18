@@ -7,23 +7,64 @@ import { readRequestBody } from '../common/request.js';
 import { OPENAI_HUD_SUMMARY_MODEL_DEFAULT } from './constants.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
-/** Upstream timeout for one HUD summary (ms); bounds headers and body read. */
+/**
+ * Default upstream backstop for one HUD summary (ms); bounds headers and body.
+ * The only caller, src/hud.js (_refreshSummary), aborts its request after
+ * 5 s, whatever model is configured, so a reply slower than that is never
+ * shown: 15 s (3x the client's abandon point) never cuts off a reply the
+ * HUD could still use and only bounds a paid request nobody waits for.
+ * Override with GEV_HUD_SUMMARY_TIMEOUT_MS (1000-600000).
+ */
 export const HUD_SUMMARY_TIMEOUT_MS = 15_000;
 
+/** Effective HUD timeout: GEV_HUD_SUMMARY_TIMEOUT_MS when valid, else the default. */
+export function hudSummaryTimeoutMs(env = process.env) {
+  const ms = Number(env?.GEV_HUD_SUMMARY_TIMEOUT_MS);
+  return Number.isInteger(ms) && ms >= 1000 && ms <= 600_000
+    ? ms
+    : HUD_SUMMARY_TIMEOUT_MS;
+}
+
 /**
- * First 300 bytes of an upstream body for a log line. OpenAI error bodies
- * never echo the prompt, but they can quote a masked key: mask sk-... and
- * bearer tokens anyway, strip markup, collapse whitespace.
+ * Log facts about an OpenAI reply body WITHOUT any of its free text: an
+ * error message can quote the request (the HUD context the browser sent),
+ * so the HUD never logs body text at all, escaped or not. Only the byte
+ * count, the body shape and error.type/code/param (identifier-shaped values
+ * that do not occur in the request context) are logged.
  */
-function redactSnippet(text, max = 300) {
-  return String(text ?? '')
-    .slice(0, 4096)
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\b(Bearer|Basic)\s+[\w.~+/=*-]+/gi, '$1 REDACTED')
-    .replace(/\bsk-[\w*.-]{4,}/g, 'REDACTED')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max);
+function openAiBodyFacts(raw, contextText) {
+  const facts = [`body_bytes=${new TextEncoder().encode(raw).length}`];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    if (raw) facts.push('body_format=non-json');
+    return facts.join(' ');
+  }
+  const error = parsed?.error;
+  if (!error || typeof error !== 'object') {
+    facts.push('body_format=json-without-error');
+    return facts.join(' ');
+  }
+  const context = String(contextText || '').toLowerCase();
+  for (const field of ['type', 'code', 'param']) {
+    const value = error[field];
+    if (
+      typeof value === 'string' &&
+      /^[\w.[\]-]{1,64}$/.test(value) &&
+      !context.includes(value.toLowerCase())
+    )
+      facts.push(`error_${field}=${value}`);
+  }
+  return facts.join(' ');
+}
+
+/** OpenAI's request id header, when it has the expected shape. */
+function requestIdFact(response) {
+  const id = response?.headers?.get?.('x-request-id');
+  return typeof id === 'string' && /^[\w-]{1,80}$/.test(id)
+    ? ` request_id=${id}`
+    : '';
 }
 
 /** Cause class of a thrown error: never its message. */
@@ -95,6 +136,9 @@ async function handleHudSummary(req, res) {
   let stage = 'client-body';
   let startedAt = 0;
   let upstreamStatus = 0;
+  const timeoutMs = hudSummaryTimeoutMs();
+  const target = `target="POST ${OPENAI_RESPONSES_URL}"`;
+  const elapsed = () => Math.round(performance.now() - startedAt);
   try {
     const body = await readRequestBody(req, 64 * 1024);
     const context = JSON.parse(body || '{}');
@@ -115,15 +159,39 @@ async function handleHudSummary(req, res) {
         reasoning: { effort: 'minimal' },
         max_output_tokens: 100,
       }),
-      signal: AbortSignal.timeout(HUD_SUMMARY_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     upstreamStatus = response.status;
-    const raw = await response.text().catch(() => '');
-    let data = {};
+    // Body phase: a read or parse failure keeps the old reply (an empty
+    // reply object, so no summary) but is logged with its cause.
+    let raw = '';
+    let bodyRead = true;
     try {
-      data = JSON.parse(raw);
-    } catch {
-      data = {};
+      raw = await response.text();
+    } catch (error) {
+      bodyRead = false;
+      console.warn(
+        `[hud-summary] upstream body read failed class=${failureClass(error)} ${target} ` +
+          `status=${response.status} elapsed_ms=${elapsed()} timeout_ms=${timeoutMs}` +
+          requestIdFact(response),
+      );
+    }
+    let data = {};
+    let parsed = false;
+    if (bodyRead) {
+      try {
+        data = JSON.parse(raw);
+        parsed = true;
+      } catch {
+        data = {};
+        if (response.ok)
+          console.warn(
+            `[hud-summary] upstream body malformed class=malformed ${target} ` +
+              `status=${response.status} elapsed_ms=${elapsed()} ` +
+              openAiBodyFacts(raw, body) +
+              requestIdFact(response),
+          );
+      }
     }
     const summary = toFiveWordHudSummary(extractOpenAiResponseText(data));
     res.statusCode = response.ok && summary ? 200 : response.status || 502;
@@ -131,9 +199,17 @@ async function handleHudSummary(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     if (!response.ok)
       console.warn(
-        `[hud-summary] upstream HTTP ${response.status} target="POST ${OPENAI_RESPONSES_URL}" ` +
-          `status=${response.status} elapsed_ms=${Math.round(performance.now() - startedAt)} ` +
-          `body=${JSON.stringify(redactSnippet(raw))}`,
+        `[hud-summary] upstream HTTP ${response.status} ${target} ` +
+          `status=${response.status} elapsed_ms=${elapsed()} ` +
+          openAiBodyFacts(raw, body) +
+          requestIdFact(response),
+      );
+    else if (parsed && !summary)
+      console.warn(
+        `[hud-summary] upstream reply has no summary text ${target} ` +
+          `status=${response.status} elapsed_ms=${elapsed()} ` +
+          openAiBodyFacts(raw, body) +
+          requestIdFact(response),
       );
     res.end(
       JSON.stringify({
@@ -147,8 +223,8 @@ async function handleHudSummary(req, res) {
     console.warn(
       `[hud-summary] request failed stage=${stage} class=${failureClass(error)}` +
         (stage === 'upstream'
-          ? ` target="POST ${OPENAI_RESPONSES_URL}" status=${upstreamStatus || 'none'} ` +
-            `elapsed_ms=${Math.round(performance.now() - startedAt)} timeout_ms=${HUD_SUMMARY_TIMEOUT_MS}`
+          ? ` ${target} status=${upstreamStatus || 'none'} ` +
+            `elapsed_ms=${elapsed()} timeout_ms=${timeoutMs}`
           : ''),
     );
     res.statusCode = 502;

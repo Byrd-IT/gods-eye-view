@@ -35,8 +35,30 @@ function googleRateLimiter() {
   return _googleRateLimiter;
 }
 
-/** Upstream timeout for one Google Places call (ms); bounds headers and body. */
-export const GOOGLE_PLACES_TIMEOUT_MS = 10_000;
+/**
+ * Default upstream backstop for one Google Places call (ms); bounds headers
+ * and body. The baseline had no timeout at all. 60 s is the longest explicit
+ * per-request deadline an in-app caller puts on a Places request: browser
+ * search/geospatial gives up after 5 s (src/search/geospatial.js), MCP
+ * globe-panel requests of any app route after 60 s
+ * (src/tools/queries/panelRequest.js REQUEST_TIMEOUT_MS). The installations
+ * layer has no deadline and other MCP tool calls only the 120 s hung-server
+ * backstop; for them an answer slower than 60 s is cut off (no telemetry
+ * shows Places that slow). Override with GEV_GOOGLE_PLACES_TIMEOUT_MS
+ * (1000-600000).
+ */
+export const GOOGLE_PLACES_TIMEOUT_MS = 60_000;
+
+/** Effective Places timeout: GEV_GOOGLE_PLACES_TIMEOUT_MS when valid, else the default. */
+export function googlePlacesTimeoutMs(env = process.env) {
+  const ms = Number(env?.GEV_GOOGLE_PLACES_TIMEOUT_MS);
+  return Number.isInteger(ms) && ms >= 1000 && ms <= 600_000
+    ? ms
+    : GOOGLE_PLACES_TIMEOUT_MS;
+}
+
+/** Errors postPlaces already logged (the route catch must not log them twice). */
+const loggedPlacesFailures = new WeakSet();
 
 /**
  * URL for a log line. The key travels in X-Goog-Api-Key, but an override
@@ -57,20 +79,61 @@ function redactUrl(value) {
   }
 }
 
-/** First 300 bytes of an upstream body for a log line, markup and secrets removed. */
-function redactSnippet(text, max = 300) {
-  return String(text ?? '')
-    .slice(0, 4096)
+/**
+ * Log-safe upstream body snippet (b12, STANDARD R3). In order:
+ * 1. the request's own secrets/inputs (`secrets`) are masked literally, in
+ *    raw, JSON-escaped and URL-encoded form, wherever the upstream echoed them;
+ * 2. markup is stripped, `\/` is unescaped, and URL userinfo, Bearer/Basic
+ *    credentials, JSON / query / header style secret fields (key, token,
+ *    secret, password, auth, credential, sig, session, cookie ...) in plain or
+ *    escaped JSON, and well-known key shapes (sk-, AIza, ghp_, xox?-, JWT) are
+ *    masked;
+ * 3. whitespace is collapsed and the result is cut to at most `maxBytes`
+ *    UTF-8 bytes without splitting a code point.
+ * The same text is copied into every b12 provider file (there is no shared
+ * runtime module); src/byrdit/providerErrorLogging.test.mjs checks that the
+ * copies stay identical and attacks each one.
+ */
+function redactSnippet(text, secrets = [], maxBytes = 300) {
+  let s = String(text ?? '');
+  for (const secret of secrets) {
+    const raw = String(secret ?? '');
+    if (raw.length < 4) continue;
+    const forms = new Set([raw, JSON.stringify(raw).slice(1, -1)]);
+    try {
+      forms.add(encodeURIComponent(raw));
+    } catch {
+      /* lone surrogate: raw + JSON forms only */
+    }
+    for (const form of forms) s = s.split(form).join('REDACTED');
+  }
+  s = s
+    .slice(0, 65536)
     .replace(/<[^>]*>/g, ' ')
-    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+    .replace(/\\+\//g, '/')
+    .replace(/\b([a-z][a-z0-9+.-]{0,30}:\/\/)[^\s/?#@"'<>]*@/gi, '$1REDACTED@')
+    .replace(/\b(Bearer|Basic|Token)\s+[^\s"'\\,;]+/gi, '$1 REDACTED')
     .replace(
-      /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+      /((?:\\*["'])?(?<![\w.-])[\w.-]{0,40}(?:key|token|secret|passw(?:or)?d|pwd|pass|auth|credential|signature|sig|session|cookie)[\w.-]{0,40}(?:\\*["'])?\s*[:=]\s*)(?:"(?:[^"\\]|\\.)*"?|\\+"[\s\S]*?(?:\\+"(?=\s*[,}\]])|$)|'[^']*'?|[^\s,&;}\]"'<>]+)/gi,
       '$1REDACTED',
     )
-    .replace(/\bAIza[\w-]{20,}/g, 'REDACTED')
+    .replace(
+      /\b(?:sk-[\w*.-]{4,}|AIza[\w-]{10,}|gh[pousr]_\w{10,}|xox[abprs]-[\w-]{10,}|eyJ[\w-]{6,}\.[\w-]{6,}\.[\w-]*)/g,
+      'REDACTED',
+    )
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max);
+    .trim();
+  const encoder = new TextEncoder();
+  if (encoder.encode(s).length <= maxBytes) return s;
+  let out = '';
+  let bytes = 0;
+  for (const ch of s) {
+    const size = encoder.encode(ch).length;
+    if (bytes + size > maxBytes) break;
+    out += ch;
+    bytes += size;
+  }
+  return out;
 }
 
 /** Cause class of a thrown error: never its message. */
@@ -92,43 +155,79 @@ function failureClass(error) {
 
 /**
  * POST one Places request with a timeout. Returns { response, data } where
- * data is the parsed JSON body (or {}). A non-OK status or a thrown call logs
- * one line: route, redacted URL, status or cause class, elapsed, and a
- * redacted 300-byte body snippet. Thrown errors are re-thrown unchanged so the
- * caller's 502 contract stays as it was.
+ * data is exactly what the old `response.json().catch(() => ({}))` gave the
+ * caller: the parsed JSON value as-is (null, a number, an object ...), or {}
+ * when the body could not be read or parsed. Every failure logs one line:
+ * route, redacted URL, status or cause class, elapsed and a redacted
+ * <=300-byte body snippet (the key and the request's own query text and
+ * coordinates masked). A thrown call is re-thrown unchanged so the caller's
+ * 502 contract stays as it was.
  */
-async function postPlaces(fetchImpl, route, url, init) {
+async function postPlaces(fetchImpl, route, url, init, secrets = []) {
   const startedAt = performance.now();
+  const timeoutMs = googlePlacesTimeoutMs();
   const target = `POST ${redactUrl(url)}`;
+  const elapsed = () => Math.round(performance.now() - startedAt);
   let status = 0;
   try {
     const response = await fetchImpl(url, {
       ...init,
-      signal: AbortSignal.timeout(GOOGLE_PLACES_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     status = response.status;
-    const raw = await response.text().catch(() => '');
-    let data = {};
+    let raw = '';
     try {
-      data = JSON.parse(raw);
-    } catch {
-      data = {};
+      raw = await response.text();
+    } catch (error) {
+      console.warn(
+        `[Google Places] ${route} upstream body read failed target="${target}" ` +
+          `class=${failureClass(error)} status=${response.status} elapsed_ms=${elapsed()} ` +
+          `timeout_ms=${timeoutMs}`,
+      );
+      return { response, data: {} };
     }
+    const snippet = () => JSON.stringify(redactSnippet(raw, secrets));
     if (!response.ok)
       console.warn(
         `[Google Places] ${route} upstream HTTP ${response.status} target="${target}" ` +
-          `status=${response.status} elapsed_ms=${Math.round(performance.now() - startedAt)} ` +
-          `body=${JSON.stringify(redactSnippet(raw))}`,
+          `status=${response.status} elapsed_ms=${elapsed()} body=${snippet()}`,
       );
-    return { response, data: data && typeof data === 'object' ? data : {} };
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      if (response.ok)
+        console.warn(
+          `[Google Places] ${route} upstream body malformed target="${target}" ` +
+            `class=malformed status=${response.status} elapsed_ms=${elapsed()} body=${snippet()}`,
+        );
+      return { response, data: {} };
+    }
+    if (response.ok && (data === null || typeof data !== 'object'))
+      console.warn(
+        `[Google Places] ${route} upstream reply is not a JSON object target="${target}" ` +
+          `json_type=${data === null ? 'null' : typeof data} status=${response.status} ` +
+          `elapsed_ms=${elapsed()} body=${snippet()}`,
+      );
+    return { response, data };
   } catch (error) {
     console.warn(
       `[Google Places] ${route} request failed target="${target}" class=${failureClass(error)} ` +
-        `status=${status || 'none'} elapsed_ms=${Math.round(performance.now() - startedAt)} ` +
-        `timeout_ms=${GOOGLE_PLACES_TIMEOUT_MS}`,
+        `status=${status || 'none'} elapsed_ms=${elapsed()} timeout_ms=${timeoutMs}`,
     );
+    if (error && typeof error === 'object') loggedPlacesFailures.add(error);
     throw error;
   }
+}
+
+/** Log a route-side failure (e.g. a null reply the projection cannot read) once. */
+function logPlacesRouteFailure(route, error) {
+  if (error && typeof error === 'object' && loggedPlacesFailures.has(error))
+    return;
+  console.warn(
+    `[Google Places] ${route} reply processing failed class=${failureClass(error)} ` +
+      `response=502`,
+  );
 }
 
 /** Validate raw lat/lon presence and WGS84 bounds before consuming request quota. */
@@ -244,6 +343,7 @@ export function googlePlacesContextProxy({
               },
             }),
           },
+          [apiKey, String(latitude), String(longitude)],
         );
         const places = projectNearbyPlaces(data, latitude, longitude);
 
@@ -259,6 +359,7 @@ export function googlePlacesContextProxy({
           }),
         );
       } catch (error) {
+        logPlacesRouteFailure('nearby-places', error);
         res.statusCode = 502;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(
@@ -366,6 +467,7 @@ export function googlePlacesContextProxy({
               maxResultCount: 5,
             }),
           },
+          [apiKey, textQuery, String(latitude), String(longitude)],
         );
         const places = projectTextSearchPlaces(data, latitude, longitude);
 
@@ -381,6 +483,7 @@ export function googlePlacesContextProxy({
           }),
         );
       } catch (error) {
+        logPlacesRouteFailure('text-search', error);
         res.statusCode = 502;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(

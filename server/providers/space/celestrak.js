@@ -128,18 +128,65 @@ export function celestrakProxy() {
   // markup and secret-looking values removed. A thrown request keeps only
   // its cause class/code, never its message (that can carry URLs or HTML).
   // Kept inside the plugin for the same reason as USER_AGENT above.
-  const redactSnippet = (text, max = 300) =>
-    String(text ?? '')
-      .slice(0, 4096)
+  /**
+   * Log-safe upstream body snippet (b12, STANDARD R3). In order:
+   * 1. the request's own secrets/inputs (`secrets`) are masked literally, in
+   *    raw, JSON-escaped and URL-encoded form, wherever the upstream echoed them;
+   * 2. markup is stripped, `\/` is unescaped, and URL userinfo, Bearer/Basic
+   *    credentials, JSON / query / header style secret fields (key, token,
+   *    secret, password, auth, credential, sig, session, cookie ...) in plain or
+   *    escaped JSON, and well-known key shapes (sk-, AIza, ghp_, xox?-, JWT) are
+   *    masked;
+   * 3. whitespace is collapsed and the result is cut to at most `maxBytes`
+   *    UTF-8 bytes without splitting a code point.
+   * The same text is copied into every b12 provider file (there is no shared
+   * runtime module); src/byrdit/providerErrorLogging.test.mjs checks that the
+   * copies stay identical and attacks each one.
+   */
+  function redactSnippet(text, secrets = [], maxBytes = 300) {
+    let s = String(text ?? '');
+    for (const secret of secrets) {
+      const raw = String(secret ?? '');
+      if (raw.length < 4) continue;
+      const forms = new Set([raw, JSON.stringify(raw).slice(1, -1)]);
+      try {
+        forms.add(encodeURIComponent(raw));
+      } catch {
+        /* lone surrogate: raw + JSON forms only */
+      }
+      for (const form of forms) s = s.split(form).join('REDACTED');
+    }
+    s = s
+      .slice(0, 65536)
       .replace(/<[^>]*>/g, ' ')
-      .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+      .replace(/\\+\//g, '/')
       .replace(
-        /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+        /\b([a-z][a-z0-9+.-]{0,30}:\/\/)[^\s/?#@"'<>]*@/gi,
+        '$1REDACTED@',
+      )
+      .replace(/\b(Bearer|Basic|Token)\s+[^\s"'\\,;]+/gi, '$1 REDACTED')
+      .replace(
+        /((?:\\*["'])?(?<![\w.-])[\w.-]{0,40}(?:key|token|secret|passw(?:or)?d|pwd|pass|auth|credential|signature|sig|session|cookie)[\w.-]{0,40}(?:\\*["'])?\s*[:=]\s*)(?:"(?:[^"\\]|\\.)*"?|\\+"[\s\S]*?(?:\\+"(?=\s*[,}\]])|$)|'[^']*'?|[^\s,&;}\]"'<>]+)/gi,
         '$1REDACTED',
       )
+      .replace(
+        /\b(?:sk-[\w*.-]{4,}|AIza[\w-]{10,}|gh[pousr]_\w{10,}|xox[abprs]-[\w-]{10,}|eyJ[\w-]{6,}\.[\w-]{6,}\.[\w-]*)/g,
+        'REDACTED',
+      )
       .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, max);
+      .trim();
+    const encoder = new TextEncoder();
+    if (encoder.encode(s).length <= maxBytes) return s;
+    let out = '';
+    let bytes = 0;
+    for (const ch of s) {
+      const size = encoder.encode(ch).length;
+      if (bytes + size > maxBytes) break;
+      out += ch;
+      bytes += size;
+    }
+    return out;
+  }
   const failureClass = (error) => {
     // String codes only: DOMException carries a numeric legacy `code`.
     const code =
@@ -158,12 +205,19 @@ export function celestrakProxy() {
   };
 
   /**
-   * One CelesTrak GET with timeout. Resolves to the body text of a 200;
-   * otherwise throws an Error whose message is `HTTP <n>` (non-200) or
-   * 'upstream request failed' (thrown request) and whose `evidence` carries
-   * { url, status, elapsed_ms, body | error_class }.
+   * One CelesTrak GET with timeout. Resolves to { body, evidence } for a 200.
+   * Otherwise throws an Error whose message is `HTTP <n>` (non-200) or
+   * 'upstream request failed' (thrown request / unreadable 200 body) and
+   * whose `evidence` carries { url, status, elapsed_ms, body | error_class }.
+   *
+   * A non-200 LATCHES THE HALT AS SOON AS ITS HEADERS ARRIVE, before any of
+   * its body is read (the old code threw on the status line; a stalled error
+   * body must not keep the halt open and let another group's request out).
+   * The bounded body evidence is collected afterwards and written into that
+   * same latch (see enrichHalt); such errors carry `latched: true` so the
+   * caller does not latch them a second time.
    */
-  async function celestrakGet(url, timeoutMs) {
+  async function celestrakGet(url, timeoutMs, group) {
     const startedAt = performance.now();
     const elapsed = () => Math.round(performance.now() - startedAt);
     let res;
@@ -185,36 +239,132 @@ export function celestrakProxy() {
         },
       });
     }
+    if (!res.ok) {
+      const err = Object.assign(new Error(`HTTP ${res.status}`), {
+        latched: true,
+        evidence: { url, status: res.status, elapsed_ms: elapsed() },
+      });
+      const latch = await haltOnFailure(group, err);
+      const { text, note } = await readBodyEvidence(res);
+      await enrichHalt(latch, {
+        body: redactSnippet(text),
+        ...(note ? { body_note: note } : {}),
+      });
+      throw err;
+    }
     let body;
     try {
       body = await res.text();
     } catch (err) {
-      throw Object.assign(
-        new Error(res.ok ? 'upstream request failed' : `HTTP ${res.status}`),
-        {
-          evidence: {
-            url,
-            status: res.status,
-            elapsed_ms: elapsed(),
-            timeout_ms: timeoutMs,
-            error_class: `body read ${failureClass(err)}`,
-          },
-        },
-      );
-    }
-    if (!res.ok)
-      throw Object.assign(new Error(`HTTP ${res.status}`), {
+      throw Object.assign(new Error('upstream request failed'), {
         evidence: {
           url,
           status: res.status,
           elapsed_ms: elapsed(),
-          body: redactSnippet(body),
+          timeout_ms: timeoutMs,
+          error_class: `body read ${failureClass(err)}`,
         },
       });
+    }
     return {
       body,
       evidence: { url, status: res.status, elapsed_ms: elapsed() },
     };
+  }
+
+  /** Longest wait for a refused response's body once the halt is latched (ms). */
+  const BODY_EVIDENCE_MS = 5000;
+
+  /**
+   * What a refused response's body yields within BODY_EVIDENCE_MS (at most
+   * ~4 KiB), then cancel it. Never throws: a read failure becomes `note`.
+   */
+  async function readBodyEvidence(res) {
+    let timer;
+    const deadline = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ timedOut: true }), BODY_EVIDENCE_MS);
+      timer.unref?.();
+    });
+    let reader = null;
+    let text = '';
+    let note = '';
+    try {
+      reader = res.body?.getReader?.() || null;
+      if (reader) {
+        const decoder = new TextDecoder();
+        while (text.length < 4096) {
+          const step = await Promise.race([reader.read(), deadline]);
+          if (step.timedOut) {
+            note = `body read cut at ${BODY_EVIDENCE_MS} ms evidence deadline`;
+            break;
+          }
+          if (step.done) break;
+          text += decoder.decode(step.value, { stream: true });
+        }
+      } else {
+        const step = await Promise.race([
+          Promise.resolve(res.text()).then((t) => ({ t })),
+          deadline,
+        ]);
+        if (step.timedOut)
+          note = `body read cut at ${BODY_EVIDENCE_MS} ms evidence deadline`;
+        else text = String(step.t ?? '');
+      }
+    } catch (err) {
+      note = `body read ${failureClass(err)}`;
+    } finally {
+      clearTimeout(timer);
+      reader?.cancel().catch(() => {});
+    }
+    return { text, note };
+  }
+
+  /**
+   * Add the body evidence to the latch `haltOnFailure` just made, without
+   * ever re-opening or re-creating it: the halt file is opened 'r+' (fails
+   * if an operator already deleted it) and rewritten only while it is still
+   * that same latch (same `at` and `group`). `halted/at/group/reason` are
+   * never changed, so the S3 celestrak-latch-routine (which keys a latch
+   * event on host|kind|at|reason) sees the same event. `latch` is null when
+   * the halt was already latched before this request: nothing to enrich.
+   */
+  async function enrichHalt(latch, fields) {
+    if (!latch) return;
+    if (
+      haltState &&
+      haltState.at === latch.at &&
+      haltState.group === latch.group
+    )
+      Object.assign(haltState, fields);
+    let written = false;
+    let handle;
+    try {
+      handle = await fsp.open(HALT_FILE, 'r+');
+      const onDisk = JSON.parse(await handle.readFile('utf8'));
+      if (
+        onDisk?.halted === true &&
+        onDisk.at === latch.at &&
+        onDisk.group === latch.group
+      ) {
+        const text = JSON.stringify({ ...onDisk, ...fields });
+        await handle.truncate(0);
+        await handle.write(text, 0, 'utf8');
+        written = true;
+      }
+    } catch {
+      /* gone (operator cleared it) or unreadable: never re-create it */
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+    const detail = Object.entries(fields)
+      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+      .join(' ');
+    console.warn(
+      `[celestrak-proxy] ${latch.group} halt evidence (${latch.reason}) status=${latch.status} ${detail}` +
+        (written
+          ? ''
+          : ' (halt file not updated: removed by an operator or never written)'),
+    );
   }
 
   /** Halt marker on disk, or null. Unreadable/foreign content = not halted. */
@@ -270,7 +420,7 @@ export function celestrakProxy() {
     ])
       if (ev[key] !== undefined) evidence[key] = ev[key];
     const already = haltState;
-    haltState = {
+    const latched = {
       halted: true,
       at: Date.now(),
       group,
@@ -278,22 +428,26 @@ export function celestrakProxy() {
       ...evidence,
       clear: `check https://celestrak.org, then delete ${HALT_FILE}`,
     };
-    if (already) return;
+    haltState = latched;
+    if (already) return null;
     const detail = Object.entries(evidence)
       .map(([k, v]) => `${k}=${typeof v === 'string' ? JSON.stringify(v) : v}`)
       .join(' ');
     console.warn(
-      `[celestrak-proxy] ${group} refresh failed (${reason})${detail ? ` ${detail}` : ''} — ALL CelesTrak requests HALTED ` +
+      `[celestrak-proxy] ${group} refresh failed (${reason})${detail ? ` ${detail}` : ''}` +
+        (err?.latched ? ' body=(follows in a halt evidence line)' : '') +
+        ` — ALL CelesTrak requests HALTED ` +
         `until an operator deletes ${HALT_FILE}; serving cache if any`,
     );
     try {
       await fsp.mkdir(CACHE_DIR, { recursive: true });
-      await fsp.writeFile(HALT_FILE, JSON.stringify(haltState), 'utf8');
+      await fsp.writeFile(HALT_FILE, JSON.stringify(latched), 'utf8');
     } catch {
       console.warn(
         '[celestrak-proxy] halt file write failed — halted in memory only',
       );
     }
+    return latched;
   }
 
   /** True if `body` is GP CSV (not a legacy TLE cache written before the migration). */
@@ -337,6 +491,7 @@ export function celestrakProxy() {
     const { body, evidence } = await celestrakGet(
       celestrakTleUrl(group).toString(),
       20000,
+      group,
     );
     // An upstream error page parses to zero CSV rows — treat as failure, keep
     // cache. Validate against the GP CSV header CelesTrak sends. The 200
@@ -381,6 +536,7 @@ export function celestrakProxy() {
     const { body, evidence } = await celestrakGet(
       celestrakSatcatUrl().toString(),
       60000,
+      'satcat',
     );
     const parsed = parseSatcatRcs(body);
     if (!parsed)
@@ -456,7 +612,8 @@ export function celestrakProxy() {
             return fresh;
           })
           .catch(async (err) => {
-            await haltOnFailure('satcat', err);
+            // A refusal latched at its headers inside celestrakGet already.
+            if (!err?.latched) await haltOnFailure('satcat', err);
             return null;
           })
           .finally(() => {
@@ -554,7 +711,8 @@ export function celestrakProxy() {
                 return fresh;
               })
               .catch(async (err) => {
-                await haltOnFailure(group, err);
+                // A refusal latched at its headers inside celestrakGet already.
+                if (!err?.latched) await haltOnFailure(group, err);
                 return null;
               })
               .finally(() => inflight.delete(group)),

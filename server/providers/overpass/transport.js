@@ -62,19 +62,61 @@ function overpassPayloadIsData(payload) {
 
 const cooldowns = new Map();
 
-/** First 300 bytes of an upstream body for a log line, markup and secrets removed. */
-function redactSnippet(text, max = 300) {
-  return String(text ?? '')
-    .slice(0, 4096)
+/**
+ * Log-safe upstream body snippet (b12, STANDARD R3). In order:
+ * 1. the request's own secrets/inputs (`secrets`) are masked literally, in
+ *    raw, JSON-escaped and URL-encoded form, wherever the upstream echoed them;
+ * 2. markup is stripped, `\/` is unescaped, and URL userinfo, Bearer/Basic
+ *    credentials, JSON / query / header style secret fields (key, token,
+ *    secret, password, auth, credential, sig, session, cookie ...) in plain or
+ *    escaped JSON, and well-known key shapes (sk-, AIza, ghp_, xox?-, JWT) are
+ *    masked;
+ * 3. whitespace is collapsed and the result is cut to at most `maxBytes`
+ *    UTF-8 bytes without splitting a code point.
+ * The same text is copied into every b12 provider file (there is no shared
+ * runtime module); src/byrdit/providerErrorLogging.test.mjs checks that the
+ * copies stay identical and attacks each one.
+ */
+function redactSnippet(text, secrets = [], maxBytes = 300) {
+  let s = String(text ?? '');
+  for (const secret of secrets) {
+    const raw = String(secret ?? '');
+    if (raw.length < 4) continue;
+    const forms = new Set([raw, JSON.stringify(raw).slice(1, -1)]);
+    try {
+      forms.add(encodeURIComponent(raw));
+    } catch {
+      /* lone surrogate: raw + JSON forms only */
+    }
+    for (const form of forms) s = s.split(form).join('REDACTED');
+  }
+  s = s
+    .slice(0, 65536)
     .replace(/<[^>]*>/g, ' ')
-    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+    .replace(/\\+\//g, '/')
+    .replace(/\b([a-z][a-z0-9+.-]{0,30}:\/\/)[^\s/?#@"'<>]*@/gi, '$1REDACTED@')
+    .replace(/\b(Bearer|Basic|Token)\s+[^\s"'\\,;]+/gi, '$1 REDACTED')
     .replace(
-      /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+      /((?:\\*["'])?(?<![\w.-])[\w.-]{0,40}(?:key|token|secret|passw(?:or)?d|pwd|pass|auth|credential|signature|sig|session|cookie)[\w.-]{0,40}(?:\\*["'])?\s*[:=]\s*)(?:"(?:[^"\\]|\\.)*"?|\\+"[\s\S]*?(?:\\+"(?=\s*[,}\]])|$)|'[^']*'?|[^\s,&;}\]"'<>]+)/gi,
       '$1REDACTED',
     )
+    .replace(
+      /\b(?:sk-[\w*.-]{4,}|AIza[\w-]{10,}|gh[pousr]_\w{10,}|xox[abprs]-[\w-]{10,}|eyJ[\w-]{6,}\.[\w-]{6,}\.[\w-]*)/g,
+      'REDACTED',
+    )
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, max);
+    .trim();
+  const encoder = new TextEncoder();
+  if (encoder.encode(s).length <= maxBytes) return s;
+  let out = '';
+  let bytes = 0;
+  for (const ch of s) {
+    const size = encoder.encode(ch).length;
+    if (bytes + size > maxBytes) break;
+    out += ch;
+    bytes += size;
+  }
+  return out;
 }
 
 /**
@@ -180,8 +222,16 @@ async function fetchOverpassPayload(
     const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
     const startedAt = performance.now();
     let upstreamStatus = 0;
+    let responseBody = null;
+    // The endpoint's own credentials are masked if a body echoes them.
+    const secrets = [];
     try {
       const requestUrl = new URL(endpoint);
+      secrets.push(
+        decodeURIComponent(requestUrl.username),
+        decodeURIComponent(requestUrl.password),
+        ...[...requestUrl.searchParams.values()],
+      );
       const authorization =
         requestUrl.username || requestUrl.password
           ? 'Basic ' +
@@ -189,6 +239,7 @@ async function fetchOverpassPayload(
               `${decodeURIComponent(requestUrl.username)}:${decodeURIComponent(requestUrl.password)}`,
             ).toString('base64')
           : null;
+      if (authorization) secrets.push(authorization.slice('Basic '.length));
       requestUrl.username = '';
       requestUrl.password = '';
       const upstream = await fetchImpl(requestUrl.href, {
@@ -203,7 +254,7 @@ async function fetchOverpassPayload(
         signal: controller.signal,
       });
       upstreamStatus = upstream.status;
-      const responseBody = await readBody(upstream, maxResponseBytes);
+      responseBody = await readBody(upstream, maxResponseBytes);
       const rateLimited =
         upstream.status === 429 ||
         upstream.status === 406 ||
@@ -233,7 +284,7 @@ async function fetchOverpassPayload(
           `[Overpass] upstream refused endpoint=${endpointForLog(endpoint)} ` +
             `class=${rateLimited ? 'rate_limited' : upstream.status >= 200 && upstream.status < 300 ? 'runtime_error' : 'http'} ` +
             `status=${upstream.status} elapsed_ms=${Math.round(performance.now() - startedAt)} ` +
-            `cooldown_ms=${delay} failures=${failures} body=${JSON.stringify(redactSnippet(responseBody))}`,
+            `cooldown_ms=${delay} failures=${failures} body=${JSON.stringify(redactSnippet(responseBody, secrets))}`,
         );
         continue;
       }
@@ -262,7 +313,11 @@ async function fetchOverpassPayload(
         `[Overpass] upstream failed endpoint=${endpointForLog(endpoint)} ` +
           `class=${overpassFailureClass(error)} status=${upstreamStatus || 'none'} ` +
           `elapsed_ms=${Math.round(performance.now() - startedAt)} timeout_ms=${OVERPASS_TIMEOUT_MS} ` +
-          `cooldown_ms=${delay} failures=${failures}`,
+          `cooldown_ms=${delay} failures=${failures}` +
+          // A body that was read but is malformed is the evidence.
+          (responseBody !== null
+            ? ` body=${JSON.stringify(redactSnippet(responseBody, secrets))}`
+            : ''),
       );
     } finally {
       clearTimeout(timeoutId);
