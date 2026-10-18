@@ -132,12 +132,73 @@ export function _routeInflightCountForTest() {
   return _routeInflight.size;
 }
 
-/** Release a response body we are not going to read. */
-async function cancelBody(response) {
+/** First 300 bytes of an upstream body for a log line, markup and secrets removed. */
+function redactSnippet(text, max = 300) {
+  return String(text ?? '')
+    .slice(0, 4096)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+    .replace(
+      /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+      '$1REDACTED',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+/** Cause class of a thrown error: never its message. */
+function failureClass(error) {
+  // String codes only: DOMException carries a numeric legacy `code`.
+  const code =
+    [error?.cause?.code, error?.code].find((c) => typeof c === 'string') || '';
+  // The only abort on this path is fetchRoute's 12 s timer.
+  if (
+    error?.name === 'AbortError' ||
+    error?.name === 'TimeoutError' ||
+    code === 'UND_ERR_CONNECT_TIMEOUT' ||
+    code === 'UND_ERR_HEADERS_TIMEOUT' ||
+    code === 'ETIMEDOUT'
+  )
+    return `timeout${code ? ` code=${code}` : ''}`;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `dns code=${code}`;
+  if (code === 'RESPONSE_TOO_LARGE') return 'too_large';
+  if (error instanceof SyntaxError) return 'malformed';
+  if (code) return `network code=${code}`;
+  return error?.name || 'error';
+}
+
+/**
+ * Routing target for a log line: endpoint origin/path and profile, with the
+ * coordinates (a user's start/end points) reduced to a count and no userinfo.
+ */
+function routeTargetForLog(base, osrmProfile, coords) {
+  let shown = '(invalid endpoint)';
   try {
-    await response.body?.cancel();
+    const url = new URL(base);
+    shown = `${url.origin}${url.pathname.replace(/\/$/, '')}`;
   } catch {
-    /* already closed */
+    /* keep the placeholder */
+  }
+  return `GET ${shown}/route/v1/${osrmProfile}/<${String(coords).split(';').length} coords>`;
+}
+
+/** Read at most ~4 KiB of a body we are about to discard, for the log. */
+async function peekAndCancel(response) {
+  try {
+    const reader = response.body?.getReader?.();
+    if (!reader) return await response.text();
+    const decoder = new TextDecoder();
+    let text = '';
+    while (text.length < 4096) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    reader.cancel().catch(() => {});
+    return text;
+  } catch {
+    return '';
   }
 }
 
@@ -168,31 +229,46 @@ async function fetchRoute({
     `?overview=full&geometries=geojson&alternatives=false&steps=${withSteps ? 'true' : 'false'}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
+  const target = routeTargetForLog(base, osrmProfile, coords);
+  let startedAt = 0;
+  let upstreamStatus = 0;
+  const elapsed = () =>
+    startedAt ? Math.round(performance.now() - startedAt) : 0;
+  const logRefusal = (reason, body) =>
+    console.warn(
+      `[Route Proxy] upstream ${reason} target="${target}" status=${upstreamStatus} ` +
+        `elapsed_ms=${elapsed()} body=${JSON.stringify(redactSnippet(body))}`,
+    );
   let osrm;
   try {
-    const upstreamRes = await throughUpstreamGate(() =>
-      fetchImpl(upstream, {
+    const upstreamRes = await throughUpstreamGate(() => {
+      startedAt = performance.now();
+      return fetchImpl(upstream, {
         signal: controller.signal,
         // The endpoint is configured above; a redirect is the one way out of
         // it, so it is refused rather than followed.
         redirect: 'error',
         headers: { 'User-Agent': 'gods-eye-view/dev (local)' },
-      }),
-    );
+      });
+    });
+    upstreamStatus = upstreamRes.status;
     if (upstreamRes.status === 429) {
-      await cancelBody(upstreamRes);
+      logRefusal('rate limited', await peekAndCancel(upstreamRes));
       const retryAfter = Number(upstreamRes.headers.get('retry-after'));
       throw new UpstreamRateLimitError(
         Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 5,
       );
     }
     if (!upstreamRes.ok) {
-      await cancelBody(upstreamRes);
+      logRefusal('non-OK', await peekAndCancel(upstreamRes));
       return { payload: null, error: 'no route found' };
     }
     const ctype = upstreamRes.headers.get('content-type') || '';
     if (!ctype.includes('json')) {
-      await cancelBody(upstreamRes);
+      logRefusal(
+        `non-JSON content-type=${JSON.stringify(ctype.slice(0, 80))}`,
+        await peekAndCancel(upstreamRes),
+      );
       return { payload: null, error: 'no route found' };
     }
     const text = await readResponseTextCapped(
@@ -200,6 +276,18 @@ async function fetchRoute({
       ROUTE_MAX_RESPONSE_BYTES,
     );
     osrm = JSON.parse(text);
+  } catch (error) {
+    // Local refusals (queue full) and the 429 above are not upstream faults
+    // and are reported by the middleware / logRefusal already.
+    if (
+      !(error instanceof RouteBusyError) &&
+      !(error instanceof UpstreamRateLimitError)
+    )
+      console.warn(
+        `[Route Proxy] upstream request failed target="${target}" class=${failureClass(error)} ` +
+          `status=${upstreamStatus || 'none'} elapsed_ms=${elapsed()} timeout_ms=12000`,
+      );
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -363,7 +451,13 @@ export function installRouteMiddleware(
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(shapePayload(payload)));
     } catch (e) {
-      console.error('[Route Proxy]', e?.message || e);
+      // The upstream cause (class/status/elapsed/body) was logged in
+      // fetchRoute; this line names the client-facing outcome.
+      const code = [e?.cause?.code, e?.code].find((c) => typeof c === 'string');
+      console.error(
+        `[Route Proxy] request failed class=${e?.name || 'error'}${code ? ` code=${code}` : ''} ` +
+          `response="route proxy error"`,
+      );
       fail('route proxy error');
     }
   });

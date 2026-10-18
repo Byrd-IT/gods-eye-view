@@ -35,6 +35,102 @@ function googleRateLimiter() {
   return _googleRateLimiter;
 }
 
+/** Upstream timeout for one Google Places call (ms); bounds headers and body. */
+export const GOOGLE_PLACES_TIMEOUT_MS = 10_000;
+
+/**
+ * URL for a log line. The key travels in X-Goog-Api-Key, but an override
+ * endpoint could still carry `?key=`: drop userinfo, mask secret-looking
+ * query values.
+ */
+function redactUrl(value) {
+  try {
+    const url = new URL(String(value));
+    url.username = '';
+    url.password = '';
+    for (const name of [...url.searchParams.keys()])
+      if (/key|token|secret|pass|auth|sig/i.test(name))
+        url.searchParams.set(name, 'REDACTED');
+    return url.href;
+  } catch {
+    return '(unparseable url)';
+  }
+}
+
+/** First 300 bytes of an upstream body for a log line, markup and secrets removed. */
+function redactSnippet(text, max = 300) {
+  return String(text ?? '')
+    .slice(0, 4096)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+    .replace(
+      /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+      '$1REDACTED',
+    )
+    .replace(/\bAIza[\w-]{20,}/g, 'REDACTED')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+/** Cause class of a thrown error: never its message. */
+function failureClass(error) {
+  // String codes only: DOMException carries a numeric legacy `code`.
+  const code =
+    [error?.cause?.code, error?.code].find((c) => typeof c === 'string') || '';
+  if (
+    error?.name === 'TimeoutError' ||
+    code === 'UND_ERR_CONNECT_TIMEOUT' ||
+    code === 'UND_ERR_HEADERS_TIMEOUT' ||
+    code === 'ETIMEDOUT'
+  )
+    return `timeout${code ? ` code=${code}` : ''}`;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `dns code=${code}`;
+  if (code) return `network code=${code}`;
+  return error?.name || 'error';
+}
+
+/**
+ * POST one Places request with a timeout. Returns { response, data } where
+ * data is the parsed JSON body (or {}). A non-OK status or a thrown call logs
+ * one line: route, redacted URL, status or cause class, elapsed, and a
+ * redacted 300-byte body snippet. Thrown errors are re-thrown unchanged so the
+ * caller's 502 contract stays as it was.
+ */
+async function postPlaces(fetchImpl, route, url, init) {
+  const startedAt = performance.now();
+  const target = `POST ${redactUrl(url)}`;
+  let status = 0;
+  try {
+    const response = await fetchImpl(url, {
+      ...init,
+      signal: AbortSignal.timeout(GOOGLE_PLACES_TIMEOUT_MS),
+    });
+    status = response.status;
+    const raw = await response.text().catch(() => '');
+    let data = {};
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = {};
+    }
+    if (!response.ok)
+      console.warn(
+        `[Google Places] ${route} upstream HTTP ${response.status} target="${target}" ` +
+          `status=${response.status} elapsed_ms=${Math.round(performance.now() - startedAt)} ` +
+          `body=${JSON.stringify(redactSnippet(raw))}`,
+      );
+    return { response, data: data && typeof data === 'object' ? data : {} };
+  } catch (error) {
+    console.warn(
+      `[Google Places] ${route} request failed target="${target}" class=${failureClass(error)} ` +
+        `status=${status || 'none'} elapsed_ms=${Math.round(performance.now() - startedAt)} ` +
+        `timeout_ms=${GOOGLE_PLACES_TIMEOUT_MS}`,
+    );
+    throw error;
+  }
+}
+
 /** Validate raw lat/lon presence and WGS84 bounds before consuming request quota. */
 export function validatePlacesCoordinates(searchParams) {
   const rawLat = searchParams.get('lat');
@@ -115,7 +211,9 @@ export function googlePlacesContextProxy({
       );
 
       try {
-        const response = await fetchImpl(
+        const { response, data } = await postPlaces(
+          fetchImpl,
+          'nearby-places',
           endpoints.nearby ||
             'https://places.googleapis.com/v1/places:searchNearby',
           {
@@ -147,7 +245,6 @@ export function googlePlacesContextProxy({
             }),
           },
         );
-        const data = await response.json().catch(() => ({}));
         const places = projectNearbyPlaces(data, latitude, longitude);
 
         res.statusCode = response.ok ? 200 : response.status;
@@ -237,7 +334,9 @@ export function googlePlacesContextProxy({
       );
 
       try {
-        const response = await fetchImpl(
+        const { response, data } = await postPlaces(
+          fetchImpl,
+          'text-search',
           endpoints.textSearch ||
             'https://places.googleapis.com/v1/places:searchText',
           {
@@ -268,7 +367,6 @@ export function googlePlacesContextProxy({
             }),
           },
         );
-        const data = await response.json().catch(() => ({}));
         const places = projectTextSearchPlaces(data, latitude, longitude);
 
         res.statusCode = response.ok ? 200 : response.status;

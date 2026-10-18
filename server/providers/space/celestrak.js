@@ -121,6 +121,102 @@ export function celestrakProxy() {
   /** @type {{at: number, group: string, reason: string} | null} */
   let haltState = null;
 
+  // --- Failure evidence (STANDARD R3/R8) ----------------------------------
+  // The halt records WHAT CelesTrak answered so a human can tell a firewall
+  // block from "data not updated" without asking CelesTrak again: request
+  // URL, HTTP status, elapsed time and the first 300 bytes of the body with
+  // markup and secret-looking values removed. A thrown request keeps only
+  // its cause class/code, never its message (that can carry URLs or HTML).
+  // Kept inside the plugin for the same reason as USER_AGENT above.
+  const redactSnippet = (text, max = 300) =>
+    String(text ?? '')
+      .slice(0, 4096)
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+      .replace(
+        /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+        '$1REDACTED',
+      )
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, max);
+  const failureClass = (error) => {
+    // String codes only: DOMException carries a numeric legacy `code`.
+    const code =
+      [error?.cause?.code, error?.code].find((c) => typeof c === 'string') ||
+      '';
+    if (
+      error?.name === 'TimeoutError' ||
+      code === 'UND_ERR_CONNECT_TIMEOUT' ||
+      code === 'UND_ERR_HEADERS_TIMEOUT' ||
+      code === 'ETIMEDOUT'
+    )
+      return code ? `timeout code=${code}` : 'timeout';
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `dns code=${code}`;
+    if (/^[A-Z][A-Z0-9_]{2,40}$/.test(code)) return `network code=${code}`;
+    return /^[A-Za-z]{1,40}$/.test(String(error?.name)) ? error.name : 'error';
+  };
+
+  /**
+   * One CelesTrak GET with timeout. Resolves to the body text of a 200;
+   * otherwise throws an Error whose message is `HTTP <n>` (non-200) or
+   * 'upstream request failed' (thrown request) and whose `evidence` carries
+   * { url, status, elapsed_ms, body | error_class }.
+   */
+  async function celestrakGet(url, timeoutMs) {
+    const startedAt = performance.now();
+    const elapsed = () => Math.round(performance.now() - startedAt);
+    let res;
+    try {
+      res = await fetch(url, {
+        signal: AbortSignal.timeout(timeoutMs),
+        // CelesTrak 403s bulk groups (e.g. `active`) unless the request
+        // carries a descriptive User-Agent with a contact point.
+        headers: { 'User-Agent': USER_AGENT },
+      });
+    } catch (err) {
+      throw Object.assign(new Error('upstream request failed'), {
+        evidence: {
+          url,
+          status: null,
+          elapsed_ms: elapsed(),
+          timeout_ms: timeoutMs,
+          error_class: failureClass(err),
+        },
+      });
+    }
+    let body;
+    try {
+      body = await res.text();
+    } catch (err) {
+      throw Object.assign(
+        new Error(res.ok ? 'upstream request failed' : `HTTP ${res.status}`),
+        {
+          evidence: {
+            url,
+            status: res.status,
+            elapsed_ms: elapsed(),
+            timeout_ms: timeoutMs,
+            error_class: `body read ${failureClass(err)}`,
+          },
+        },
+      );
+    }
+    if (!res.ok)
+      throw Object.assign(new Error(`HTTP ${res.status}`), {
+        evidence: {
+          url,
+          status: res.status,
+          elapsed_ms: elapsed(),
+          body: redactSnippet(body),
+        },
+      });
+    return {
+      body,
+      evidence: { url, status: res.status, elapsed_ms: elapsed() },
+    };
+  }
+
   /** Halt marker on disk, or null. Unreadable/foreign content = not halted. */
   async function readHalt() {
     try {
@@ -153,17 +249,41 @@ export function celestrakProxy() {
 
   /** Latches the halt after a failed refresh and logs it once. */
   async function haltOnFailure(group, err) {
-    // Upstream error text can contain request URLs, tokens, or an HTML body.
-    // Keep only the safe HTTP status; everything else collapses to a label.
+    // `reason` stays the short label the halt-check pager and the tests
+    // read: `HTTP <n>` or 'upstream request failed'. The evidence fields
+    // (url, status, elapsed_ms, body | error_class) were built by
+    // celestrakGet from the response itself, already redacted; a raw error
+    // message is never stored or logged.
     const message = String(err?.message || err);
     const reason = /^HTTP \d+$/.test(message)
       ? message
       : 'upstream request failed';
+    const ev = err && typeof err.evidence === 'object' ? err.evidence : {};
+    const evidence = {};
+    for (const key of [
+      'url',
+      'status',
+      'elapsed_ms',
+      'timeout_ms',
+      'body',
+      'error_class',
+    ])
+      if (ev[key] !== undefined) evidence[key] = ev[key];
     const already = haltState;
-    haltState = { halted: true, at: Date.now(), group, reason };
+    haltState = {
+      halted: true,
+      at: Date.now(),
+      group,
+      reason,
+      ...evidence,
+      clear: `check https://celestrak.org, then delete ${HALT_FILE}`,
+    };
     if (already) return;
+    const detail = Object.entries(evidence)
+      .map(([k, v]) => `${k}=${typeof v === 'string' ? JSON.stringify(v) : v}`)
+      .join(' ');
     console.warn(
-      `[celestrak-proxy] ${group} refresh failed (${reason}) — ALL CelesTrak requests HALTED ` +
+      `[celestrak-proxy] ${group} refresh failed (${reason})${detail ? ` ${detail}` : ''} — ALL CelesTrak requests HALTED ` +
         `until an operator deletes ${HALT_FILE}; serving cache if any`,
     );
     try {
@@ -214,18 +334,21 @@ export function celestrakProxy() {
   }
 
   async function fetchUpstream(group) {
-    const url = celestrakTleUrl(group);
-    const res = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(20000),
-      // CelesTrak 403s bulk groups (e.g. `active`) unless the request carries a
-      // descriptive User-Agent with a contact point.
-      headers: { 'User-Agent': USER_AGENT },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = await res.text();
+    const { body, evidence } = await celestrakGet(
+      celestrakTleUrl(group).toString(),
+      20000,
+    );
     // An upstream error page parses to zero CSV rows — treat as failure, keep
-    // cache. Validate against the GP CSV header CelesTrak sends.
-    if (!isGpCsv(body)) throw new Error('no GP CSV rows in response');
+    // cache. Validate against the GP CSV header CelesTrak sends. The 200
+    // body is the evidence ("data not updated" text vs an HTML block page).
+    if (!isGpCsv(body))
+      throw Object.assign(new Error('no GP CSV rows in response'), {
+        evidence: {
+          ...evidence,
+          error_class: 'malformed (no GP CSV header)',
+          body: redactSnippet(body),
+        },
+      });
     return { at: Date.now(), body };
   }
 
@@ -255,13 +378,19 @@ export function celestrakProxy() {
   }
 
   async function fetchRcsUpstream() {
-    const res = await fetch(celestrakSatcatUrl().toString(), {
-      signal: AbortSignal.timeout(60000),
-      headers: { 'User-Agent': USER_AGENT },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const parsed = parseSatcatRcs(await res.text());
-    if (!parsed) throw new Error('no SATCAT CSV rows in response');
+    const { body, evidence } = await celestrakGet(
+      celestrakSatcatUrl().toString(),
+      60000,
+    );
+    const parsed = parseSatcatRcs(body);
+    if (!parsed)
+      throw Object.assign(new Error('no SATCAT CSV rows in response'), {
+        evidence: {
+          ...evidence,
+          error_class: 'malformed (no SATCAT CSV header)',
+          body: redactSnippet(body),
+        },
+      });
     return { at: Date.now(), ...parsed };
   }
 

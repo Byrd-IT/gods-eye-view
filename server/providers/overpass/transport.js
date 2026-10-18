@@ -62,6 +62,57 @@ function overpassPayloadIsData(payload) {
 
 const cooldowns = new Map();
 
+/** First 300 bytes of an upstream body for a log line, markup and secrets removed. */
+function redactSnippet(text, max = 300) {
+  return String(text ?? '')
+    .slice(0, 4096)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, '$1 REDACTED')
+    .replace(
+      /([?&](?:key|api_?key|token|access_token|secret|password|sig|signature)=)[^&\s"']*/gi,
+      '$1REDACTED',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+/**
+ * Cause class of a thrown Overpass failure, so an outage (timeout, DNS,
+ * refused) can be told from a bad answer (malformed, too large). Never the
+ * error message: it can carry the endpoint.
+ */
+function overpassFailureClass(error) {
+  // String codes only: DOMException carries a numeric legacy `code`.
+  const code =
+    [error?.cause?.code, error?.code].find((c) => typeof c === 'string') || '';
+  // The only abort on this path is the OVERPASS_TIMEOUT_MS timer.
+  if (
+    error?.name === 'AbortError' ||
+    error?.name === 'TimeoutError' ||
+    code === 'UND_ERR_CONNECT_TIMEOUT' ||
+    code === 'UND_ERR_HEADERS_TIMEOUT' ||
+    code === 'ETIMEDOUT'
+  )
+    return `timeout${code ? ` code=${code}` : ''}`;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `dns code=${code}`;
+  if (code === 'RESPONSE_TOO_LARGE') return 'too_large';
+  if (code === 'OVERPASS_MALFORMED' || error instanceof SyntaxError)
+    return 'malformed';
+  if (code) return `network code=${code}`;
+  return error?.name || 'error';
+}
+
+/** Endpoint for a log line: origin + path only (no userinfo, no query). */
+function endpointForLog(endpoint) {
+  try {
+    const url = new URL(endpoint);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return '(invalid endpoint)';
+  }
+}
+
 /** A stable, non-retryable capability response shared by every Overpass route. */
 export function overpassNotConfigured() {
   return {
@@ -127,6 +178,8 @@ async function fetchOverpassPayload(
     }
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
+    const startedAt = performance.now();
+    let upstreamStatus = 0;
     try {
       const requestUrl = new URL(endpoint);
       const authorization =
@@ -149,6 +202,7 @@ async function fetchOverpassPayload(
         body,
         signal: controller.signal,
       });
+      upstreamStatus = upstream.status;
       const responseBody = await readBody(upstream, maxResponseBytes);
       const rateLimited =
         upstream.status === 429 ||
@@ -175,11 +229,19 @@ async function fetchOverpassPayload(
         while (cooldowns.size > 64)
           cooldowns.delete(cooldowns.keys().next().value);
         failure = refusal(status, delay);
+        console.warn(
+          `[Overpass] upstream refused endpoint=${endpointForLog(endpoint)} ` +
+            `class=${rateLimited ? 'rate_limited' : upstream.status >= 200 && upstream.status < 300 ? 'runtime_error' : 'http'} ` +
+            `status=${upstream.status} elapsed_ms=${Math.round(performance.now() - startedAt)} ` +
+            `cooldown_ms=${delay} failures=${failures} body=${JSON.stringify(redactSnippet(responseBody))}`,
+        );
         continue;
       }
       const parsed = JSON.parse(responseBody);
       if (!Array.isArray(parsed?.elements) || parsed.remark)
-        throw new Error('Malformed Overpass response');
+        throw Object.assign(new Error('Malformed Overpass response'), {
+          code: 'OVERPASS_MALFORMED',
+        });
       cooldowns.delete(endpoint);
       return {
         status: upstream.status,
@@ -189,13 +251,19 @@ async function fetchOverpassPayload(
         endpoint: 'configured',
         rateLimited: false,
       };
-    } catch {
+    } catch (error) {
       const failures = (previous?.failures || 0) + 1;
       const delay = retryDelay(null, failures - 1, now());
       cooldowns.set(endpoint, { until: now() + delay, failures, status: 502 });
       while (cooldowns.size > 64)
         cooldowns.delete(cooldowns.keys().next().value);
       failure = refusal(502, delay);
+      console.warn(
+        `[Overpass] upstream failed endpoint=${endpointForLog(endpoint)} ` +
+          `class=${overpassFailureClass(error)} status=${upstreamStatus || 'none'} ` +
+          `elapsed_ms=${Math.round(performance.now() - startedAt)} timeout_ms=${OVERPASS_TIMEOUT_MS} ` +
+          `cooldown_ms=${delay} failures=${failures}`,
+      );
     } finally {
       clearTimeout(timeoutId);
     }

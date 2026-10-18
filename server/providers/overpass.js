@@ -221,11 +221,20 @@ function overpassProxy({ routing = {} } = {}) {
       } catch (e) {
         // Every mirror threw (network-level). Same serve-stale rule.
         const stale = cacheKey ? await readStaleOverpass(cacheKey) : null;
+        // Upstream failures are logged per endpoint in overpass/transport.js;
+        // this catch sees proxy-side failures (body read, cache I/O, ...).
+        // Name/code only: the message can carry the configured endpoint.
+        const code = [e?.cause?.code, e?.code].find(
+          (c) => typeof c === 'string',
+        );
+        console.error(
+          `[Overpass Proxy] request failed class=${e?.name || 'error'}${code ? ` code=${code}` : ''} ` +
+            (stale ? 'serving=STALE' : 'status=502'),
+        );
         if (stale) {
           sendOverpassResponse(res, stale, 'STALE');
           return;
         }
-        console.error('[Overpass Proxy] request failed');
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Overpass proxy error' }));
       }

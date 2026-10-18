@@ -6,6 +6,44 @@ import { enforceRateLimit, openAiRateLimiter } from './rate-limit.js';
 import { readRequestBody } from '../common/request.js';
 import { OPENAI_HUD_SUMMARY_MODEL_DEFAULT } from './constants.js';
 
+const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
+/** Upstream timeout for one HUD summary (ms); bounds headers and body read. */
+export const HUD_SUMMARY_TIMEOUT_MS = 15_000;
+
+/**
+ * First 300 bytes of an upstream body for a log line. OpenAI error bodies
+ * never echo the prompt, but they can quote a masked key: mask sk-... and
+ * bearer tokens anyway, strip markup, collapse whitespace.
+ */
+function redactSnippet(text, max = 300) {
+  return String(text ?? '')
+    .slice(0, 4096)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\b(Bearer|Basic)\s+[\w.~+/=*-]+/gi, '$1 REDACTED')
+    .replace(/\bsk-[\w*.-]{4,}/g, 'REDACTED')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+/** Cause class of a thrown error: never its message. */
+function failureClass(error) {
+  // String codes only: DOMException carries a numeric legacy `code`.
+  const code =
+    [error?.cause?.code, error?.code].find((c) => typeof c === 'string') || '';
+  if (
+    error?.name === 'TimeoutError' ||
+    code === 'UND_ERR_CONNECT_TIMEOUT' ||
+    code === 'UND_ERR_HEADERS_TIMEOUT' ||
+    code === 'ETIMEDOUT'
+  )
+    return `timeout${code ? ` code=${code}` : ''}`;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `dns code=${code}`;
+  if (error instanceof SyntaxError) return 'malformed';
+  if (code) return `network code=${code}`;
+  return error?.name || 'error';
+}
+
 function extractOpenAiResponseText(data) {
   if (typeof data?.output_text === 'string' && data.output_text.trim()) {
     return data.output_text.trim();
@@ -51,10 +89,18 @@ async function handleHudSummary(req, res) {
   // consuming a paid-endpoint quota slot.
   if (!enforceRateLimit(openAiRateLimiter(), req, res)) return;
 
+  // `stage` tells a client-side failure (oversized/invalid request body) from
+  // an upstream one in the log. The prompt, the context and the key are never
+  // logged.
+  let stage = 'client-body';
+  let startedAt = 0;
+  let upstreamStatus = 0;
   try {
     const body = await readRequestBody(req, 64 * 1024);
     const context = JSON.parse(body || '{}');
-    const response = await fetch('https://api.openai.com/v1/responses', {
+    stage = 'upstream';
+    startedAt = performance.now();
+    const response = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -69,14 +115,26 @@ async function handleHudSummary(req, res) {
         reasoning: { effort: 'minimal' },
         max_output_tokens: 100,
       }),
+      signal: AbortSignal.timeout(HUD_SUMMARY_TIMEOUT_MS),
     });
-    const data = await response.json().catch(() => ({}));
+    upstreamStatus = response.status;
+    const raw = await response.text().catch(() => '');
+    let data = {};
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = {};
+    }
     const summary = toFiveWordHudSummary(extractOpenAiResponseText(data));
     res.statusCode = response.ok && summary ? 200 : response.status || 502;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     if (!response.ok)
-      console.warn(`[hud-summary] upstream HTTP ${response.status}`);
+      console.warn(
+        `[hud-summary] upstream HTTP ${response.status} target="POST ${OPENAI_RESPONSES_URL}" ` +
+          `status=${response.status} elapsed_ms=${Math.round(performance.now() - startedAt)} ` +
+          `body=${JSON.stringify(redactSnippet(raw))}`,
+      );
     res.end(
       JSON.stringify({
         summary: summary || null,
@@ -85,8 +143,14 @@ async function handleHudSummary(req, res) {
         error: response.ok ? null : 'OpenAI HUD summary request failed',
       }),
     );
-  } catch {
-    console.warn('[hud-summary] request failed');
+  } catch (error) {
+    console.warn(
+      `[hud-summary] request failed stage=${stage} class=${failureClass(error)}` +
+        (stage === 'upstream'
+          ? ` target="POST ${OPENAI_RESPONSES_URL}" status=${upstreamStatus || 'none'} ` +
+            `elapsed_ms=${Math.round(performance.now() - startedAt)} timeout_ms=${HUD_SUMMARY_TIMEOUT_MS}`
+          : ''),
+    );
     res.statusCode = 502;
     res.setHeader('Content-Type', 'application/json');
     res.end(
