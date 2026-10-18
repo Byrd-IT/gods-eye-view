@@ -141,6 +141,21 @@ export const AIRCRAFT_DOC_VALUES = Object.freeze({
   source: 'keyword',
 });
 
+/**
+ * The subset the aircraft slice reads (openSkyState + merge + order):
+ * hex, snap, registration, type and db_flags are only used by the military
+ * archive fallback (readsbRow). Fewer columns = fewer bytes to parse on the
+ * server's one thread (t_5dc0e0c3: a global slice blocked a concurrent
+ * bbox answer by 100-300 ms).
+ */
+export const AIRCRAFT_STATE_DOC_VALUES = Object.freeze(
+  Object.fromEntries(
+    Object.entries(AIRCRAFT_DOC_VALUES).filter(
+      ([f]) => !['hex', 'snap', 'registration', 'type', 'db_flags'].includes(f),
+    ),
+  ),
+);
+
 /** Memo lane of a bbox (cuts learned per view; null = no box). */
 export function bboxLane(bbox) {
   return bbox ? `${bbox.w},${bbox.s},${bbox.e},${bbox.n}` : 'all';
@@ -259,12 +274,12 @@ export function createHistoryService({
    * COLLAPSE_FANOUT wide. Same rows as before (exact partitions).
    */
   const cutMemo = createCutMemo();
-  async function rowsPerId(index, filter, field, maxRows, lane) {
+  async function rowsPerId(index, filter, field, maxRows, lane, docValues) {
     const r = await latestPerKey(es, index, {
       filter,
       field,
       _source: AIRCRAFT_SOURCE,
-      docValues: AIRCRAFT_DOC_VALUES,
+      docValues,
       probe: true,
       concurrency: COLLAPSE_FANOUT,
       memo: cutMemo.lane(lane),
@@ -510,6 +525,7 @@ export function createHistoryService({
     maxRows,
     extraFilter = [],
     lane = '',
+    docValues = AIRCRAFT_STATE_DOC_VALUES,
   ) {
     const snapS = adsblolSnapAtOrBefore(tMs);
     const snapMs = snapS * 1000;
@@ -524,6 +540,7 @@ export function createHistoryService({
       'icao24',
       maxRows,
       `adsblol${lane}|${bboxLane(bbox)}`,
+      docValues,
     );
     return { snapMs, ...res };
   }
@@ -706,7 +723,14 @@ export function createHistoryService({
     }
     // Recording gap / before the recorder: adsb.lol archive, dbFlags & 1.
     const military = { terms: { db_flags: [1, 3, 5, 7, 9, 11, 13, 15] } };
-    const a = await adsblolBucket(t, bbox, maxRows, [military], ':military');
+    const a = await adsblolBucket(
+      t,
+      bbox,
+      maxRows,
+      [military],
+      ':military',
+      AIRCRAFT_DOC_VALUES,
+    );
     const ac = a.hits
       .map((hit) =>
         readsbRow({ ...sourceOf(hit), source: 'adsblol' }, a.snapMs),

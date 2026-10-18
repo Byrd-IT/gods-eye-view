@@ -1983,3 +1983,51 @@ test('t_5dc0e0c3 vessels slice reads positions from doc values (no stored _sourc
   assert.ok(vesselCalls.length >= 1);
   assert.ok(vesselCalls.every((c) => c.body.stored_fields === '_none_'));
 });
+
+test('t_5dc0e0c3 doc-value pages ask ES for the allowlisted response filter only; other filters are refused', async () => {
+  const { DOC_VALUE_FILTER_PATH } = await import('./historyCollapse.js');
+  const { SEARCH_FILTER_PATHS, createHistoryEsClient } = await import('./historyEs.js');
+  assert.ok(SEARCH_FILTER_PATHS.includes(DOC_VALUE_FILTER_PATH));
+  assert.match(DOC_VALUE_FILTER_PATH, /(^|,)timed_out(,|$)/);
+  assert.match(DOC_VALUE_FILTER_PATH, /(^|,)_shards\.failed(,|$)/);
+  const urls = [];
+  const fake = createFakeEs({ 'gev-history-aircraft-adsblol': bucketDocs(5, 1_791_000_000) });
+  const es = createHistoryEsClient({
+    url: 'https://es.example.test',
+    apiKey: 'k',
+    fetchImpl: (u, init) => {
+      urls.push(String(u));
+      return fake.fetchImpl(u, init);
+    },
+  });
+  const IDXA = 'gev-history-aircraft-adsblol,gev-history-aircraft-adsblol-hist';
+  await latestPerKey(es, IDXA, { filter: [], field: 'icao24', docValues: { location: 'geo_point' }, probe: true });
+  const searches = urls.filter((u) => u.includes('/_search'));
+  assert.ok(searches.length >= 2);
+  for (const u of searches)
+    assert.equal(new URL(u).searchParams.get('filter_path'), DOC_VALUE_FILTER_PATH);
+  // a _source page is never filtered
+  urls.length = 0;
+  await latestPerKey(es, IDXA, { filter: [], field: 'icao24', _source: ['location'] });
+  assert.ok(urls.filter((u) => u.includes('/_search')).every((u) => !u.includes('filter_path')));
+  await assert.rejects(
+    es.search(IDXA, { size: 0 }, { filterPath: 'hits.hits._source' }),
+    (e) => e.reason === 'filter_path_denied',
+  );
+});
+
+test('t_5dc0e0c3 aircraft slice reads only the state columns; the military archive fallback keeps registration/type/db_flags', async () => {
+  const { AIRCRAFT_STATE_DOC_VALUES, AIRCRAFT_DOC_VALUES } = await import('./historyService.js');
+  for (const f of ['hex', 'snap', 'registration', 'type', 'db_flags'])
+    assert.ok(!(f in AIRCRAFT_STATE_DOC_VALUES) && f in AIRCRAFT_DOC_VALUES, f);
+  const T0 = Date.UTC(2026, 9, 10, 12, 0, 0);
+  const { api, fake } = makeApi({ 'gev-history-aircraft-adsblol': bucketDocs(3, T0 / 1000) });
+  const r = await call(api, `/api/history/slice?feed=aircraft&t=${iso(T0)}`);
+  assert.equal(r.status, 200, r.body);
+  const pages = fake.calls.filter((c) => c.body?.collapse && c.body.docvalue_fields.length > 1);
+  assert.ok(pages.length >= 1);
+  for (const c of pages) {
+    const names = c.body.docvalue_fields.map((d) => (typeof d === 'string' ? d : d.field));
+    assert.deepEqual(new Set(names), new Set(['icao24', ...Object.keys(AIRCRAFT_STATE_DOC_VALUES)]));
+  }
+});

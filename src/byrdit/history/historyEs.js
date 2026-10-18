@@ -51,6 +51,15 @@ export const HISTORY_INDICES = Object.freeze({
   imagery: 'gev-history-imagery',
 });
 const ALLOWED = new Set(Object.values(HISTORY_INDICES));
+/**
+ * Response filters (filter_path) a search may ask for (t_5dc0e0c3: the
+ * doc-value collapse pages of historyCollapse.js). Each keeps `timed_out`
+ * and `_shards.failed`, which checkShards reads.
+ */
+export const SEARCH_FILTER_PATHS = Object.freeze([
+  'took,timed_out,_shards.failed,hits.hits._id,hits.hits.fields',
+]);
+const FILTER_PATHS = new Set(SEARCH_FILTER_PATHS);
 
 export class HistoryUnavailableError extends Error {
   constructor(reason) {
@@ -244,12 +253,19 @@ export function createHistoryEsClient({
     return json;
   }
 
-  async function search(index, body) {
+  async function search(index, body, { filterPath } = {}) {
     await verify();
+    // t_5dc0e0c3: a response filter from the fixed allowlist only
+    if (filterPath !== undefined && !FILTER_PATHS.has(filterPath))
+      throw new HistoryUnavailableError('filter_path_denied');
+    const filter =
+      filterPath === undefined
+        ? ''
+        : `&filter_path=${encodeURIComponent(filterPath)}`;
     return checkShards(
       await call(
         'POST',
-        `${indexPath(index)}/_search?allow_no_indices=true&ignore_unavailable=true`,
+        `${indexPath(index)}/_search?allow_no_indices=true&ignore_unavailable=true${filter}`,
         body,
       ),
     );

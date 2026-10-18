@@ -70,6 +70,16 @@ export const VESSEL_DOC_VALUES = Object.freeze({
   source: 'keyword',
 });
 
+/** Vessel-static fields read per mmsi (mapping 2026-10-18, all doc values). */
+export const VESSEL_STATIC_DOC_VALUES = Object.freeze({
+  mmsi: 'keyword',
+  name: 'keyword',
+  imo: 'keyword',
+  ship_type: 'keyword',
+  destination: 'keyword',
+  '@timestamp': 'date',
+});
+
 export function insideBbox(doc, bbox) {
   if (!bbox) return true;
   const la = doc?.location?.lat;
@@ -174,6 +184,9 @@ export function createLatestSlices({ es }) {
             'destination',
             '@timestamp',
           ],
+          // t_5dc0e0c3: up to 12 k statics per answer; doc values (all
+          // keyword/date, ignore_above 1024) parse a third fewer bytes
+          docValues: VESSEL_STATIC_DOC_VALUES,
         }),
       ),
     );

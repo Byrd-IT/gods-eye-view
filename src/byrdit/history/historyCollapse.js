@@ -69,6 +69,15 @@ export const COLLAPSE_FANOUT = 8;
 export const COLLAPSE_PART_DOCS = 1_500;
 /** Lanes (e.g. feed + bbox) whose cuts a memo keeps (LRU). */
 export const COLLAPSE_MEMO_LANES = 64;
+/** Keys sampled to learn cuts. */
+export const CUTS_SAMPLE = 4_096;
+/**
+ * Response filter of doc-value collapse requests: per hit only _id and the
+ * doc values (no _index, _score, sort), plus what checkShards reads. About
+ * a fifth of the bytes the server parses per answer.
+ */
+export const DOC_VALUE_FILTER_PATH =
+  'took,timed_out,_shards.failed,hits.hits._id,hits.hits.fields';
 
 /** Field types fromDocValues can turn back into their _source value. */
 export const DOC_VALUE_TYPES = Object.freeze([
@@ -89,6 +98,12 @@ export function shortestFloat32(v) {
   if (typeof v !== 'number' || !Number.isFinite(v)) return v;
   const f = Math.fround(v);
   if (f !== v) return v; // not a float32 value: leave it
+  // fewest decimals = fewest significant digits; k / 10^d is the double
+  // JSON.parse gives for that decimal (cheap: toPrecision was a CPU hotspot)
+  for (let d = 0, m = 1; d <= 10; d += 1, m *= 10) {
+    const c = Math.round(v * m) / m;
+    if (Math.fround(c) === f) return c === 0 ? 0 : c;
+  }
   for (let p = 1; p <= 9; p += 1) {
     const c = Number(v.toPrecision(p));
     if (Math.fround(c) === f) return c;
@@ -123,10 +138,14 @@ function geoPoint(v) {
   let lat;
   let lon;
   if (typeof v === 'string') {
-    const m = /^\s*(-?[\d.eE+-]+)\s*,\s*(-?[\d.eE+-]+)\s*$/.exec(v);
-    if (!m) return undefined;
-    lat = Number(m[1]);
-    lon = Number(m[2]);
+    // "lat, lon" (no regex: this runs once per doc of a 32 k-doc answer)
+    const c = v.indexOf(',');
+    if (c < 0 || v.indexOf(',', c + 1) >= 0) return undefined;
+    const a = v.slice(0, c).trim();
+    const b = v.slice(c + 1).trim();
+    if (!a || !b) return undefined;
+    lat = Number(a);
+    lon = Number(b);
   } else if (Array.isArray(v?.coordinates)) {
     [lon, lat] = v.coordinates;
   } else if (v && typeof v === 'object') {
@@ -226,9 +245,13 @@ function keyOf(hit, field) {
  * real keys, none of them the smallest key (so no empty first range).
  */
 export function cutsFor(keys, parts) {
-  const sorted = [...new Set(keys.filter((k) => typeof k === 'string'))].sort(
-    compareKeys,
-  );
+  // quantiles of an even sample are enough for a starting partition (any
+  // cuts give the exact answer); sorting all 32 k vessel keys was not
+  const step = Math.max(1, Math.floor(keys.length / CUTS_SAMPLE));
+  const sample = [];
+  for (let i = 0; i < keys.length; i += step)
+    if (typeof keys[i] === 'string') sample.push(keys[i]);
+  const sorted = [...new Set(sample)].sort(compareKeys);
   const k = Math.min(parts, sorted.length);
   const cuts = [];
   for (let j = 1; j < k; j += 1) {
@@ -401,16 +424,21 @@ export async function latestPerKey(
 
   async function run(part, next) {
     queries += 1;
-    const json = await es.search(index, {
-      size: pageSize,
-      track_total_hits: false,
-      ...(part.probe ? fetchKeys : fetchDocs),
-      query: {
-        bool: { filter: [...filter, ...partitionFilter(field, part)] },
+    const docValuesOnly = part.probe || spec !== null;
+    const json = await es.search(
+      index,
+      {
+        size: pageSize,
+        track_total_hits: false,
+        ...(part.probe ? fetchKeys : fetchDocs),
+        query: {
+          bool: { filter: [...filter, ...partitionFilter(field, part)] },
+        },
+        collapse: { field },
+        sort: [{ [timeField]: order === 'asc' ? 'asc' : 'desc' }],
       },
-      collapse: { field },
-      sort: [{ [timeField]: order === 'asc' ? 'asc' : 'desc' }],
-    });
+      docValuesOnly ? { filterPath: DOC_VALUE_FILTER_PATH } : undefined,
+    );
     const page = json?.hits?.hits ?? [];
     const keys = page.map((h) => keyOf(h, field));
     if (page.length < pageSize) {
