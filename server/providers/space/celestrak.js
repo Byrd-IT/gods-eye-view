@@ -120,6 +120,10 @@ export function celestrakProxy() {
   const HALT_FILE = path.join(CACHE_DIR, 'celestrak-HALT.json');
   /** @type {{at: number, group: string, reason: string} | null} */
   let haltState = null;
+  // Halt-file writes in flight (the latch write and the evidence update).
+  // While one runs, the file can briefly be empty or half-written, so the
+  // admission check trusts the in-memory latch and does not read the disk.
+  let haltWrites = 0;
 
   // --- Failure evidence (STANDARD R3/R8) ----------------------------------
   // The halt records WHAT CelesTrak answered so a human can tell a firewall
@@ -319,79 +323,211 @@ export function celestrakProxy() {
     return { text, note };
   }
 
+  /** Log-safe errno-style code of an I/O error ('unknown' if none). */
+  const ioCode = (error) =>
+    typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(error.code)
+      ? error.code
+      : 'unknown';
+
+  /** Evidence keys enrichment may add; the latch's own fields never change. */
+  const EVIDENCE_KEYS = ['body', 'body_note'];
+
   /**
-   * Add the body evidence to the latch `haltOnFailure` just made, without
-   * ever re-opening or re-creating it: the halt file is opened 'r+' (fails
-   * if an operator already deleted it) and rewritten only while it is still
-   * that same latch (same `at` and `group`). `halted/at/group/reason` are
-   * never changed, so the S3 celestrak-latch-routine (which keys a latch
-   * event on host|kind|at|reason) sees the same event. `latch` is null when
-   * the halt was already latched before this request: nothing to enrich.
+   * Add the body evidence to the latch `haltOnFailure` just made.
+   *
+   * - Never re-creates the file: it is opened 'r+', which fails if an
+   *   operator already deleted it, and a write through that handle after a
+   *   later delete lands on the unlinked inode, not on a new file.
+   * - Rewrites only while the file still holds that same latch (halted, same
+   *   `at`, `group` and `reason`); a newer or different latch is left alone.
+   *   Only `body`/`body_note` are added: `halted/at/group/reason/clear` never
+   *   change, so the S3 celestrak-latch-routine (event key host|kind|at|reason)
+   *   sees the same event.
+   * - Never empties the latch: the new text is written over the old one in
+   *   place (no truncate-to-zero first) and the file is shortened only after
+   *   that, to the new length, if it shrank. A failed or short write puts the
+   *   original bytes back. While the update runs, `haltWrites` makes the
+   *   admission check use the in-memory latch, so no request ever sees a
+   *   half-written file. If even the restore fails, the latch is held in
+   *   memory (`diskDamaged`) until an operator deletes the file.
+   * - Logs what really happened, with the errno code of any I/O failure.
+   *
+   * `latch` is null when the halt was already latched before this request:
+   * nothing to enrich.
    */
-  async function enrichHalt(latch, fields) {
+  async function enrichHalt(latch, rawFields) {
     if (!latch) return;
-    if (
-      haltState &&
-      haltState.at === latch.at &&
-      haltState.group === latch.group
-    )
-      Object.assign(haltState, fields);
-    let written = false;
+    const fields = {};
+    for (const key of EVIDENCE_KEYS)
+      if (rawFields[key] !== undefined) fields[key] = rawFields[key];
+    const sameLatch = (h) =>
+      h?.halted === true &&
+      h.at === latch.at &&
+      h.group === latch.group &&
+      h.reason === latch.reason;
+    if (sameLatch(haltState)) Object.assign(haltState, fields);
+    let outcome;
     let handle;
+    if (latch.persisted === false) {
+      console.warn(
+        `[celestrak-proxy] ${latch.group} halt evidence (${latch.reason}) status=${latch.status} ` +
+          Object.entries(fields)
+            .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+            .join(' ') +
+          ' (halt file not updated: the latch write had failed, halted in memory only)',
+      );
+      return;
+    }
+    haltWrites += 1;
     try {
-      handle = await fsp.open(HALT_FILE, 'r+');
-      const onDisk = JSON.parse(await handle.readFile('utf8'));
-      if (
-        onDisk?.halted === true &&
-        onDisk.at === latch.at &&
-        onDisk.group === latch.group
-      ) {
-        const text = JSON.stringify({ ...onDisk, ...fields });
-        await handle.truncate(0);
-        await handle.write(text, 0, 'utf8');
-        written = true;
+      let stage = 'open';
+      try {
+        handle = await fsp.open(HALT_FILE, 'r+');
+        stage = 'read';
+        const original = String(await handle.readFile('utf8'));
+        let onDisk;
+        try {
+          onDisk = JSON.parse(original);
+        } catch {
+          onDisk = undefined;
+        }
+        if (onDisk === undefined) {
+          outcome =
+            'halt file not updated: it is not valid JSON; left unchanged';
+        } else if (!sameLatch(onDisk)) {
+          outcome =
+            onDisk?.halted === true
+              ? `halt file not updated: it now holds a different latch (group=${JSON.stringify(String(onDisk.group).slice(0, 40))} at=${Number(onDisk.at) || 'none'}); left unchanged`
+              : 'halt file not updated: it no longer holds a halt; left unchanged';
+        } else {
+          const text = JSON.stringify({ ...onDisk, ...fields });
+          const oldBytes = Buffer.byteLength(original, 'utf8');
+          const newBytes = Buffer.byteLength(text, 'utf8');
+          stage = 'write';
+          try {
+            const r = await handle.write(text, 0, 'utf8');
+            if (
+              typeof r?.bytesWritten === 'number' &&
+              r.bytesWritten !== newBytes
+            )
+              throw Object.assign(new Error('short write'), {
+                code: 'ESHORTWRITE',
+              });
+            if (newBytes < oldBytes) {
+              stage = 'truncate';
+              await handle.truncate(newBytes);
+            }
+            outcome = 'written';
+            // Deleted by an operator after we opened it? Then the write went
+            // to the unlinked inode: nothing was re-created; say so.
+            const st = await handle.stat?.().catch(() => null);
+            if (st && st.nlink === 0)
+              outcome =
+                'halt file not updated: removed by an operator during the update (not re-created)';
+          } catch (err) {
+            // Put the original latch back over whatever part was written.
+            try {
+              const r = await handle.write(original, 0, 'utf8');
+              if (
+                typeof r?.bytesWritten === 'number' &&
+                r.bytesWritten !== oldBytes
+              )
+                throw Object.assign(new Error('short write'), {
+                  code: 'ESHORTWRITE',
+                });
+              if (newBytes > oldBytes) await handle.truncate(oldBytes);
+              outcome = `halt file not updated: ${stage} failed code=${ioCode(err)}; original latch restored`;
+            } catch (restoreErr) {
+              if (sameLatch(haltState)) haltState.diskDamaged = true;
+              outcome =
+                `halt file not updated: ${stage} failed code=${ioCode(err)}; restore failed code=${ioCode(restoreErr)}; ` +
+                `file may be damaged, halt held in memory until an operator deletes ${HALT_FILE}`;
+            }
+          }
+        }
+      } catch (err) {
+        outcome =
+          stage === 'open' && err?.code === 'ENOENT'
+            ? 'halt file not updated: removed by an operator before the evidence was added (not re-created)'
+            : `halt file not updated: ${stage} failed code=${ioCode(err)}; existing latch left unchanged`;
       }
-    } catch {
-      /* gone (operator cleared it) or unreadable: never re-create it */
+      if (handle) {
+        try {
+          await handle.close();
+        } catch (err) {
+          outcome += ` (close failed code=${ioCode(err)})`;
+        }
+      }
     } finally {
-      await handle?.close().catch(() => {});
+      haltWrites -= 1;
     }
     const detail = Object.entries(fields)
       .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
       .join(' ');
     console.warn(
       `[celestrak-proxy] ${latch.group} halt evidence (${latch.reason}) status=${latch.status} ${detail}` +
-        (written
-          ? ''
-          : ' (halt file not updated: removed by an operator or never written)'),
+        (outcome === 'written' ? '' : ` (${outcome})`),
     );
   }
 
-  /** Halt marker on disk, or null. Unreadable/foreign content = not halted. */
+  /**
+   * Halt file on disk: { halt } when it holds a halt, { absent: true } when
+   * there is no file (ENOENT), else { unreadable: code } (foreign content or
+   * an I/O error). Foreign/unreadable content counts as not halted, as before.
+   */
   async function readHalt() {
+    let text;
     try {
-      const parsed = JSON.parse(await fsp.readFile(HALT_FILE, 'utf8'));
-      if (parsed && parsed.halted === true) return parsed;
-    } catch {
-      /* no halt file */
+      text = await fsp.readFile(HALT_FILE, 'utf8');
+    } catch (err) {
+      return err?.code === 'ENOENT'
+        ? { absent: true }
+        : { unreadable: ioCode(err) };
     }
-    return null;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.halted === true) return { halt: parsed };
+    } catch {
+      /* not JSON */
+    }
+    return { unreadable: 'content' };
   }
 
   /**
    * True if upstream calls are forbidden. The in-memory latch is cleared only
-   * when the file is gone, i.e. a human removed it.
+   * when the file is gone, i.e. a human removed it. While this process is
+   * writing the halt file, the in-memory latch decides (the file may be
+   * mid-write). If an evidence update damaged the file and could not restore
+   * it, the latch also stays in memory until the file is deleted.
    */
   async function isHalted() {
+    if (haltWrites > 0 && haltState) return true;
     const onDisk = await readHalt();
-    if (onDisk) {
-      haltState = onDisk;
+    if (onDisk.halt) {
+      haltState = onDisk.halt;
+      return true;
+    }
+    if (haltState?.diskDamaged && !onDisk.absent) {
+      if (!haltState.damageLogged) {
+        haltState.damageLogged = true;
+        console.warn(
+          `[celestrak-proxy] halt file unreadable (${onDisk.unreadable}) after a failed evidence update — ` +
+            `still HALTED in memory; delete ${HALT_FILE} to re-enable upstream`,
+        );
+      }
       return true;
     }
     if (haltState) {
-      console.info(
-        '[celestrak-proxy] halt file removed by operator — upstream re-enabled',
-      );
+      // Same policy as before (an unreadable file does not hold the halt);
+      // the log now says which case it was instead of always "removed".
+      if (onDisk.absent)
+        console.info(
+          '[celestrak-proxy] halt file removed by operator — upstream re-enabled',
+        );
+      else
+        console.warn(
+          `[celestrak-proxy] halt file unreadable (${onDisk.unreadable}) — treated as cleared, upstream re-enabled`,
+        );
       haltState = null;
     }
     return false;
@@ -439,13 +575,17 @@ export function celestrakProxy() {
         ` — ALL CelesTrak requests HALTED ` +
         `until an operator deletes ${HALT_FILE}; serving cache if any`,
     );
+    haltWrites += 1;
     try {
       await fsp.mkdir(CACHE_DIR, { recursive: true });
       await fsp.writeFile(HALT_FILE, JSON.stringify(latched), 'utf8');
-    } catch {
+    } catch (err) {
+      latched.persisted = false;
       console.warn(
-        '[celestrak-proxy] halt file write failed — halted in memory only',
+        `[celestrak-proxy] halt file write failed code=${ioCode(err)} — halted in memory only`,
       );
+    } finally {
+      haltWrites -= 1;
     }
     return latched;
   }
