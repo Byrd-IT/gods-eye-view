@@ -209,3 +209,13 @@ test('a missing data file surfaces as a layer error, not a silent zero', async (
   assert.ok(springs.getStats().error, 'error reported');
   springs.destroy(viewer);
 });
+
+test('the layer source names the 30-minute export cadence', async () => {
+  // The S3 ingest and the S4 export run every 30 minutes (2026-10-18).
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./usgsWater.js', import.meta.url), 'utf8');
+  assert.match(src, /const SOURCE = 'USGS · refreshed every 30 min';/);
+  assert.doesNotMatch(src, /15[ -]min/);
+  for (const layer of USGS_WATER_LAYERS)
+    assert.doesNotMatch(JSON.stringify(layer), /15 min/);
+});
