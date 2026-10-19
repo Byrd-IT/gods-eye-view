@@ -8,6 +8,7 @@ import { apiNotFoundPlugin } from './api-not-found.js';
 import { standaloneVoiceTools } from './voiceTools.js';
 import { historyPlugins } from '../byrdit/history.js';
 import { basemapPlugins } from '../byrdit/basemap.js';
+import { unwatchedRuntimeDirsPlugin } from './unwatched-cache.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -24,6 +25,7 @@ export default defineConfig(({ command, mode }) => {
       ...localProviderPlugins({ realtime: { tools: standaloneVoiceTools() } }),
       localMcpPlugin(),
       apiNotFoundPlugin(),
+      unwatchedRuntimeDirsPlugin(),
     ],
     host: process.env.HOST,
     port: process.env.PORT,

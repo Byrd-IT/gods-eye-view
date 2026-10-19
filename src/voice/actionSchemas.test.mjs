@@ -36,10 +36,11 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // consolidated tool wording (each policy stated once); model-facing tools
     // omit top-level anyOf (OpenAI rejects it). Contacts list routing preserves
     // requested radius and center authority in descriptions only.
-    // Street Level adds its toggle enum values and generated alias hint.
-    // Byrd-IT fork: the four USGS water layers in src/voice/layerManifest.js
-    // (upstream 6be2559 pin without them: 9eb11345...41ad0f).
-    '9465bea688b55c35529aaa5be07c5ce2a0f6226b681dbe313fcafa191c4cd165',
+    // Street Level and GNSS extend the manifest; tracked and analyst aircraft describe broadcasts.
+    // Air quality (ECCC AQHI) extends the manifest.
+    // Byrd-IT fork: + the four USGS water layers in src/voice/layerManifest.js
+    // (upstream 93ea088f pin without them: 775ba323...1da3969).
+    '775ba323384b4c1b62fb8415bac52aecc3fc668e20bedcfa57e426dcd1da3969',
   );
 });
 

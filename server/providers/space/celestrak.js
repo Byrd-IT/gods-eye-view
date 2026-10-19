@@ -4,6 +4,7 @@ import {
   celestrakSatcatUrl,
   celestrakTleUrl,
 } from '../../../src/data/spaceProviderRequests.js';
+import { readResponseTextCapped } from '../common/http.js';
 
 /** SATCAT RCS cache lifetime (SKYVIEW.md 4.4: one polite fetch per week). */
 export const RCS_TTL_MS = 7 * 24 * 3600_000;
@@ -240,9 +241,12 @@ export function celestrakProxy() {
     const startedAt = performance.now();
     const elapsed = () => Math.round(performance.now() - startedAt);
     let res;
+    // One deadline bounds the headers AND the capped body read (upstream
+    // readResponseTextCapped, adopted in the t_d7f5ae4c merge).
+    const signal = AbortSignal.timeout(timeoutMs);
     try {
       res = await fetch(url, {
-        signal: AbortSignal.timeout(timeoutMs),
+        signal,
         // CelesTrak 403s bulk groups (e.g. `active`) unless the request
         // carries a descriptive User-Agent with a contact point.
         headers: { 'User-Agent': USER_AGENT },
@@ -273,7 +277,11 @@ export function celestrakProxy() {
     }
     let body;
     try {
-      body = await res.text();
+      body = await readResponseTextCapped(
+        res,
+        CELESTRAK_MAX_RESPONSE_BYTES,
+        signal,
+      );
     } catch (err) {
       throw Object.assign(new Error('upstream request failed'), {
         evidence: {
@@ -659,6 +667,9 @@ export function celestrakProxy() {
       console.warn('[celestrak-proxy] cache write failed');
     }
   }
+
+  /** The largest group (`active`) measures ~2.7 MB; this bounds a runaway body. */
+  const CELESTRAK_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 
   async function fetchUpstream(group) {
     const { body, evidence } = await celestrakGet(

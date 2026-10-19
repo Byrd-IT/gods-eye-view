@@ -1,3 +1,5 @@
+import { readResponseTextCapped } from '../common/http.js';
+
 const ADSB_LOL_MIL_URL = 'https://api.adsb.lol/v2/mil';
 /**
  * Default upstream backstop (ms); bounds the headers AND the body read. The
@@ -165,6 +167,9 @@ export function adsbLolProxy() {
   let _cooldownStatus = 0;
   /** Response cache TTL (ms). */
   const CACHE_MS = 12000;
+  /** Upstream deadline: adsbLolTimeoutMs() (Byrd-IT, telemetry-sized; see top of file). */
+  /** /v2/mil measures ~67 KB; a relayed error page is bounded by the same cap. */
+  const ADSBLOL_MIL_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
   /** Cooldown after a 429 when upstream sends no usable Retry-After (ms). */
   const RATE_LIMIT_COOLDOWN_MS = 30000;
   /** Cooldown after a 5xx (ms). */
@@ -242,13 +247,20 @@ export function adsbLolProxy() {
           return;
         }
         startedAt = performance.now();
+        // Byrd-IT: one deadline (GEV_ADSB_LOL_TIMEOUT_MS, default 30 s) bounds
+        // the headers AND the capped body read.
+        const signal = AbortSignal.timeout(timeoutMs);
         const upstream = await fetch(ADSB_LOL_MIL_URL, {
           headers: { 'User-Agent': 'gods-eye-view-adsblol-proxy/1.0' },
-          signal: AbortSignal.timeout(timeoutMs),
+          signal,
         });
         upstreamStatus = upstream.status;
         if (upstream.ok) {
-          const body = await upstream.text();
+          const body = await readResponseTextCapped(
+            upstream,
+            ADSBLOL_MIL_MAX_RESPONSE_BYTES,
+            signal,
+          );
           _cache = body;
           _cacheAt = Date.now();
           _cooldownUntil = 0;
@@ -279,7 +291,11 @@ export function adsbLolProxy() {
             console.warn(failureLine(snippet, cooling));
             return;
           }
-          const body = await upstream.text();
+          const body = await readResponseTextCapped(
+            upstream,
+            ADSBLOL_MIL_MAX_RESPONSE_BYTES,
+            signal,
+          );
           console.warn(failureLine(body, cooling));
           serve(res, upstream.status, body, 'MISS', {
             'Retry-After': String(
@@ -288,7 +304,11 @@ export function adsbLolProxy() {
           });
           return;
         }
-        const body = await upstream.text();
+        const body = await readResponseTextCapped(
+          upstream,
+          ADSBLOL_MIL_MAX_RESPONSE_BYTES,
+          signal,
+        );
         console.warn(failureLine(body, '; relayed (no cooldown)'));
         serve(
           res,

@@ -1,6 +1,7 @@
 import {
   OVERPASS_MAX_RESPONSE_BYTES,
   resolveOverpassUpstreams,
+  resolveOverpassUpstreamTag,
   OVERPASS_USER_AGENT,
   OVERPASS_TIMEOUT_MS,
 } from './constants.js';
@@ -13,7 +14,7 @@ import { simplifyOverpassPayloadBody } from './geometry.js';
  * Checks for known rate-limit phrases in the body text regardless of
  * HTTP status code, since some mirrors return 200 with an error payload.
  *
- * @param {string} bodyText - Upstream response body.
+ * @param {string} bodyText - The remark of a data reply, or a non-data body.
  * @returns {boolean} True if the body looks rate-limited.
  */
 function overpassLooksRateLimited(bodyText) {
@@ -38,6 +39,14 @@ function overpassLooksRuntimeError(bodyText) {
     text.includes('timed out') ||
     text.includes('out of memory')
   );
+}
+
+function parseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -255,15 +264,22 @@ async function fetchOverpassPayload(
       });
       upstreamStatus = upstream.status;
       responseBody = await readBody(upstream, maxResponseBytes);
+      const parsed = parseJson(responseBody);
+      // An Overpass data reply reports failure in its remark; its element
+      // tags are data and can contain any phrase. Any other body (an error
+      // page, or JSON without elements) is matched whole.
+      const failureText = Array.isArray(parsed?.elements)
+        ? String(parsed.remark || '')
+        : responseBody;
       const rateLimited =
         upstream.status === 429 ||
         upstream.status === 406 ||
-        overpassLooksRateLimited(responseBody);
+        overpassLooksRateLimited(failureText);
       if (
         rateLimited ||
         upstream.status < 200 ||
         upstream.status >= 300 ||
-        overpassLooksRuntimeError(responseBody)
+        overpassLooksRuntimeError(failureText)
       ) {
         const failures = (previous?.failures || 0) + 1;
         const delay = retryDelay(
@@ -288,7 +304,6 @@ async function fetchOverpassPayload(
         );
         continue;
       }
-      const parsed = JSON.parse(responseBody);
       if (!Array.isArray(parsed?.elements) || parsed.remark)
         throw Object.assign(new Error('Malformed Overpass response'), {
           code: 'OVERPASS_MALFORMED',
@@ -300,6 +315,9 @@ async function fetchOverpassPayload(
         contentType: 'application/json',
         // Never retain a secret-bearing endpoint in cache or response metadata.
         endpoint: 'configured',
+        // Which configured instance produced this, as a hash rather than a URL,
+        // so a cached answer is not reused after the operator repoints.
+        upstreams: resolveOverpassUpstreamTag(),
         rateLimited: false,
       };
     } catch (error) {
