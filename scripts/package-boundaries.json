@@ -89,7 +89,8 @@
       "src/layers/bikeshare/registry.js",
       "src/sources/transitHistoryStore.js",
       "src/sources/transitHistory.js",
-      "src/sources/rateLimit.js"
+      "src/sources/rateLimit.js",
+      "src/geoDistance.js"
     ],
     "external": []
   },

@@ -144,9 +144,21 @@ test('exported CelesTrak plugin coalesces GP CSV refreshes, retains stale data, 
   assert.equal(disk.body, csv);
 });
 
-test('CelesTrak answers 502 to an oversized TLE body without caching it', async (t) => {
+test('CelesTrak answers 502 to an oversized body without caching it, then halts', async (t) => {
+  // Byrd-IT fork: an oversized body is a failed refresh, so the halt latch
+  // (CelesTrak usage policy) is written and CelesTrak is not asked again.
   isolateDisk(t);
+  // The halt latch lives on disk: keep what is written readable.
+  const disk = new Map();
+  t.mock.method(fsp, 'writeFile', async (file, text) => {
+    disk.set(String(file), String(text));
+  });
+  t.mock.method(fsp, 'readFile', async (file) => {
+    if (disk.has(String(file))) return disk.get(String(file));
+    throw Object.assign(new Error('no such file'), { code: 'ENOENT' });
+  });
   t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
   const bodies = [];
   t.mock.method(globalThis, 'fetch', async () => {
     const oversized = oversizedResponse(
@@ -160,9 +172,17 @@ test('CelesTrak answers 502 to an oversized TLE body without caching it', async 
   assert.equal(first.status, 502);
   assert.equal(bodies[0].cancelled, true);
   assert.ok(bodies[0].pulled <= 17, 'reading stops at the 16 MiB cap');
-  assert.equal(fsp.writeFile.mock.callCount(), 0);
-  assert.equal((await request('/api/celestrak', '/stations')).status, 502);
-  assert.equal(bodies.length, 2, 'nothing was cached in memory');
+  const written = fsp.writeFile.mock.calls.map((call) =>
+    String(call.arguments[0]).split(/[\\/]/).pop(),
+  );
+  assert.ok(written.length > 0, 'the halt latch is written');
+  assert.ok(
+    written.every((name) => name === 'celestrak-HALT.json'),
+    `no cache file is written: ${written.join(', ')}`,
+  );
+  const second = await request('/api/celestrak', '/stations');
+  assert.equal(second.status, 503, 'halted, nothing cached to serve');
+  assert.equal(bodies.length, 1, 'halted: CelesTrak is not asked again');
 });
 
 for (const preview of [false, true])

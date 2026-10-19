@@ -997,10 +997,10 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // Air quality (ECCC AQHI) extends the manifest.
   // Byrd-IT fork: + the four USGS water layers in src/voice/layerManifest.js
   // (upstream 93ea088f pin without them: 30655 / 3b1d5e77...eda371e).
-  assert.equal(block.length, 30655, 'serialized tool schema length drifted');
+  assert.equal(block.length, 30952, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '3b1d5e77c10a92f6543a4f9d1ff1870101a0306b65e5b8a6113111c81eda371e',
+    '3bee9fc8ea876e9982ba8d04efb39bd075b1fd47dea56f0aca2a3807ccd6187d',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

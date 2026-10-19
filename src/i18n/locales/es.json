@@ -2,7 +2,6 @@
   "NO PLACE LEFT BEHIND": "NINGÚN RINCÓN SIN VIGILAR",
   "Initializing photorealistic world...": "Inicializando el mundo fotorrealista...",
   "Configuring viewer...": "Configurando el visor...",
-  "Google 3D Tiles unavailable ({detail}). Loading the keyless globe...": "Google 3D Tiles no disponibles ({detail}). Cargando el globo sin clave...",
   "Flying to Austin, TX...": "Volando a Austin, TX...",
   "Restoring shared view...": "Restaurando la vista compartida...",
   "LOADING LIVE DATA": "CARGANDO DATOS EN VIVO",
@@ -2038,7 +2037,6 @@
   "subject": "objetivo",
   "{value}m": "{value} m",
   "Google 3D tiles unavailable — check the key's API restrictions, quota, or network": "Teselas de Google 3D no disponibles: revisa las restricciones de API de la clave, la cuota o la red",
-  "Needs {envVars} — add it in Provider Settings — or a Cesium ion token for the ion-hosted route": "Necesita {envVars} — se añade en Ajustes de proveedores — o un token de Cesium ion para la ruta alojada en ion",
   "Comparison in use by another scene": "La comparación está en uso por otra escena",
   "A location reading needs a loaded forecast and the Earth at the center of the view.": "Una lectura en un punto necesita un pronóstico cargado y la Tierra en el centro de la vista.",
   "{mode} {band} {locality} | {region} | ALT {alt} | WINDOW {window} | SUN {sun}° | ONA {ona}° | {zone}": "{mode} · {band} · {locality} | {region} | ALT {alt} | VENTANA {window} | SOL {sun}° | ONA {ona}° | {zone}",
@@ -2889,5 +2887,14 @@
   "USB work abandoned after a stalled transfer": "Trabajo USB cancelado tras una transferencia bloqueada",
   "SDR decoder did not start; receiver stopped": "El decodificador SDR no arrancó; receptor detenido",
   "SDR decoder stopped responding; receiver stopped": "El decodificador SDR dejó de responder; receptor detenido",
-  "SDR decoder fell behind; receiver stopped": "El decodificador SDR se quedó atrás; receptor detenido"
+  "SDR decoder fell behind; receiver stopped": "El decodificador SDR se quedó atrás; receptor detenido",
+  "Google 3D Tiles unavailable ({detail}). Loading the non-Google globe...": "Google 3D Tiles no disponibles ({detail}). Cargando el globo sin Google...",
+  "{label} degraded: {hint}": "{label} degradado: {hint}",
+  "{name} (degraded)": "{name} (degradado)",
+  "Water": "Agua",
+  "Exit cockpit to open the sky view": "Sal de la cabina para abrir la vista del cielo",
+  "USGS Rivers & Streams": "USGS: ríos y arroyos",
+  "USGS Groundwater Wells": "USGS: pozos de agua subterránea",
+  "USGS Lakes & Reservoirs": "USGS: lagos y embalses",
+  "USGS Springs": "USGS: manantiales"
 }

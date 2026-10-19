@@ -5,7 +5,6 @@
   "Configuring viewer...": "Настройка просмотрщика...",
   "Loading Google 3D Tiles...": "Загрузка Google 3D Tiles...",
   "Loading the keyless globe...": "Загрузка глобуса без ключа...",
-  "Google 3D Tiles unavailable ({detail}). Loading the keyless globe...": "Google 3D Tiles недоступны ({detail}). Загрузка глобуса без ключа...",
   "Close data attribution": "Закрыть атрибуцию данных",
   "observed or mapped nearby context": "наблюдаемая или картографическая обстановка",
   "no observed or mapped objects in current feeds": "нет наблюдаемых или картографированных объектов в текущих потоках",
@@ -2071,7 +2070,6 @@
   "subject": "объект",
   "{value}m": "{value} м",
   "Google 3D tiles unavailable — check the key's API restrictions, quota, or network": "Тайлы Google 3D недоступны — проверьте ограничения API ключа, квоту или сеть",
-  "Needs {envVars} — add it in Provider Settings — or a Cesium ion token for the ion-hosted route": "Нужен {envVars} — добавьте его в «Настройках провайдеров» — или токен Cesium ion для варианта через ion",
   "Comparison in use by another scene": "Сравнение занято другой сценой",
   "A location reading needs a loaded forecast and the Earth at the center of the view.": "Чтобы получить данные в точке, загрузите прогноз и поместите Землю в центр экрана.",
   "{mode} {band} {locality} | {region} | ALT {alt} | WINDOW {window} | SUN {sun}° | ONA {ona}° | {zone}": "{mode} · {band} · {locality} | {region} | ALT {alt} | ОКНО {window} | SUN {sun}° | ONA {ona}° | {zone}",
@@ -2956,5 +2954,14 @@
   "USB work abandoned after a stalled transfer": "Работа с USB прервана: передача данных зависла",
   "SDR decoder did not start; receiver stopped": "Декодер SDR не запустился; приёмник остановлен",
   "SDR decoder stopped responding; receiver stopped": "Декодер SDR перестал отвечать; приёмник остановлен",
-  "SDR decoder fell behind; receiver stopped": "Декодер SDR не успевает; приёмник остановлен"
+  "SDR decoder fell behind; receiver stopped": "Декодер SDR не успевает; приёмник остановлен",
+  "Google 3D Tiles unavailable ({detail}). Loading the non-Google globe...": "Google 3D Tiles недоступны ({detail}). Загрузка глобуса без Google...",
+  "{label} degraded: {hint}": "{label}: с перебоями — {hint}",
+  "{name} (degraded)": "{name} (с перебоями)",
+  "Water": "Вода",
+  "Exit cockpit to open the sky view": "Выйдите из кабины, чтобы открыть вид неба",
+  "USGS Rivers & Streams": "USGS: реки и ручьи",
+  "USGS Groundwater Wells": "USGS: скважины подземных вод",
+  "USGS Lakes & Reservoirs": "USGS: озёра и водохранилища",
+  "USGS Springs": "USGS: родники"
 }

@@ -9,8 +9,15 @@ import * as input from '../../data/inputOwnership.js';
 import * as scenePick from '../../data/scenePick.js';
 import * as render from '../../renderGovernor.js';
 
-/** The browser Maps key the scene was started with (src/app/scene.js). */
-const googleApiKey = () => globalThis.window?.__GOOGLE_MAPS_API_KEY__ || null;
+/**
+ * The browser Maps key for Google Street View. Byrd-IT fork: none. The fork
+ * never puts the Google key on a window global (src/byrdit/serverKeys.js keeps
+ * it in a closure for Google 3D Tiles only), and Street View on our key needs
+ * an owner decision (Maps JavaScript API on the key, billing, CSP). With no
+ * key the provider reports "key required" and the keyless providers
+ * (Mapillary via the server, KartaView, Panoramax) work as before.
+ */
+const googleApiKey = () => null;
 
 /**
  * Mapillary, Google Street View, KartaView and Panoramax, once the Mapillary

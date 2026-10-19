@@ -43,8 +43,18 @@ export function skyClassColor(klass) {
 export function skyClassLabel(klass) {
   if (klass === 'other') return 'ACTIVE';
   if (klass === 'comms') return 'STARLINK';
-  return SATELLITE_CLASSES[klass]?.label ?? 'ACTIVE';
+  // satelliteClass.js moved its labels into msg() keys (upstream i18n); the
+  // Sky view keeps its own English tokens.
+  return SKY_CLASS_LABELS[klass] ?? 'ACTIVE';
 }
+
+const SKY_CLASS_LABELS = Object.freeze({
+  station: 'STATION',
+  nav: 'NAV',
+  geo: 'GEO',
+  visual: 'VISUAL',
+  comms: 'COMMS',
+});
 
 const DOT_RADIUS = {
   station: 4,

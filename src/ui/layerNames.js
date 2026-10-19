@@ -42,6 +42,11 @@ export const LAYER_NAME_KEYS = Object.freeze({
   'air-quality': msg('Air quality'),
   directions: msg('Directions'),
   'alpr-cameras': msg('ALPR Cameras'),
+  // Byrd-IT fork: USGS water layers (src/byrdit/usgsWater.js).
+  'local-usgs-water': msg('USGS Rivers & Streams'),
+  'local-usgs-wells': msg('USGS Groundwater Wells'),
+  'local-usgs-lakes': msg('USGS Lakes & Reservoirs'),
+  'local-usgs-springs': msg('USGS Springs'),
 });
 
 /** The layer panel's own English names, where they differ from the module's. */

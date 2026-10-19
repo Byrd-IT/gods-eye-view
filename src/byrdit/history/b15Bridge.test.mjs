@@ -125,7 +125,10 @@ test('resolvers: only registered ids and registry URLs map to collector snapshot
     assert.equal(i.cadenceMs, GBFS_INFO_CADENCE_MS);
     n += 2;
   }
-  assert.equal(n, 64);
+  // One status + one info resolver per registry system (upstream 93ea088f
+  // has 61 systems; a registry change must be seen here).
+  assert.equal(n, 2 * GBFS_CITY_REGISTRY.length);
+  assert.equal(n, 122);
   const other = resolveGbfs(
     u(
       `/${encodeURIComponent('https://gbfs.lyft.com/gbfs/2.3/xyz/en/station_status.json')}`,
@@ -394,10 +397,10 @@ test('integration: GBFS registry URLs from the collector; other URLs 404 and are
       0,
     );
     assert.equal(ok.headers['x-gbfs-upstream'], 'gbfs.bcycle.com');
-    // a dead registry system: the collector says system_down -> 503, quiet
-    const broward = GBFS_CITY_REGISTRY.find(
-      (e) => e.id === 'fort-lauderdale-broward',
-    );
+    // a registry system with no collector snapshot (dead or not collected):
+    // the collector says system_down -> 503, quiet. Upstream 001043f7 dropped
+    // Broward B-cycle from the registry, so Boulder stands in.
+    const broward = GBFS_CITY_REGISTRY.find((e) => e.id === 'boulder-bcycle');
     const down = await r.call(enc(broward.stationStatusUrl));
     assert.equal(down.statusCode, 503);
     assert.equal(down.headers['x-feed-reason'], 'system_down');

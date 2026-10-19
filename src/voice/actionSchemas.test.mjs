@@ -40,7 +40,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Air quality (ECCC AQHI) extends the manifest.
     // Byrd-IT fork: + the four USGS water layers in src/voice/layerManifest.js
     // (upstream 93ea088f pin without them: 775ba323...1da3969).
-    '775ba323384b4c1b62fb8415bac52aecc3fc668e20bedcfa57e426dcd1da3969',
+    'f95ff61bd970dcecebc79efd260a1fc5e8e362f4738c8bd3c1575c24ece3d69e',
   );
 });
 

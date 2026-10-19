@@ -1,20 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTleText } from '../../sources/tle.js';
+import { parseGP } from '../../byrdit/gpCsv.js';
 import { createIngestion } from './ingestion.js';
 
-// The ISS set (1 January 2024) with its catalog field swapped per satellite.
-const ISS_LINE1 =
-  '1 25544U 98067A   24001.50000000  .00016717  00000-0  30370-3 0  9993';
-const ISS_LINE2 =
-  '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.50377579432323';
+// Byrd-IT fork: the CelesTrak proxy serves GP CSV (OMM columns), not TLE, so
+// this upstream Alpha-5 test drives the fork parser (parts.orbits.parseGP).
+// GP CSV carries catalog numbers above 99999 as plain digits; the satellites
+// TLE spells A0000 / B0001 / Z9999 are 100000 / 110001 / 339999.
+const HEADER =
+  'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT';
 
-function tleSet(name, field) {
-  return [
-    name,
-    ISS_LINE1.replace('25544', field),
-    ISS_LINE2.replace('25544', field),
-  ].join('\n');
+// The ISS elements (1 January 2024) with the catalog number swapped per row.
+function gpRow(name, noradId) {
+  return `${name},1998-067A,2024-01-01T12:00:00.000000,15.50377579,.0006703,51.6416,247.4627,130.5360,325.0288,0,U,${noradId},999,43232,.30370E-3,.16717E-3,0`;
 }
 
 function ingestionFor(catalogText) {
@@ -35,7 +33,7 @@ function ingestionFor(catalogText) {
   };
   const parts = {
     orbits: {
-      parseTLE: parseTleText,
+      parseGP,
       propagatePosition: () => ({ longitude: 0, latitude: 0, altitude: 4e5 }),
     },
     labels: { _syncIssOverlay() {} },
@@ -56,15 +54,16 @@ function ingestionFor(catalogText) {
   return { state, update: () => methods.update({ scene: {} }) };
 }
 
-test('every Alpha-5 satellite keeps its own catalog entry through dedupe', async (t) => {
+test('every 6-digit (Alpha-5 range) satellite keeps its own catalog entry through dedupe', async (t) => {
   t.mock.method(console, 'log', () => {});
   t.mock.method(console, 'warn', () => {});
   const { state, update } = ingestionFor(
     [
-      tleSet('FIRST', 'A0000'),
-      tleSet('SECOND', 'B0001'),
-      tleSet('THIRD', 'Z9999'),
-    ].join('\n'),
+      HEADER,
+      gpRow('FIRST', 100000),
+      gpRow('SECOND', 110001),
+      gpRow('THIRD', 339999),
+    ].join('\r\n'),
   );
   await update();
   assert.deepEqual(

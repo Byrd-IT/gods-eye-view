@@ -406,7 +406,9 @@ export function findUnmarked() {
       ...unmarkedMarkup(file, readFileSync(path.join(ROOT, file), 'utf8')),
     );
   for (const file of sourceFiles().filter(
-    (name) => !NOT_UI.some((pattern) => pattern.test(name)),
+    (name) =>
+      !NOT_UI.some((pattern) => pattern.test(name)) &&
+      !BYRDIT_FORK_UNMARKED_EXEMPT.some((pattern) => pattern.test(name)),
   ))
     found.push(
       ...unmarkedScript(file, readFileSync(path.join(ROOT, file), 'utf8')),
@@ -423,6 +425,13 @@ export function findUnmarked() {
 // Text that never reaches the page as UI: tool results and descriptions for
 // AI clients (MCP and the voice model).
 const NOT_UI = [/^src\/tools\//];
+
+// Byrd-IT fork: fork-only UI under src/byrdit/** (Sky view, History, nav
+// control, Byrd-IT Open base map, USGS water) is English-only and not yet
+// marked for translation. It is exempt from the unmarked-text scan ONLY; any
+// t()/msg() it does use is still checked against every catalog. Remove this
+// once the fork strings are marked and translated (upstream merge t_d7f5ae4c).
+const BYRDIT_FORK_UNMARKED_EXEMPT = [/^src\/byrdit\//];
 
 function sourceFiles() {
   return trackedFiles(
