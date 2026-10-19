@@ -2963,5 +2963,9 @@
   "USGS Rivers & Streams": "USGS: реки и ручьи",
   "USGS Groundwater Wells": "USGS: скважины подземных вод",
   "USGS Lakes & Reservoirs": "USGS: озёра и водохранилища",
-  "USGS Springs": "USGS: родники"
+  "USGS Springs": "USGS: родники",
+  "Clean view: hide the controls": "Чистый вид: скрыть элементы управления",
+  "Exit clean view: show the controls": "Выйти из чистого вида: показать элементы управления",
+  "Clean view: hide the controls (V)": "Чистый вид: скрыть элементы управления (V)",
+  "{label} (V)": "{label} (V)"
 }

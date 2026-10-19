@@ -29,4 +29,5 @@
 @import './src/ui/styles/panel-surfaces.css';
 @import './src/byrdit/navControl/navControl.css';
 @import './src/byrdit/skyView/skyView.css';
+@import './src/byrdit/cleanView/cleanView.css';
 @import './src/ui/styles/cyber.css';

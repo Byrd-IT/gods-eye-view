@@ -108,6 +108,7 @@
     "panel",
     "view band|GLOBAL",
     "voice|ERROR",
+    "{label} (V)",
     "{rate} msg/s",
     "{speed} kn",
     "{type}  SPD: {speed}  HDG: {heading}",
@@ -132,6 +133,7 @@
     "R&B",
     "REC",
     "VS",
-    "WHOT/BHOT"
+    "WHOT/BHOT",
+    "{label} (V)"
   ]
 }

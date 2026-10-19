@@ -1,0 +1,36 @@
+/* ── Clean view: fork-only controls (Byrd-IT) ─────────────────────────────
+   Upstream's clean view (body.ui-clean-view, V / Clean UI / the corner eye)
+   hides upstream chrome in src/ui/styles/controls.css. These rules hide the
+   fork's own map controls the same way, the nav control and the Sky button
+   included (their display: none rules cover the other full-screen modes).
+   Visibility keeps every box: no reflow, no resize, no camera change. */
+body.ui-clean-view
+  :is(
+    #gev-naip-slider,
+    #gev-naip-split-line,
+    .gev-hist,
+    .gev-nav,
+    .gev-sky-btn,
+    .gev-sky-panel
+  ) {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  transition-property: none !important;
+}
+
+/* Sky view has its own Clear view eye; the map's eye steps aside. */
+body.gev-sky-active #clean-view-eye {
+  display: none !important;
+}
+
+/* Wide screens: the nav control and the Sky button fill the bottom-right
+   corner (navControl.css: right 36 px, bottom 14 px above 900 px), so the
+   eye takes the top-right corner, below the active-style label
+   (#style-indicator: 32-70 px from the top) and above the HUD lines. */
+@media (min-width: 901px) and (min-height: 521px) {
+  #clean-view-eye {
+    top: max(78px, calc(env(safe-area-inset-top, 0px) + 74px));
+    bottom: auto;
+  }
+}
