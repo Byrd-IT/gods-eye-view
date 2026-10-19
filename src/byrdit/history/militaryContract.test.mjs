@@ -127,7 +127,15 @@ test("GEV's military source reads the bridged answer like the live one", async (
   assert.equal(feedDisplayState(fresh.response).state, 'live');
 
   up = false;
+  // military polls every 300 s (t_5ad2b9a4): 200 s without the collector is
+  // inside 3 x 300 s, so the last-good copy is still fresh (the 60 s rule
+  // greyed it at 180 s)
   clock.now = lastOk + 200_000;
+  const held = await throughGevSource(handler, clock);
+  assert.equal((await held.source.getSnapshot()).stale, false);
+  assert.equal(feedDisplayState(held.response).state, 'live');
+
+  clock.now = lastOk + 901_000;
   const stale = await throughGevSource(handler, clock);
   const staleSnap = await stale.source.getSnapshot();
   assert.equal(staleSnap.stale, true, 'GEV marks the layer stale');
@@ -143,7 +151,7 @@ test("GEV's military source reads the bridged answer like the live one", async (
   assert.equal(display.state, 'grey');
   assert.equal(display.chip, 'No data since 09:19 CDT');
 
-  clock.now = lastOk + 180_000 + 3_600_000;
+  clock.now = lastOk + 900_000 + 3_600_000;
   const cleared = await throughGevSource(handler, clock);
   assert.equal(feedDisplayState(cleared.response).state, 'cleared');
 });

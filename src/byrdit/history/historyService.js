@@ -1,6 +1,7 @@
 import { HISTORY_INDICES as IDX } from './historyEs.js';
 import {
   ADSBLOL_BUCKET_S,
+  MILITARY_CADENCE_MS,
   MILITARY_MAX_SNAP_AGE_MS,
   STALE_POSITION_MAX_MS,
   STALE_UNION_SPAN_MS,
@@ -46,9 +47,14 @@ export const LOG_FEED = Object.freeze({
   opensky: 'aircraft-opensky',
 });
 
-/** Recorder cadence per ingest-log feed (collector feed definitions). */
+/**
+ * Recorder cadence per ingest-log feed (collector feed definitions).
+ * polls_expected = floor(bucket / cadence): military (300 s) expects 1 poll
+ * per 5m bucket, 12 per 1h, and 0 per 1m bucket (a 1-minute bucket holds a
+ * poll only every 5th minute, so none is expected).
+ */
 export const CADENCE_MS = Object.freeze({
-  military: 60_000,
+  military: MILITARY_CADENCE_MS,
   firms: 1_800_000,
   'fire-perimeters': 900_000,
   cyclones: 900_000,

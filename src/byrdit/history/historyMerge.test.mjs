@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MERGE_TIE_MS,
+  MILITARY_CADENCE_MS,
+  MILITARY_MAX_SNAP_AGE_MS,
+  STALE_POSITION_MAX_MS,
+  STALE_UNION_SPAN_MS,
   adsblolSnapAtOrBefore,
   boxesIntersect,
   mergeAircraft,
@@ -97,10 +101,49 @@ test('adsb.lol snap = largest 60 s bucket end <= t (epoch s)', () => {
 test('snap nearest: military poll = newest snap <= t within 3 x cadence', () => {
   const polls = [T - 200_000, T - 100_000, T - 40_000, T + 5_000];
   assert.equal(pickPollSnap(polls, T), T - 40_000);
-  assert.equal(pickPollSnap([T - 180_000], T), T - 180_000);
-  assert.equal(pickPollSnap([T - 180_001], T), null); // gap -> fallback
+  assert.equal(pickPollSnap([T - 900_000], T), T - 900_000);
+  assert.equal(pickPollSnap([T - 900_001], T), null); // gap -> fallback
   assert.equal(pickPollSnap([T + 1], T), null); // never a future poll
   assert.equal(pickPollSnap([], T), null);
+});
+
+test('military cadence 300 s (t_5ad2b9a4): 3 x rule = 900 s max snap age', () => {
+  assert.equal(MILITARY_CADENCE_MS, 300_000);
+  assert.equal(MILITARY_MAX_SNAP_AGE_MS, 3 * MILITARY_CADENCE_MS);
+  assert.equal(MILITARY_MAX_SNAP_AGE_MS, 900_000);
+  // a poll 250 s before t IS the poll at t (under the old 60 s rule, 180 s
+  // max age, it was a recording gap and t fell back to the archive)
+  assert.equal(pickPollSnap([T - 250_000], T), T - 250_000);
+  // polls every 300 s: every instant between two polls maps to the earlier
+  // one, never to the archive, and never to the later (future) poll
+  const polls = [T - 600_000, T - 300_000, T];
+  for (let dt = 0; dt < 300_000; dt += 10_000)
+    assert.equal(pickPollSnap(polls, T - 300_000 + dt), T - 300_000, `dt ${dt}`);
+  // two missed polls (last poll 900 s back) still serve; a third does not
+  assert.equal(pickPollSnap([T - 900_000], T), T - 900_000);
+  assert.equal(pickPollSnap([T - 900_001], T), null);
+});
+
+test('stale union limits: span covers the position age, independent of cadence', () => {
+  // a held position (time F) was first written by the first poll >= F, so a
+  // span >= the position-age limit always reaches it (historyMerge.js note)
+  assert.ok(STALE_UNION_SPAN_MS >= STALE_POSITION_MAX_MS);
+  assert.equal(STALE_POSITION_MAX_MS, 180_000);
+  assert.equal(STALE_UNION_SPAN_MS, 300_000);
+});
+
+test('stale union at 300 s polls: prior poll rows add only positions <= 180 s old', () => {
+  const S = T;
+  const primary = [{ id: 'live', tsMs: S - 20_000 }];
+  // the previous poll was at S - 300 s: its positions are all <= S - 300 s
+  const prior = [
+    { id: 'live', tsMs: S - 310_000 }, // also in the poll at S
+    { id: 'left', tsMs: S - 305_000 }, // not in the poll at S: gone
+    { id: 'jitter', tsMs: S - 179_000 }, // an earlier poll < 300 s back (restart)
+  ];
+  const rows = byId(staleUnion(primary, prior, S));
+  assert.deepEqual(Object.keys(rows).sort(), ['jitter', 'live']);
+  assert.equal(rows.live.tsMs, S - 20_000);
 });
 
 test('snap nearest: n nearest of before/after lists, ascending, deduped', () => {
