@@ -7,6 +7,7 @@ import { VisualSettings } from './visualSettings.js';
 import { NavigationController } from './navigationController.js';
 import { ShareRestoration } from './shareRestoration.js';
 import { DisplayBindings } from './displayBindings.js';
+import { bindCleanViewEye } from './cleanViewEye.js';
 import { createStateChannel } from '../app/stateChannel.js';
 import { setSplitFlapText } from '../splitFlap.js';
 import { UiLifetime } from './uiLifetime.js';
@@ -513,6 +514,7 @@ export class StyleManager extends ShellFacade {
         _cyberSonarSector: this._cyberSonarSector,
         _cleanViewBtn: this._cleanViewBtn,
         _cleanViewExitBtn: this._cleanViewExitBtn,
+        _cleanViewEyeBtn: this._cleanViewEyeBtn,
         _detectionDensitySlider: this._detectionDensitySlider,
         _detectionBtn: this._detectionBtn,
         _detectionFadeSlider: this._detectionFadeSlider,
@@ -578,6 +580,7 @@ export class StyleManager extends ShellFacade {
     this._initShareButton();
     this._initCameraOrientationControls();
     this._initNavControl();
+    this._initCleanViewEye();
     this._initClearSelectedLayersButton();
     this._initHUDToggle();
     this._initModels3dToggle();
@@ -1107,8 +1110,26 @@ export class StyleManager extends ShellFacade {
     document.body.classList.toggle('ui-clean-view', shouldEnable);
     if (this._cleanViewBtn) {
       this._cleanViewBtn.classList.toggle('active', shouldEnable);
+      this._cleanViewBtn.setAttribute('aria-pressed', String(shouldEnable));
     }
-    this._scheduleLeftPanelLayout();
+    this._cleanViewEye?.sync(shouldEnable);
+    // The rails are hidden, not removed: keep their layout as it is so the
+    // toggle does not re-measure or resize them (no ResizeObserver churn).
+    this._panelChrome.holdPanelLayout(shouldEnable);
+  }
+
+  /**
+   * Binds the corner eye that mirrors clean view and fades while idle in it.
+   * Its click is bound with the other Display controls (toggleCleanView).
+   * @returns {void}
+   */
+  _initCleanViewEye() {
+    this._cleanViewEye?.destroy();
+    this._cleanViewEye = bindCleanViewEye({
+      button: this._cleanViewEyeBtn,
+      documentRef: document,
+    });
+    this._cleanViewEye.sync(document.body.classList.contains('ui-clean-view'));
   }
 
   // ── Public control facade ──────────────────────────────────────────────
@@ -1603,6 +1624,7 @@ export class StyleManager extends ShellFacade {
     this._mapSourceControls?.destroy();
     this._cameraOrientationControls?.destroy();
     this._navControl?.destroy();
+    this._cleanViewEye?.destroy();
     this._clearLayersControl?.destroy();
     this._cctvControls?.destroy();
     this.services?.streetLevelLayer?.attachNavigation?.(null);
