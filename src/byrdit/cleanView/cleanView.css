@@ -34,3 +34,16 @@ body.gev-sky-active #clean-view-eye {
     bottom: auto;
   }
 }
+
+/* Phones in portrait: upstream's corner row (#corner-actions: POWER UP chip
+   and language picker, src/ui/styles/locale-picker.css) stacks as a column in
+   the bottom-right corner, where the map eye (controls.css) and the Sky view
+   eye (skyView.css) already sit. Between the dock and the right edge there is
+   no room for both, so on phones the row takes the bottom-left corner beside
+   the dock instead (below the attribution, clear of the dock). */
+@media (max-width: 767.98px) and (min-height: 521px) {
+  #corner-actions {
+    inset-inline-start: 10px;
+    inset-inline-end: auto;
+  }
+}

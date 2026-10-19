@@ -328,6 +328,44 @@ async function main() {
       // positions), and so we can confirm the shim is live.
       window.__SYNTH = synth;
       window.__SYNTH_HITS = { opensky: 0, mil: 0 };
+      // Byrd-IT fork: /api/celestrak serves CelesTrak GP CSV (OMM columns,
+      // src/byrdit/gpCsv.js), not TLE. The scenarios below edit the synthetic
+      // catalog as TLE text (drop a satellite = drop its 3 lines), so the stub
+      // converts that text to the GP CSV the fork parses, element for element.
+      const tleToGpCsv = (text) => {
+        const header = 'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT';
+        const expo = (field) => {
+          const f = field.trim();
+          const m = /^([+-]?)(\d+)([+-]\d)$/.exec(f);
+          if (!m) return '0';
+          return `${m[1]}${Number(`0.${m[2]}e${m[3]}`)}`;
+        };
+        const lines = String(text || '').split('\n').filter((l) => l.trim());
+        const rows = [header];
+        for (let i = 0; i + 2 < lines.length; i += 3) {
+          const name = lines[i].trim();
+          const l1 = lines[i + 1];
+          const l2 = lines[i + 2];
+          const yy = Number(l1.slice(18, 20));
+          const year = yy < 57 ? 2000 + yy : 1900 + yy;
+          const day = Number(l1.slice(20, 32));
+          const epoch = new Date(Date.UTC(year, 0, 1) + (day - 1) * 86400000)
+            .toISOString().replace('Z', '');
+          const intl = l1.slice(9, 17).trim();
+          const intlYear = Number(intl.slice(0, 2));
+          const objectId = `${intlYear < 57 ? 2000 + intlYear : 1900 + intlYear}-${intl.slice(2)}`;
+          rows.push([
+            name, objectId, epoch,
+            Number(l2.slice(52, 63)), Number(`0.${l2.slice(26, 33).trim()}`),
+            Number(l2.slice(8, 16)), Number(l2.slice(17, 25)),
+            Number(l2.slice(34, 42)), Number(l2.slice(43, 51)),
+            0, l1[7] || 'U', Number(l1.slice(2, 7)), Number(l1.slice(64, 68)),
+            Number(l2.slice(63, 68)), expo(l1.slice(53, 61)),
+            Number(l1.slice(33, 43)), expo(l1.slice(44, 52)),
+          ].join(','));
+        }
+        return rows.join('\r\n');
+      };
 
       const realFetch = window.fetch.bind(window);
       const jsonResponse = (obj) =>
@@ -427,16 +465,16 @@ async function main() {
             if (window.__SYNTH.failDense) {
               return Promise.resolve(new Response('upstream unavailable', { status: 503 }));
             }
-            return Promise.resolve(new Response(window.__SYNTH.denseTle, {
-              status: 200, headers: { 'Content-Type': 'text/plain' },
+            return Promise.resolve(new Response(tleToGpCsv(window.__SYNTH.denseTle), {
+              status: 200, headers: { 'Content-Type': 'text/csv' },
             }));
           }
           // EVERY core group serves the same catalog. Dedupe keeps the first
           // (stations) tag, so the catalog is unchanged — but no group is
           // EMPTY, and an empty group counts as failed, which would make an
           // `accepted` refresh (and therefore any release) unreachable here.
-          return Promise.resolve(new Response(window.__SYNTH.tle, {
-            status: 200, headers: { 'Content-Type': 'text/plain' },
+          return Promise.resolve(new Response(tleToGpCsv(window.__SYNTH.tle), {
+            status: 200, headers: { 'Content-Type': 'text/csv' },
           }));
         }
         // Voice scene context reverse-geocodes the view target and asks Places

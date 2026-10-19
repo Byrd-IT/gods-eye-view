@@ -93,3 +93,21 @@ test('wide screens put the eye in the top-right corner, clear of the nav control
   );
   assert.match(nav, /@media \(max-width: 900px\)/);
 });
+
+test('phones: the upstream corner row steps to the bottom-left, clear of both eyes', () => {
+  const m = own.match(
+    /@media \(max-width: 767\.98px\) and \(min-height: 521px\) \{\s*#corner-actions \{([^}]*)\}/,
+  );
+  assert.ok(m, 'phone #corner-actions rule');
+  assert.match(m[1], /inset-inline-start: 10px/);
+  assert.match(m[1], /inset-inline-end: auto/);
+  // the upstream phone column this rule moves (same breakpoint)
+  const corner = fs.readFileSync(
+    path.join(ROOT, 'src/ui/styles/locale-picker.css'),
+    'utf8',
+  );
+  assert.match(
+    corner,
+    /@media \(max-width: 767\.98px\) \{[\s\S]*?#corner-actions \{[^}]*flex-direction: column/,
+  );
+});
