@@ -181,6 +181,7 @@
       "src/i18n/marker.js",
       "src/data/tomtomTiles.js",
       "server/providers/common/same-site.js",
+      "server/byrdit/trustedProxy.js",
       "src/localRequestGate.mjs"
     ],
     "external": []

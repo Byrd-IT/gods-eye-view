@@ -780,7 +780,9 @@ test('generic voice visibility resolves the USGS water alias', async () => {
     lifecycleUncertain: false,
     feedState: 'off',
     say: 'USGS Water Levels on.',
-    display: { title: 'USGS Water Levels on', chips: [{ label: 'off' }], sources: [] },
+    // The card title names the layer by id (src/ui/layerNames.js), so it
+    // shows the real USGS layer name, not this fixture's module name.
+    display: { title: 'USGS Rivers & Streams on', chips: [{ label: 'off' }], sources: [] },
   });
 });
 
