@@ -583,6 +583,46 @@ test('cctv/sources.js: TxDOT refused -> [], class names the cause', async (t) =>
   );
 });
 
+test('stalled and huge failure bodies: bounded peek, same result', async (t) => {
+  stubFetch(t);
+  const sockets = [];
+  routes.set('/511on.ca/api/v2/get/cameras', (req, res) => {
+    // Headers + a few bytes, then the body stalls (never ends).
+    res.writeHead(503, { 'content-type': 'text/plain' });
+    res.write('partial ');
+    sockets.push(res);
+  });
+  routes.set('/www.drivebc.ca/api/webcams/', (req, res) => {
+    res.writeHead(500, { 'content-type': 'text/plain' });
+    res.end(`token=${ownKey} ` + 'x'.repeat(1024 * 1024));
+  });
+  t.after(() => {
+    for (const res of sockets) res.destroy();
+  });
+  const logs = captureLogs(t);
+  const sources = await mod('server/providers/cctv/sources.js');
+  const started = performance.now();
+  assert.deepEqual(await sources.loadOntarioSourcesFromOpenData(), []);
+  const stalledMs = performance.now() - started;
+  assert.deepEqual(await sources.loadDriveBcSourcesFromOpenData(), []);
+  if (BASE_MODE) return;
+  // The peek waits at most P16_BODY_PEEK_MS (1 s) for a stalled body.
+  assert.ok(stalledMs < 3000, `stalled body held the loader ${stalledMs} ms`);
+  const stalled = assertFailureLine(
+    logs,
+    /Ontario 511 camera download failed: 503/,
+    {
+      status: 503,
+    },
+  );
+  assert.match(stalled, /partial \[body read cut at peek deadline\]/);
+  const huge = assertFailureLine(logs, /DriveBC camera download failed: 500/, {
+    status: 500,
+  });
+  assert.equal(Buffer.byteLength(bodiesOf(huge)[0]), 300);
+  assertSafe(logs, 'stalled/huge');
+});
+
 test('stub accounting: every upstream request went to the localhost stub', () => {
   assert.ok(seen.length > 0);
   for (const url of seen) assert.ok(url.startsWith('/'), url);
