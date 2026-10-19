@@ -5,6 +5,300 @@ import {
   readResponseTextCapped,
 } from '../common/http.js';
 import { requiredFiniteQueryNumber } from '../common/query.js';
+
+// --- Byrd-IT p16: upstream failure log helpers (STANDARD R3, KB SeY7S6EBs9sMHq_KSKLr).
+// The same block is copied into every p16 provider file (there is no shared
+// runtime module, as in b12); src/byrdit/providerErrorLoggingP16.test.mjs
+// checks that the copies stay identical and that redactSnippet equals the b12
+// copy. Every helper is log-only and never throws.
+
+/** Longest wait for a failing body's first bytes (ms). */
+const P16_BODY_PEEK_MS = 1000;
+/** Characters of a failing body read for the log; the rest is cancelled. */
+const P16_BODY_PEEK_CHARS = 4096;
+
+/**
+ * Read at most P16_BODY_PEEK_CHARS of a failing response body within `ms`,
+ * then cancel the body. A stalled body never holds the caller past `ms`.
+ * Never throws; returns '' when there is no readable body.
+ */
+async function p16PeekBody(response, ms = P16_BODY_PEEK_MS) {
+  let reader;
+  try {
+    reader = response?.body?.getReader?.();
+  } catch {
+    return '[body locked]';
+  }
+  if (!reader) return '';
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ done: true, timedOut: true }), ms);
+    timer.unref?.();
+  });
+  const decoder = new TextDecoder();
+  let text = '';
+  try {
+    while (text.length < P16_BODY_PEEK_CHARS) {
+      const { done, value, timedOut } = await Promise.race([
+        reader.read(),
+        deadline,
+      ]);
+      if (timedOut) {
+        text += text
+          ? ' [body read cut at peek deadline]'
+          : '[no body bytes before peek deadline]';
+        break;
+      }
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    /* body errored: log what we have */
+  } finally {
+    clearTimeout(timer);
+    reader.cancel().catch(() => {});
+    try {
+      reader.releaseLock();
+    } catch {
+      /* a pending read keeps the lock; the cancel above settles it */
+    }
+  }
+  return text;
+}
+
+/**
+ * Log-safe upstream body snippet (b12, STANDARD R3). In order:
+ * 1. the request's own secrets/inputs (`secrets`) are masked literally, in
+ *    raw, JSON-escaped and URL-encoded form, wherever the upstream echoed them;
+ * 2. markup is stripped, `\/` is unescaped, and URL userinfo, Bearer/Basic
+ *    credentials, JSON / query / header style secret fields (key, token,
+ *    secret, password, auth, credential, sig, session, cookie ...) in plain or
+ *    escaped JSON, and well-known key shapes (sk-, AIza, ghp_, xox?-, JWT) are
+ *    masked;
+ * 3. whitespace is collapsed and the result is cut to at most `maxBytes`
+ *    UTF-8 bytes without splitting a code point.
+ * The same text is copied into every b12 provider file (there is no shared
+ * runtime module); src/byrdit/providerErrorLogging.test.mjs checks that the
+ * copies stay identical and attacks each one.
+ */
+function redactSnippet(text, secrets = [], maxBytes = 300) {
+  let s = String(text ?? '');
+  for (const secret of secrets) {
+    const raw = String(secret ?? '');
+    if (raw.length < 4) continue;
+    const forms = new Set([raw, JSON.stringify(raw).slice(1, -1)]);
+    try {
+      forms.add(encodeURIComponent(raw));
+    } catch {
+      /* lone surrogate: raw + JSON forms only */
+    }
+    for (const form of forms) s = s.split(form).join('REDACTED');
+  }
+  s = s
+    .slice(0, 65536)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\\+\//g, '/')
+    .replace(/\b([a-z][a-z0-9+.-]{0,30}:\/\/)[^\s/?#@"'<>]*@/gi, '$1REDACTED@')
+    .replace(/\b(Bearer|Basic|Token)\s+[^\s"'\\,;]+/gi, '$1 REDACTED')
+    .replace(
+      /((?:\\*["'])?(?<![\w.-])[\w.-]{0,40}(?:key|token|secret|passw(?:or)?d|pwd|pass|auth|credential|signature|sig|session|cookie)[\w.-]{0,40}(?:\\*["'])?\s*[:=]\s*)(?:"(?:[^"\\]|\\.)*"?|\\+"[\s\S]*?(?:\\+"(?=\s*[,}\]])|$)|'[^']*'?|[^\s,&;}\]"'<>]+)/gi,
+      '$1REDACTED',
+    )
+    .replace(
+      /\b(?:sk-[\w*.-]{4,}|AIza[\w-]{10,}|gh[pousr]_\w{10,}|xox[abprs]-[\w-]{10,}|eyJ[\w-]{6,}\.[\w-]{6,}\.[\w-]*)/g,
+      'REDACTED',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  const encoder = new TextEncoder();
+  if (encoder.encode(s).length <= maxBytes) return s;
+  let out = '';
+  let bytes = 0;
+  for (const ch of s) {
+    const size = encoder.encode(ch).length;
+    if (bytes + size > maxBytes) break;
+    out += ch;
+    bytes += size;
+  }
+  return out;
+}
+
+/**
+ * Thrown-error classes, as fixed constants (b12 HUD tables). The error's
+ * `cause.code`/`code`/`name` are only looked up here, never printed: anything
+ * outside these tables is logged as `code=OTHER` / `error`.
+ */
+const P16_TIMEOUT_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'ETIMEDOUT',
+]);
+const P16_DNS_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN']);
+const P16_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'EPIPE',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'EHOSTDOWN',
+  'EPROTO',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CLOSED',
+  'UND_ERR_DESTROYED',
+  'UND_ERR_ABORTED',
+  'UND_ERR_INFO',
+  'UND_ERR_RES_CONTENT_LENGTH_MISMATCH',
+  'UND_ERR_REQ_CONTENT_LENGTH_MISMATCH',
+  'UND_ERR_RES_EXCEEDED_MAX_SIZE',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'CERT_HAS_EXPIRED',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'ERR_SSL_WRONG_VERSION_NUMBER',
+]);
+const P16_LOCAL_CODES = new Set(['RESPONSE_TOO_LARGE', 'BODY_TOO_LARGE']);
+const P16_ERROR_NAMES = new Set([
+  'AbortError',
+  'TypeError',
+  'RangeError',
+  'SyntaxError',
+  'Error',
+]);
+
+/** Cause class of a thrown error: constants only, never its message, code or name. */
+function p16FailureClass(error) {
+  try {
+    // String codes only: DOMException carries a numeric legacy `code`.
+    const rawCode =
+      [error?.cause?.code, error?.code].find((c) => typeof c === 'string') ||
+      '';
+    const name = typeof error?.name === 'string' ? error.name : '';
+    if (name === 'TimeoutError' || P16_TIMEOUT_CODES.has(rawCode))
+      return `timeout${P16_TIMEOUT_CODES.has(rawCode) ? ` code=${rawCode}` : ''}`;
+    if (P16_DNS_CODES.has(rawCode)) return `dns code=${rawCode}`;
+    if (P16_NETWORK_CODES.has(rawCode)) return `network code=${rawCode}`;
+    if (P16_LOCAL_CODES.has(rawCode)) return `local code=${rawCode}`;
+    if (error instanceof SyntaxError) return 'malformed';
+    if (rawCode) return 'error code=OTHER';
+    return P16_ERROR_NAMES.has(name) ? name : 'error';
+  } catch {
+    return 'error';
+  }
+}
+
+/**
+ * `METHOD origin/path` of an upstream URL for a log line: no userinfo, no
+ * query, no fragment, and the request's own secrets masked in the path.
+ */
+function p16Target(method, url, secrets = []) {
+  try {
+    const parsed = new URL(String(url));
+    return `${method} ${redactSnippet(`${parsed.origin}${parsed.pathname}`, secrets, 300)}`;
+  } catch {
+    return `${method} [unparsable url]`;
+  }
+}
+
+/**
+ * Credential-like parts of a URL (userinfo, query values), so an upstream
+ * that echoes them back is masked too. Never throws.
+ */
+function p16UrlSecrets(url) {
+  try {
+    const parsed = new URL(String(url));
+    return [
+      decodeURIComponent(parsed.username),
+      decodeURIComponent(parsed.password),
+      ...parsed.searchParams.values(),
+    ].filter((value) => value.length >= 4);
+  } catch {
+    return [];
+  }
+}
+
+/** Whole milliseconds since `startedAt` (a performance.now() value). */
+function p16Elapsed(startedAt) {
+  const ms = performance.now() - Number(startedAt);
+  return Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : -1;
+}
+
+/**
+ * key=value fields for an upstream HTTP failure: target, status, elapsed and
+ * a redacted body[:300]. `text` is the already-read body; without it the body
+ * is peeked (bounded) and cancelled. Never throws.
+ */
+async function p16HttpFailure({
+  method = 'GET',
+  url,
+  response,
+  startedAt,
+  secrets = [],
+  text,
+  withTarget = true,
+}) {
+  try {
+    const status = Number(response?.status);
+    const raw = text === undefined ? await p16PeekBody(response) : text;
+    const all = [...secrets, ...p16UrlSecrets(url)];
+    return (
+      (withTarget
+        ? `target=${JSON.stringify(p16Target(method, url, all))} `
+        : '') +
+      `status=${Number.isInteger(status) ? status : 'none'}` +
+      ` elapsed_ms=${p16Elapsed(startedAt)}` +
+      ` body=${JSON.stringify(redactSnippet(raw, all))}`
+    );
+  } catch {
+    return 'detail=unavailable';
+  }
+}
+
+/** key=value fields for a thrown upstream failure (no message). Never throws. */
+function p16ThrownFailure({
+  method = 'GET',
+  url,
+  error,
+  startedAt,
+  timeoutMs,
+  secrets = [],
+  stage,
+  withTarget = true,
+}) {
+  try {
+    const all = [...secrets, ...p16UrlSecrets(url)];
+    return (
+      (withTarget
+        ? `target=${JSON.stringify(p16Target(method, url, all))} `
+        : '') +
+      (stage === 'body' || stage === 'headers' ? `stage=${stage} ` : '') +
+      `class=${p16FailureClass(error)}` +
+      ` elapsed_ms=${p16Elapsed(startedAt)}` +
+      (Number.isFinite(timeoutMs) ? ` timeout_ms=${timeoutMs}` : '')
+    );
+  } catch {
+    return 'detail=unavailable';
+  }
+}
+
+/** Attach log fields to an error without changing it otherwise. Never throws. */
+function p16Annotate(error, fields) {
+  try {
+    if (error && typeof error === 'object' && !error.p16Log)
+      Object.defineProperty(error, 'p16Log', {
+        value: fields,
+        enumerable: false,
+        configurable: true,
+      });
+  } catch {
+    /* frozen error: the log falls back to its old text */
+  }
+  return error;
+}
+// --- end of p16 helpers
 // ---------------------------------------------------------------------------
 // OpenSky OAuth2 token + response cache state
 // ---------------------------------------------------------------------------
@@ -64,6 +358,7 @@ function openSkyRateLimitCooldownMs(upstream) {
  */
 async function fetchOpenSkyStates(headers) {
   for (let attempt = 1; ; attempt++) {
+    const startedAt = performance.now();
     try {
       const signal = AbortSignal.timeout(OPENSKY_ATTEMPT_TIMEOUT_MS);
       const upstream = await fetch(OPENSKY_STATES_URL, { headers, signal });
@@ -76,6 +371,8 @@ async function fetchOpenSkyStates(headers) {
         return {
           upstream,
           body: JSON.stringify({ error: 'OpenSky rate limited.' }),
+          startedAt,
+          bodyUnread: true,
         };
       }
       const body = await readResponseTextCapped(
@@ -83,12 +380,20 @@ async function fetchOpenSkyStates(headers) {
         OPENSKY_STATES_MAX_RESPONSE_BYTES,
         signal,
       );
-      return { upstream, body };
+      return { upstream, body, startedAt };
     } catch (error) {
-      if (attempt >= 2 || error?.code === 'RESPONSE_TOO_LARGE') throw error;
+      // Byrd-IT p16 (R3): class/elapsed/timeout instead of the message.
+      const fields = p16ThrownFailure({
+        url: OPENSKY_STATES_URL,
+        error,
+        startedAt,
+        timeoutMs: OPENSKY_ATTEMPT_TIMEOUT_MS,
+      });
+      if (attempt >= 2 || error?.code === 'RESPONSE_TOO_LARGE')
+        throw p16Annotate(error, fields);
       console.warn(
         '[OpenSky] global snapshot attempt failed, retrying:',
-        error?.message || error,
+        fields,
       );
     }
   }
@@ -124,6 +429,48 @@ function openskyAdaptiveTtlMs(remaining) {
   if (remaining > 400) return 90_000;
   return 300_000;
 }
+/**
+ * Byrd-IT p16: a non-OK /states/all reply was not logged at all. It is now,
+ * at most once per status per P16_STATES_LOG_WINDOW_MS (the client polls
+ * every 30 s per viewer), with the count of replies not logged since.
+ */
+const P16_STATES_LOG_WINDOW_MS = 60_000;
+/** @type {Map<number, {at: number, suppressed: number}>} */
+const _p16StatesLogGate = new Map();
+function p16AdmitStatesLog(status, now = Date.now()) {
+  const gate = _p16StatesLogGate.get(status);
+  if (gate && now - gate.at < P16_STATES_LOG_WINDOW_MS) {
+    gate.suppressed += 1;
+    return null;
+  }
+  if (_p16StatesLogGate.size >= 32) _p16StatesLogGate.clear();
+  _p16StatesLogGate.set(status, { at: now, suppressed: 0 });
+  return { suppressed: gate?.suppressed || 0 };
+}
+
+/** Log one non-OK /states/all reply (gated). Never throws. */
+async function p16LogStatesFailure(states, usedMode, secrets) {
+  try {
+    const admitted = p16AdmitStatesLog(states.upstream.status);
+    if (!admitted) return;
+    const fields = await p16HttpFailure({
+      url: OPENSKY_STATES_URL,
+      response: states.upstream,
+      startedAt: states.startedAt,
+      secrets,
+      text: states.bodyUnread
+        ? '[not read: a 429 starts the cooldown from its headers]'
+        : states.body,
+    });
+    console.warn(
+      `[OpenSky] states upstream HTTP ${states.upstream.status} ${fields} auth=${usedMode}` +
+        (admitted.suppressed ? ` suppressed=${admitted.suppressed}` : ''),
+    );
+  } catch {
+    /* logging only */
+  }
+}
+
 /** @type {boolean} Guards duplicate auth-failure warnings in logs. */
 let _openskyAuthWarned = false;
 /** @type {boolean} Guards duplicate invalid-auth-mode warnings. */
@@ -168,21 +515,26 @@ export async function getOpenSkyToken() {
   if (!clientId || !clientSecret) return null;
 
   // Wrap the async token fetch in a shared promise stored in _openskyTokenPromise
+  const tokenUrl =
+    'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token';
+  const tokenSecrets = [clientId, clientSecret];
   _openskyTokenPromise = (async () => {
+    const startedAt = performance.now();
     try {
-      const res = await fetch(
-        'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          signal: AbortSignal.timeout(OPENSKY_ATTEMPT_TIMEOUT_MS),
-          body: `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`,
-        },
-      );
+      const res = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        signal: AbortSignal.timeout(OPENSKY_ATTEMPT_TIMEOUT_MS),
+        body: `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`,
+      });
 
+      // Same result as res.json() (null when unreadable or not JSON), but
+      // the text stays available for the failure log.
+      let text;
       let data = null;
       try {
-        data = await res.json();
+        text = await res.text();
+        data = JSON.parse(text);
       } catch {
         data = null;
       }
@@ -191,8 +543,16 @@ export async function getOpenSkyToken() {
       const expiresIn = Number(data?.expires_in);
       if (!res.ok || !accessToken) {
         if (!_openskyAuthWarned) {
-          const detail =
-            data?.error_description || data?.error || `HTTP ${res.status}`;
+          // Byrd-IT p16 (R3): status/elapsed/redacted body[:300]; the client
+          // id/secret and any token in the reply are masked.
+          const detail = await p16HttpFailure({
+            method: 'POST',
+            url: tokenUrl,
+            response: res,
+            startedAt,
+            secrets: tokenSecrets,
+            text: text ?? '[body unreadable]',
+          });
           console.warn('[OpenSky] OAuth client_credentials failed:', detail);
           _openskyAuthWarned = true;
         }
@@ -216,7 +576,14 @@ export async function getOpenSkyToken() {
       if (!_openskyAuthWarned) {
         console.warn(
           '[OpenSky] OAuth token request failed:',
-          err?.message || String(err),
+          p16ThrownFailure({
+            method: 'POST',
+            url: tokenUrl,
+            error: err,
+            startedAt,
+            timeoutMs: OPENSKY_ATTEMPT_TIMEOUT_MS,
+            secrets: tokenSecrets,
+          }),
         );
         _openskyAuthWarned = true;
       }
@@ -323,22 +690,54 @@ async function fetchAdsbLolPointFallback(req) {
     async () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
+      // Byrd-IT p16 (R3): the log target hides the view anchor coordinates.
+      const logUrl = `https://api.adsb.lol/v2/lat/_/lon/_/dist/${ADSBLOL_POINT_RADIUS_NM}`;
+      const startedAt = performance.now();
+      const thrown = (error, stage) =>
+        p16Annotate(
+          error,
+          p16ThrownFailure({
+            url: logUrl,
+            error,
+            startedAt,
+            timeoutMs: 10000,
+            stage,
+          }),
+        );
       try {
-        const upstream = await fetch(
-          `https://api.adsb.lol/v2/lat/${roundedLat}/lon/${roundedLon}/dist/${ADSBLOL_POINT_RADIUS_NM}`,
-          {
-            headers: {
-              Accept: 'application/json',
-              'User-Agent': 'gods-eye-view-adsblol-regional-fallback/1.0',
+        let upstream;
+        try {
+          upstream = await fetch(
+            `https://api.adsb.lol/v2/lat/${roundedLat}/lon/${roundedLon}/dist/${ADSBLOL_POINT_RADIUS_NM}`,
+            {
+              headers: {
+                Accept: 'application/json',
+                'User-Agent': 'gods-eye-view-adsblol-regional-fallback/1.0',
+              },
+              signal: controller.signal,
             },
-            signal: controller.signal,
-          },
-        );
-        if (!upstream.ok) throw new Error(`upstream HTTP ${upstream.status}`);
-        const payload = await readResponseJsonCapped(
-          upstream,
-          ADSBLOL_POINT_MAX_RESPONSE_BYTES,
-        );
+          );
+        } catch (error) {
+          throw thrown(error, 'headers');
+        }
+        if (!upstream.ok)
+          throw p16Annotate(
+            new Error(`upstream HTTP ${upstream.status}`),
+            await p16HttpFailure({
+              url: logUrl,
+              response: upstream,
+              startedAt,
+            }),
+          );
+        let payload;
+        try {
+          payload = await readResponseJsonCapped(
+            upstream,
+            ADSBLOL_POINT_MAX_RESPONSE_BYTES,
+          );
+        } catch (error) {
+          throw thrown(error, 'body');
+        }
         const normalized = normalizeAdsbLolPointResponse(payload);
         const record = {
           body: JSON.stringify(normalized),
@@ -361,7 +760,10 @@ async function fetchAdsbLolPointFallback(req) {
     return { ...record, cacheStatus: request.shared ? 'INFLIGHT' : 'MISS' };
   } catch (error) {
     if (!request.shared && error?.name !== 'AbortError') {
-      console.warn('[adsb.lol Flights Fallback]', error?.message || error);
+      console.warn(
+        '[adsb.lol Flights Fallback]',
+        error?.p16Log || error?.message || error,
+      );
     }
     return cached ? { ...cached, cacheStatus: 'STALE' } : null;
   }
@@ -543,7 +945,8 @@ export function openSkyProxy() {
           }
         }
 
-        let { upstream, body } = await fetchOpenSkyStates(headers);
+        let states = await fetchOpenSkyStates(headers);
+        let { upstream, body } = states;
         // Auto-mode fallback: if OAuth was rejected, retry with Basic credentials
         if (
           (upstream.status === 401 || upstream.status === 403) &&
@@ -555,10 +958,22 @@ export function openSkyProxy() {
             Accept: 'application/json',
             Authorization: `Basic ${Buffer.from(`${basicUser}:${basicPass}`).toString('base64')}`,
           };
-          ({ upstream, body } = await fetchOpenSkyStates(retryHeaders));
+          states = await fetchOpenSkyStates(retryHeaders);
+          ({ upstream, body } = states);
           usedMode = 'basic';
           reason = 'oauth_rejected_fallback_basic';
         }
+        if (!upstream.ok)
+          await p16LogStatesFailure(states, usedMode, [
+            _openskyToken,
+            basicUser,
+            basicPass,
+            hasBasicCreds
+              ? Buffer.from(`${basicUser}:${basicPass}`).toString('base64')
+              : '',
+            process.env.OPENSKY_CLIENT_ID,
+            process.env.OPENSKY_CLIENT_SECRET,
+          ]);
 
         const sourceEpochMs = upstream.ok ? openSkySourceEpochMs(body) : null;
         if (
@@ -702,7 +1117,7 @@ export function openSkyProxy() {
         );
         res.end(body);
       } catch (e) {
-        console.error('[OpenSky Proxy]', e.message);
+        console.error('[OpenSky Proxy]', e?.p16Log || p16FailureClass(e));
         if (_openskyCacheBody) {
           const cachedMeta = _openskyCacheMeta || {
             requestedMode: normalizeOpenSkyAuthMode(
