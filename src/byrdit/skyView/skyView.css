@@ -492,8 +492,9 @@ body.gev-sky-active #right-context-rail {
   }
 }
 
-/* The cockpit, scene playback, recording and clean view own the screen. */
-body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
+/* The cockpit, scene playback and recording own the screen. Clean view hides
+   these with visibility instead (src/byrdit/cleanView/cleanView.css). */
+body:is(.cockpit-mode, .scene-playback-mode, .recording-mode)
   :is(.gev-sky-btn, .gev-sky-panel) {
   display: none !important;
 }

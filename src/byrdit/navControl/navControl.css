@@ -199,8 +199,9 @@
   }
 }
 
-/* The cockpit, scene playback, recording and clean view own the screen. */
-body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
-  .gev-nav {
+/* The cockpit, scene playback and recording own the screen. Clean view hides
+   the control with visibility instead (src/byrdit/cleanView/cleanView.css),
+   so its box stays and toggling clean view re-lays out nothing. */
+body:is(.cockpit-mode, .scene-playback-mode, .recording-mode) .gev-nav {
   display: none !important;
 }
