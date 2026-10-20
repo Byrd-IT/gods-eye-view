@@ -17,7 +17,9 @@
  *
  * Aircraft has two lanes (adsb.lol continuous to yesterday UTC; OpenSky only
  * where an area was polled, with tile outlines); collector feeds (military)
- * have one lane plus the gap list.
+ * have one lane plus the gap list. A collector lane whose buckets are
+ * shorter than its recorder cadence (answer `cadence_ms`; military 300 s at
+ * 1m buckets) holds each poll one cadence forward (holdSegments).
  */
 import { DAY_MS, historyStart } from './historyTimeline.js';
 
@@ -129,22 +131,61 @@ function adsblolLane(lane, win, now) {
   };
 }
 
-function bucketLane(id, lane, bucketMs, win) {
+const isRecordedBucket = (b) => (b.polls_ok ?? 0) > 0 || (b.docs ?? 0) > 0;
+
+/**
+ * Hold segments for a lane whose buckets are SHORTER than its recorder
+ * cadence (military: 300 s polls at 1m buckets, polls_expected 0). Such a
+ * lane has a poll only every few buckets, but each OK poll serves the
+ * history slice until the next one is due, so it paints `recorded` forward
+ * ONE cadence from the poll time (`last_ok`, else the bucket start; the
+ * answer's `prev_ok` covers the window's left edge), never past `now`.
+ * One cadence, not the 900 s max snap age: a missed poll still leaves a
+ * hole. No `cadence_ms` (OpenSky: demand-driven; 60 s-era answers) or
+ * bucket >= cadence: no hold, segments exactly as before. (Review
+ * t_77c13cca F1.)
+ */
+function holdSegments(lane, bucketMs, now) {
+  const cadence = Number(lane?.cadence_ms);
+  if (!Number.isFinite(cadence) || cadence <= bucketMs) return [];
+  const out = [];
+  const hold = (at, floor) => {
+    const to = Math.min(at + cadence, now);
+    if (to > floor) out.push({ from: floor, to, kind: 'recorded' });
+  };
+  const prev = toMs(lane?.prev_ok);
+  if (prev !== null) hold(prev, prev);
+  for (const b of lane?.buckets ?? []) {
+    const from = toMs(b.t);
+    if (from === null || !isRecordedBucket(b)) continue;
+    const last = toMs(b.last_ok);
+    const at =
+      last !== null && last >= from && last < from + bucketMs ? last : from;
+    hold(at, from + bucketMs);
+  }
+  return out;
+}
+
+function bucketLane(id, lane, bucketMs, win, now) {
   const segments = [];
   for (const b of lane?.buckets ?? []) {
     const from = toMs(b.t);
     if (from === null) continue;
-    const kind =
-      (b.polls_ok ?? 0) > 0 || (b.docs ?? 0) > 0 ? 'recorded' : 'none';
+    const kind = isRecordedBucket(b) ? 'recorded' : 'none';
     const seg = { from, to: from + bucketMs, kind };
     if (Array.isArray(b.tiles) && b.tiles.length) seg.tiles = b.tiles;
     segments.push(seg);
   }
+  const held = holdSegments(lane, bucketMs, now);
   return {
     id,
     label: LANE_LABELS[id] ?? id,
     tilesOmitted: Boolean(lane?.tilesOmitted),
-    segments: normalizeSegments(segments, win.from, win.to),
+    segments: normalizeSegments(
+      held.length ? overlay(segments, held) : segments,
+      win.from,
+      win.to,
+    ),
   };
 }
 
@@ -192,12 +233,14 @@ export function buildRibbon({ win, now, aircraft = null, military = null }) {
       if (s.kind === 'gap')
         gaps.push({ lane: 'adsblol', from: s.from, to: s.to, open: false });
     const bucketMs = msOfBucket(byId.opensky?.bucket ?? aircraft.bucket);
-    lanes.push(blankBefore(bucketLane('opensky', byId.opensky, bucketMs, win)));
+    lanes.push(
+      blankBefore(bucketLane('opensky', byId.opensky, bucketMs, win, now)),
+    );
   }
   if (military) {
     const lane = (military.lanes ?? [])[0];
     const bucketMs = msOfBucket(lane?.bucket ?? military.bucket);
-    const built = bucketLane('military', lane, bucketMs, win);
+    const built = bucketLane('military', lane, bucketMs, win, now);
     const recorded = parseGaps(military.gaps, now);
     built.segments = overlay(
       built.segments,

@@ -14,7 +14,9 @@
  * The recorded world, relative to `now` (minute-aligned):
  *   - adsb.lol days: complete up to 3 days ago, the 2nd-before-yesterday day
  *     MISSING (a known gap), yesterday unverified, today pending
- *   - military + OpenSky polls every 60 s, except the gap
+ *   - military + OpenSky polls every 60 s (the military recorder ran at 60 s
+ *     until 2026-10-19, 300 s since; this 60 s-era world sends no
+ *     cadence_ms, so the ribbon applies no poll hold), except the gap
  *     [now - 2 h + 2 min, now - 2 h + 9 min) where nothing was recorded and
  *     the gap detector wrote {from, to}
  *   - OpenSky tiles: one Texas tile + one world tile at each polled bucket
