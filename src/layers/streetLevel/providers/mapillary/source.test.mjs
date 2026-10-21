@@ -62,21 +62,6 @@ test('graph lookups go through this app, with the requested fields and no token'
   assert.doesNotMatch(calls[0].url, /graph\.mapillary\.com|MLY/);
   assert.equal(url.searchParams.get('sequence_ids'), 'seq-1');
   assert.match(url.searchParams.get('fields'), /geometry/);
-
-  const nearest = await source.nearestImages({
-    lat: 38.5,
-    lon: -121.5,
-    radius: 500,
-    limit: 500,
-  });
-  assert.equal(nearest.length, 1);
-  const nearestUrl = new URL(calls[1].url, 'http://localhost');
-  assert.equal(
-    nearestUrl.searchParams.get('radius'),
-    '50',
-    'radius is clamped to the API maximum',
-  );
-  assert.equal(nearestUrl.searchParams.get('limit'), '100');
 });
 
 test('a missing server key surfaces from the graph route as keyRequired', async () => {

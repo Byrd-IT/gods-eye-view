@@ -3,10 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseTerrainPoints } from './data/terrainHeightsProxy.js';
-import {
-  readResponseTextCapped,
-  coalesceProxyRequest,
-} from './sources/httpBody.js';
+import { readResponseTextCapped, coalesceProxyRequest } from './sources/httpBody.js';
+import { makeRateLimiter, clientKey } from '../server/providers/common/rate-limit.js';
 
 const source = [
   'local.js',
@@ -40,10 +38,14 @@ function extract(name) {
 function fixture(name, overrides = {}, preview = false) {
   const logs = [];
   const deps = {
-    readResponseTextCapped,
-    coalesceProxyRequest,
-    path,
-    process: { cwd: () => '/fixture', env: {} },
+    readResponseTextCapped, coalesceProxyRequest,
+    // The rate-limited proxies reach for these; give them the real ones so a
+    // fixture request is throttled exactly as production would be.
+    makeRateLimiter, clientKey,
+    // terrain.js gates cross-site requests first; fixture requests carry no
+    // browser headers, so admit them like a loopback tool.
+    admitSameSiteKeyless: () => false,
+    path, process: { cwd: () => '/fixture', env: {} },
     fsp: {
       readFile: async () => {
         throw new Error('cache absent');

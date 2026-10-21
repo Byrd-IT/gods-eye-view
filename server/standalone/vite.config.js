@@ -18,11 +18,12 @@ export default defineConfig(({ command, mode }) => {
   for (const [key, value] of Object.entries(loaded)) {
     if (process.env[key] === undefined) process.env[key] = value;
   }
+  const tools = standaloneVoiceTools();
   return createBrowserViteConfig({
     plugins: [
       ...historyPlugins(),
       ...basemapPlugins(),
-      ...localProviderPlugins({ realtime: { tools: standaloneVoiceTools() } }),
+      ...localProviderPlugins({ realtime: { tools }, gemini: { tools } }),
       localMcpPlugin(),
       apiNotFoundPlugin(),
       unwatchedRuntimeDirsPlugin(),
