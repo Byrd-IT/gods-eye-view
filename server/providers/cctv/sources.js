@@ -3207,7 +3207,7 @@ export async function loadVegvesenSourcesFromOpenData() {
   const startedAt = Date.now();
   try {
     const endpoint = process.env.CCTV_VEGVESEN_URL || DEFAULT_VEGVESEN_CCTV_URL;
-    const startedAt = performance.now();
+    const p16StartedAt = performance.now();
     const resp = await fetch(endpoint, {
       headers: { Accept: 'application/geo+json,application/json' },
       redirect: 'manual',
@@ -3231,7 +3231,11 @@ export async function loadVegvesenSourcesFromOpenData() {
       console.warn(
         '[CCTV] Vegvesen camera download failed:',
         resp.status,
-        await p16HttpFailure({ url: endpoint, response: resp, startedAt }),
+        await p16HttpFailure({
+          url: endpoint,
+          response: resp,
+          startedAt: p16StartedAt,
+        }),
       );
       return discard();
     }

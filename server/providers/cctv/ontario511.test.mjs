@@ -120,10 +120,15 @@ for (const status of [429, 500, 503]) {
     );
     assert.deepEqual(cameras, []);
     assert.equal(lines.length, 1);
-    assert.equal(
+    // Byrd-IT fork: p16 appends target/status/elapsed/body evidence after the
+    // upstream line, so match the line's start rather than the whole line.
+    assert.match(
       lines[0],
-      `[CCTV] Ontario 511 camera download failed: ${status}`,
+      new RegExp(
+        `^\\[CCTV\\] Ontario 511 camera download failed: ${status}(?: |$)`,
+      ),
     );
+    assert.doesNotMatch(lines[0], /check ONTARIO_511_API_KEY/);
     assert.doesNotMatch(lines[0], /secret-key-value/);
   });
 }

@@ -26,10 +26,15 @@ const GROUPS = [
   'starlink',
 ];
 
+// Byrd-IT fork: the CelesTrak proxy serves GP CSV (OMM columns), not TLE, so
+// this upstream fixture serves the same element set as one GP CSV row.
+const GP_HEADER =
+  'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT';
+
 function tle(id, invalid = false) {
   // Owned synthetic catalog IDs over one valid element set; never live requests.
-  const motion = invalid ? ' 0.00000000' : '15.48899044';
-  return `OWNED ORBIT FIXTURE ${id}\n1 ${id}U 98067A   26289.78971908  .00007803  00000+0  15012-3 0  9995\n2 ${id}  51.6326  58.3278 0006748 271.9059  88.1156 ${motion}590607`;
+  const motion = invalid ? '0.00000000' : '15.48899044';
+  return `${GP_HEADER}\r\nOWNED ORBIT FIXTURE ${id},1998-067A,2026-10-16T18:57:11.428512,${motion},.0006748,51.6326,58.3278,271.9059,88.1156,0,U,${id},999,59060,.15012E-3,.7803E-4,0`;
 }
 
 async function fixture(t) {

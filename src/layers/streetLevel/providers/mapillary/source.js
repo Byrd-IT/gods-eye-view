@@ -1,7 +1,4 @@
-import {
-  SEQUENCE_IMAGE_FIELDS,
-  SEQUENCE_IMAGES_LIMIT,
-} from './policy.js';
+import { SEQUENCE_IMAGE_FIELDS, SEQUENCE_IMAGES_LIMIT } from './policy.js';
 
 /** HTTP error flagged `keyRequired`, `keyRejected` or `retryAfterSec` (429). */
 export class MapillarySourceError extends Error {

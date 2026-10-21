@@ -107,7 +107,11 @@ test.after(() => server.close());
 const realFetch = globalThis.fetch;
 function stubFetch(t) {
   t.mock.method(globalThis, 'fetch', (input, init) => {
-    const u = new URL(typeof input === 'string' ? input : input.url);
+    const u = new URL(
+      typeof input === 'string' || input instanceof URL
+        ? String(input)
+        : input.url,
+    );
     if (u.hostname === '127.0.0.1') return realFetch(input, init);
     return realFetch(`${STUB}/${u.host}${u.pathname}${u.search}`, init);
   });
@@ -542,6 +546,8 @@ test('cctv/sources.js: every loader on a 400/500 body -> still [], line has stat
   stubFetch(t);
   withEnv(t, {
     TFL_APP_KEY: ownKey,
+    // Upstream now skips Ontario 511 without a key; the key rides in ?key=.
+    ONTARIO_511_API_KEY: ownKey,
     CCTV_CALTRANS_DISTRICTS: '4',
     CCTV_TXDOT_DISTRICTS: 'AUS',
   });
@@ -585,6 +591,7 @@ test('cctv/sources.js: TxDOT refused -> [], class names the cause', async (t) =>
 
 test('stalled and huge failure bodies: bounded peek, same result', async (t) => {
   stubFetch(t);
+  withEnv(t, { ONTARIO_511_API_KEY: ownKey });
   const sockets = [];
   routes.set('/511on.ca/api/v2/get/cameras', (req, res) => {
     // Headers + a few bytes, then the body stalls (never ends).
