@@ -1,7 +1,9 @@
 // Byrd-IT: a request from a configured trusted proxy (GEV_TRUSTED_PROXIES, i.e.
 // NPM on S2 after it has basic-authenticated the user) gets exactly what a
 // loopback/LAN user gets on every gate that treats forwarded requests
-// differently. Per gate: (a) trusted peer + forwarding headers -> full access,
+// differently (CCTV Street View fallback, Gemini voice token gate; the same-site
+// gate and per-client history key are covered in trustedProxy.test.mjs and
+// historyWiring.test.mjs). Per gate: (a) trusted peer + forwarding headers -> full access,
 // (b) untrusted peer + forwarding headers -> refused / placeholder, (c) loopback
 // with no headers -> unchanged, (d) setting unset -> upstream behaviour.
 import assert from 'node:assert/strict';
@@ -12,7 +14,6 @@ import path from 'node:path';
 import { cctvProxy } from '../../server/providers/cctv.js';
 import { PROXY_SIGNALS } from '../localRequestGate.mjs';
 import { isGeminiRequestOriginAllowed } from '../../server/providers/gemini/request.js';
-import { clientKey } from '../../server/providers/common/rate-limit.js';
 import {
   TRUSTED_PROXIES_ENV,
   hasUntrustedForwarding,
@@ -304,28 +305,4 @@ test('Gemini token gate: unset = upstream, forwarded peers refused (d)', (t) => 
     origin: 'http://localhost:4173',
   });
   assert.equal(isGeminiRequestOriginAllowed(local, 'localhost'), true);
-});
-
-// ---- gate: per-client rate-limit key (server/providers/common/rate-limit.js) -
-
-test('clientKey: trusted proxy users get their own bucket; others keep the socket peer', (t) => {
-  withTrusted(t, NPM);
-  assert.equal(
-    clientKey(req(NPM, { 'x-real-ip': '203.0.113.9' })),
-    'proxied:203.0.113.9',
-  );
-  assert.equal(
-    clientKey(req(NPM, { 'x-real-ip': '203.0.113.10' })),
-    'proxied:203.0.113.10',
-  );
-  assert.equal(clientKey(req(NPM, {})), NPM); // no X-Real-IP: shared peer bucket
-  assert.equal(clientKey(req(OTHER, { 'x-real-ip': '203.0.113.9' })), OTHER); // spoof ignored
-  assert.equal(clientKey(req('127.0.0.1')), '127.0.0.1');
-  assert.equal(clientKey({ socket: {}, headers: {} }), 'local');
-});
-
-test('clientKey: unset = upstream (socket peer only, X-Real-IP never read)', (t) => {
-  withTrusted(t, undefined);
-  assert.equal(clientKey(req(NPM, { 'x-real-ip': '203.0.113.9' })), NPM);
-  assert.equal(clientKey(req(`::ffff:${NPM}`)), `::ffff:${NPM}`);
 });
