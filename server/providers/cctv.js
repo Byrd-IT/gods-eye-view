@@ -22,6 +22,8 @@ import {
 import { sanitizeCctvRangeHeader } from './cctv/range.js';
 import { admitSameSiteKeyless } from './common/same-site.js';
 import { PROXY_SIGNALS } from '../../src/localRequestGate.mjs';
+// Byrd-IT: a configured trusted proxy (GEV_TRUSTED_PROXIES) is not "forwarded".
+import { hasUntrustedForwarding } from '../byrdit/trustedProxy.js';
 import { createHlsPuller } from './cctv/stream.js';
 import {
   createFeedAvailability,
@@ -600,9 +602,7 @@ export function cctvProxy({ sourceRoot = process.cwd() } = {}) {
         // request (whose client this server cannot see) gets the placeholder,
         // as if no key were configured. Any forwarding header counts, even an
         // empty one.
-        const forwarded = PROXY_SIGNALS.some(
-          (name) => req.headers?.[name] !== undefined,
-        );
+        const forwarded = hasUntrustedForwarding(req, PROXY_SIGNALS);
         const sv = forwarded
           ? null
           : await streetViewFallback({

@@ -1,3 +1,5 @@
+// Byrd-IT: per-client key behind a trusted reverse proxy.
+import { trustedClientAddress } from '../../byrdit/trustedProxy.js';
 import { makeRateLimiter } from '../../../src/sources/rateLimit.js';
 export { makeRateLimiter } from '../../../src/sources/rateLimit.js';
 
@@ -58,5 +60,9 @@ export function makeCostRateLimiter(envValue, defaultPerMin) {
  * address is the real client.
  */
 export function clientKey(req) {
-  return String(req.socket?.remoteAddress || 'local');
+  // Byrd-IT: behind a configured trusted proxy (GEV_TRUSTED_PROXIES) each
+  // public user gets their own bucket (its X-Real-IP); unset = socket peer.
+  return (
+    trustedClientAddress(req) ?? String(req.socket?.remoteAddress || 'local')
+  );
 }

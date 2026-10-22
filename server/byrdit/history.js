@@ -1,11 +1,7 @@
 import { weatherProxy } from '../providers/weather.js';
 import { makeCostRateLimiter } from '../providers/common/rate-limit.js';
 import { isAllowedHost } from '../../build/allowedHosts.js';
-import {
-  TRUSTED_PROXIES_ENV,
-  normalizeProxyAddress,
-  parseTrustedProxies,
-} from './trustedProxy.js';
+import { normalizeProxyAddress, trustedClientAddress } from './trustedProxy.js';
 import {
   enabledBridgeFeeds,
   historyPlugins as browserSafeHistoryPlugins,
@@ -77,11 +73,7 @@ export function historyPlugins(options = {}) {
  * @param {Record<string, string|undefined>} env
  */
 export function historyClientKey(env) {
-  const trusted = parseTrustedProxies(env[TRUSTED_PROXIES_ENV]);
-  return (req) => {
-    const peer = normalizeProxyAddress(req.socket?.remoteAddress) || 'local';
-    if (!trusted.has(peer)) return peer;
-    const real = normalizeProxyAddress(req.headers?.['x-real-ip']);
-    return /^[0-9a-f:.]{2,45}$/.test(real) ? `proxied:${real}` : peer;
-  };
+  return (req) =>
+    trustedClientAddress(req, env) ??
+    (normalizeProxyAddress(req.socket?.remoteAddress) || 'local');
 }

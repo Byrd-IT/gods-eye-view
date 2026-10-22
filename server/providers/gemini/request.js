@@ -1,5 +1,7 @@
 import { readRequestBody } from '../common/request.js';
 import { admitSameSiteRequest } from '../../../src/localRequestGate.mjs';
+// Byrd-IT: opt-in trusted reverse proxy (GEV_TRUSTED_PROXIES); unset = upstream.
+import { sameSiteTransport } from '../../byrdit/trustedProxy.js';
 import {
   isAllowedHost,
   resolveAllowedHosts,
@@ -21,14 +23,12 @@ export function isGeminiRequestOriginAllowed(
     /[\s/?#@\\]/.test(host)
   )
     return false;
-  const protocol = req.socket?.encrypted ? 'https:' : 'http:';
   if (
     !admitSameSiteRequest({
       hostHeader: host,
-      protocol,
       origin,
       secFetchSite: req.headers?.['sec-fetch-site'],
-      proxyHeaders: req.headers || {},
+      ...sameSiteTransport(req),
     }).ok
   )
     return false;
