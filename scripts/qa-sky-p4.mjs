@@ -76,16 +76,27 @@ const check = (name, ok, detail) => {
   say(ok ? 'PASS' : 'FAIL', name, detail ?? '');
 };
 
-// ── a time when the Moon is up over Houston (search from now) ──────────────
+// ── a fixed time when the Moon is up over Houston ──────────────────────────
+// Pinned (t_219ff98b): the old search started at Date.now(), so every run saw
+// a different Moon pose and the result depended on the time of day. Default:
+// the first whole hour from a fixed start (2026-11-01T00:00Z) with the Moon at
+// 25-55 deg. Override with --sky-time <ISO> to probe another pose.
 const OBS = { latDeg: 29.7604, lonDeg: -95.3698, heightM: 1.7 };
+const FIXED_START = Date.UTC(2026, 10, 1, 0, 0, 0);
 let skyTime = null;
-for (let h = 0; h < 24 * 20 && skyTime == null; h += 1) {
-  const t = Math.floor(Date.now() / 3_600_000) * 3_600_000 + h * 3_600_000;
-  const m = moonState(t, OBS, { refraction: true });
-  if (m.elDeg > 25 && m.elDeg < 55) skyTime = t;
+const skyTimeArg = arg('--sky-time', null);
+if (skyTimeArg) {
+  skyTime = Date.parse(skyTimeArg);
+  if (!Number.isFinite(skyTime)) throw new Error('bad --sky-time');
+} else {
+  for (let h = 0; h < 24 * 20 && skyTime == null; h += 1) {
+    const t = FIXED_START + h * 3_600_000;
+    const m = moonState(t, OBS, { refraction: true });
+    if (m.elDeg > 25 && m.elDeg < 55) skyTime = t;
+  }
 }
 const moon = moonState(skyTime, OBS, { refraction: true });
-const decl = declinationDeg(OBS.latDeg, OBS.lonDeg, Date.now());
+const decl = declinationDeg(OBS.latDeg, OBS.lonDeg, skyTime);
 say(
   'sky time',
   new Date(skyTime).toISOString(),
@@ -481,6 +492,17 @@ async function ensureEntered(page) {
   throw new Error('sky never entered');
 }
 
+/**
+ * Roll tolerance for the landscape check (t_219ff98b). Chromium quantises the
+ * emulated absolute-orientation quaternion (about 4e-4 per component, ~0.05
+ * deg; probed: sent 0.1234568 got 0.1235998), which shows up as up to ~0.15
+ * deg of roll at Moon elevation ~53. The app maths itself is exact
+ * (viewFromQuaternion gives roll 0 for el 10-80 and screen angles 0/90/270),
+ * so 0.1 deg was tighter than the test channel. 0.3 deg still catches a real
+ * roll error (a wrong screen basis gives 90 deg).
+ */
+const LANDSCAPE_ROLL_TOL_DEG = 0.3;
+
 const readSensor = (cdp, q) =>
   cdp.send('Emulation.setSensorOverrideReadings', {
     type: 'absolute-orientation',
@@ -746,7 +768,7 @@ let hiddenList = [];
     land.angle === 90 &&
       Math.abs(wrap180(land.view.azDeg - moon.azDeg)) < 0.1 &&
       Math.abs(land.view.elDeg - moon.elDeg) < 0.1 &&
-      Math.abs(land.view.rollDeg) < 0.1,
+      Math.abs(land.view.rollDeg) < LANDSCAPE_ROLL_TOL_DEG,
     land,
   );
   check(
