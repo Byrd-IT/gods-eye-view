@@ -11,6 +11,7 @@ import test from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { cctvProxy } from '../../server/providers/cctv.js';
 import { PROXY_SIGNALS } from '../localRequestGate.mjs';
 import { isGeminiRequestOriginAllowed } from '../../server/providers/gemini/request.js';
@@ -161,7 +162,7 @@ function cctvFixture(t) {
   cctvProxy({ sourceRoot: root }).configureServer({
     middlewares: { use: (_route, fn) => (handler = fn) },
   });
-  return async (request) => {
+  const frame = async (request) => {
     const res = {
       writeHead(status, headers) {
         Object.assign(this, { status, headers });
@@ -173,6 +174,8 @@ function cctvFixture(t) {
     await handler({ url: '/frame/cam1', method: 'GET', ...request }, res);
     return res;
   };
+  frame.handler = handler;
+  return frame;
 }
 
 const streetViewCalls = (calls) =>
@@ -305,4 +308,54 @@ test('Gemini token gate: unset = upstream, forwarded peers refused (d)', (t) => 
     origin: 'http://localhost:4173',
   });
   assert.equal(isGeminiRequestOriginAllowed(local, 'localhost'), true);
+});
+
+// ---- real socket: the loopback client plays NPM (GEV_TRUSTED_PROXIES=127.0.0.1) -
+
+async function overSocket(handler, headers) {
+  const server = http.createServer((request, response) => {
+    handler(request, response);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    return await new Promise((resolve, reject) => {
+      http
+        .get(
+          {
+            host: '127.0.0.1',
+            port: server.address().port,
+            path: '/frame/cam1',
+            headers,
+          },
+          (response) => {
+            response.resume();
+            response.on('end', () =>
+              resolve(response.headers['x-cctv-source']),
+            );
+          },
+        )
+        .on('error', reject);
+    });
+  } finally {
+    server.close();
+  }
+}
+
+test('CCTV frame over a real socket: loopback standing in for NPM (trusted) vs not trusted', async (t) => {
+  const fwd = {
+    'x-forwarded-for': '203.0.113.9',
+    'x-forwarded-proto': 'https',
+    'x-real-ip': '203.0.113.9',
+  };
+  withTrusted(t, '127.0.0.1');
+  const frame = cctvFixture(t);
+  // The listener reports the peer as 127.0.0.1 / ::ffff:127.0.0.1 - both match.
+  assert.equal(await overSocket(frame.handler, fwd), 'streetview');
+  assert.equal(await overSocket(frame.handler, {}), 'streetview');
+  process.env[TRUSTED_PROXIES_ENV] = NPM; // loopback is no longer trusted
+  assert.notEqual(await overSocket(frame.handler, fwd), 'streetview');
+  assert.equal(await overSocket(frame.handler, {}), 'streetview');
+  delete process.env[TRUSTED_PROXIES_ENV]; // unset = upstream
+  assert.notEqual(await overSocket(frame.handler, fwd), 'streetview');
+  assert.equal(await overSocket(frame.handler, {}), 'streetview');
 });
