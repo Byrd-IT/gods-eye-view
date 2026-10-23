@@ -230,6 +230,7 @@ export function createTileCache({
 
   let statsSavedAt = -Infinity;
   let statsTimer = null;
+  let statsWriting = null;
   async function saveStats({ force = false } = {}) {
     if (!statsDirty) return;
     if (!force && now() - statsSavedAt < statsSaveMs) {
@@ -253,14 +254,30 @@ export function createTileCache({
     }
     statsSavedAt = now();
     statsDirty = false;
-    try {
-      const file = path.join(dir, 'stats.json');
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(`${file}.tmp`, JSON.stringify({ tiles, bytes }));
-      await fs.rename(`${file}.tmp`, file);
-    } catch (error) {
-      log('[wayback-cache] could not save stats:', safeReason(error));
-    }
+    // Writes are serialised (they share one .tmp path) and the in-flight
+    // promise is kept so flush() can wait for a write that already started.
+    const write = (statsWriting ?? Promise.resolve()).then(async () => {
+      try {
+        const file = path.join(dir, 'stats.json');
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(`${file}.tmp`, JSON.stringify({ tiles, bytes }));
+        await fs.rename(`${file}.tmp`, file);
+      } catch (error) {
+        log('[wayback-cache] could not save stats:', safeReason(error));
+      }
+    });
+    statsWriting = write;
+    write.finally(() => {
+      if (statsWriting === write) statsWriting = null;
+    });
+    await write;
+  }
+
+  /** Shutdown: wait for any write already started, then write what is left. */
+  async function flushStats() {
+    while (statsWriting) await statsWriting;
+    await saveStats({ force: true });
+    while (statsWriting) await statsWriting;
   }
 
   async function checkGuard() {
@@ -557,6 +574,6 @@ export function createTileCache({
       };
     },
     /** Shutdown and tests: write unsaved stats now and drop the timer. */
-    flush: () => saveStats({ force: true }),
+    flush: () => flushStats(),
   };
 }
