@@ -21,7 +21,9 @@
 // A trusted peer sending a malformed X-Forwarded-Proto (a list, or any other
 // value) is treated as untrusted, i.e. refused as a proxied request.
 //
-// This file is the ONE copy of the trust rule (socket peer in the list). Every
+// This file is the ONE copy of the same-site trust rule (socket peer in the list;
+// src/keySetupCore.mjs GEV_KEY_SETUP_TRUSTED_PEERS is a separate upstream peer
+// list for the credential panel only). Every
 // gate that treats forwarded requests differently asks it:
 //   - sameSiteTransport      (same-site gate, Gemini voice token gate)
 //   - hasUntrustedForwarding (CCTV Street View fallback)
