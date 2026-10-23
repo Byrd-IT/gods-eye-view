@@ -25,6 +25,7 @@ test('clean view hides every fork map control with visibility, never display', (
   const targets = m[1].split(',').map((t) => t.trim());
   assert.deepEqual(targets, [
     '#gev-naip-slider',
+    '#gev-wayback',
     '#gev-naip-split-line',
     '.gev-hist',
     '.gev-nav',
