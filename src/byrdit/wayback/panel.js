@@ -63,11 +63,14 @@ export function createWaybackPanel({
     },
     style: {
       position: 'absolute',
-      left: '8px',
-      bottom: '118px',
+      // Top centre, just under the toolbar icons: the bottom edge is taken
+      // by the dock, the credits and the NAIP slider.
+      left: '50%',
+      top: '80px',
+      transform: 'translateX(-50%)',
       boxSizing: 'border-box',
       width: 'max-content',
-      maxWidth: 'min(460px, calc(100% - 16px))',
+      maxWidth: 'calc(100% - 16px)',
       padding: '6px 10px',
       background: 'rgba(12, 16, 22, 0.88)',
       color: '#e6edf3',
@@ -90,7 +93,16 @@ export function createWaybackPanel({
     }
   });
 
-  const head = el(doc, 'label', panel, {
+  const top = el(doc, 'div', panel, {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '12px',
+      minHeight: '44px',
+    },
+  });
+  const head = el(doc, 'label', top, {
     style: {
       display: 'flex',
       alignItems: 'center',
@@ -106,6 +118,10 @@ export function createWaybackPanel({
   el(doc, 'span', head, { text: t('Time travel') });
   toggle.addEventListener('change', () => onToggle(Boolean(toggle.checked)));
 
+  const label = el(doc, 'output', top, {
+    attrs: { 'aria-live': 'polite', class: 'gev-wayback-date' },
+    style: { fontWeight: '600', fontSize: '16px', whiteSpace: 'nowrap' },
+  });
   const body = el(doc, 'div', panel, {
     style: {
       display: 'flex',
@@ -154,10 +170,6 @@ export function createWaybackPanel({
     attrs: { type: 'button', 'aria-label': t('Latest imagery') },
     style: BUTTON_STYLE,
   });
-  const label = el(doc, 'output', body, {
-    attrs: { 'aria-live': 'polite', class: 'gev-wayback-date' },
-    style: { fontWeight: '600', fontSize: '15px' },
-  });
   const detail = el(doc, 'div', body, {
     attrs: { class: 'gev-wayback-detail' },
     style: { opacity: '0.8', fontSize: '12px', overflowWrap: 'anywhere' },
@@ -173,12 +185,26 @@ export function createWaybackPanel({
   latest.addEventListener('click', () => onLatest());
   container.append(panel);
 
+  // Phones: the layer rails fill the top and the bottom of the screen; the
+  // free band is between the HUD summary line and the Display rail.
+  const media = doc.defaultView?.matchMedia?.('(max-width: 767.98px)') ?? null;
+  const place = () => {
+    const phone = Boolean(media?.matches);
+    panel.style.top = phone ? '256px' : '80px';
+  };
+  place();
+  media?.addEventListener?.('change', place);
+
   return {
     element: panel,
     controls: { toggle, range, older, newer, latest },
     update(next) {
       toggle.checked = Boolean(next.on);
       body.style.display = next.on ? 'flex' : 'none';
+      label.style.display = next.on ? '' : 'none';
+      panel.style.width = next.on
+        ? 'min(460px, calc(100% - 16px))'
+        : 'max-content';
       range.value = String(next.index);
       range.setAttribute('aria-valuetext', next.label ?? '');
       older.disabled = next.index <= 0;
@@ -193,6 +219,7 @@ export function createWaybackPanel({
       panel.style.display = visible ? 'flex' : 'none';
     },
     destroy() {
+      media?.removeEventListener?.('change', place);
       panel.remove();
     },
   };
