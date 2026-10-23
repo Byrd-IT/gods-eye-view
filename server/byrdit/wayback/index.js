@@ -120,6 +120,11 @@ export function createWaybackHandler(settings, deps = {}) {
       fs,
       log,
       maxBytes: settings.maxBytes,
+      limiter: createLimiter({
+        concurrency: settings.concurrency,
+        perSecond: settings.perSecond,
+        now,
+      }),
     });
   const infoCache = new Map();
 
