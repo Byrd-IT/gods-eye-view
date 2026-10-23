@@ -5,7 +5,12 @@ import {
   WaybackConfigError,
   WAYBACK_USER_AGENT,
 } from './releases.js';
-import { createTileCache, TileError, validTile } from './tileCache.js';
+import {
+  createLimiter,
+  createTileCache,
+  TileError,
+  validTile,
+} from './tileCache.js';
 
 /**
  * Esri Wayback routes (GEV_BYRDIT_WAYBACK=1; everything is 404 otherwise
