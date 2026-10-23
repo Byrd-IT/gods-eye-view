@@ -78,7 +78,7 @@ const browser = await puppeteer.launch({
 const pageErrors = [];
 
 function recordRequests(page) {
-  const rec = { tiles: [], direct: [], cacheHeaders: [] };
+  const rec = { tiles: [], direct: [], cacheHeaders: [], byUrl: new Map() };
   page.on('request', (req) => {
     const url = req.url();
     const m = TILE.exec(url);
@@ -93,8 +93,11 @@ function recordRequests(page) {
     }
   });
   page.on('response', (res) => {
-    if (TILE.test(res.url()))
-      rec.cacheHeaders.push(res.headers()['x-wayback-cache'] ?? '');
+    if (TILE.test(res.url())) {
+      const header = res.headers()['x-wayback-cache'] ?? '';
+      rec.cacheHeaders.push(header);
+      rec.byUrl.set(new URL(res.url()).pathname, header);
+    }
   });
   return rec;
 }
@@ -534,31 +537,37 @@ async function revisit() {
 }
 // The same scripted view twice from fresh browser contexts: the first one
 // may fetch whatever the earlier steps did not, the second must not.
-await revisit();
+const warm = await revisit();
 const before2 = await status();
 const second = await revisit();
 const afterSecond = await status();
+// Cesium may pick a few different tiles from one run to the next, so the
+// proof is per tile: every tile the warm-up view fetched and the second view
+// asks for again must be served from the cache, and only tiles the warm-up
+// never saw may cost an upstream fetch.
+const repeated = [...second.byUrl.keys()].filter((k) => warm.byUrl.has(k));
+const notHit = repeated.filter((k) => second.byUrl.get(k) !== 'HIT');
+const fresh = [...second.byUrl.keys()].filter((k) => !warm.byUrl.has(k));
 const newUpstream = afterSecond.upstream - before2.upstream;
 check(
   'F second view of the same area (fresh browser cache): tile requests reach the server',
-  second.tiles.length >= 10,
-  `${second.tiles.length} tile requests`,
+  second.tiles.length >= 10 && repeated.length >= 10,
+  `${second.tiles.length} tile requests, ${repeated.length} distinct tiles seen before`,
 );
 check(
-  'F second view: x-wayback-cache is HIT for (nearly) every tile',
-  second.cacheHeaders.filter((h) => h === 'HIT').length >=
-    second.cacheHeaders.length * 0.9,
-  `${second.cacheHeaders.filter((h) => h === 'HIT').length}/${second.cacheHeaders.length} HIT`,
+  'F every tile seen before is served from the cache (x-wayback-cache HIT, 0 upstream)',
+  notHit.length === 0,
+  `${repeated.length - notHit.length}/${repeated.length} HIT${notHit.length ? `; not HIT: ${notHit.slice(0, 3)}` : ''}`,
 );
 check(
-  'F second view: server hit counter rises',
+  'F server hit counter rises',
   afterSecond.hits >= before2.hits + 10,
   `hits ${before2.hits} -> ${afterSecond.hits}`,
 );
 check(
-  'F second view: ~0 upstream fetches',
-  newUpstream <= 3,
-  `upstream ${before2.upstream} -> ${afterSecond.upstream} (+${newUpstream}), misses +${afterSecond.misses - before2.misses}`,
+  'F upstream fetches only for tiles the first view never requested',
+  newUpstream <= 3 * fresh.length,
+  `upstream ${before2.upstream} -> ${afterSecond.upstream} (+${newUpstream}); ${fresh.length} tile(s) new to the cache, misses +${afterSecond.misses - before2.misses}`,
 );
 check(
   'F cache status exposes counters and the guard, no paths',
