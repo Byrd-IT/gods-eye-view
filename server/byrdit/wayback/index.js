@@ -6,6 +6,7 @@ import {
   WAYBACK_USER_AGENT,
 } from './releases.js';
 import {
+  createBreaker,
   createLimiter,
   createTileCache,
   TileError,
@@ -30,6 +31,7 @@ import {
 
 export const WAYBACK_PLUGIN_NAME = 'byrdit-wayback';
 export const WAYBACK_META_NAME = 'gev-wayback';
+const INFO_FAIL_TTL_MS = 60_000;
 export const ROUTE_PREFIX = '/api/byrdit/wayback/';
 const TILE_ROUTE =
   /^\/api\/byrdit\/wayback\/tile\/(\d{1,10})\/(\d{1,2})\/(\d{1,8})\/(\d{1,8})$/;
@@ -116,6 +118,14 @@ export function createWaybackHandler(settings, deps = {}) {
         await fs.rename(`${lastGood}.tmp`, lastGood);
       },
     });
+  // One limiter and one breaker bound EVERYTHING we send to Esri: tiles and
+  // /info share them (when the tile cache is injected, /info gets its own).
+  const limiter = createLimiter({
+    concurrency: settings.concurrency,
+    perSecond: settings.perSecond,
+    now,
+  });
+  const breaker = createBreaker({ now });
   const tiles =
     deps.tiles ??
     createTileCache({
@@ -125,13 +135,12 @@ export function createWaybackHandler(settings, deps = {}) {
       fs,
       log,
       maxBytes: settings.maxBytes,
-      limiter: createLimiter({
-        concurrency: settings.concurrency,
-        perSecond: settings.perSecond,
-        now,
-      }),
+      limiter,
+      breaker,
     });
   const infoCache = new Map();
+  const infoFlights = new Map();
+  const infoFailed = new Map();
 
   async function listReleases(res, req) {
     try {
@@ -270,6 +279,14 @@ export function createWaybackHandler(settings, deps = {}) {
       return send(res, 200, cached.body, {
         'cache-control': 'public, max-age=3600',
       });
+    const failedAt = infoFailed.get(key);
+    if (failedAt !== undefined && now() - failedAt < INFO_FAIL_TTL_MS)
+      return send(
+        res,
+        502,
+        { error: 'wayback info unavailable' },
+        { 'cache-control': 'no-store', 'retry-after': '60' },
+      );
     const query = new URLSearchParams({
       f: 'json',
       geometry: `${lon},${lat}`,
@@ -279,41 +296,86 @@ export function createWaybackHandler(settings, deps = {}) {
       outFields: 'SRC_DATE,SRC_RES,NICE_NAME,NICE_DESC',
       returnGeometry: 'false',
     });
+    let flight = infoFlights.get(key);
+    if (!flight) {
+      flight = fetchInfo(`${base}/${layer}/query?${query}`).finally(() =>
+        infoFlights.delete(key),
+      );
+      infoFlights.set(key, flight);
+    }
     try {
-      const response = await fetchImpl(`${base}/${layer}/query?${query}`, {
-        headers: {
-          'user-agent': WAYBACK_USER_AGENT,
-          accept: 'application/json',
-        },
-        redirect: 'error',
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const doc = await response.json();
-      const a = doc?.features?.[0]?.attributes ?? null;
-      const d = String(a?.SRC_DATE ?? '');
-      const body = {
-        captured: /^\d{8}$/.test(d)
-          ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`
-          : null,
-        resolutionM: Number.isFinite(a?.SRC_RES) ? a.SRC_RES : null,
-        source:
-          typeof a?.NICE_NAME === 'string' ? a.NICE_NAME.slice(0, 50) : null,
-        provider:
-          typeof a?.NICE_DESC === 'string' ? a.NICE_DESC.slice(0, 25) : null,
-      };
+      const body = await flight;
+      infoFailed.delete(key);
       if (infoCache.size > 2000)
         infoCache.delete(infoCache.keys().next().value);
       infoCache.set(key, { at: now(), body });
       return send(res, 200, body, { 'cache-control': 'public, max-age=3600' });
-    } catch {
-      return send(
-        res,
-        502,
-        { error: 'wayback info unavailable' },
-        { 'cache-control': 'no-store' },
-      );
+    } catch (error) {
+      if (error?.code !== 'breaker') {
+        if (infoFailed.size > 2000)
+          infoFailed.delete(infoFailed.keys().next().value);
+        infoFailed.set(key, now());
+      }
+      const headers = { 'cache-control': 'no-store' };
+      if (error?.retryAfter) headers['retry-after'] = String(error.retryAfter);
+      return send(res, 502, { error: 'wayback info unavailable' }, headers);
     }
+  }
+
+  /** One bounded upstream metadata query: breaker, then the shared limiter. */
+  async function fetchInfo(target) {
+    const wait = breaker.check();
+    if (wait) {
+      const e = new Error('upstream paused');
+      e.code = 'breaker';
+      e.retryAfter = Math.ceil(wait / 1000);
+      throw e;
+    }
+    let response;
+    try {
+      response = await limiter.run(() =>
+        fetchImpl(target, {
+          headers: {
+            'user-agent': WAYBACK_USER_AGENT,
+            accept: 'application/json',
+          },
+          redirect: 'error',
+          signal: AbortSignal.timeout(10_000),
+        }),
+      );
+    } catch {
+      breaker.failure();
+      throw new Error('fetch failed');
+    }
+    if (!response.ok) {
+      await response.body?.cancel?.().catch(() => {});
+      const ra = Number(response.headers?.get?.('retry-after'));
+      breaker.failure({
+        retryAfterMs: Number.isFinite(ra) ? Math.min(ra, 900) * 1000 : 0,
+        immediate: [401, 403, 429].includes(response.status),
+      });
+      throw new Error(`HTTP ${response.status}`);
+    }
+    let doc;
+    try {
+      doc = await response.json();
+    } catch {
+      breaker.failure();
+      throw new Error('bad json');
+    }
+    breaker.success();
+    const a = doc?.features?.[0]?.attributes ?? null;
+    const d = String(a?.SRC_DATE ?? '');
+    return {
+      captured: /^\d{8}$/.test(d)
+        ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`
+        : null,
+      resolutionM: Number.isFinite(a?.SRC_RES) ? a.SRC_RES : null,
+      source:
+        typeof a?.NICE_NAME === 'string' ? a.NICE_NAME.slice(0, 50) : null,
+      provider:
+        typeof a?.NICE_DESC === 'string' ? a.NICE_DESC.slice(0, 25) : null,
+    };
   }
 
   /** Connect-style middleware. */
@@ -356,6 +418,7 @@ export function createWaybackHandler(settings, deps = {}) {
   }
   handler.releases = releases;
   handler.tiles = tiles;
+  handler.close = () => tiles.flush?.();
   return handler;
 }
 
@@ -371,9 +434,11 @@ export function waybackPlugins({ env = process.env, ...deps } = {}) {
       name: WAYBACK_PLUGIN_NAME,
       configureServer(server) {
         server.middlewares.use(handler);
+        server.httpServer?.once('close', () => handler.close());
       },
       configurePreviewServer(server) {
         server.middlewares.use(handler);
+        server.httpServer?.once('close', () => handler.close());
       },
       transformIndexHtml() {
         return [

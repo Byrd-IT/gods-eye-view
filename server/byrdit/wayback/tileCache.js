@@ -190,6 +190,7 @@ export function createTileCache({
   limiter = createLimiter({ now }),
   breaker = createBreaker({ now }),
   guardIntervalMs = 30_000,
+  statsSaveMs = STATS_SAVE_MS,
   timeoutMs = 15_000,
   log = (...args) => console.warn(...args),
 } = {}) {
@@ -228,9 +229,28 @@ export function createTileCache({
   }
 
   let statsSavedAt = -Infinity;
+  let statsTimer = null;
   async function saveStats({ force = false } = {}) {
     if (!statsDirty) return;
-    if (!force && now() - statsSavedAt < STATS_SAVE_MS) return;
+    if (!force && now() - statsSavedAt < statsSaveMs) {
+      // Throttled: still schedule a trailing save so the last writes of a
+      // burst are never left only in memory.
+      if (!statsTimer) {
+        statsTimer = setTimeout(
+          () => {
+            statsTimer = null;
+            saveStats({ force: true });
+          },
+          Math.max(1, statsSaveMs - (now() - statsSavedAt)),
+        );
+        statsTimer.unref?.();
+      }
+      return;
+    }
+    if (statsTimer) {
+      clearTimeout(statsTimer);
+      statsTimer = null;
+    }
     statsSavedAt = now();
     statsDirty = false;
     try {
@@ -403,6 +423,9 @@ export function createTileCache({
       }
       if (status !== 200) {
         await response.body?.cancel?.().catch(() => {});
+        // 401/403: Esri refuses us, open the breaker at once like 429.
+        // Any other unexpected status counts as an ordinary failure.
+        breaker.failure({ immediate: status === 401 || status === 403 });
         throw new TileError('upstream', `HTTP ${status}`);
       }
       const contentType = String(response.headers.get('content-type') ?? '')
@@ -412,6 +435,7 @@ export function createTileCache({
       const declared = Number(response.headers.get('content-length'));
       if (declared > MAX_TILE_BYTES || !IMAGE_TYPES.has(contentType)) {
         await response.body?.cancel?.().catch(() => {});
+        breaker.failure();
         throw new TileError('upstream', 'unexpected tile response');
       }
       let body;
@@ -532,7 +556,7 @@ export function createTileCache({
         limiter: limiter.stats(),
       };
     },
-    /** For tests and shutdown: flush the stats file. */
+    /** Shutdown and tests: write unsaved stats now and drop the timer. */
     flush: () => saveStats({ force: true }),
   };
 }

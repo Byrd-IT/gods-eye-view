@@ -980,3 +980,202 @@ test('settings: defaults and overrides', () => {
   assert.equal(o.maxBytes, 2 * 1024 ** 3);
   assert.equal(o.info, true);
 });
+
+// ---------- repair t_7dfe83d1: F1 info bounds, F2 breaker on 403, F3 stats flush ----------
+
+test('tile cache: 403 and 401 open the breaker at once; other odd statuses count as failures', async () => {
+  for (const status of [403, 401]) {
+    let t = 0;
+    const { cache, fetchImpl } = await cacheWith(
+      { '*': () => new Response('no', { status }) },
+      { now: () => t, breaker: createBreaker({ now: () => t }) },
+    );
+    await assert.rejects(() => cache.getTile(100, 17, 5, 6), {
+      code: 'upstream',
+    });
+    await assert.rejects(() => cache.getTile(100, 17, 5, 7), {
+      code: 'breaker',
+    });
+    assert.equal(fetchImpl.calls.length, 1, `${status}: no second request`);
+    assert.equal((await cache.status()).breaker, 'open');
+  }
+  let t = 0;
+  const { cache } = await cacheWith(
+    { '*': () => new Response('x', { status: 418 }) },
+    {
+      now: () => t,
+      breaker: createBreaker({ threshold: 2, now: () => t }),
+    },
+  );
+  for (let i = 0; i < 2; i++)
+    await assert.rejects(() => cache.getTile(100, 17, 5, 10 + i), {
+      code: 'upstream',
+    });
+  assert.equal(
+    (await cache.status()).breaker,
+    'open',
+    '2 odd statuses open it',
+  );
+});
+
+test('tile cache: stats.json gets a trailing save and a flush, so a restart keeps the count', async () => {
+  const dir = await tmp();
+  const fetchImpl = fakeFetch({ '*': () => jpegResponse() });
+  const make = () =>
+    createTileCache({
+      dir,
+      fetchImpl,
+      log() {},
+      guardIntervalMs: 0,
+      statsSaveMs: 60,
+    });
+  const a = make();
+  for (let i = 0; i < 5; i++) await a.getTile(100, 17, 5, 20 + i);
+  // The throttle skipped some saves; the trailing timer must catch up.
+  await new Promise((r) => setTimeout(r, 250));
+  const saved = JSON.parse(
+    await fs.readFile(path.join(dir, 'stats.json'), 'utf8'),
+  );
+  assert.equal(saved.tiles, 5, 'trailing save wrote the last tile');
+  // flush() on close writes immediately, without waiting for the timer.
+  const b = createTileCache({
+    dir,
+    fetchImpl,
+    log() {},
+    guardIntervalMs: 0,
+    statsSaveMs: 3_600_000,
+  });
+  await b.getTile(100, 17, 5, 40);
+  await b.getTile(100, 17, 5, 41);
+  await b.flush();
+  const after = JSON.parse(
+    await fs.readFile(path.join(dir, 'stats.json'), 'utf8'),
+  );
+  assert.equal(after.tiles, 7);
+  assert.equal((await make().status()).tiles, 7, 'a restart sees them');
+});
+
+const INFO_URL =
+  '/api/byrdit/wayback/info?release=63116&lat=32.5&lon=-94.9&z=17';
+const infoOk = () =>
+  new Response(
+    JSON.stringify({ features: [{ attributes: { SRC_DATE: 20251020 } }] }),
+  );
+
+test('handler: /info single-flight, concurrent identical calls make one upstream query', async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const on = await handlerWith(
+    {
+      '*': async (url) => {
+        if (!url.includes('metadata'))
+          return new Response('no', { status: 404 });
+        await gate;
+        return infoOk();
+      },
+    },
+    { info: true },
+  );
+  const calls = Array.from({ length: 10 }, () =>
+    request(on.handler, 'GET', INFO_URL),
+  );
+  await new Promise((r) => setTimeout(r, 30));
+  release();
+  const all = await Promise.all(calls);
+  assert.ok(all.every((r) => r.status === 200));
+  assert.equal(
+    on.fetchImpl.calls.filter((c) => c.url.includes('metadata')).length,
+    1,
+  );
+});
+
+test('handler: /info failure is cached negatively, 502 without hitting Esri again', async () => {
+  let t = 1_000_000;
+  const dir = await tmp();
+  const fetchImpl = fakeFetch({
+    'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json':
+      () => new Response(JSON.stringify(RAW)),
+    '*': () => new Response('boom', { status: 500 }),
+  });
+  const handler = createWaybackHandler(
+    {
+      ...waybackSettingsFromEnv({
+        GEV_BYRDIT_WAYBACK: '1',
+        GEV_BYRDIT_WAYBACK_CACHE_DIR: dir,
+      }),
+      info: true,
+    },
+    { fetchImpl, log() {}, now: () => t },
+  );
+  const meta = () =>
+    fetchImpl.calls.filter((c) => c.url.includes('metadata')).length;
+  assert.equal((await request(handler, 'GET', INFO_URL)).status, 502);
+  assert.equal(meta(), 1);
+  assert.equal((await request(handler, 'GET', INFO_URL)).status, 502);
+  assert.equal(meta(), 1, 'negative cache: no second query');
+  t += 61_000;
+  await request(handler, 'GET', INFO_URL);
+  assert.equal(meta(), 2, 'asks again after the short TTL');
+});
+
+test('handler: /info obeys the breaker: open = no upstream query; 403 opens it for tiles too', async () => {
+  const on = await handlerWith(
+    { '*': () => new Response('denied', { status: 403 }) },
+    { info: true },
+  );
+  const meta = () =>
+    on.fetchImpl.calls.filter((c) => c.url.includes('metadata')).length;
+  assert.equal((await request(on.handler, 'GET', INFO_URL)).status, 502);
+  assert.equal(meta(), 1);
+  const other = await request(
+    on.handler,
+    'GET',
+    '/api/byrdit/wayback/info?release=63116&lat=10.5&lon=10.5&z=17',
+  );
+  assert.equal(other.status, 502);
+  assert.ok(other.headers['retry-after'], 'tells the client when to retry');
+  assert.equal(meta(), 1, 'breaker open: different key, still no upstream');
+  const tilesBefore = on.fetchImpl.calls.length;
+  const tileRes = await request(
+    on.handler,
+    'GET',
+    '/api/byrdit/wayback/tile/63116/17/5/6',
+  );
+  assert.ok([502, 503].includes(tileRes.status));
+  assert.equal(
+    on.fetchImpl.calls.length,
+    tilesBefore,
+    'tiles share the breaker',
+  );
+});
+
+test('handler: /info goes through the shared rate limiter (cap holds)', async () => {
+  let active = 0;
+  let peak = 0;
+  const on = await handlerWith(
+    {
+      '*': async (url) => {
+        if (!url.includes('metadata'))
+          return new Response('no', { status: 404 });
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((r) => setTimeout(r, 20));
+        active -= 1;
+        return infoOk();
+      },
+    },
+    { info: true, concurrency: 2, perSecond: 1000 },
+  );
+  const rs = await Promise.all(
+    Array.from({ length: 8 }, (_, i) =>
+      request(
+        on.handler,
+        'GET',
+        `/api/byrdit/wayback/info?release=63116&lat=${10 + i}.5&lon=20.5&z=17`,
+      ),
+    ),
+  );
+  assert.ok(rs.every((r) => r.status === 200));
+  assert.ok(peak <= 2, `peak concurrency ${peak} <= 2`);
+  assert.ok(peak >= 1);
+});
