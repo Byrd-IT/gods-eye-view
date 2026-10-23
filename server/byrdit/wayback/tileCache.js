@@ -1,6 +1,6 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { WAYBACK_USER_AGENT } from './releases.js';
+import { safeReason, WAYBACK_USER_AGENT } from './releases.js';
 
 /**
  * Perpetual view-through tile cache for Esri Wayback (owner decision
@@ -239,10 +239,7 @@ export function createTileCache({
       await fs.writeFile(`${file}.tmp`, JSON.stringify({ tiles, bytes }));
       await fs.rename(`${file}.tmp`, file);
     } catch (error) {
-      log(
-        '[wayback-cache] could not save stats:',
-        error?.code ?? error?.message,
-      );
+      log('[wayback-cache] could not save stats:', safeReason(error));
     }
   }
 
@@ -466,7 +463,7 @@ export function createTileCache({
           await writeAlias(release, resolved, z, row, col);
       } catch (error) {
         counters.errors += 1;
-        log('[wayback-cache] write failed:', error?.code ?? error?.message);
+        log('[wayback-cache] write failed:', safeReason(error));
       }
     } else counters.passthrough += 1;
     return {

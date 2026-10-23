@@ -335,7 +335,10 @@ export async function attachWayback({
     releasing = Promise.resolve()
       .then(() => held.release())
       .catch((error) => {
-        console.warn('[Wayback] could not restore the previous map:', error);
+        console.warn(
+          '[Wayback] could not restore the previous map:',
+          typeof error?.name === 'string' ? error.name : 'Error',
+        );
       })
       .then(() => {
         releasing = null;

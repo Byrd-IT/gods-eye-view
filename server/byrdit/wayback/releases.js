@@ -28,6 +28,26 @@ const MAX_RELEASES = 1000;
 export const WAYBACK_USER_AGENT =
   'GodsEyeView-Byrd-IT/1.0 (+https://godseyeview.byrd-it.com; admin@byrd-it.com) wayback-viewer';
 
+/**
+ * A log-safe reason for an error: our own fixed messages as they are; for
+ * anything foreign (a fetch/DNS/proxy error whose message can carry a URL,
+ * userinfo or a header value) only its name and error code. Never the message.
+ */
+export function safeReason(error) {
+  if (error instanceof WaybackConfigError) return error.message;
+  const code = (value) =>
+    typeof value === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(value)
+      ? value
+      : null;
+  const name =
+    typeof error?.name === 'string' && /^[A-Za-z]{1,40}$/.test(error.name)
+      ? error.name
+      : 'Error';
+  return [name, code(error?.code) ?? code(error?.cause?.code)]
+    .filter(Boolean)
+    .join(' ');
+}
+
 export class WaybackConfigError extends Error {
   constructor(message) {
     super(message);
@@ -124,7 +144,7 @@ export function createReleaseStore({
     } catch (error) {
       log(
         '[wayback] ignoring unreadable last-good release list:',
-        error?.message,
+        safeReason(error),
       );
     }
   }
@@ -162,7 +182,7 @@ export function createReleaseStore({
       } catch (error) {
         log(
           '[wayback] could not save the last-good release list:',
-          error?.message,
+          safeReason(error),
         );
       }
     } catch (error) {
@@ -174,7 +194,7 @@ export function createReleaseStore({
       retryAt = now() + wait;
       // One quiet line per failure (the backoff keeps these rare).
       log(
-        `[wayback] release list refresh failed (${error?.message ?? error}); retry in ${Math.round(wait / 60000)} min`,
+        `[wayback] release list refresh failed (${safeReason(error)}); retry in ${Math.round(wait / 60000)} min`,
       );
     }
   }
