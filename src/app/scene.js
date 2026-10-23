@@ -15,6 +15,7 @@ import {
 } from '../renderGovernor.js';
 import { describeError } from './errors.js';
 import { openBasemap } from '../byrdit/basemap/index.js';
+import { attachWayback } from '../byrdit/wayback/index.js';
 import { t } from '../i18n/index.js';
 
 /** Construct the application globe using the caller's local configuration. */
@@ -136,6 +137,16 @@ export async function createApplicationScene({
     { silent: true },
   );
   if (basemap?.lazy) defer(basemap.attach(mapStackController));
+  // Byrd-IT: Esri Wayback time travel. A no-op unless the server rendered the
+  // page with GEV_BYRDIT_WAYBACK=1; never blocks startup.
+  let detachWayback = null;
+  defer(() => detachWayback?.());
+  attachWayback({ Cesium, viewer, controller: mapStackController }).then(
+    (detach) => {
+      if (signal.aborted) detach();
+      else detachWayback = detach;
+    },
+  );
 
   signal.throwIfAborted();
   return { viewer, tileset, mapStackController, operations };

@@ -8,6 +8,7 @@ import { apiNotFoundPlugin } from './api-not-found.js';
 import { standaloneVoiceTools } from './voiceTools.js';
 import { historyPlugins } from '../byrdit/history.js';
 import { basemapPlugins } from '../byrdit/basemap.js';
+import { waybackPlugins } from '../byrdit/wayback/index.js';
 import { unwatchedRuntimeDirsPlugin } from './unwatched-cache.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -23,6 +24,7 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       ...historyPlugins(),
       ...basemapPlugins(),
+      ...waybackPlugins(),
       ...localProviderPlugins({ realtime: { tools }, gemini: { tools } }),
       localMcpPlugin(),
       apiNotFoundPlugin(),

@@ -3021,5 +3021,14 @@
   "hemisphere|E": "В",
   "hemisphere|W": "З",
   "OK": "НОРМА",
-  "{category} ({count})": "{category} ({count})"
+  "{category} ({count})": "{category} ({count})",
+  "Captured {details}": "Снято: {details}",
+  "Wayback release {date}": "Выпуск Wayback {date}",
+  "Another imagery tool is using the map": "Карту сейчас использует другой инструмент снимков",
+  "Esri imagery is unavailable right now": "Снимки Esri сейчас недоступны",
+  "Time travel": "Путешествие во времени",
+  "Older imagery": "Более старые снимки",
+  "Imagery date": "Дата снимков",
+  "Newer imagery": "Более новые снимки",
+  "Latest imagery": "Самые свежие снимки"
 }

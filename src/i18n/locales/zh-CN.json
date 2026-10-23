@@ -2820,5 +2820,14 @@
   "Water": "水文",
   "{name} (degraded)": "{name}（降级）",
   "Clean view: hide the controls (V)": "简洁视图：隐藏控件（V）",
-  "{label} (V)": "{label}（V）"
+  "{label} (V)": "{label}（V）",
+  "Captured {details}": "拍摄信息：{details}",
+  "Wayback release {date}": "Wayback 版本 {date}",
+  "Another imagery tool is using the map": "另一个影像工具正在使用地图",
+  "Esri imagery is unavailable right now": "Esri 影像暂时不可用",
+  "Time travel": "时光穿梭",
+  "Older imagery": "更早的影像",
+  "Imagery date": "影像日期",
+  "Newer imagery": "更新的影像",
+  "Latest imagery": "最新影像"
 }
