@@ -509,7 +509,6 @@ async function runViewport(name, vp, context) {
 // browser's; then the phone.
 const desktopCtx = await browser.createBrowserContext();
 const cam = await runViewport('desktop', VIEWPORTS.desktop, desktopCtx);
-const afterFirst = await status();
 
 async function revisit() {
   const ctx = await browser.createBrowserContext();
@@ -533,9 +532,13 @@ async function revisit() {
   await ctx.close();
   return rec;
 }
+// The same scripted view twice from fresh browser contexts: the first one
+// may fetch whatever the earlier steps did not, the second must not.
+await revisit();
+const before2 = await status();
 const second = await revisit();
 const afterSecond = await status();
-const newUpstream = afterSecond.upstream - afterFirst.upstream;
+const newUpstream = afterSecond.upstream - before2.upstream;
 check(
   'F second view of the same area (fresh browser cache): tile requests reach the server',
   second.tiles.length >= 10,
@@ -549,13 +552,13 @@ check(
 );
 check(
   'F second view: server hit counter rises',
-  afterSecond.hits >= afterFirst.hits + 10,
-  `hits ${afterFirst.hits} -> ${afterSecond.hits}`,
+  afterSecond.hits >= before2.hits + 10,
+  `hits ${before2.hits} -> ${afterSecond.hits}`,
 );
 check(
   'F second view: ~0 upstream fetches',
   newUpstream <= 3,
-  `upstream ${afterFirst.upstream} -> ${afterSecond.upstream} (+${newUpstream}), misses +${afterSecond.misses - afterFirst.misses}`,
+  `upstream ${before2.upstream} -> ${afterSecond.upstream} (+${newUpstream}), misses +${afterSecond.misses - before2.misses}`,
 );
 check(
   'F cache status exposes counters and the guard, no paths',
