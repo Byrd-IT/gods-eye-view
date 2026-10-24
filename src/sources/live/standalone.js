@@ -126,6 +126,9 @@ export function createFlightSource({
 export function createMilitarySource({
   fetchImpl = defaultFetch,
   now = () => Date.now(),
+  // Byrd-IT fork: the browser keeps getTrack for the History scrubber (B12e);
+  // the AI tool services pass false (upstream: military track is unsupported).
+  trackHistory = true,
 } = {}) {
   return {
     // i18n-ignore: feed source name, replaced by the provider from each snapshot and reported to AI tools
@@ -163,26 +166,28 @@ export function createMilitarySource({
     // the tracked aircraft's recorded [t-6h, t] track through the history
     // router. Live, /api/military/track is upstream's 503 refusal and the
     // tracking layer keeps its accumulated trail.
-    async getTrack(reference, { signal } = {}) {
-      const { response, payload } = await readResponse(
-        fetchImpl,
-        '/api/military/track?hex=' + encodeURIComponent(reference),
-        { signal },
-        'Military aircraft',
-      );
-      if (!response.ok) throw httpError(response, 'Military aircraft');
-      const baseTimeMs = epoch(payload?.timestamp, 1000);
-      return {
-        records:
-          baseTimeMs == null
-            ? []
-            : normalizeAircraftTrack(payload?.trace, {
-                baseTimeMs,
-                readsb: true,
-              }),
-        complete: false,
-      };
-    },
+    ...(trackHistory && {
+      async getTrack(reference, { signal } = {}) {
+        const { response, payload } = await readResponse(
+          fetchImpl,
+          '/api/military/track?hex=' + encodeURIComponent(reference),
+          { signal },
+          'Military aircraft',
+        );
+        if (!response.ok) throw httpError(response, 'Military aircraft');
+        const baseTimeMs = epoch(payload?.timestamp, 1000);
+        return {
+          records:
+            baseTimeMs == null
+              ? []
+              : normalizeAircraftTrack(payload?.trace, {
+                  baseTimeMs,
+                  readsb: true,
+                }),
+          complete: false,
+        };
+      },
+    }),
   };
 }
 
