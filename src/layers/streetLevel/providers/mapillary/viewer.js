@@ -14,6 +14,20 @@ import { mapillaryImageUrl } from './policy.js';
  */
 
 /**
+ * The source's Graph endpoint as an absolute URL ending in `/`, as MapillaryJS
+ * resolves its lookup paths against it; '' when the source has none.
+ */
+export function graphEndpointUrl(source) {
+  if (!source?.graphEndpoint) return '';
+  const url = new URL(
+    source.graphEndpoint,
+    globalThis.location?.href || 'http://localhost/',
+  );
+  url.pathname = url.pathname.replace(/\/*$/, '/');
+  return url.href;
+}
+
+/**
  * The panel's photo viewer: loads MapillaryJS on the first `mount` and emits
  * a pose on every image, view or position change.
  */
@@ -119,10 +133,11 @@ export function createMapillaryViewer({ source, render } = {}) {
     // Unmounted (layer off) while the library loaded: a viewer built now
     // would hold a WebGL context nobody releases.
     if (built !== generation) throw new Error('Mapillary viewer was unmounted');
+    const endpoint = graphEndpointUrl(source);
     viewer = new Viewer({
       // Graph requests go to this app's server, which holds the token; the
       // viewer is given no access token.
-      dataProvider: new GraphDataProvider({ endpoint: source.graphEndpoint }),
+      dataProvider: new GraphDataProvider({ endpoint }),
       container: host,
       component: {
         cover: false,

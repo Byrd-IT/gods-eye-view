@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { providerCooldownMs } from '../server/providers/space/cooldown.js';
 import { parseTerrainPoints } from './data/terrainHeightsProxy.js';
 import { readResponseTextCapped, coalesceProxyRequest } from './sources/httpBody.js';
 import { makeRateLimiter, clientKey } from '../server/providers/common/rate-limit.js';
@@ -38,7 +39,7 @@ function extract(name) {
 function fixture(name, overrides = {}, preview = false) {
   const logs = [];
   const deps = {
-    readResponseTextCapped, coalesceProxyRequest,
+    readResponseTextCapped, coalesceProxyRequest, providerCooldownMs,
     // The rate-limited proxies reach for these; give them the real ones so a
     // fixture request is throttled exactly as production would be.
     makeRateLimiter, clientKey,
@@ -212,7 +213,7 @@ test('CelesTrak unexpected failures hide details', async () => {
       },
     },
   });
-  const res = await app.request('/active');
+  const res = await app.request('/stations');
   assert.equal(res.status, 500);
   assert.equal(res.body, 'celestrak proxy error');
   assert.equal(res.headers['x-tle-cache'], 'ERROR');
@@ -221,7 +222,7 @@ test('CelesTrak unexpected failures hide details', async () => {
 test('CelesTrak retains invalid-group and unavailable responses', async () => {
   const app = fixture('celestrakProxy');
   assert.equal((await app.request('/../')).status, 400);
-  const res = await app.request('/active');
+  const res = await app.request('/stations');
   assert.equal(res.status, 502);
   assert.equal(res.headers['x-tle-cache'], 'NONE');
 });
@@ -230,7 +231,11 @@ test('CelesTrak retains fresh and stale GP CSV caches', async () => {
   let now = Date.now();
   let calls = 0;
   const app = fixture('celestrakProxy', {
-    Date: { now: () => now },
+    Date: class extends Date {
+      static now() {
+        return now;
+      }
+    },
     fetch: async () => {
       if (++calls > 1) throw new Error(detail);
       return new Response(
@@ -238,10 +243,10 @@ test('CelesTrak retains fresh and stale GP CSV caches', async () => {
       );
     },
   });
-  assert.equal((await app.request('/active')).headers['x-tle-cache'], 'MISS');
-  assert.equal((await app.request('/active')).headers['x-tle-cache'], 'HIT');
+  assert.equal((await app.request('/stations')).headers['x-tle-cache'], 'MISS');
+  assert.equal((await app.request('/stations')).headers['x-tle-cache'], 'HIT');
   now += 7 * 3600_000;
-  const stale = await app.request('/active');
+  const stale = await app.request('/stations');
   assert.equal(stale.status, 200);
   assert.equal(
     stale.body,

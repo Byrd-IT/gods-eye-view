@@ -32,16 +32,27 @@ async function readJsonOrThrow(response, label) {
   return payload;
 }
 
+/** `endpoint` with exactly one trailing slash, or '' when unset. */
+function endpointBase(endpoint) {
+  const text = String(endpoint || '').trim();
+  return text ? text.replace(/\/*$/, '/') : '';
+}
+
 /**
  * Mapillary network access: tiles and Graph API lookups both go through this
  * app's server, which adds the client token (the browser never holds it).
- * `configured` is learned from the status route.
- * @param {{fetchImpl?: Function, endpoints?: object}} options
+ * `configured` is learned from the status route. With `graphEndpoint` (a
+ * Graph API base that adds the token itself, such as a same-origin proxy),
+ * the source's Graph lookups go there through `fetchImpl` instead, and the
+ * photo viewer sends its own lookups there too; no token is sent or needed.
+ * @param {{fetchImpl?: Function, endpoints?: object, graphEndpoint?: string}} options
  */
 export function createMapillarySource({
   fetchImpl = (...args) => globalThis.fetch(...args),
   endpoints = {},
+  graphEndpoint = '',
 } = {}) {
+  const graphBase = endpointBase(graphEndpoint);
   const urls = {
     status: '/api/mapillary/status',
     tiles: '/api/mapillary/tiles',
@@ -52,6 +63,12 @@ export function createMapillarySource({
 
   async function graph(path, params = {}, { signal } = {}) {
     const search = new URLSearchParams(params);
+    if (graphBase) {
+      const response = await fetchImpl(`${graphBase}${path}?${search}`, {
+        signal,
+      });
+      return readJsonOrThrow(response, 'Mapillary graph');
+    }
     const response = await fetchImpl(`${urls.graph}/${path}?${search}`, {
       signal,
     });
@@ -64,7 +81,7 @@ export function createMapillarySource({
       // MapillaryJS resolves paths against this with `new URL`, so it must be
       // absolute and end in a slash.
       return new URL(
-        `${urls.graph.replace(/\/$/, '')}/`,
+        graphBase || `${urls.graph.replace(/\/$/, '')}/`,
         globalThis.location?.href ?? 'http://localhost/',
       ).href;
     },

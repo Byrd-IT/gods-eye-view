@@ -4,6 +4,7 @@ import {
   celestrakSatcatUrl,
   celestrakTleUrl,
 } from '../../../src/data/spaceProviderRequests.js';
+import { admitSameSiteKeyless } from '../common/same-site.js';
 import { readResponseTextCapped } from '../common/http.js';
 
 /** SATCAT RCS cache lifetime (SKYVIEW.md 4.4: one polite fetch per week). */
@@ -102,6 +103,17 @@ export function celestrakProxy() {
     'gods-eye-view-celestrak-proxy/1.0 (+https://github.com/bilawalsidhu/gods-eye-view)';
   const TLE_TTL_MS = 6 * 3600_000;
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
+  const groups = new Set([
+    'stations',
+    'visual',
+    'gps-ops',
+    'glo-ops',
+    'galileo',
+    'geo',
+    'starlink',
+    // Space Missions (`getActiveTle`) reads the full active catalog.
+    'active',
+  ]);
   const mem = new Map(); // group -> { at: epochMs, body: string }
   const inflight = new Map(); // group -> Promise<{at, body}|null>
 
@@ -833,12 +845,20 @@ export function celestrakProxy() {
       const group = String(req.url || '')
         .replace(/^\//, '')
         .split('?')[0];
-      if (!/^[a-z0-9-]+$/i.test(group)) {
+      // Keyless and needed to render the satellites layer: refuse cross-site
+      // browsers but keep the documented reverse-proxy deployment working.
+      if (admitSameSiteKeyless(req, res)) return;
+      if (req.method !== 'GET') {
+        res.writeHead(405);
+        res.end();
+        return;
+      }
+      if (!groups.has(group)) {
         res.writeHead(400, { 'Content-Type': 'text/plain' });
         res.end('invalid group');
         return;
       }
-      const send = (status, body, cacheStatus) => {
+      const send = (status, body, cacheStatus, entry) => {
         // Guard against a double-send (e.g. a throw AFTER a response already
         // went out routing into the catch's send): writeHead after headersSent
         // throws "Cannot set headers after they are sent".
@@ -846,6 +866,10 @@ export function celestrakProxy() {
         res.writeHead(status, {
           'Content-Type': 'text/plain',
           'x-tle-cache': cacheStatus,
+          'Cache-Control': 'no-store',
+          ...(entry
+            ? { 'X-TLE-Cached-At': new Date(entry.at).toISOString() }
+            : {}),
         });
         res.end(body);
       };
@@ -867,7 +891,7 @@ export function celestrakProxy() {
           }
         }
         if (entry && now - entry.at < TLE_TTL_MS) {
-          send(200, entry.body, 'HIT');
+          send(200, entry.body, 'HIT', entry);
           return;
         }
         // Stale or missing → refresh, single-flight per group.
@@ -904,9 +928,9 @@ export function celestrakProxy() {
         }
         const fresh = await inflight.get(group);
         if (fresh) {
-          send(200, fresh.body, 'MISS');
+          send(200, fresh.body, 'MISS', fresh);
         } else if (entry) {
-          send(200, entry.body, 'STALE-ERROR'); // upstream down — stale beats empty
+          send(200, entry.body, 'STALE-ERROR', entry); // upstream down — stale beats empty
         } else {
           send(502, 'celestrak fetch failed and no cache available', 'NONE');
         }

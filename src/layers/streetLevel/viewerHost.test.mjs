@@ -28,8 +28,10 @@ registerHooks({
     return { format: 'module', shortCircuit: true, source };
   },
 });
-const { createMapillaryViewer } =
+const { createMapillaryViewer, graphEndpointUrl } =
   await import('./providers/mapillary/viewer.js');
+const { createMapillarySource } =
+  await import('./providers/mapillary/source.js');
 
 /**
  * A viewer host over `adapter`. `marker` records where the position marker
@@ -346,13 +348,7 @@ function fakeLibrary() {
   }
   globalThis.__gevMapillaryLibrary = async () => {
     await gate.promise;
-    // Records the endpoint it was given; the real one fetches from it.
-    class GraphDataProvider {
-      constructor(options) {
-        this.options = options;
-      }
-    }
-    return { Viewer, GraphDataProvider, RenderMode: {} };
+    return { Viewer, RenderMode: {}, GraphDataProvider: FakeGraphDataProvider };
   };
   return { gate, viewers };
 }
@@ -614,4 +610,43 @@ test('a pose’s licence reaches the caption state, and a closed viewer forgets 
   google.emitPose('g-1', { providerId: 'google', license: 'CC0' });
   host.close();
   assert.equal(state.street.license, null);
+});
+
+/** MapillaryJS 4's Graph provider, recording what it was built with. */
+class FakeGraphDataProvider {
+  constructor(options = {}) {
+    this.options = options;
+  }
+}
+
+test("with a Graph endpoint the viewer uses MapillaryJS's Graph provider there, without a token", async () => {
+  const library = fakeLibrary();
+  library.gate.resolve();
+  const source = createMapillarySource({
+    graphEndpoint: 'https://app.example/api/mapillary/graph',
+    fetchImpl: async () => {
+      throw new Error('the viewer does not use the source transport');
+    },
+  });
+  const adapter = createMapillaryViewer({ source });
+  await adapter.mount({});
+  const [viewer] = library.viewers.instances;
+  assert.equal(viewer.options.accessToken, undefined);
+  const provider = viewer.options.dataProvider;
+  assert.ok(provider instanceof FakeGraphDataProvider);
+  assert.deepEqual(provider.options, {
+    endpoint: 'https://app.example/api/mapillary/graph/',
+  });
+});
+
+test('a relative Graph endpoint resolves against the page, with one trailing slash', () => {
+  assert.equal(
+    graphEndpointUrl({ graphEndpoint: '/api/mapillary/graph' }),
+    'http://localhost/api/mapillary/graph/',
+  );
+  assert.equal(
+    graphEndpointUrl({ graphEndpoint: '/api/mapillary/graph//' }),
+    'http://localhost/api/mapillary/graph/',
+  );
+  assert.equal(graphEndpointUrl({ token: 't' }), '');
 });

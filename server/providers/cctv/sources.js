@@ -133,7 +133,6 @@ import {
   fallbackHeadingFromId,
   isLikelyFinlandCoordinate,
   fintrafficCameraName,
-  hashSeed,
   isPlausibleLatLon,
   isLikelyBcCoordinate,
   isLikelyTexasCoordinate,
@@ -2297,7 +2296,7 @@ export function normalizeCataloniaImageUrl(rawUrl) {
  * @param {string} imageUrl - A URL normalizeCataloniaImageUrl accepted.
  * @returns {string}
  */
-export function cataloniaCameraId(imageUrl) {
+function cataloniaCameraId(imageUrl) {
   const parsed = new URL(imageUrl);
   const slug = (text) =>
     text

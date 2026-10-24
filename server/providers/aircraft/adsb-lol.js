@@ -1,4 +1,7 @@
-import { readResponseTextCapped } from '../common/http.js';
+import {
+  coalesceProxyRequest,
+  readResponseTextCapped,
+} from '../common/http.js';
 
 const ADSB_LOL_MIL_URL = 'https://api.adsb.lol/v2/mil';
 /**
@@ -159,6 +162,7 @@ function failureClass(error) {
 export function adsbLolProxy() {
   /** @type {string|null} Cached upstream JSON body. */
   let _cache = null;
+  const inFlight = new Map();
   /** @type {number} Epoch-ms when the cache was populated. */
   let _cacheAt = 0;
   /** @type {number} Epoch-ms until which upstream is not contacted. */
@@ -214,8 +218,6 @@ export function adsbLolProxy() {
 
   const installMiddleware = (server) => {
     server.middlewares.use('/api/military', async (req, res, next) => {
-      let startedAt = 0;
-      let upstreamStatus = 0;
       const timeoutMs = adsbLolTimeoutMs();
       try {
         // This mount also matches its /track route, served by its own handler.
@@ -246,89 +248,122 @@ export function adsbLolProxy() {
           );
           return;
         }
-        startedAt = performance.now();
-        // Byrd-IT: one deadline (GEV_ADSB_LOL_TIMEOUT_MS, default 30 s) bounds
-        // the headers AND the capped body read.
-        const signal = AbortSignal.timeout(timeoutMs);
-        const upstream = await fetch(ADSB_LOL_MIL_URL, {
-          headers: { 'User-Agent': 'gods-eye-view-adsblol-proxy/1.0' },
-          signal,
-        });
-        upstreamStatus = upstream.status;
-        if (upstream.ok) {
-          const body = await readResponseTextCapped(
-            upstream,
-            ADSBLOL_MIL_MAX_RESPONSE_BYTES,
-            signal,
-          );
-          _cache = body;
-          _cacheAt = Date.now();
-          _cooldownUntil = 0;
-          _cooldownStatus = 0;
-          serve(res, 200, body, 'MISS');
-          return;
-        }
-        const elapsedMs = () => Math.round(performance.now() - startedAt);
-        const failureLine = (body, extra = '') =>
-          `[adsb.lol Proxy] upstream ${upstream.status}${extra} target="GET ${ADSB_LOL_MIL_URL}" ` +
-          `status=${upstream.status} elapsed_ms=${elapsedMs()} body=${JSON.stringify(redactSnippet(body))}`;
-        if (upstream.status === 429 || upstream.status >= 500) {
-          const failedAt = Date.now();
-          _cooldownUntil = failedAt + cooldownFor(upstream, failedAt);
-          _cooldownStatus = upstream.status;
-          const cooling = `; cooling down ${Math.round((_cooldownUntil - Date.now()) / 1000)} s${_cache ? ', serving stale' : ''}`;
-          if (_cache) {
-            // Do not wait for a failing response body before serving usable data:
-            // serve stale first, then peek the body (bounded) for the log and
-            // cancel it.
-            serve(res, 200, _cache, 'STALE', {
-              'X-ADS-B-Upstream-Status': String(upstream.status),
-              'X-ADS-B-Retry-After-Seconds': String(
-                Math.ceil((_cooldownUntil - Date.now()) / 1000),
-              ),
-            });
-            const snippet = await peekAndCancel(upstream);
-            console.warn(failureLine(snippet, cooling));
-            return;
-          }
-          const body = await readResponseTextCapped(
-            upstream,
-            ADSBLOL_MIL_MAX_RESPONSE_BYTES,
-            signal,
-          );
-          console.warn(failureLine(body, cooling));
-          serve(res, upstream.status, body, 'MISS', {
-            'Retry-After': String(
-              Math.ceil((_cooldownUntil - Date.now()) / 1000),
-            ),
+        // Coalesce concurrent refreshes (upstream) into one upstream request.
+        // The closure never throws: failures are logged once (Byrd-IT) and
+        // returned as a stale/502 result shared by every waiter.
+        const refresh = coalesceProxyRequest(inFlight, 'global', async () => {
+          const result = (status, body, cacheStatus, extra = {}) => ({
+            status,
+            body,
+            cacheStatus,
+            extra,
           });
+          let startedAt = 0;
+          let upstreamStatus = 0;
+          try {
+            startedAt = performance.now();
+            // Byrd-IT: one deadline (GEV_ADSB_LOL_TIMEOUT_MS, default 30 s)
+            // bounds the headers AND the capped body read.
+            const signal = AbortSignal.timeout(timeoutMs);
+            const upstream = await fetch(ADSB_LOL_MIL_URL, {
+              headers: { 'User-Agent': 'gods-eye-view-adsblol-proxy/1.0' },
+              signal,
+            });
+            upstreamStatus = upstream.status;
+            if (upstream.ok) {
+              const body = await readResponseTextCapped(
+                upstream,
+                ADSBLOL_MIL_MAX_RESPONSE_BYTES,
+                signal,
+              );
+              _cache = body;
+              _cacheAt = Date.now();
+              _cooldownUntil = 0;
+              _cooldownStatus = 0;
+              return result(200, body, 'MISS');
+            }
+            const elapsedMs = () => Math.round(performance.now() - startedAt);
+            const failureLine = (body, extra = '') =>
+              `[adsb.lol Proxy] upstream ${upstream.status}${extra} target="GET ${ADSB_LOL_MIL_URL}" ` +
+              `status=${upstream.status} elapsed_ms=${elapsedMs()} body=${JSON.stringify(redactSnippet(body))}`;
+            if (upstream.status === 429 || upstream.status >= 500) {
+              const failedAt = Date.now();
+              _cooldownUntil = failedAt + cooldownFor(upstream, failedAt);
+              _cooldownStatus = upstream.status;
+              const cooling = `; cooling down ${Math.round((_cooldownUntil - Date.now()) / 1000)} s${_cache ? ', serving stale' : ''}`;
+              if (_cache) {
+                // Do not wait for a failing response body before serving
+                // usable data: return stale now, then peek the body (bounded)
+                // for the log and cancel it.
+                peekAndCancel(upstream)
+                  .then((snippet) => console.warn(failureLine(snippet, cooling)))
+                  .catch(() => {});
+                return result(200, _cache, 'STALE', {
+                  'X-ADS-B-Upstream-Status': String(upstream.status),
+                  'X-ADS-B-Retry-After-Seconds': String(
+                    Math.ceil((_cooldownUntil - Date.now()) / 1000),
+                  ),
+                });
+              }
+            }
+            const body = await readResponseTextCapped(
+              upstream,
+              ADSBLOL_MIL_MAX_RESPONSE_BYTES,
+              signal,
+            );
+            console.warn(
+              failureLine(
+                body,
+                upstream.status === 429 || upstream.status >= 500
+                  ? `; cooling down ${Math.round((_cooldownUntil - Date.now()) / 1000)} s`
+                  : '; relayed (no cooldown)',
+              ),
+            );
+            return result(
+              upstream.status,
+              body,
+              'MISS',
+              _cooldownUntil > Date.now()
+                ? {
+                    'Retry-After': String(
+                      Math.ceil((_cooldownUntil - Date.now()) / 1000),
+                    ),
+                  }
+                : {},
+            );
+          } catch (e) {
+            console.error(
+              `[adsb.lol Proxy] upstream request failed target="GET ${ADSB_LOL_MIL_URL}" ` +
+                `class=${failureClass(e)} status=${upstreamStatus || 'none'} ` +
+                `elapsed_ms=${startedAt ? Math.round(performance.now() - startedAt) : 0} ` +
+                `timeout_ms=${timeoutMs}${_cache ? '; serving stale' : '; relaying 502'}`,
+            );
+            if (_cache) return result(200, _cache, 'STALE');
+            return {
+              status: 502,
+              body: JSON.stringify({ error: 'ADS-B proxy error' }),
+              cacheStatus: 'NONE',
+              extra: {},
+              plainJson: true,
+            };
+          }
+        });
+        const response = await refresh.promise;
+        if (response.plainJson) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(response.body);
           return;
         }
-        const body = await readResponseTextCapped(
-          upstream,
-          ADSBLOL_MIL_MAX_RESPONSE_BYTES,
-          signal,
-        );
-        console.warn(failureLine(body, '; relayed (no cooldown)'));
         serve(
           res,
-          upstream.status,
-          body,
-          'MISS',
-          _cooldownUntil > Date.now()
-            ? {
-                'Retry-After': String(
-                  Math.ceil((_cooldownUntil - Date.now()) / 1000),
-                ),
-              }
-            : {},
+          response.status,
+          response.body,
+          response.cacheStatus,
+          response.extra,
         );
       } catch (e) {
         console.error(
-          `[adsb.lol Proxy] upstream request failed target="GET ${ADSB_LOL_MIL_URL}" ` +
-            `class=${failureClass(e)} status=${upstreamStatus || 'none'} ` +
-            `elapsed_ms=${startedAt ? Math.round(performance.now() - startedAt) : 0} ` +
-            `timeout_ms=${timeoutMs}${_cache ? '; serving stale' : '; relaying 502'}`,
+          `[adsb.lol Proxy] handler failed class=${failureClass(e)}`,
         );
         if (_cache) {
           serve(res, 200, _cache, 'STALE');
