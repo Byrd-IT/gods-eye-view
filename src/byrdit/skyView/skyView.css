@@ -1095,3 +1095,14 @@ body.gev-sky-active :is(#gev-naip-slider, #gev-naip-split-line) {
     transition: none;
   }
 }
+
+/* Phone shell (upstream mobileShell.js, body.mobile-shell, <= 720 px): the
+   tab bar (#mobile-tab-bar, --mobile-tab-space tall) covers the bottom edge
+   while the Sky controls show, and its last tab (More) sat under the eye, so a
+   tap on the eye opened the More sheet instead. The eye rides just above the
+   bar, at the same height in Clear view (bar hidden) so it never jumps. */
+@media (max-width: 720px) and (min-height: 521px) {
+  body.mobile-shell .gev-sky-clear-btn {
+    bottom: calc(var(--mobile-tab-space) + 12px);
+  }
+}

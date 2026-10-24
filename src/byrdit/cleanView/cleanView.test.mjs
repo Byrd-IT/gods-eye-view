@@ -112,3 +112,41 @@ test('phones: the upstream corner row steps to the bottom-left, clear of both ey
     /@media \(max-width: 767\.98px\) \{[\s\S]*?#corner-actions \{[^}]*flex-direction: column/,
   );
 });
+
+test('phone shell: both eyes ride above the upstream tab bar, never on its More tab', () => {
+  const mobile = fs.readFileSync(
+    path.join(ROOT, 'src/ui/styles/mobile-shell.css'),
+    'utf8',
+  );
+  const sky = fs.readFileSync(
+    path.join(ROOT, 'src/byrdit/skyView/skyView.css'),
+    'utf8',
+  );
+  // the upstream facts this relies on: the bar, its height variable, and the
+  // bar hiding in clean view
+  assert.match(mobile, /--mobile-tab-space:/);
+  assert.match(
+    mobile,
+    /body\.mobile-shell #mobile-tab-bar \{[^}]*position: fixed;[^}]*bottom: 0;/,
+  );
+  assert.match(mobile, /body\.mobile-shell\.ui-clean-view #mobile-tab-bar/);
+  const shellRule = (text, selector) => {
+    const media = '@media (max-width: 720px) and (min-height: 521px) {';
+    const at = text.indexOf(media);
+    assert.ok(at >= 0, 'phone media block');
+    const rest = text.slice(at + media.length);
+    const from = rest.indexOf(selector + ' {');
+    assert.ok(from >= 0, selector);
+    return rest.slice(from, rest.indexOf('}', from));
+  };
+  const bottom = /bottom: calc\(var\(--mobile-tab-space\) \+ 12px\)/;
+  assert.match(shellRule(own, 'body.mobile-shell #clean-view-eye'), bottom);
+  assert.match(shellRule(sky, 'body.mobile-shell .gev-sky-clear-btn'), bottom);
+  // an open sheet (z 155-160) and its backdrop cover the map eye
+  const sheet = shellRule(
+    own,
+    'body.mobile-shell[data-mobile-sheet] #clean-view-eye',
+  );
+  const z = Number(sheet.match(/z-index: (\d+)/)[1]);
+  assert.ok(z < 155, 'below the sheet backdrop');
+});

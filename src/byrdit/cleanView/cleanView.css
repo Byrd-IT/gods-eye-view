@@ -48,3 +48,20 @@ body.gev-sky-active #clean-view-eye {
     inset-inline-end: auto;
   }
 }
+
+/* Phone shell (upstream mobileShell.js, body.mobile-shell, <= 720 px): the
+   bottom tab bar (#mobile-tab-bar, z 170, --mobile-tab-space tall) owns the
+   bottom edge, and the last tab (More) sits exactly where the eye does, so
+   the eye rides just above the bar. It stays at that height in clean view
+   too (the bar is hidden there) so the eye never jumps when it toggles. An
+   open sheet (z 155-160) and its backdrop cover the eye, so a tap outside the
+   sheet closes it and no sheet control sits under the eye. */
+@media (max-width: 720px) and (min-height: 521px) {
+  body.mobile-shell #clean-view-eye {
+    bottom: calc(var(--mobile-tab-space) + 12px);
+  }
+
+  body.mobile-shell[data-mobile-sheet] #clean-view-eye {
+    z-index: 150;
+  }
+}
