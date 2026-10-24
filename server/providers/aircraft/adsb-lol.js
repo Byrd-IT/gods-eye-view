@@ -295,15 +295,20 @@ export function adsbLolProxy() {
                 // Do not wait for a failing response body before serving
                 // usable data: return stale now, then peek the body (bounded)
                 // for the log and cancel it.
-                peekAndCancel(upstream)
-                  .then((snippet) => console.warn(failureLine(snippet, cooling)))
+                const logged = peekAndCancel(upstream)
+                  .then((snippet) =>
+                    console.warn(failureLine(snippet, cooling)),
+                  )
                   .catch(() => {});
-                return result(200, _cache, 'STALE', {
-                  'X-ADS-B-Upstream-Status': String(upstream.status),
-                  'X-ADS-B-Retry-After-Seconds': String(
-                    Math.ceil((_cooldownUntil - Date.now()) / 1000),
-                  ),
-                });
+                return {
+                  ...result(200, _cache, 'STALE', {
+                    'X-ADS-B-Upstream-Status': String(upstream.status),
+                    'X-ADS-B-Retry-After-Seconds': String(
+                      Math.ceil((_cooldownUntil - Date.now()) / 1000),
+                    ),
+                  }),
+                  logged,
+                };
               }
             }
             const body = await readResponseTextCapped(
@@ -361,6 +366,9 @@ export function adsbLolProxy() {
           response.cacheStatus,
           response.extra,
         );
+        // The stale reply is already out; wait for the bounded body peek
+        // and its log line so the failing body is always cancelled.
+        if (response.logged) await response.logged;
       } catch (e) {
         console.error(
           `[adsb.lol Proxy] handler failed class=${failureClass(e)}`,

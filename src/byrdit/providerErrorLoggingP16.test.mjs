@@ -405,9 +405,13 @@ test('opensky.js: OAuth 401, states 503, adsb.lol 500 -> same replies, gated lin
   const handler = installPlugin(openSkyProxy()).get('/api/flights');
   const res = fakeRes();
   await handler(localReq('/?lat=30.27&lon=-97.74'), res, () => {});
-  // Unchanged: no cache and no fallback -> the upstream status and body relay.
+  // Upstream (ed2f0685): a 5xx starts a cooldown and the reply is a generic
+  // JSON error with the upstream status, never the upstream body.
   assert.equal(res.statusCode, 503);
-  assert.equal(res.body, secretBody());
+  assert.equal(
+    res.body,
+    JSON.stringify({ error: 'OpenSky upstream unavailable.' }),
+  );
   const res2 = fakeRes();
   await handler(localReq('/'), res2, () => {});
   assert.equal(res2.statusCode, 503);

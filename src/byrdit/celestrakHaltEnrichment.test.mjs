@@ -81,7 +81,7 @@ function celestrakApp() {
     const done =
       kind === 'SATCAT'
         ? handlers['/api/celestrak-rcs']({ url: '/' }, res)
-        : handlers['/api/celestrak']({ url: `/${group}` }, res);
+        : handlers['/api/celestrak']({ url: `/${group}`, method: 'GET' }, res);
     return { res, done };
   };
   return {

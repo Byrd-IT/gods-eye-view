@@ -1,4 +1,5 @@
 import {
+  epoch,
   finite,
   httpError,
   LiveSourceError,
@@ -158,8 +159,30 @@ export function createMilitarySource({
         status: response.status,
       };
     },
-    // ADSB.lol does not expose a supported live-history endpoint. Omitting
-    // optional getTrack keeps the tracking layer on its accumulated trail.
+    // Byrd-IT fork: getTrack stays so the History scrubber (B12e) can answer
+    // the tracked aircraft's recorded [t-6h, t] track through the history
+    // router. Live, /api/military/track is upstream's 503 refusal and the
+    // tracking layer keeps its accumulated trail.
+    async getTrack(reference, { signal } = {}) {
+      const { response, payload } = await readResponse(
+        fetchImpl,
+        '/api/military/track?hex=' + encodeURIComponent(reference),
+        { signal },
+        'Military aircraft',
+      );
+      if (!response.ok) throw httpError(response, 'Military aircraft');
+      const baseTimeMs = epoch(payload?.timestamp, 1000);
+      return {
+        records:
+          baseTimeMs == null
+            ? []
+            : normalizeAircraftTrack(payload?.trace, {
+                baseTimeMs,
+                readsb: true,
+              }),
+        complete: false,
+      };
+    },
   };
 }
 

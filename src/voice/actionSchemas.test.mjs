@@ -39,10 +39,12 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // requested radius and center authority in descriptions only.
     // Street Level and GNSS extend the manifest; tracked and analyst aircraft describe broadcasts.
     // Air quality (ECCC AQHI) extends the manifest.
+    // Byrd-IT fork: + the four USGS water layers in src/voice/layerManifest.js
+    // (upstream 1c234ce0 pin without them: 967b5a04...99cf6).
     // Globe rotation adds one motion; visual keyhole fit and explicit
     // reset guidance/defaults update only move_camera and mode descriptions.
     // Restore base descriptions; append only globe-rotation defaults and fit guidance.
-    '967b5a043b812e2f8c1e190fc571cf12b960c9d4486df736902221aab4d99cf6',
+    '6db2729f58cb2e5dedba1e4393a9751ce08f2f14e28983fcd74c9f4f60932924',
   );
 });
 

@@ -214,10 +214,12 @@ test('construction is inert; adapters preserve routes, viewport query, cache epo
   assert.equal(mil.observedAtMs, now - 60000);
   assert.equal(mil.records[0].positionTimeMs, now - 75000);
   assert.equal(mil.stale, true);
-  assert.equal(military.getTrack, undefined);
-  assert.ok(
-    requests.every(({ url }) => !url.startsWith('/api/military/track')),
-  );
+  // Byrd-IT fork: getTrack stays for the History scrubber (B12e).
+  const track = await military.getTrack('abc123');
+  assert.equal(track.complete, false);
+  assert.equal(track.records[0].observedAtMs, now - 50000);
+  assert.equal(track.records[0].baroAltitudeM, 304.8);
+  assert.equal(track.records[0].ellipsoidAltitudeM, null);
 });
 
 test('cancellation after slow body parsing rejects even with a transport that ignores abort', async () => {

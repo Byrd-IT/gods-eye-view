@@ -80,8 +80,9 @@ export function createMapillarySource({
     get graphEndpoint() {
       // MapillaryJS resolves paths against this with `new URL`, so it must be
       // absolute and end in a slash.
+      if (graphBase) return graphBase;
       return new URL(
-        graphBase || `${urls.graph.replace(/\/$/, '')}/`,
+        `${urls.graph.replace(/\/$/, '')}/`,
         globalThis.location?.href ?? 'http://localhost/',
       ).href;
     },

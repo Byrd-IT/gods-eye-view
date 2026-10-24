@@ -610,7 +610,7 @@ async function celestrak(url) {
     },
   });
   const res = fakeRes();
-  await handler({ url }, res);
+  await handler({ url, method: 'GET' }, res);
   return res;
 }
 

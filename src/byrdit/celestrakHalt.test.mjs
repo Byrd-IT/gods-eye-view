@@ -20,7 +20,7 @@ function install(plugin) {
       writeHead(status, headers) { this.status = status; this.headers = headers; this.headersSent = true; },
       end(body) { resolve({ status: this.status, headers: this.headers, body }); },
     };
-    handler({ url }, res);
+    handler({ url, method: 'GET' }, res);
   });
 }
 

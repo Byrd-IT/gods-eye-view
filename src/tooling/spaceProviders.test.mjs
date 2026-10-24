@@ -54,6 +54,19 @@ function isolateDisk(t) {
   t.mock.method(fsp, 'writeFile', async () => {});
 }
 
+/** Disk mock that keeps written files (the halt latch lives on disk) readable. */
+function haltableDisk(t) {
+  const disk = new Map();
+  t.mock.method(fsp, 'writeFile', async (file, text) => {
+    disk.set(String(file), String(text));
+  });
+  t.mock.method(fsp, 'readFile', async (file) => {
+    if (disk.has(String(file))) return disk.get(String(file));
+    throw Object.assign(new Error('no such file'), { code: 'ENOENT' });
+  });
+  return disk;
+}
+
 /** A response that streams 1 MiB chunks of `text` well past every cap, then ends. */
 function oversizedResponse(text) {
   const state = { pulled: 0, cancelled: false };
@@ -219,12 +232,72 @@ for (const preview of [false, true])
     assert.equal(calls, 1);
   });
 
-test('space providers honor Retry-After, gate groups, preserve stale dates and recover', async (t) => {
+const GP_CSV =
+  'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION\r\nISS (ZARYA),1998-067A,2026-09-19T00:00:00.000000,15.5';
+
+test('CelesTrak gates groups; a refused refresh serves the cached GP CSV stale, latches the halt and asks no group again', async (t) => {
+  // Byrd-IT fork: the CelesTrak usage-policy halt latch replaces upstream's
+  // Retry-After cooldown. A refusal stops every group until an operator
+  // clears the latch (deletes celestrak-HALT.json).
+  isolateDisk(t);
+  const disk = haltableDisk(t);
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  let fail = false;
+  let cancelled = false;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    if (fail)
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 403, headers: { 'Retry-After': '90' } },
+      );
+    return new Response(GP_CSV);
+  });
+  const request = install(celestrakProxy());
+  assert.equal(
+    (await request('/api/celestrak', '/not-a-supported-group')).status,
+    400,
+  );
+  assert.equal(calls, 0);
+  const first = await request('/api/celestrak', '/stations');
+  assert.equal(first.headers['x-tle-cache'], 'MISS');
+  now += 7 * 3600000;
+  fail = true;
+  const stale = await request('/api/celestrak', '/stations');
+  assert.equal(stale.status, 200);
+  assert.equal(stale.body, first.body);
+  assert.equal(stale.headers['x-tle-cache'], 'STALE-ERROR');
+  assert.ok(stale.headers['X-TLE-Cached-At']);
+  assert.equal(cancelled, true);
+  const halted = await request('/api/celestrak', '/stations');
+  assert.equal(halted.status, 200);
+  assert.equal(halted.headers['x-tle-cache'], 'STALE-HALTED');
+  const other = await request('/api/celestrak', '/visual');
+  assert.equal(other.status, 503);
+  assert.equal(other.headers['x-tle-cache'], 'HALTED');
+  assert.equal(calls, 2, 'halted: no group is asked again');
+  // An operator clears the latch.
+  for (const file of [...disk.keys()])
+    if (/celestrak-HALT\.json$/.test(file)) disk.delete(file);
+  fail = false;
+  assert.equal((await request('/api/celestrak', '/visual')).status, 200);
+  assert.equal(calls, 3);
+});
+
+test('launch proxy honors Retry-After, preserves stale dates and recovers', async (t) => {
   isolateDisk(t);
   t.mock.method(console, 'warn', () => {});
   let now = Date.now();
   t.mock.method(Date, 'now', () => now);
-  for (const kind of ['tle', 'launches']) {
+  for (const kind of ['launches']) {
     for (const retryAfter of ['90', new Date(now + 90000).toUTCString()]) {
       let calls = 0;
       let fail = false;
@@ -297,7 +370,7 @@ test('space providers honor Retry-After, gate groups, preserve stale dates and r
 
 test('Space Missions reads the active catalog through the real proxy while unknown groups stay rejected', async (t) => {
   isolateDisk(t);
-  const tle = 'ISS\n1 25544U fixture\n2 25544 fixture\n';
+  const tle = GP_CSV;
   const fetched = [];
   t.mock.method(globalThis, 'fetch', async (url) => {
     fetched.push(new URL(url).searchParams.get('GROUP'));
@@ -325,7 +398,7 @@ test('CelesTrak admits a same-origin request behind the documented reverse proxy
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => {
     calls++;
-    return new Response('ISS\n1 25544U fixture\n2 25544 fixture\n');
+    return new Response(GP_CSV);
   });
   const request = install(celestrakProxy());
   const proxied = {
@@ -354,58 +427,38 @@ test('CelesTrak admits a same-origin request behind the documented reverse proxy
   assert.equal(calls, 1, 'refused requests do no provider or cache work');
 });
 
-for (const longFirst of [true, false])
-  test(`CelesTrak keeps the longest cooldown when concurrent failures finish ${longFirst ? 'long then short' : 'short then long'}`, async (t) => {
-    isolateDisk(t);
-    t.mock.method(console, 'warn', () => {});
-    let now = Date.now();
-    t.mock.method(Date, 'now', () => now);
-    const pending = new Map();
-    let calls = 0;
-    t.mock.method(globalThis, 'fetch', async (url) => {
-      calls++;
-      const group = new URL(url).searchParams.get('GROUP');
-      await new Promise((resolve) => pending.set(group, resolve));
-      return group === 'stations'
-        ? new Response('slow down', {
-            status: 429,
-            headers: { 'Retry-After': '1800' },
-          })
-        : new Response('unavailable', { status: 503 });
-    });
-    const request = install(celestrakProxy());
-    const long = request('/api/celestrak', '/stations');
-    const short = request('/api/celestrak', '/visual');
-    while (pending.size < 2) await new Promise(setImmediate);
-    const order = longFirst
-      ? [
-          ['stations', long],
-          ['visual', short],
-        ]
-      : [
-          ['visual', short],
-          ['stations', long],
-        ];
-    for (const [group, response] of order) {
-      pending.get(group)();
-      assert.equal((await response).status, 502);
-    }
-    assert.equal(calls, 2);
-    const cooling = await request('/api/celestrak', '/geo');
-    assert.equal(cooling.status, 502);
-    assert.equal(cooling.headers['Retry-After'], '1800');
-    now += 61_000;
-    assert.equal((await request('/api/celestrak', '/geo')).status, 502);
-    assert.equal(
-      calls,
-      2,
-      'the 60 s fallback did not replace the 30 min deadline',
-    );
-    now += 1800_000;
-    t.mock.method(
-      globalThis,
-      'fetch',
-      async () => new Response('ISS\n1 25544U fixture\n2 25544 fixture\n'),
-    );
-    assert.equal((await request('/api/celestrak', '/geo')).status, 200);
+test('CelesTrak concurrent refusals latch one halt; later groups are refused without a request', async (t) => {
+  isolateDisk(t);
+  haltableDisk(t);
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
+  const pending = new Map();
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    calls++;
+    const group = new URL(url).searchParams.get('GROUP');
+    await new Promise((resolve) => pending.set(group, resolve));
+    return group === 'stations'
+      ? new Response('slow down', {
+          status: 429,
+          headers: { 'Retry-After': '1800' },
+        })
+      : new Response('unavailable', { status: 503 });
   });
+  const request = install(celestrakProxy());
+  const long = request('/api/celestrak', '/stations');
+  const short = request('/api/celestrak', '/visual');
+  while (pending.size < 2) await new Promise(setImmediate);
+  for (const [group, response] of [
+    ['stations', long],
+    ['visual', short],
+  ]) {
+    pending.get(group)();
+    assert.equal((await response).status, 502);
+  }
+  assert.equal(calls, 2);
+  const halted = await request('/api/celestrak', '/geo');
+  assert.equal(halted.status, 503);
+  assert.equal(halted.headers['x-tle-cache'], 'HALTED');
+  assert.equal(calls, 2, 'halted: CelesTrak is not asked again');
+});

@@ -152,6 +152,7 @@
       "server/providers/space.js",
       "server/providers/space/celestrak.js",
       "server/providers/common/same-site.js",
+      "server/byrdit/trustedProxy.js",
       "src/localRequestGate.mjs",
       "server/providers/space/cooldown.js",
       "server/providers/space/launch-library.js",

@@ -672,7 +672,7 @@ function celestrakApp() {
   return {
     async gp(group) {
       const res = fakeRes();
-      await handlers['/api/celestrak']({ url: `/${group}` }, res);
+      await handlers['/api/celestrak']({ url: `/${group}`, method: 'GET' }, res);
       return res;
     },
     async rcs() {
@@ -682,7 +682,7 @@ function celestrakApp() {
     },
     startGp(group) {
       const res = fakeRes();
-      return { res, done: handlers['/api/celestrak']({ url: `/${group}` }, res) };
+      return { res, done: handlers['/api/celestrak']({ url: `/${group}`, method: 'GET' }, res) };
     },
     startRcs() {
       const res = fakeRes();
