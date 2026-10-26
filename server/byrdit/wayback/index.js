@@ -440,6 +440,14 @@ export function waybackPlugins({ env = process.env, ...deps } = {}) {
         server.middlewares.use(handler);
         server.httpServer?.once('close', () => handler.close());
       },
+      // Vite's SIGTERM handler awaits server.close() and then calls
+      // process.exit() at once. The httpServer 'close' listener above cannot be
+      // awaited, so its async stats write never lands. server.close() DOES
+      // await the plugin container's buildEnd hook (vite 6.4.3,
+      // PluginContainer.close), so the final flush is awaited here.
+      async buildEnd() {
+        await handler.close();
+      },
       transformIndexHtml() {
         return [
           {
