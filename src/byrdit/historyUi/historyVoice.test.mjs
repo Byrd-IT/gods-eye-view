@@ -167,3 +167,18 @@ test('a destroyed or missing control answers unavailable, never throws', () => {
   assert.equal(none.status().ok, false);
   assert.deepEqual(none.feedLayerIds(), []);
 });
+
+test('a refused jump time never echoes the text it was given', () => {
+  const h = setup();
+  for (const text of [
+    'https://user:pass@host/?api_key=SECRETKEY123',
+    'Bearer abcdef-SECRETKEY123',
+    '2026-13-45T00:00:00Z SECRETKEY123',
+    '2026-03-04T09:30:00 SECRETKEY123',
+  ]) {
+    const r = h.voice.jump({ time: text });
+    assert.equal(r.ok, false);
+    assert.ok(!JSON.stringify(r).includes('SECRETKEY123'), text);
+  }
+  h.control.destroy();
+});

@@ -58,8 +58,7 @@ export function parseJumpTime(value, now) {
         'time needs a zone (Z or an offset such as -06:00); convert the spoken local time first',
     };
   const ms = Date.parse(DATE_ONLY.test(text) ? `${text}T00:00:00Z` : text);
-  if (!Number.isFinite(ms))
-    return { error: `time is not a valid date: ${text}` };
+  if (!Number.isFinite(ms)) return { error: 'time is not a valid date' };
   return { ms };
 }
 

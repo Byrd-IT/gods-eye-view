@@ -1678,7 +1678,7 @@ async function controlHistory(voice, args = {}, setLayer) {
       if (!id || !known.includes(id))
         return wrap({
           ok: false,
-          error: `Not a History feed: ${raw}`,
+          error: `Not a History feed: ${String(raw).slice(0, 40)}`,
           feedLayers: known,
         });
       if (!wanted.includes(id)) wanted.push(id);

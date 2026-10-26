@@ -171,3 +171,12 @@ test('feeds report a layer that would not switch, and keep going', async () => {
   assert.deepEqual(r.changed.map((c) => c.layerId), ['flights']);
   assert.ok(h.on.has('flights'));
 });
+
+test('refusals never echo more than a short slice of what the model sent (secret-shaped input)', async () => {
+  const secret = 'Bearer sk-live-SECRET-' + 'x'.repeat(200) + '-TAILMARK';
+  const h = harness();
+  const feed = await h.runner('control_history', { action: 'feeds', feeds: [secret] });
+  assert.equal(feed.ok, false);
+  assert.ok(!JSON.stringify(feed).includes('TAILMARK'));
+  assert.ok(!JSON.stringify(feed).includes(secret));
+});
