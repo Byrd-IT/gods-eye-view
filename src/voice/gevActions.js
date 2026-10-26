@@ -268,6 +268,7 @@ export function createGevActionRunner({
   speechBuilders = null,
   deixis = null,
   readVoicePanelOperation = null,
+  history = null,
 }) {
   // Voice enable times and analyst follow-up memory belong to this runner.
   // Speech builders turn results into say/display envelopes; callers extend
@@ -1297,6 +1298,12 @@ export function createGevActionRunner({
       return controlScene(sceneDirector, args);
     }
 
+    if (name === 'control_history') {
+      return controlHistory(history?.(), args, (layerId, enabled) =>
+        runGevAction('set_layer_visibility', { layerId, enabled }, runOptions),
+      );
+    }
+
     if (name === 'control_cctv') {
       const action = String(args.action || '').toLowerCase();
       if (
@@ -1635,6 +1642,84 @@ function controlScene(sceneDirector, args = {}) {
     };
   }
   throw new Error(`Unknown scene action: ${args.action || 'missing'}`);
+}
+
+/**
+ * Voice History playback control (jump / play / pause / speed / live /
+ * feeds / status) over the History voice adapter (historyVoice.js, handed
+ * in as `history`). Choosing the feeds that play is choosing layers: a
+ * History feed layer that is enabled plays recorded data, one that is off
+ * is not drawn, so `feeds` drives set_layer_visibility.
+ */
+async function controlHistory(voice, args = {}, setLayer) {
+  const action = String(args.action || '').toLowerCase();
+  const wrap = (result) => ({ action: 'control_history', ...result });
+  if (!voice)
+    return wrap({
+      ok: false,
+      error: 'History playback is not available in this host',
+    });
+  if (action === 'status') return wrap(voice.status());
+  if (action === 'jump')
+    return wrap(voice.jump({ time: args.time, minutesAgo: args.minutesAgo }));
+  if (action === 'play') return wrap(voice.play());
+  if (action === 'pause') return wrap(voice.pause());
+  if (action === 'speed') return wrap(voice.speed(args.rate));
+  if (action === 'live') return wrap(voice.live());
+  if (action === 'feeds') {
+    const known = voice.feedLayerIds();
+    const asked = Array.isArray(args.feeds) ? args.feeds : [];
+    const mode = String(args.feedMode || 'only').toLowerCase();
+    if (!['only', 'add', 'remove'].includes(mode))
+      return wrap({ ok: false, error: 'feedMode must be only, add or remove' });
+    const wanted = [];
+    for (const raw of asked) {
+      const id = normalizeLayerId(raw);
+      if (!id || !known.includes(id))
+        return wrap({
+          ok: false,
+          error: `Not a History feed: ${raw}`,
+          feedLayers: known,
+        });
+      if (!wanted.includes(id)) wanted.push(id);
+    }
+    if (!wanted.length)
+      return wrap({
+        ok: false,
+        error: 'feeds needs at least one feed layer',
+        feedLayers: known,
+      });
+    const plan = [
+      ...wanted.map((layerId) => [layerId, mode !== 'remove']),
+      ...(mode === 'only'
+        ? known.filter((id) => !wanted.includes(id)).map((id) => [id, false])
+        : []),
+    ];
+    const changed = [];
+    const failed = [];
+    for (const [layerId, enabled] of plan) {
+      let r;
+      try {
+        r = await setLayer(layerId, enabled);
+      } catch (error) {
+        r = { ok: false, error: error?.message };
+      }
+      // switching off an unregistered / already-off layer is not an error
+      if (r?.ok) changed.push({ layerId, enabled });
+      else if (enabled || wanted.includes(layerId))
+        failed.push({ layerId, error: r?.error || 'failed' });
+    }
+    // History's own state first: the feed outcome must win ok / mode
+    const { ok: _ok, error: _error, ...state } = voice.status();
+    return wrap({
+      ...state,
+      ok: failed.length === 0,
+      feedMode: mode,
+      changed,
+      ...(failed.length ? { failed } : {}),
+    });
+  }
+  throw new Error(`Unknown history action: ${args.action || 'missing'}`);
 }
 
 /** Voice CCTV control over the cctv layer module's public surface. */

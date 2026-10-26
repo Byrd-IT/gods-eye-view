@@ -897,6 +897,58 @@ const schemas = [
       },
     },
   },
+  {
+    name: 'control_history',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['jump', 'play', 'pause', 'speed', 'live', 'status', 'feeds'],
+        },
+        time: {
+          type: 'string',
+          maxLength: 40,
+        },
+        minutesAgo: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1051200,
+        },
+        rate: {
+          type: 'integer',
+          enum: [1, 10, 60, 600],
+        },
+        feeds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 11,
+          items: {
+            type: 'string',
+            enum: [
+              'flights',
+              'military',
+              'ais-live-vessels',
+              'local-firms',
+              'fire-perimeters',
+              'weather-cyclones',
+              'rocket-launches',
+              'transit',
+              'bikeshare',
+              'earthquakes',
+              'wind',
+            ],
+          },
+        },
+        feedMode: {
+          type: 'string',
+          enum: ['only', 'add', 'remove'],
+        },
+      },
+      required: ['action'],
+    },
+  },
 ];
 
 function freeze(value) {

@@ -626,4 +626,43 @@ export const ACTION_DESCRIPTIONS = {
       'Predict the next pass in 24 hours for one satellite in the loaded catalog, identified by exact NORAD ID or name. Ambiguous names return candidates: ask for a choice rather than selecting one. Defaults to geometric passes; visibleOnly requires estimated illumination and a dark observer sky, which does not guarantee naked-eye visibility. Uses camera location unless coordinates are supplied.',
     $position: 1,
   },
+  control_history: {
+    description:
+      'History playback of the recorded globe (up to two years back): jump to a past time or date, play, pause, change speed, return to live, choose which feeds play, or read status. Jump opens History when the globe is live. Say the resulting state, not the request.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: {
+          description:
+            'jump needs time or minutesAgo; speed needs rate; feeds needs feeds. live leaves History. play and pause need History open (jump first).',
+          $position: 2,
+        },
+        time: {
+          description:
+            'For jump: ISO 8601 date-time WITH a zone, e.g. 2026-03-04T15:30:00Z or 2026-03-04T09:30:00-06:00. Convert the spoken local time first; a date alone means 00:00 UTC.',
+          $position: 1,
+        },
+        minutesAgo: {
+          description:
+            'For jump: relative time instead of time (\"an hour ago\" = 60, \"yesterday\" = 1440).',
+          $position: 3,
+        },
+        rate: {
+          description:
+            'For speed: history seconds per real second: 1, 10, 60 or 600.',
+          $position: 2,
+        },
+        feeds: {
+          description:
+            'For feeds: layer ids that play from History. Flights, military and ships = flights, military, ais-live-vessels; fires = local-firms; quakes = earthquakes.',
+          $position: 1,
+        },
+        feedMode: {
+          description:
+            'For feeds: only (default) plays just the listed feeds and turns the other History feeds off; add turns the listed feeds on; remove turns them off.',
+          $position: 2,
+        },
+      },
+    },
+  },
 };

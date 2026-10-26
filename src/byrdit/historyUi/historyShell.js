@@ -31,6 +31,7 @@ import { createHistoryClient } from './historyClient.js';
 import { cameraViewBox } from '../history/flightView.js';
 import { createLiveFeedDraw } from './liveFeedDraw.js';
 import { createGreyPainter } from './greyPainter.js';
+import { createHistoryVoice } from './historyVoice.js';
 
 const SCRUB_SELECTOR = '.gev-hist-scrub';
 
@@ -127,13 +128,20 @@ export function mountHistoryForShell(
     if (win?.__gevHistorySwap?.router === router) delete win.__gevHistorySwap;
   };
   shell?._lifetime?.removers?.add?.(destroyAll);
-  // QA / console hook (read-only use): the router and driver state
-  if (win) win.__gevHistorySwap = { router, driver, handle, liveDraw, painter };
+  // Voice (control_history): the adapter over the control and the router
+  const voice = createHistoryVoice({
+    getHandle: () => handle,
+    getRouter: () => router,
+  });
+  // QA / console hook, and the voice tool's way in
+  if (win)
+    win.__gevHistorySwap = { router, driver, handle, liveDraw, painter, voice };
   return Object.assign(handle, {
     router,
     driver,
     liveDraw,
     painter,
+    voice,
     destroy: destroyAll,
   });
 }

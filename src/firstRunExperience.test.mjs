@@ -1058,10 +1058,11 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // preserves the mission mapping and globe-rotation arguments.
   // S2 GhostMaps extends the generated layer enums; both feature contracts remain.
   // Voice set_map_stack adds the byrdit-open and basemap-auto stacks (+93: 31499 -> 31592, the serialized tool block; pointAndAsk's +89 measures instructions + JSON.stringify(GEV_REALTIME_TOOLS)).
-  assert.equal(block.length, 31592, 'serialized tool schema length drifted');
+  // History playback voice adds control_history (+1803: 31592 -> 33395).
+  assert.equal(block.length, 33395, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '95116ce7fb89fbcb73754453d9c7ac8952fe4adc368e1ca68c62efc64b9d52b9',
+    '9a8ab738baf652aca63fba163082b560d947b74db2baf4b5eb22cbfda251d5d3',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

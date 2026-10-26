@@ -195,6 +195,7 @@ export function createApplicationTools({
     dataManager,
     sceneDirector,
     annotations,
+    history: () => window.__gevHistorySwap?.voice ?? null,
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });

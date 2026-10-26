@@ -47,7 +47,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // S2 GhostMaps extends the generated layer enums.
     // Panel adds named voice targets and timeout; shared Panel/Cockpit guidance
     // is consolidated without changing either feature's arguments.
-    'd67dbf533a2f8b8b036d21bbc86ce731ffa2f1e2c36c53772787108025c22fd8',
+    // History playback voice adds the control_history tool (last).
+    'b7a9180e595aea7355ebda35e2c4d27789c6161e2a46234ac5af05dbd1773426',
   );
 });
 
@@ -110,6 +111,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'next_satellite_pass',
         'set_cyber_sonar',
         'set_voice_inactivity_timeout',
+        'control_history',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by
