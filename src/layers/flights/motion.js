@@ -156,7 +156,7 @@ export function createMotion({
     const renderTime =
       sampledRenderTime ??
       Cesium.JulianDate.addSeconds(
-        _motionNow(),
+        _motionNow(flightState._scratchRenderTime),
         -RENDER_DELAY_SEC,
         flightState._scratchRenderTime,
       );
@@ -321,17 +321,15 @@ export function createMotion({
 
   /** Motion "now" (GEV history seam, fork card B12a): the wall clock, or the
    *  history motion clock set through setMotionClock (frozen at t while
-   *  paused, rate x wall time while playing). No allocation per call. */
+   *  paused, rate x wall time while playing). No allocation per call.
+   *  `result` lets a caller reuse its own scratch date (upstream samples the
+   *  render time into _scratchRenderTime). */
 
-  function _motionNow() {
+  function _motionNow(result = flightState._scratchMotionNow) {
     const ms = flightState._motionClock?.(flightState._historyFrameAppliedAtMs);
-    if (!Number.isFinite(ms))
-      return Cesium.JulianDate.now(flightState._scratchMotionNow);
+    if (!Number.isFinite(ms)) return Cesium.JulianDate.now(result);
     flightState._scratchMotionDate.setTime(ms);
-    return Cesium.JulianDate.fromDate(
-      flightState._scratchMotionDate,
-      flightState._scratchMotionNow,
-    );
+    return Cesium.JulianDate.fromDate(flightState._scratchMotionDate, result);
   }
 
   /**
