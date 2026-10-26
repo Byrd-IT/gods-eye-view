@@ -637,8 +637,9 @@ export function mountHistoryControl({
   }
 
   /**
-   * Move the history time. With snap, returns the promise that settles on
-   * the nearest recorded snap (the time is the request until that resolves).
+   * Move the history time. With snap, the promise settles when this request's
+   * own snap finishes: { landed: true }, or { landed: false, superseded: true }
+   * when a newer seek took the generation before this snap landed.
    */
   function seek(ms, { snap = false } = {}) {
     if (!Number.isFinite(ms) || destroyed) return;
@@ -656,6 +657,11 @@ export function mountHistoryControl({
     const gen = ++seekGen;
     const t = s.timeMs;
     const tolerance = snapToleranceMs(spanOf());
+    const ownSnap = () => {
+      if (gen !== seekGen) return { landed: false, superseded: true };
+      if (destroyed || s.mode !== 'history') return { landed: false };
+      return { landed: true };
+    };
     for (const feed of SNAP_FEEDS) {
       // inside a known gap OF THIS FEED (and no other lane of it recorded)
       // the feed is not asked: the HUD names the gap. Other feeds still snap.
@@ -665,9 +671,10 @@ export function mountHistoryControl({
         snaps = await api.snapshots({ feed, around: t, n: 10 });
       } catch (error) {
         if (error instanceof HistoryUnavailableError) markUnavailable();
-        return;
+        return { landed: false };
       }
-      if (destroyed || gen !== seekGen || s.mode !== 'history') return;
+      if (destroyed || gen !== seekGen || s.mode !== 'history')
+        return ownSnap();
       if (feed === SNAP_FEEDS[0]) snapIndex.add(t, snaps);
       const hit = snapTo(t, snaps, tolerance);
       if (hit !== null) {
@@ -677,9 +684,10 @@ export function mountHistoryControl({
           writeUrl();
           emit();
         }
-        return;
+        return ownSnap();
       }
     }
+    return ownSnap();
   }
 
   function markUnavailable() {

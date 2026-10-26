@@ -131,6 +131,20 @@ test('feeds only while History is open: lists turn on, every other history feed 
   assert.deepEqual(h.calls.at(-1), ['status'], 'ends with the History state');
 });
 
+test('feeds only returns unavailable when History status is not ok', async () => {
+  const h = harness({
+    voiceOverrides: {
+      status: () => ({ ok: false, error: 'History playback is not available right now' }),
+    },
+  });
+  const r = await h.runner('control_history', { action: 'feeds', feeds: ['flights'], feedMode: 'only' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.changed, undefined);
+  assert.equal(JSON.stringify(r).includes('flights'), false);
+  assert.deepEqual(h.order, []);
+});
+
 test('feeds only while History is live refuses and changes no layer', async () => {
   const h = harness();
   const r = await h.runner('control_history', { action: 'feeds', feeds: ['flights'], feedMode: 'ONLY' });
@@ -156,7 +170,7 @@ test('control_history jump waits for the History snap before answering', async (
     done = true;
     return r;
   });
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(done, false);
   release();
   const r = await result;

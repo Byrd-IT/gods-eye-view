@@ -198,6 +198,42 @@ test('ht round trip: a reload with the address restores the same moment; LIVE cl
   again.control.destroy();
 });
 
+test('a newer seek tells the waiting snap its own snap did not land', async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let snaps = 0;
+  const world = fixtureWorld(NOW);
+  const real = fixtureFetch(world);
+  const fetchImpl = async (input) => {
+    const url = new URL(
+      String(typeof input === 'string' ? input : input.url),
+      'http://localhost',
+    );
+    if (url.pathname === '/api/history/snapshots') {
+      snaps += 1;
+      if (snaps === 1) await gate;
+    }
+    return real(input);
+  };
+  const h = setup({ fetchImpl });
+  const firstAsked = NOW - 3 * DAY_MS + 30_000;
+  const secondAsked = NOW - 2 * DAY_MS;
+  const first = h.control.seek(firstAsked, { snap: true });
+  for (let i = 0; i < 20 && snaps < 1; i += 1) await Promise.resolve();
+  assert.equal(snaps, 1, 'the first snap is waiting');
+  const second = h.control.seek(secondAsked, { snap: true });
+  release();
+  const older = await first;
+  const newer = await second;
+  assert.equal(older.landed, false);
+  assert.equal(older.superseded, true);
+  assert.equal(newer.landed, true);
+  assert.notEqual(h.control.getState().timeMs, firstAsked);
+  h.control.destroy();
+});
+
 test('seek with snap returns the promise that settles on recorded data', async () => {
   const h = setup();
   const asked = NOW - 3 * DAY_MS + 30_000;

@@ -1695,6 +1695,15 @@ async function controlHistory(voice, args = {}, setLayer) {
     // a live layer request: while the globe is live, point at the layer tool.
     if (mode === 'only') {
       const state = voice.status();
+      if (state?.ok === false) {
+        return wrap({
+          ok: false,
+          error:
+            typeof state.error === 'string' && state.error
+              ? state.error
+              : 'History playback is not available right now',
+        });
+      }
       if (state?.mode === 'live')
         return wrap({
           ok: false,

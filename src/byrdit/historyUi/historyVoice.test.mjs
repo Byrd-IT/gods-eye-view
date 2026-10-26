@@ -47,6 +47,16 @@ test('parseJumpTime: ISO with a zone, a bare date is UTC, a zoneless time is ref
   assert.match(parseJumpTime('2026-13-45T00:00:00Z').error, /not a valid date/);
 });
 
+test('parseJumpTime rejects a lowercase t or z on the ISO shape check', () => {
+  assert.match(parseJumpTime('2026-03-04t09:30:00Z').error, /ISO 8601/);
+  assert.match(parseJumpTime('2026-03-04T09:30:00z').error, /ISO 8601/);
+});
+
+test('parseJumpTime reads an hour-only offset as HH:00', () => {
+  assert.equal(parseJumpTime('2026-03-04T09:30:00+05').ms, Date.parse('2026-03-04T09:30:00+05:00'));
+  assert.equal(parseJumpTime('2026-03-04T09:30:00-06').ms, Date.parse('2026-03-04T09:30:00-06:00'));
+});
+
 test('status: live to begin with, then reports mode, time, rate, playing feeds', () => {
   const h = setup({ swapped: ['vessels', 'flights'] });
   const s = h.voice.status();
@@ -267,4 +277,46 @@ test('jump answers if the snap never settles, and a destroyed control is not a s
   assert.equal(r.ok, false);
   assert.match(r.error, /not available/);
   assert.equal(r.snapPending, undefined);
+});
+
+test('a jump whose snap is overtaken does not report the newer seek time', async () => {
+  const clock = fakeClock(NOW);
+  const world = fixtureWorld(NOW);
+  const realFetch = fixtureFetch(world);
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let snaps = 0;
+  const delayed = async (input) => {
+    const url = new URL(String(typeof input === 'string' ? input : input.url), 'http://localhost');
+    if (url.pathname === '/api/history/snapshots') {
+      snaps += 1;
+      if (snaps === 1) await gate;
+    }
+    return realFetch(input);
+  };
+  const control = mountHistoryControl({
+    document: fakeDocument(),
+    window: fakeWindow(HREF, delayed),
+    now: clock.now,
+    monotonic: clock.monotonic,
+    timers: clock.timers,
+  });
+  const voice = createHistoryVoice({
+    getHandle: () => control,
+    getRouter: () => ({ adapters: [], getState: () => ({ swapped: [] }) }),
+    now: clock.now,
+  });
+  const own = '2026-10-10T12:00:30Z';
+  const first = voice.jump({ time: own });
+  for (let i = 0; i < 20 && snaps < 1; i += 1) await Promise.resolve();
+  assert.equal(snaps, 1, 'the first snap is waiting');
+  control.seek(Date.parse('2026-10-10T11:00:00Z'), { snap: true });
+  release();
+  const r = await first;
+  assert.equal(r.ok, true);
+  assert.equal(r.superseded, true);
+  assert.equal(r.snapPending, undefined);
+  assert.equal(r.time, '2026-10-10T12:00:30.000Z');
+  assert.notEqual(r.time, new Date(control.getState().timeMs).toISOString());
+  control.destroy();
 });

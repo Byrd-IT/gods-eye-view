@@ -37,10 +37,12 @@ export const HISTORY_VOICE_ACTIONS = Object.freeze([
 const MAX_MINUTES_AGO = Math.floor(HISTORY_SPAN_MS / 60_000);
 const ZONE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-// End-anchored. A time of day must use T; a space is not ISO. The zone is
-// optional here so a missing zone still fails the zone check below, not this one.
+// End-anchored. A time of day must use T, and Z is uppercase; a space is not
+// ISO. The zone is optional here so a missing zone still fails the zone check
+// below, not this one. No i flag: a lowercase t or z fails this shape check
+// on every engine, instead of depending on Date.parse.
 const ISO_HEAD =
-  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/i;
+  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/;
 
 const SNAP_WAIT_MS = 3_000;
 
@@ -61,6 +63,11 @@ export function currentHistoryVoice() {
 
 const fail = (error, extra = {}) => ({ ok: false, error, ...extra });
 
+/** Date.parse does not accept an hour-only offset (+05). Read it as +05:00. */
+function withMinuteOffset(text) {
+  return text.replace(/([+-]\d{2})$/, '$1:00');
+}
+
 /**
  * Parse a jump target. Returns {ms} or {error}. A date alone means 00:00
  * UTC; a time of day must carry a zone, so the answer never depends on the
@@ -79,7 +86,9 @@ export function parseJumpTime(value, now) {
       error:
         'time needs a zone (Z or an offset such as -06:00); convert the spoken local time first',
     };
-  const ms = Date.parse(DATE_ONLY.test(text) ? `${text}T00:00:00Z` : text);
+  const ms = Date.parse(
+    DATE_ONLY.test(text) ? `${text}T00:00:00Z` : withMinuteOffset(text),
+  );
   if (!Number.isFinite(ms)) return { error: 'time is not a valid date' };
   return { ms };
 }
@@ -152,8 +161,12 @@ export function createHistoryVoice({
       // A stalled /snapshots must not hold the voice turn. The control keeps
       // snapping; the answer says the time it holds now is not settled yet.
       const settle = Promise.resolve(h.seek(target, { snap: true })).then(
-        () => ({ snapped: true }),
-        () => ({ snapped: false }),
+        (result) => {
+          if (result?.superseded) return { superseded: true };
+          if (result && result.landed === false) return { snapPending: true };
+          return {};
+        },
+        () => ({}),
       );
       let timer;
       const timed = new Promise((resolve) => {
@@ -162,8 +175,17 @@ export function createHistoryVoice({
       const snap = await Promise.race([settle, timed]);
       clearTimeout(timer);
       if (!handle()) return unavailable();
+      const requested = new Date(ms).toISOString();
+      if (snap.superseded) {
+        return done({
+          requested,
+          ...(clamped ? { clamped } : {}),
+          time: new Date(target).toISOString(),
+          superseded: true,
+        });
+      }
       return done({
-        requested: new Date(ms).toISOString(),
+        requested,
         ...(clamped ? { clamped } : {}),
         ...(snap.snapPending ? { snapPending: true } : {}),
       });
