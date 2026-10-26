@@ -306,6 +306,19 @@ test('an archive failure shows live and does not echo the error', async (t) => {
   assert.match(logs.join('\n'), /history unavailable/);
 });
 
+test('LIVE does not keep the history row if the live catalog fails', async (t) => {
+  const { layer } = setup(t, {
+    getCatalog: async () => {
+      throw new Error('HTTP 503');
+    },
+  });
+  await layer.setHistoryTime(T1);
+  assert.match(layer.getRowControls().info, /^HISTORY /);
+  await layer.setHistoryTime(null);
+  assert.equal(layer.getHistoryState(), null);
+  assert.equal(layer.getRowControls().info.includes('HISTORY'), false);
+});
+
 test('a slow answer for an older time never replaces a newer one', async (t) => {
   let release;
   const gate = new Promise((r) => (release = r));

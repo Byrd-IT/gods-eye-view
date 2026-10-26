@@ -90,7 +90,11 @@ test('LIVE goes back at once and clears the chip', () => {
   const { clock, layer, driver } = setup();
   driver.onHistory({ active: true, timeMs: T });
   clock.advance(400);
-  layer.history = { status: 'published', committedAt: T, commit: 'a'.repeat(40) };
+  layer.history = {
+    status: 'published',
+    committedAt: T,
+    commit: 'a'.repeat(40),
+  };
   assert.equal(driver.historyLayers().length, 1);
   let notified = 0;
   driver.subscribe(() => notified++);
@@ -113,10 +117,18 @@ test('playing is throttled and reads the moving history time', () => {
   // 250 ms ticks of a playing control
   for (let i = 0; i < 6; i++) {
     clock.advance(250);
-    driver.onHistory({ active: true, timeMs: T + 600 * 250 * (i + 1), playing: true, rate: 600 });
+    driver.onHistory({
+      active: true,
+      timeMs: T + 600 * 250 * (i + 1),
+      playing: true,
+      rate: 600,
+    });
   }
   clock.advance(5_000);
-  assert.ok(layer.times.length >= 1 && layer.times.length <= 4, `${layer.times.length}`);
+  assert.ok(
+    layer.times.length >= 1 && layer.times.length <= 4,
+    `${layer.times.length}`,
+  );
   assert.ok(layer.times.every((t, i) => i === 0 || t > layer.times[i - 1]));
 });
 
@@ -134,12 +146,60 @@ test('a layer enabled while history is on gets the time again', () => {
   driver.onHistory({ active: true, timeMs: T });
   clock.advance(400);
   layer.times.length = 0;
-  for (const fn of subscribers) fn({ type: 'refresh' });
+  for (const fn of subscribers)
+    fn({ type: 'refresh-transition', layerId: 'flights', enabled: true });
   clock.advance(400);
-  assert.deepEqual(layer.times, [], 'a refresh event is not a lifecycle change');
-  for (const fn of subscribers) fn({ type: 'enable', id: GHOSTMAPS_HISTORY_LAYER_ID });
+  assert.deepEqual(
+    layer.times,
+    [],
+    'another layer refreshing is not an enable',
+  );
+  for (const fn of subscribers)
+    fn({ type: 'visibility', layerId: 'flights', enabled: true });
+  clock.advance(400);
+  assert.deepEqual(layer.times, [], 'another layer turning on is not ours');
+  for (const fn of subscribers)
+    fn({
+      type: 'visibility',
+      layerId: GHOSTMAPS_HISTORY_LAYER_ID,
+      enabled: false,
+    });
+  clock.advance(400);
+  assert.deepEqual(layer.times, [], 'turning this layer off does not fetch');
+  for (const fn of subscribers)
+    fn({
+      type: 'visibility',
+      layerId: GHOSTMAPS_HISTORY_LAYER_ID,
+      enabled: true,
+    });
   clock.advance(400);
   assert.deepEqual(layer.times, [T]);
+});
+
+test('another layer refreshing does not reset the playback throttle', () => {
+  const { clock, layer, driver, subscribers } = setup();
+  driver.onHistory({ active: true, timeMs: T });
+  clock.advance(400);
+  layer.times.length = 0;
+  driver.onHistory({ active: true, timeMs: T, playing: true, rate: 60 });
+  clock.advance(100);
+  const before = layer.times.length;
+  for (const fn of subscribers)
+    fn({ type: 'refresh-transition', layerId: 'flights', enabled: true });
+  clock.advance(400);
+  assert.equal(layer.times.length, before);
+  for (const fn of subscribers)
+    fn({
+      type: 'visibility',
+      layerId: GHOSTMAPS_HISTORY_LAYER_ID,
+      enabled: true,
+    });
+  clock.advance(400);
+  assert.equal(
+    layer.times.length,
+    before,
+    'enable while playing keeps the 2s throttle',
+  );
 });
 
 test('no layer, no data manager: nothing happens and nothing throws', () => {
@@ -175,13 +235,22 @@ test('chip text: published, before the archive, unavailable', () => {
       committedAt: Date.UTC(2026, 9, 23, 20, 47),
       commit: 'ab12cd34ef'.padEnd(40, '0'),
     }),
-    { state: 'published', text: 'As published 2026-10-23 20:47Z (GitHub ab12cd3)' },
+    {
+      state: 'published',
+      text: 'As published 2026-10-23 20:47Z (GitHub ab12cd3)',
+    },
   );
   assert.equal(
-    ghostMapsHistoryChip({ status: 'before', firstCommittedAt: Date.UTC(2025, 4, 20, 16, 37) }).text,
+    ghostMapsHistoryChip({
+      status: 'before',
+      firstCommittedAt: Date.UTC(2025, 4, 20, 16, 37),
+    }).text,
     'Nothing published yet (archive starts 2025-05-20 16:37Z)',
   );
-  assert.equal(ghostMapsHistoryChip({ status: 'before' }).text, 'Nothing published yet');
+  assert.equal(
+    ghostMapsHistoryChip({ status: 'before' }).text,
+    'Nothing published yet',
+  );
   assert.equal(ghostMapsHistoryChip({ status: 'unavailable' }), null);
   assert.equal(ghostMapsHistoryChip(null), null);
 });
@@ -225,14 +294,23 @@ test('GhostMaps shows what was published instead of a LIVE chip', () => {
   }).states();
   const ghost = chips.filter((c) => c.layerId === 's2-ghostmaps');
   assert.equal(ghost.length, 1);
-  assert.equal(ghost[0].chip, 'As published 2026-10-23 20:47Z (GitHub ab12cd3)');
+  assert.equal(
+    ghost[0].chip,
+    'As published 2026-10-23 20:47Z (GitHub ab12cd3)',
+  );
   assert.equal(ghost[0].state, 'history-note');
   assert.equal(ghost[0].label, 'S2 GhostMaps');
 });
 
 test('before the archive the chip is the empty reason; unavailable shows LIVE', () => {
   const before = chipsFor({
-    history: [{ layerId: 's2-ghostmaps', status: 'before', text: 'Nothing published yet' }],
+    history: [
+      {
+        layerId: 's2-ghostmaps',
+        status: 'before',
+        text: 'Nothing published yet',
+      },
+    ],
   }).states();
   const b = before.find((c) => c.layerId === 's2-ghostmaps');
   assert.equal(b.state, 'history-empty');
@@ -254,7 +332,12 @@ test('a disabled GhostMaps layer gets no chip', () => {
   const chips = chipsFor({
     enabled: ['flights'],
     history: [
-      { layerId: 's2-ghostmaps', status: 'published', state: 'published', text: 'As published x' },
+      {
+        layerId: 's2-ghostmaps',
+        status: 'published',
+        state: 'published',
+        text: 'As published x',
+      },
     ],
   }).states();
   assert.equal(chips.filter((c) => c.layerId === 's2-ghostmaps').length, 0);

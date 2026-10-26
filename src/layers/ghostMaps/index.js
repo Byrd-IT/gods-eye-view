@@ -702,6 +702,11 @@ export function createGhostMapsLayer({
         _historyT = null;
         _historyState = null;
         notifyHistory();
+        // A failed live fetch must not leave the row on the history edition.
+        if (_catalog?.history) {
+          _catalog = null;
+          notifyRow();
+        }
         if (was && _enabled) await refreshLive(_lifetime.signal);
         return;
       }

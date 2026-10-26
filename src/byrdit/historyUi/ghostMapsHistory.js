@@ -119,10 +119,18 @@ export function createGhostMapsHistory({
     ) {
       offManager?.();
       manager = dataManager;
-      // a layer enabled while history is on gets the time at once
+      // Only this layer turning on while history is already running. A refresh
+      // of any layer (refresh-transition, and the rest) must not fetch again
+      // or drop the playback throttle.
       offManager = dataManager.subscribe((change) => {
-        if (change?.type === 'refresh' || !state.active) return;
-        schedule(false);
+        if (
+          !state.active ||
+          change?.type !== 'visibility' ||
+          change.layerId !== layerId ||
+          !change.enabled
+        )
+          return;
+        schedule(state.playing);
       });
     }
     return layer;
