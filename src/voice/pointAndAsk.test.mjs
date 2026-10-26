@@ -353,7 +353,8 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // + 89 characters: voice set_map_stack enum gains byrdit-open and basemap-auto.
   // + 2113 characters: the control_history tool and its routing sentence.
   // + 1812 characters: the control_sky tool and its routing sentence.
-  assert.ok(size <= 52000 + 297 + 89 + 2113 + 1812, `prompt size ${size}`);
+  // + 159 characters: the routing sentence keeps map ISS questions on track_entity.
+  assert.ok(size <= 52000 + 297 + 89 + 2113 + 1812 + 159, `prompt size ${size}`);
 });
 
 

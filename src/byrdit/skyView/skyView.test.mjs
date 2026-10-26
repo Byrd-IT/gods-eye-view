@@ -314,6 +314,26 @@ test('voice hook: open stands at the map centre, close leaves, destroy drops the
   assert.equal((await handle.voice.status()).ok, false);
 });
 
+test('voice: time and a preset use the mounted clock', async () => {
+  const voiceWindow = {};
+  const { handle } = setup({ voiceWindow });
+  const opened = await handle.voice.open();
+  assert.equal(opened.ok, true);
+  const set = await handle.voice.time({ time: '2026-10-12T04:00:00Z' });
+  assert.equal(set.ok, true, set.error);
+  assert.equal(set.time, '2026-10-12T04:00:00.000Z');
+  assert.equal(handle.clock.mode, 'fixed');
+  const back = await handle.voice.time({ live: true });
+  assert.equal(back.ok, true);
+  assert.equal(back.live, true);
+  assert.equal(handle.clock.mode, 'live');
+  const preset = await handle.voice.preset('sunset');
+  assert.equal(preset.ok, true, preset.error);
+  assert.equal(preset.preset, 'sunset');
+  assert.equal(handle.clock.mode, 'fixed');
+  handle.destroy();
+});
+
 test('enter at typed lat, lon: eye at 1.7 m over unknown ground (0, flagged), inputs off, URL written; exit restores the camera to 1e-6', async () => {
   const { doc, viewer, timers, location, handle } = setup();
   const before = {

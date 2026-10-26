@@ -42,7 +42,7 @@ const ISS_ALIASES = new Map([
 
 const ZONE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-const ISO_HEAD = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?/;
+const ISO_HEAD = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?/;
 
 const fail = (error, extra = {}) => ({ ok: false, error, ...extra });
 
@@ -63,7 +63,7 @@ export function parseSkyTime(value) {
   if (typeof value !== 'string' || !value.trim())
     return { error: 'time must be an ISO 8601 date-time string' };
   const text = value.trim();
-  if (!ISO_HEAD.test(text))
+  if (!ISO_HEAD.test(text) || (!DATE_ONLY.test(text) && text[10] !== 'T'))
     return {
       error: 'time must be an ISO 8601 date-time such as 2026-03-04T02:00:00Z',
     };
@@ -78,7 +78,8 @@ export function parseSkyTime(value) {
 }
 
 function issQuery(raw) {
-  return ISS_ALIASES.get(fold(raw)) || null;
+  const key = fold(raw).replace(/^the /, '');
+  return ISS_ALIASES.get(key) || null;
 }
 
 /**
@@ -213,6 +214,7 @@ export function createSkyVoice({ getHandle }) {
       return done(sky, {
         opened: opened.opened,
         ...(clamped ? { clamped } : {}),
+        ...(sky.time?.provider === 'history' ? { historyMoved: true } : {}),
       });
     },
     async lines(enabled) {

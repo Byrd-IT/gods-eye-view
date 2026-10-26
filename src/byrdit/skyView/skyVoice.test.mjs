@@ -227,7 +227,7 @@ test('look treats ISS, the ISS and the space station as ISS (ZARYA)', async () =
     search: (query) =>
       query === 'ISS (ZARYA)' ? [hit('ISS (ZARYA)', 'satellite', 0)] : [],
   });
-  for (const name of ['ISS', 'the ISS', 'international space station']) {
+  for (const name of ['ISS', 'the ISS', 'international space station', 'the space station', 'the international space station']) {
     h.calls.length = 0;
     h.state.active = true;
     const r = await h.voice.look(name);
@@ -449,4 +449,31 @@ test('a refused look or time never echoes the text it was given', async () => {
     assert.ok(!JSON.stringify(r).includes('SECRETKEY123'), JSON.stringify(r));
     assert.ok(!JSON.stringify(r).includes('pass@host'));
   }
+});
+
+test('parseSkyTime refuses a space between the date and the time', () => {
+  assert.match(parseSkyTime('2026-03-04 02:00:00Z').error, /ISO 8601/);
+});
+
+test('time says when the jump moved History', async () => {
+  const h = voiceFor({ provider: 'history' });
+  h.state.active = true;
+  const r = await h.voice.time({ time: '2026-10-26T04:30:00Z' });
+  assert.equal(r.ok, true);
+  assert.equal(r.timeMode, 'history');
+  assert.equal(r.historyMoved, true);
+});
+
+test('look still finds the ISS when star data fails to load', async () => {
+  const h = voiceFor({
+    search: (query) =>
+      query === 'ISS (ZARYA)' ? [hit('ISS (ZARYA)', 'satellite')] : [],
+  });
+  h.sky.content.ensureData = async () => {
+    throw new Error('catalogue down');
+  };
+  h.state.active = true;
+  const r = await h.voice.look('ISS');
+  assert.equal(r.ok, true);
+  assert.equal(r.target, 'ISS (ZARYA)');
 });
