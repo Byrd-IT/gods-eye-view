@@ -251,3 +251,41 @@ test('the /at routes refuse bad input and report an unavailable mirror', async (
   assert.deepEqual(JSON.parse(res.body), { error: 'ghostmaps_archive_unavailable' });
   assert.equal(gone.started(), 0);
 });
+
+test('hostile query values and a failing mirror echo nothing back or to the log', async (t) => {
+  const logs = [];
+  for (const level of ['log', 'warn', 'error', 'info', 'debug'])
+    t.mock.method(console, level, (...args) => logs.push(args.map(String).join(' ')));
+  const secrets = [
+    'Bearer synth-token-9f3a7c21',
+    'https://user:synth-pass-77@evil.example/x',
+    'synthkey_ABC123SUFFIX',
+    'api_key=synth-key-5512',
+  ];
+  const mirrorPath = '/srv/private/mirror-synth.git';
+  const m = buildMirror(t);
+  const targets = [
+    proxyOver(createGhostMapsArchive({ repoDir: m.bare })),
+    proxyOver(createGhostMapsArchive({ repoDir: mirrorPath })),
+  ];
+  const seen = [];
+  for (const { call } of targets)
+    for (const s of secrets) {
+      const q = encodeURIComponent(s);
+      for (const url of [
+        `/at?t=${q}`,
+        `/at?t=2026-10-17T00:00:00Z&x=${q}`,
+        `/at/file/cip?c=${q}&v=${q}`,
+        `/at/file/${q}?c=${q}`,
+      ]) {
+        const res = await call(url);
+        seen.push(res.body, JSON.stringify(res.headers ?? {}));
+      }
+    }
+  const haystack = [...seen, ...logs].join('\n');
+  for (const s of secrets)
+    for (const form of [s, encodeURIComponent(s), Buffer.from(s).toString('base64'), s.slice(-6), s.match(/synth[\w-]+/)[0]])
+      assert.ok(!haystack.includes(form), `leaked ${form.length} chars`);
+  assert.ok(!haystack.includes(mirrorPath), 'mirror path leaked');
+  assert.ok(seen.length >= 32);
+});
