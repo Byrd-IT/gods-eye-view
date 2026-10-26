@@ -257,6 +257,45 @@ test('before the first commit nothing is drawn and the state says so', async (t)
   );
 });
 
+test('LIVE with no history time leaves the live edition mounted', async (t) => {
+  const { layer, calls, mounted } = setup(t);
+  await layer.update({});
+  assert.equal(mounted.size, 1);
+  calls.length = 0;
+  await layer.setHistoryTime(null);
+  assert.equal(mounted.size, 1);
+  assert.deepEqual(calls, []);
+  assert.equal(layer.getHistoryState(), null);
+});
+
+test('LIVE after an archive failure does not reload the live edition', async (t) => {
+  const { layer, calls, mounted } = setup(t, {
+    getCatalogAt: async () => {
+      throw new Error('archive down');
+    },
+  });
+  await layer.update({});
+  assert.equal(mounted.size, 1);
+  calls.length = 0;
+  await layer.setHistoryTime(T1);
+  assert.equal(layer.getHistoryState().status, 'unavailable');
+  assert.equal(
+    mounted.size,
+    1,
+    'the live edition stayed when the archive failed',
+  );
+  const afterFail = calls.length;
+  await layer.setHistoryTime(null);
+  assert.equal(mounted.size, 1);
+  assert.equal(
+    calls.length,
+    afterFail,
+    'LIVE does not fetch the live edition again',
+  );
+  assert.equal(layer.getHistoryState(), null);
+  assert.equal(layer.getRowControls().info.includes('HISTORY'), false);
+});
+
 test('a live push is ignored while history is on, LIVE restores live', async (t) => {
   const { layer, calls, mounted, push } = setup(t);
   await layer.setHistoryTime(T1);

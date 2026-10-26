@@ -450,9 +450,13 @@ export function createGhostMapsLayer({
     return sync();
   }
 
-  /** Unload a history edition before live, including when the live fetch fails. */
+  /**
+   * Unload a history edition before live, including when the live fetch fails.
+   * A live catalog (no history flag) stays: LIVE before any history time, or
+   * after an archive failure already fell back to live, must not blank the globe.
+   */
   function dropHistoryDraw() {
-    if (!_catalog?.history && _loaded.size === 0) return Promise.resolve();
+    if (!_catalog?.history) return Promise.resolve();
     return applyCatalog({
       products: [],
       history: false,
@@ -709,19 +713,24 @@ export function createGhostMapsLayer({
      * server, from the local git mirror.
      */
     async setHistoryTime(tMs) {
-      const seq = ++_historySeq;
       if (!Number.isFinite(tMs)) {
-        const was = _historyT !== null;
+        // History was never applied (LIVE inside the driver's debounce, or a
+        // second LIVE). Do not unload the live editions or start a fetch.
+        if (_historyT === null) return;
+        // Drop an in-flight archive answer so it cannot land after LIVE.
+        ++_historySeq;
+        const hadHistoryCatalog = Boolean(_catalog?.history);
         _historyT = null;
         _historyState = null;
         notifyHistory();
-        // Clearing the catalog object is not enough: the archived edition is
-        // still in _loaded. An empty catalog goes through sync and unloads it,
-        // so a failed live fetch cannot leave an old edition on the globe.
+        // Only a history catalog is unloaded. After an archive failure the
+        // live edition is already drawn; fetching it again would only reload it.
         await dropHistoryDraw();
-        if (was && _enabled) await refreshLive(_lifetime.signal);
+        if (_enabled && (hadHistoryCatalog || _loaded.size === 0))
+          await refreshLive(_lifetime.signal);
         return;
       }
+      const seq = ++_historySeq;
       _historyT = tMs;
       if (_enabled) await refreshHistory(seq, _lifetime.signal);
       else {

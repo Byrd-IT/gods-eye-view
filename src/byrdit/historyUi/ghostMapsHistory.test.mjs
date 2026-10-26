@@ -141,6 +141,30 @@ test('the time is capped at now (history never runs ahead of the clock)', () => 
   assert.equal(layer.times[0], start + 300);
 });
 
+test('repeated identical paused resends apply once', () => {
+  const { clock, layer, driver } = setup();
+  driver.onHistory({ active: true, timeMs: T });
+  clock.advance(400);
+  assert.deepEqual(layer.times, [T]);
+  // The History control repeats this state every 2 s, paused.
+  driver.onHistory({ active: true, timeMs: T });
+  driver.onHistory({ active: true, timeMs: T, playing: false, rate: 1 });
+  clock.advance(2_000);
+  assert.deepEqual(layer.times, [T]);
+});
+
+test('a settled unavailable answer is retried on the next resend', async () => {
+  const { clock, layer, driver } = setup();
+  driver.onHistory({ active: true, timeMs: T });
+  clock.advance(400);
+  await new Promise((r) => setImmediate(r));
+  layer.history = { status: 'unavailable', t: T };
+  layer.times.length = 0;
+  driver.onHistory({ active: true, timeMs: T });
+  clock.advance(400);
+  assert.deepEqual(layer.times, [T]);
+});
+
 test('a layer enabled while history is on gets the time again', () => {
   const { clock, layer, driver, subscribers } = setup();
   driver.onHistory({ active: true, timeMs: T });

@@ -11,6 +11,9 @@
  *   history on, time changes  ->  layer.setHistoryTime(t)   (debounced after
  *        a seek / drag release; throttled while playing, since a commit
  *        lands every few hours or days)
+ *   same time again           ->  nothing. The History control repeats its
+ *        state every 2 s. Re-applying that time restarts the debounce and
+ *        bumps the layer sequence, so a slow archive answer never lands.
  *   LIVE                      ->  layer.setHistoryTime(null)  at once
  *   layer enabled in history  ->  the data manager event re-sends the time
  *
@@ -66,6 +69,11 @@ export function createGhostMapsHistory({
   let stateAt = 0;
   let timer = null;
   let lastApplied = -Infinity;
+  /** The history time last passed to setHistoryTime, or NaN if none. */
+  let lastRequested = NaN;
+  /** A setHistoryTime call has not settled. A resend must not bump its seq. */
+  let inFlight = false;
+  let flightGen = 0;
   let destroyed = false;
   let manager = null;
   let offManager = null;
@@ -136,14 +144,35 @@ export function createGhostMapsHistory({
     return layer;
   }
 
+  function appliedStatus() {
+    try {
+      return layerObject()?.getHistoryState?.()?.status ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   function apply() {
     timer = null;
     if (destroyed || !state.active) return;
     const layer = attach();
     const t = historyNow();
     if (!layer?.setHistoryTime || !Number.isFinite(t)) return;
+    lastRequested = t;
     lastApplied = now();
-    Promise.resolve(layer.setHistoryTime(t)).catch(() => {});
+    let pending;
+    try {
+      pending = layer.setHistoryTime(t);
+    } catch {
+      return;
+    }
+    inFlight = true;
+    const mine = ++flightGen;
+    Promise.resolve(pending)
+      .catch(() => {})
+      .finally(() => {
+        if (mine === flightGen) inFlight = false;
+      });
   }
 
   function schedule(playing) {
@@ -167,6 +196,8 @@ export function createGhostMapsHistory({
     onHistory(detail = {}) {
       if (destroyed) return;
       const was = state.active;
+      const wasPlaying = state.playing;
+      const wasRate = state.rate;
       stateAt = now();
       state = {
         active: Boolean(detail.active) && Number.isFinite(detail.timeMs),
@@ -180,9 +211,25 @@ export function createGhostMapsHistory({
         if (was) {
           const layer = attach();
           lastApplied = -Infinity;
+          lastRequested = NaN;
+          flightGen += 1;
+          inFlight = false;
           Promise.resolve(layer?.setHistoryTime?.(null)).catch(() => {});
           notify();
         }
+        return;
+      }
+      const t = historyNow();
+      // Heartbeat (and any other identical resend): do not restart the
+      // debounce or call setHistoryTime again. Retry only after a settled
+      // unavailable answer, so a slow archive call can still land.
+      if (
+        was &&
+        t === lastRequested &&
+        state.playing === wasPlaying &&
+        state.rate === wasRate &&
+        (inFlight || appliedStatus() !== 'unavailable')
+      ) {
         return;
       }
       schedule(state.playing && was);
