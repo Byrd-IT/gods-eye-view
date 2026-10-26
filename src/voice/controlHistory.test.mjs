@@ -134,7 +134,10 @@ test('feeds only while History is open: lists turn on, every other history feed 
 test('feeds only returns unavailable when History status is not ok', async () => {
   const h = harness({
     voiceOverrides: {
-      status: () => ({ ok: false, error: 'History playback is not available right now' }),
+      status: () => ({
+        ok: false,
+        error: 'History playback is not available right now TAILMARK',
+      }),
     },
   });
   const r = await h.runner('control_history', { action: 'feeds', feeds: ['flights'], feedMode: 'only' });
@@ -142,6 +145,7 @@ test('feeds only returns unavailable when History status is not ok', async () =>
   assert.match(r.error, /not available/);
   assert.equal(r.changed, undefined);
   assert.equal(JSON.stringify(r).includes('flights'), false);
+  assert.equal(JSON.stringify(r).includes('TAILMARK'), false);
   assert.deepEqual(h.order, []);
 });
 

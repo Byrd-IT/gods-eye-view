@@ -1698,10 +1698,7 @@ async function controlHistory(voice, args = {}, setLayer) {
       if (state?.ok === false) {
         return wrap({
           ok: false,
-          error:
-            typeof state.error === 'string' && state.error
-              ? state.error
-              : 'History playback is not available right now',
+          error: 'History playback is not available right now',
         });
       }
       if (state?.mode === 'live')
