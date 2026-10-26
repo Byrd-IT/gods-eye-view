@@ -196,6 +196,23 @@ Regression coverage lives in `src/tools/area.test.mjs`,
 `src/tools/queries/environment.test.mjs` and
 `src/layers/perimeters/cards.test.mjs`.
 
+## Scope display controls
+
+Display's native Scope checkbox defaults ON with feather at 100%, adjustable
+from 0–200%. OFF disables the slider while retaining its value. HUD layout
+changes preserve both settings; share links and scenes restore them. The
+historical missing-`scf` fallback remains 35%; explicit 0% keeps the hard edge.
+
+With Scope OFF, Tactical, Operator and Minimal add text-sized black backplates
+at 70% opacity behind telemetry, vertical metadata and scene chrome. Original
+HUD text color, glow and opacity are preserved. Scope OFF brightens the tagline
+and Active Style label with the shared secondary text color. The title plate
+covers the eye and title without moving the title or tagline. Scope ON retains
+the original HUD presentation; Cyber retains its existing skin.
+
+`node scripts/qa-scope-hud.mjs` checks native input, range, layout persistence,
+restoration and both Scope presentations. `QA_SCREENSHOT_DIR` saves screenshots.
+
 ## Cyber HUD — September 30, 2026
 
 Display > HUD > Layout includes Cyber, also available through the HUD voice
@@ -553,6 +570,36 @@ order are preserved. Stopped connections, stale offers and delayed captures cann
 replacement session; audio meters release failed initialization and reject revoked
 frames. Delayed action results and post-capture continuations cannot resume a
 stopped conversation or send output into a replacement. See [voice ownership](VOICE-OWNERSHIP.md).
+
+The opt-in voice panel shares Preview and Voice Settings, with browser-local
+Preview and inactivity preferences. Voice-requested timeout changes apply directly
+without a confirmation question; results distinguish a live change from a saved
+browser preference. `set_voice_inactivity_timeout` accepts integer minutes from 1–60,
+or 0 for None. Named `voice-settings` and `voice-preview` panel targets exit
+Cockpit before opening the requested voice UI. `control_cockpit` also accepts
+`voicePanel: "preview" | "settings"` for an explicit exit-and-show request.
+Newer manual choices, Stop and provider replacement prevent an older operation
+from revealing its UI. Ambiguous requests to open settings ask whether the user
+means Voice Settings or Provider Settings before opening either panel. Named
+Voice Settings applies directly; Provider Settings opens the existing local
+provider dialog when available. Visual Presets targets the visual controls tray,
+while Scenes targets saved scenes. Selecting Preview does not enable a disabled
+Preview preference. Unverified speech captions use the localized Recent
+speech label; ordinary user captions retain YOU. Caption attribution does not
+control tool dispatch.
+
+Voice inactivity waits for local input, output and actions to become quiet.
+A matching OpenAI response that explicitly completes without audio can restore
+idle eligibility; completion of an audio response does not prove playback has
+drained. Missing or ambiguous output evidence remains conservative. Gemini
+retires its per-audio observer wrappers on close, replacement or session end,
+so repeated Stop/Start does not retain old audio instances until the panel closes.
+The panel keeps the model tier and regular cost estimate in Voice Settings;
+warning, capped and unknown cost states also appear in the dock heading when
+Settings is closed. The existing hard cost cap still stops the session and
+announces the reason.
+
+Automatic Voice Preview uses output from the active mounted provider, including late replies that may answer an older request. Manual panel choices remain until genuine local input rearms automatic presentation. Preview stays off when disabled, remains hidden in Cockpit, and retires on Stop or provider replacement. Display events do not grant command authority.
 
 Contacts nearest-aircraft follow-ups retain the snapshot's distance basis even
 after the camera moves. An explicit new scope replaces that basis. Provider
@@ -3776,6 +3823,7 @@ its criteria cannot be silently ignored.
 | Street Level 📷 | Mapillary street-level imagery (vector tiles, Graph API, MapillaryJS) | `src/layers/streetLevel/` via `src/app/layers/streetLevel.js` | `/api/mapillary/status`, `/api/mapillary/tiles/coverage/{z}/{x}/{y}` (`MAPILLARY_CLIENT_TOKEN`) | camera-driven (320 ms debounce, ≤9 tiles, server memory cache 24 h) |
 | Wind 🌬                 | NOAA GFS 10 m wind (keyless, 0.25°→1° grid; animated particles)                                                                                                                                 | `src/data/wind.js`                                    | `/api/wind`                                              | 1 h (forecast cycle)                                                              |
 | GNSS Integrity 📡 (`gnss-integrity`) | adsb.lol point snapshot, low navigation accuracy binned per 0.5° cell (GEV NIC/NACp threshold + gpsjam.org formula and bands, keyless, ODbL) | `src/layers/gnss/` via `src/app/layers/gnss.js` | `/api/gnss-integrity` | camera-driven (600 ms debounce, minimum 2.5 s between reads) + 60s poll (server cache 60 s; 30 min rolling window) |
+| S2 GhostMaps 👻 (`s2-ghostmaps`) | S2 Underground's public GhostMaps repository on GitHub (KMZ intel products, keyless, CC BY-NC-SA 4.0) | `src/layers/ghostMaps/` via `src/app/layers/ghostMaps.js` | `/api/ghostmaps/catalog`, `/api/ghostmaps/events` (server-sent events), `/api/ghostmaps/file/{product}` | branch head checked every 15 s; new commits pushed to the page; 5 min catalog backstop |
 | Fire Perimeters 🔥 | NIFC WFIGS current interagency perimeters (keyless, paged past the 2000-record cap); InciWeb catalog + incident page origin and update time checks for verified incident-page links | `src/layers/perimeters/` via `src/app/layers/perimeters.js` | `/api/fire-perimeters` + `/api/fire-perimeters/inciweb/*` | 5 min (server caches: catalog 1 h; publication 30 min) |
 
 GNSS Integrity samples a 250 nm circle around the Earth point under the screen
@@ -5124,7 +5172,7 @@ and unreachable upstream (502/504) separately from road geometry.
   - **Contact-match ties break on hex ascending.** `track_entity` is a mutation fulfilling "follow that one", and the model's observed answer to a non-ok track result is to retry with guesses rather than ask, so the lookup always commits rather than returning an ambiguity. What it owes the caller is stability: hex is unique and always present, so the same query resolves to the same contact for as long as both are loaded.
 - **Visual grounding**: at `local` view scale with no structured identity, the client captures the Cesium canvas (≤1200px JPEG, black-frame detection, double-render for freshness) and sends it as `input_image` with a strict "do not invent labels" instruction.
 - **Context window**: only the latest viewport screenshot stays in context — the client deletes the prior image item (`conversation.item.delete`) before adding a new one (images are the most expensive item, re-billed every turn). Text history is bounded by the **server-side** `truncation: { type: 'retention_ratio', retention_ratio, token_limits.post_instructions }` set in `/api/realtime/token` (cache-friendly batched truncation). There is intentionally **no** client-side per-turn conversation-item cap — deleting from the front of history each turn busts the Realtime prompt cache. A spatially-aware summarize-and-prune policy is specced for a future iteration.
-- **Model tier + spend guard** (`src/voice/voiceCost.js`, August 2026): the voice heading row carries a `STD`/`MINI` toggle and a running session-cost readout (`~$0.42`).
+- **Model tier + spend guard** (`src/voice/voiceCost.js`, August 2026): hosts without the voice panel keep the `STD`/`MINI` toggle and running session-cost readout (`~$0.42`) in the heading. Panel hosts place these controls in Voice Settings and mirror warning, capped or unknown cost states in the heading.
   - **Tier selection.** `standard` = `gpt-realtime-2` (default), `mini` = `gpt-realtime-2.1-mini` (~3× cheaper per audio token). The client sends `?tier=` to `/api/realtime/token`; the endpoint resolves it through the shared registry, so an unknown, empty, or hostile value falls back to `standard` rather than reaching OpenAI as a model id. Responses echo `X-GEV-Voice-Tier` / `X-GEV-Voice-Model` (plus `X-GEV-Voice-Tier-Fallback: 1` when a bogus tier was downgraded). Persisted at `godsEyeView.voiceCost.tier`.
   - **Applies NEXT session.** The model is fixed when the ephemeral token is minted, so a live session always keeps the model it connected with; toggling mid-session only records the preference (the button title says so). The cost tracker's lifetime is the session's lifetime and its model binding is immutable from `start()` to `stop()` — rebuilding it on toggle would erase accrued spend and let repeated toggles bypass the cap. The tracker may only be replaced once the session is FULLY SETTLED (`isVoiceSessionSettled()`: not active **and** no data channel **and** no peer connection) — `!isActive()` alone is not enough, because the `error` status reports inactive while the transport can still deliver a late `response.done`. The toggle itself reads and writes only the persisted preference, never the live tracker.
   - **Env overrides.** `OPENAI_REALTIME_MODEL` / `OPENAI_REALTIME_MODEL_MINI` remain authoritative per tier, so a drifted upstream model id is a `.env` fix rather than a code change. Because an override can point a tier at any model, the client prices against the model id the server actually echoed, **not** the tier it requested. An unrecognised id is billed at the most expensive known rates plus one console warning — under-metering is what lets a cap be overrun.
@@ -5298,6 +5346,28 @@ request viewbox and continues searching without that geographic preference.
 - **Enter belongs to whatever has the keyboard.** The finish key is taken only from the canvas, the page body and the tool's own label field. With a control focused — Clear, a shape button — Enter activates that control, as a keyboard user expects; it does not quietly finish the shape.
 - Pure half: `src/annotations/drawMode.js` (session, minimum vertices, double-click de-dup at 0.5 m, vertex ceiling, degenerate-geometry refusal, ring closing, dateline-safe length/area/centroid, hint text). Regression surface: `src/annotations/drawMode.test.mjs` and `src/data/inputOwnership.test.mjs` (pure), `src/annotations/drawToolBehaviour.test.mjs` (the tool driven against DOM and viewer doubles — leases, borrowed input actions, teardown, the Enter key, preview heights), `src/annotations/drawTool.test.mjs` (structural: where files live, which ids the markup carries, what the docs may claim), and the rendered harness `scripts/qa-draw-tool.mjs`.
 - The annotation tree is a declared ownership group: `./annotations` → `src/annotations/index.js` in `package.json`, with its module graph listed in `scripts/package-boundaries.json`, so an annotation module reaching outside that graph is a gate failure rather than a surprise in a layer's bundle. `drawMode.js`, `drawTool.js` and their tests are in `scripts/format-scope.json`.
+
+### S2 GhostMaps (October 2026)
+
+- **What it shows.** Events ▸ **S2 GhostMaps** draws the current edition of S2 Underground's KMZ intel products from `github.com/s2underground/GhostMaps`. The products are the Common Intelligence Picture and the 30-day kinetic pull (both on by default), the Border Crisis Map, the Iran Common Intelligence Picture, Iran Kinetic Events, Yemen FLOT, and **Latest Drop**: the newest dated incident file outside those series, `0_Archive`, `Basedata` and `Reference Material`. Each product has a chip in the row. The chip choice is kept in `localStorage` (`gev.ghostmaps.products`) and falls back to the defaults when storage is blocked.
+- **Editions.** `src/layers/ghostMaps/catalog.js` (pure) matches whole repository paths per product. The newest edition wins by the date written in the file name, then by `Export_N`/`vN`. Undated names, such as the fixed 30-day file, are identified by blob sha. Files over 50 MiB are left out (the 62 MB census KMZ, for example). A renamed folder drops the product rather than matching elsewhere.
+- **Updates.** The repository is not ours, so there is no webhook. `server/providers/ghostMaps.js` starts with the first `/api/ghostmaps` request, so an install that never enables the layer never contacts GitHub.
+  - It reads the branch head from git's smart-HTTP ref advertisement (`/info/refs?service=git-upload-pack`, about 0.5 KB, outside the REST rate limit) every `GHOSTMAPS_POLL_SECONDS` (15 s by default, 5 s minimum). Failures back off from 15 s to 5 min.
+  - Only a new head costs REST calls: one recursive tree and one commit. An optional `GITHUB_TOKEN` raises the REST limit.
+  - After an upstream outage, a successful branch-head check clears the error and pushes a recovered catalog even when the commit is unchanged. Cached products stay in place; subsequent healthy unchanged checks stay silent.
+  - The new catalog goes to `.gev-cache/ghostmaps/catalog.json` and to every open page over server-sent events (`/api/ghostmaps/events`, 25 s heartbeat, at most 64 subscribers). Default products are downloaded at once.
+  - The layer reloads only products whose blob changed. The new edition's data source is added before the old one is removed. A product that leaves the catalog leaves the globe.
+  - The row reads `LIVE` while the stream is open. A five-minute catalog read is the backstop.
+- **Files.** `/api/ghostmaps/file/{product}` serves only catalog products. Files are downloaded by commit-pinned raw URLs, so a CDN cannot return an older edition. They are cached on disk by blob sha, and blobs no current product uses are pruned. A request whose `?v=` names the current blob is `immutable`. Repository paths never reach the page.
+- **Source ownership.** The application catalog receives `sources['s2-ghostmaps']` through the shared source contracts; an omitted or null source stays unavailable without opening a stream or fetching. The standalone source factory supplies the same-origin implementation and accepts replacements. Packed-image URLs are released on cancelled or failed product construction, and remain owned by a successfully loaded product until it is removed.
+- **Voice and locales.** S2 can be toggled through its registered id and aliases. The model already sees the S2 GhostMaps brand in the id, and compact alias-hint separators keep the complete voice prompt within its existing 52,000-character limit; accepted aliases are unchanged. The row and reports are translated in Spanish, Russian and Simplified Chinese.
+- **Rendering.** The page parses the KMZ with the import module's zip, KMZ and XML helpers into one `CustomDataSource` per product.
+  - Points become ground-clamped billboards with the depth test off, so they never sink into terrain or 3D tiles. Because the Google 3D map hides the globe, nothing else would stop far-side pins drawing through the planet. Pins are therefore horizon-culled with Street Level's `createHorizonCull` before their first frame and again whenever the camera moves.
+  - Lines and polygon outlines are ground-clamped polylines.
+  - Styles, StyleMaps and inline styles are honoured. Icons come only from images packed in the same KMZ and at most 512 KB. Anything else uses a per-product round marker.
+  - Network links, overlays, models and remote hrefs are never followed. Hidden placemarks are skipped. Bounds are 20,000 placemarks and 250,000 positions per product.
+- **Reports.** Clicking a marker opens a card with the product, folder, edition date and the placemark's report fields. `src/layers/ghostMaps/records.js` reads ArcGIS popup tables as text only: `<Null>` and internal fields are dropped and values are capped. Description markup is never inserted into the page. The first `http(s)` research link opens from the card. The card is `stateless`, so it comes and goes with the click, as CCTV cards do. It is also `horizonCull`ed, so it hides when its marker turns behind the planet. Picks are registered under `s2-ghostmaps`.
+- **Validation.** Unit tests: `src/layers/ghostMaps/*.test.mjs` cover editions, the catalog, ref parsing, description tables and wrapping; `server/providers/ghostMaps.test.mjs` covers commit detection, events, pinned downloads, cache pruning, restart and routing. `node scripts/qa-ghostmaps.mjs --url http://localhost:4173` covers the live load, the open stream, picks and cards (asserted on the overlay host's diagnostics, since the `desynchronized` overlay canvas can read back a stale buffer headless), far-side culling, a synthetic push, chip persistence, disable and phone width.
 
 ### Import Your Own Files (October 2026)
 
@@ -5545,10 +5615,11 @@ the `_detectionUserOverridden` / explicit-intent flags that would suppress a
 separate landed behaviour. Pinned in `src/reasonableDefaults.test.mjs` (feather,
 detection, OUTSIDE opacity) and `src/data/layerState.test.mjs` (3D).
 
-**The 2026-08-24 defaults** (superseding the interim 08-23 values of 8%/3%):
+**Current defaults** (scope feather revised to 100% on 2026-10-25;
+detection and outside opacity retain the 2026-08-24 defaults):
 the first-run look is Detection DENSE
-`75%`, ELASTIC allocation, Fade `7%`, OUTSIDE opacity `1%`, scope feather `11%`,
-and 3D fleet mode PROXIMITY, with `AIRCRAFT_BRACKET_FLOOR_ANCHOR` at `0.01` so
+`75%`, ELASTIC allocation, Fade `7%`, OUTSIDE opacity `1%`, Scope ON with feather
+`100%`, and 3D fleet mode PROXIMITY, with `AIRCRAFT_BRACKET_FLOOR_ANCHOR` at `0.01` so
 brackets keep their approved brightness exactly at the new OUTSIDE default. Two
 terms that must never be conflated: scope FEATHER softens the black scope-mask
 edge; detection FADE is the label/card fading band around the keyhole. The
@@ -5618,14 +5689,10 @@ easier to meet (detection is now on more often), but does not create it.
   calibrated so `AIRCRAFT_BRACKET_ALPHA_FLOOR` (0.35) lands exactly at the
   default, and the mapping follows bracket brightness rather than slider
   position. The `ko` PARSE fallback stays at `5`.
-- **Scope feather: `11%`** — a soft scope-mask edge (moved `0% → 8% → 11%`; `0%` hard crop for one day,
-  `35%` before that). `SCOPE_FEATHER_RATIO_DEFAULT` in `src/scopeMask.js`,
-  mirrored by `#scope-feather-slider`'s markup value AND readout and
-  `_scopeFeatherPct` in `sharelink.js`. The slider is untouched and still spans
-  0–100, and an explicit `0` is still the hard-crop path — pinned, so moving the
-  default cannot quietly delete it. The `scf` PARSE fallback deliberately stays
-  at `35`: a link predating `scf` was authored when 35 was what its author saw,
-  and restoring the author's view is what a share link is for.
+- **Scope: `ON`, feather: `100%`**. `SCOPE_FEATHER_RATIO_DEFAULT` in
+  `src/scopeMask.js` matches the slider, readout and share generator. The range
+  is 0–200%; explicit 0% is a hard edge. Missing-`scf` links retain the historical
+  35% parse fallback.
 - **3D aircraft models: `ON`, mode `proximity`** — see the 3D Aircraft section
   above and the DISPLAY-rail entry below (was `OFF`).
 - Style shader starting params: CRT/NVG/FLIR pixelation `1.2` (just above the native `1.0` floor); thermal/FLIR ships an optional Ironbow "Predator" palette (`palette` uniform, default `0` = accurate grayscale).

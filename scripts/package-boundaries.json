@@ -924,7 +924,8 @@
       "src/ui/keyGuidance.js",
       "src/ui/layerNames.js",
       "src/ui/statusText.js",
-      "src/ui/statusBadge.js"
+      "src/ui/statusBadge.js",
+      "src/scopeMaskPolicy.js"
     ],
     "external": ["cesium", "satellite.js", "astronomy-engine", "geomagnetism"]
   },
@@ -1780,6 +1781,12 @@
       "src/voice/layerSummary.js",
       "src/voice/voiceCost.js",
       "src/voice/commands.js",
+      "src/voice/panel/actionObserver.js",
+      "src/voice/panel/host.js",
+      "src/voice/panel/inactivity.js",
+      "src/voice/panel/manualPanel.js",
+      "src/voice/panel/nativeActivity.js",
+      "src/voice/panel/preferences.js",
       "src/voice/session.js",
       "src/voice/sessionCommands.js",
       "src/voice/realtimeSession.js",
@@ -2481,6 +2488,12 @@
       "src/ui/visualPresets.js",
       "src/ui/visualSettings.js",
       "src/voice/commands.js",
+      "src/voice/panel/actionObserver.js",
+      "src/voice/panel/host.js",
+      "src/voice/panel/inactivity.js",
+      "src/voice/panel/manualPanel.js",
+      "src/voice/panel/nativeActivity.js",
+      "src/voice/panel/preferences.js",
       "src/voice/control.js",
       "src/voice/gevActions.js",
       "src/agent/worldPacket.js",
@@ -2545,6 +2558,12 @@
       "src/layers/gnss/index.js",
       "src/layers/gnss/source.js",
       "src/layers/gnss/records.js",
+      "src/app/layers/ghostMaps.js",
+      "src/layers/ghostMaps/index.js",
+      "src/layers/ghostMaps/catalog.js",
+      "src/layers/ghostMaps/records.js",
+      "src/layers/ghostMaps/kml.js",
+      "src/layers/ghostMaps/source.js",
       "src/layers/cctv/sourcePolicy.js",
       "src/sources/reference.js",
       "src/search/nominatim.js",
@@ -2780,7 +2799,8 @@
       "src/voice/geminiAudio.js",
       "src/voice/geminiCaptureWorklet.js",
       "src/ui/statusBadge.js",
-      "src/sceneCommandRelease.js"
+      "src/sceneCommandRelease.js",
+      "src/scopeMaskPolicy.js"
     ],
     "external": [
       "hls.js",
@@ -3203,6 +3223,12 @@
       "src/layers/gnss/index.js",
       "src/layers/gnss/source.js",
       "src/layers/gnss/records.js",
+      "src/app/layers/ghostMaps.js",
+      "src/layers/ghostMaps/index.js",
+      "src/layers/ghostMaps/catalog.js",
+      "src/layers/ghostMaps/records.js",
+      "src/layers/ghostMaps/kml.js",
+      "src/layers/ghostMaps/source.js",
       "src/layers/cctv/sourcePolicy.js",
       "src/search/nominatim.js",
       "src/nominatimGeocode.js",
@@ -3355,7 +3381,10 @@
       "src/layers/airQuality/source.js",
       "src/ui/statusText.js",
       "src/ui/layerNames.js",
-      "src/layers/streetLevel/providers/mapillary/policy.js"
+      "src/layers/streetLevel/providers/mapillary/policy.js",
+      "src/data/geoImportImages.js",
+      "src/data/geoImportPins.js",
+      "src/data/geoFileImport.js"
     ],
     "external": [
       "hls.js",
@@ -3508,7 +3537,9 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
-      "src/i18n/locales/zh-CN.json"
+      "src/i18n/locales/zh-CN.json",
+      "src/scopeMaskPolicy.js",
+      "src/ui/displayControls.js"
     ],
     "external": ["cesium"]
   },
@@ -4056,6 +4087,39 @@
       "src/sources/httpBody.js",
       "src/i18n/marker.js",
       "src/layers/gnss/source.js"
+    ],
+    "external": []
+  },
+  "ghostmaps": {
+    "exports": ["./layers/ghostmaps"],
+    "modules": [
+      "src/layers/ghostMaps/index.js",
+      "src/layers/ghostMaps/catalog.js",
+      "src/layers/ghostMaps/records.js",
+      "src/layers/ghostMaps/kml.js",
+      "src/layers/ghostMaps/source.js",
+      "src/sources/httpBody.js",
+      "src/data/geoFileImport.js",
+      "src/i18n/marker.js",
+      "src/i18n/index.js",
+      "src/i18n/locale.js",
+      "src/i18n/locales/es.json",
+      "src/i18n/locales/ru.json",
+      "src/i18n/locales/zh-CN.json",
+      "src/data/geoImportImages.js",
+      "src/data/geoImportPins.js",
+      "src/layers/streetLevel/tileMath.js",
+      "src/layers/streetLevel/view.js"
+    ],
+    "external": ["cesium"]
+  },
+  "ghostmaps-source": {
+    "exports": ["./layers/ghostmaps/source"],
+    "modules": [
+      "src/layers/ghostMaps/source.js",
+      "src/layers/ghostMaps/catalog.js",
+      "src/sources/httpBody.js",
+      "src/i18n/marker.js"
     ],
     "external": []
   },
