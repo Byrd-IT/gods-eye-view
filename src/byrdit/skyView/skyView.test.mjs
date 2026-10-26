@@ -250,6 +250,7 @@ function setup(options = {}) {
       ? { orientationOptions: options.orientationOptions }
       : {}),
     ...(options.declinationAt ? { declinationAt: options.declinationAt } : {}),
+    ...(options.voiceWindow !== undefined ? { voiceWindow: options.voiceWindow } : {}),
   });
   return { doc, viewer, timers, location, history, handle };
 }
@@ -288,6 +289,29 @@ test('mount: Sky button, panel, toolbar, overlay canvas; once per viewer; null w
   handle.destroy();
   assert.equal(doc.body.find('open'), null);
   assert.equal(skyViewFor(viewer), null);
+});
+
+test('voice hook: open stands at the map centre, close leaves, destroy drops the hook', async () => {
+  const voiceWindow = {};
+  const { handle } = setup({ voiceWindow });
+  assert.equal(voiceWindow.__gevSky.voice, handle.voice);
+  const opened = await handle.voice.open();
+  assert.equal(opened.ok, true);
+  assert.equal(opened.open, true);
+  assert.equal(handle.active, true);
+  const again = await handle.voice.open();
+  assert.equal(again.opened, false);
+  const lines = await handle.voice.lines(false);
+  assert.equal(lines.ok, true);
+  assert.equal(lines.lines, false);
+  assert.equal(handle.content.flags.lines, false);
+  const closed = handle.voice.close();
+  assert.equal(closed.ok, true);
+  assert.equal(closed.open, false);
+  assert.equal(handle.active, false);
+  handle.destroy();
+  assert.equal(voiceWindow.__gevSky, undefined);
+  assert.equal((await handle.voice.status()).ok, false);
 });
 
 test('enter at typed lat, lon: eye at 1.7 m over unknown ground (0, flagged), inputs off, URL written; exit restores the camera to 1e-6', async () => {

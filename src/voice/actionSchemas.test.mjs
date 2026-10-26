@@ -48,7 +48,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Panel adds named voice targets and timeout; shared Panel/Cockpit guidance
     // is consolidated without changing either feature's arguments.
     // History playback voice adds the control_history tool (last).
-    'b7a9180e595aea7355ebda35e2c4d27789c6161e2a46234ac5af05dbd1773426',
+    // Sky view voice adds the control_sky tool (last).
+    '17f1f4c2ad137d1d1691b30625e9fc3595481791b299cabed0fc59ec80d14e1b',
   );
 });
 

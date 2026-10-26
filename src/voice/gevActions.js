@@ -269,6 +269,7 @@ export function createGevActionRunner({
   deixis = null,
   readVoicePanelOperation = null,
   history = null,
+  sky = null,
 }) {
   // Voice enable times and analyst follow-up memory belong to this runner.
   // Speech builders turn results into say/display envelopes; callers extend
@@ -1304,6 +1305,10 @@ export function createGevActionRunner({
       );
     }
 
+    if (name === 'control_sky') {
+      return controlSky(sky?.(), args);
+    }
+
     if (name === 'control_cctv') {
       const action = String(args.action || '').toLowerCase();
       if (
@@ -1720,6 +1725,32 @@ async function controlHistory(voice, args = {}, setLayer) {
     });
   }
   throw new Error(`Unknown history action: ${args.action || 'missing'}`);
+}
+
+/**
+ * Voice Sky view control (open / close / look / time / lines / preset /
+ * status) over the Sky voice adapter (skyVoice.js, handed in as `sky`).
+ */
+async function controlSky(voice, args = {}) {
+  const action = String(args.action || '').toLowerCase();
+  const wrap = (result) => ({ action: 'control_sky', ...result });
+  if (!voice)
+    return wrap({
+      ok: false,
+      error: 'Sky view is not available in this host',
+    });
+  if (action === 'status') return wrap(await voice.status());
+  if (action === 'open') return wrap(await voice.open());
+  if (action === 'close') return wrap(await voice.close());
+  if (action === 'look') return wrap(await voice.look(args.target));
+  if (action === 'time')
+    return wrap(await voice.time({ time: args.time, live: args.live }));
+  if (action === 'lines') return wrap(await voice.lines(args.enabled));
+  if (action === 'preset') return wrap(await voice.preset(args.preset));
+  // A token that is not a short word is not repeated: the model may have
+  // put a secret in the action field.
+  const token = /^[a-z]{1,20}$/.test(action) ? action : 'missing';
+  throw new Error(`Unknown sky action: ${token}`);
 }
 
 /** Voice CCTV control over the cctv layer module's public surface. */

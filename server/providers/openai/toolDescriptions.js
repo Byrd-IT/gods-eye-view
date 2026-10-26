@@ -665,4 +665,43 @@ export const ACTION_DESCRIPTIONS = {
       },
     },
   },
+  control_sky: {
+    description:
+      'Sky view: open or close it, look at a named planet, the ISS or a constellation, set the time of night, turn constellation lines on or off, or jump to a preset. Open uses the map centre. look at the ISS is look, not preset; preset iss is the next ISS pass. Say the resulting state, not the request.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: {
+          description:
+            'open, close, look (needs target), time (needs time or live), lines (needs enabled), preset (needs preset), or status.',
+          $position: 2,
+        },
+        target: {
+          description:
+            'For look: a planet (Jupiter), the ISS, or a constellation (Orion). One name.',
+          $position: 1,
+        },
+        time: {
+          description:
+            'For time: ISO 8601 WITH a zone, e.g. 2026-03-04T02:00:00Z or 2026-03-03T20:00:00-06:00. Convert the spoken local time first; a date alone means 00:00 UTC.',
+          $position: 1,
+        },
+        live: {
+          description:
+            'For time: true returns the sky clock to now. When true, live wins over time.',
+          $position: 1,
+        },
+        enabled: {
+          description:
+            'For lines: true shows constellation lines, false hides them.',
+          $position: 1,
+        },
+        preset: {
+          description:
+            'sunset, dusk (end of astronomical twilight), midnight (solar midnight), moonrise, or iss (start of the next ISS pass, not a look-at).',
+          $position: 2,
+        },
+      },
+    },
+  },
 };
