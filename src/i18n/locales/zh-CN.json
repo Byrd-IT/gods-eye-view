@@ -2864,6 +2864,8 @@
   "Latest Drop": "最新发布",
   "GhostMaps file could not be read": "无法读取 GhostMaps 文件",
   "GhostMaps catalog unavailable": "GhostMaps 目录不可用",
+  "GhostMaps archive unavailable": "GhostMaps 归档不可用",
+  "GhostMaps file unavailable": "GhostMaps 文件不可用",
   "Malformed GhostMaps catalog": "GhostMaps 目录格式无效",
   "{count} source links ↗ · click card to open the first": {
     "other": "{count} 个来源链接 ↗ · 点击卡片打开第一个"

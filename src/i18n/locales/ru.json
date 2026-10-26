@@ -3031,6 +3031,8 @@
   "Latest Drop": "Новый выпуск",
   "GhostMaps file could not be read": "Не удалось прочитать файл GhostMaps",
   "GhostMaps catalog unavailable": "Каталог GhostMaps недоступен",
+  "GhostMaps archive unavailable": "Архив GhostMaps недоступен",
+  "GhostMaps file unavailable": "Файл GhostMaps недоступен",
   "Malformed GhostMaps catalog": "Повреждённый каталог GhostMaps",
   "{count} source links ↗ · click card to open the first": {
     "one": "{count} ссылка на источник ↗ · нажмите на карточку, чтобы открыть",

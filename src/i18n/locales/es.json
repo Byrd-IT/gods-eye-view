@@ -2964,6 +2964,8 @@
   "Latest Drop": "Última publicación",
   "GhostMaps file could not be read": "No se pudo leer el archivo de GhostMaps",
   "GhostMaps catalog unavailable": "Catálogo de GhostMaps no disponible",
+  "GhostMaps archive unavailable": "Archivo de GhostMaps no disponible",
+  "GhostMaps file unavailable": "Fichero de GhostMaps no disponible",
   "Malformed GhostMaps catalog": "Catálogo de GhostMaps mal formado",
   "{count} source links ↗ · click card to open the first": {
     "one": "{count} enlace a la fuente ↗ · haz clic en la tarjeta para abrirlo",
