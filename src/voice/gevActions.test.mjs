@@ -19,6 +19,7 @@ import {
   knownRadioLocation,
   normalizeStackId,
 } from './gevActions.js';
+import { StyleManager } from '../ui/applicationShell.js';
 import { MAP_STACKS } from '../mapStackController.js';
 import { BASEMAP_AUTO_STACK_ID, BYRDIT_OPEN_STACK_ID } from '../byrdit/basemap/stack.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
@@ -57,7 +58,7 @@ test('set_map_stack voice reaches the Byrd-IT Open and Auto stacks', async () =>
     assert.equal(normalizeStackId(id), id);
   for (const phrase of ['Byrd-IT map', 'byrd it open', 'Byrd-IT Open', 'byrdit map'])
     assert.equal(normalizeStackId(phrase), BYRDIT_OPEN_STACK_ID, phrase);
-  for (const phrase of ['auto basemap', 'Auto', 'automatic basemap', 'auto map'])
+  for (const phrase of ['auto basemap', 'automatic basemap', 'auto map'])
     assert.equal(normalizeStackId(phrase), BASEMAP_AUTO_STACK_ID, phrase);
   assert.equal(normalizeStackId('bing aerial'), 'bing-aerial');
   const { viewer } = createVoiceNavigationHarness();
@@ -72,6 +73,29 @@ test('set_map_stack voice reaches the Byrd-IT Open and Auto stacks', async () =>
   assert.equal(a.requested, BYRDIT_OPEN_STACK_ID);
   assert.equal(b.requested, BASEMAP_AUTO_STACK_ID);
   await assert.rejects(() => runner('set_map_stack', { stack: 'nonsense' }), /Unknown map stack/);
+});
+
+test('real setMapStack reports the auto basemap as landed although it shows a concrete map', async () => {
+  const mk = (state) => ({
+    mapStackController: {
+      getStacks: () => [
+        { id: 'basemap-auto', label: 'Auto', available: true },
+        { id: 'byrdit-open', label: 'Byrd-IT Open', available: true },
+      ],
+      getActiveId: () => state.activeId,
+      getState: () => state,
+    },
+    _setMapStack: async () => {},
+  });
+  const run = (self, id) => StyleManager.prototype.setMapStack.call(self, id);
+  // Auto picks Google 3D or Open: activeId is never 'basemap-auto'.
+  const ok = await run(mk({ activeId: 'photoreal', lastError: null }), 'basemap-auto');
+  assert.deepEqual([ok.ok, ok.activeStack, ok.error], [true, 'photoreal', null]);
+  const bad = await run(mk({ activeId: 'photoreal', lastError: 'boom' }), 'basemap-auto');
+  assert.equal(bad.ok, false);
+  // Concrete stacks still require activeId to equal the request.
+  assert.equal((await run(mk({ activeId: 'photoreal' }), 'byrdit-open')).ok, false);
+  assert.equal((await run(mk({ activeId: 'byrdit-open' }), 'byrdit-open')).ok, true);
 });
 
 test('track_entity narration names aircraft callsign → registration → icao24', () => {

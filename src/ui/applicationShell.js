@@ -1410,7 +1410,12 @@ export class StyleManager extends ShellFacade {
     }
     await this._setMapStack(stackId);
     const state = this.mapStackController.getState();
-    const landed = state.activeId === stackId;
+    // `basemap-auto` is a mode, not a displayed map: choosing it shows
+    // Google 3D or Byrd-IT Open, so activeId is never the id itself.
+    const landed =
+      stackId === 'basemap-auto'
+        ? Boolean(state.activeId) && !state.lastError
+        : state.activeId === stackId;
     return {
       ok: landed,
       activeStack: state.activeId,

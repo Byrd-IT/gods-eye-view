@@ -1057,7 +1057,7 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // Panel adds timeout and named voice/provider targets; consolidated guidance
   // preserves the mission mapping and globe-rotation arguments.
   // S2 GhostMaps extends the generated layer enums; both feature contracts remain.
-  // Voice set_map_stack adds the byrdit-open and basemap-auto stacks (+93: 31499 -> 31592).
+  // Voice set_map_stack adds the byrdit-open and basemap-auto stacks (+93: 31499 -> 31592, the serialized tool block; pointAndAsk's +89 measures instructions + JSON.stringify(GEV_REALTIME_TOOLS)).
   assert.equal(block.length, 31592, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
