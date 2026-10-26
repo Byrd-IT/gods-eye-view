@@ -50,7 +50,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // History playback voice adds the control_history tool (last).
     // Sky view voice adds the control_sky tool (last).
     // Imagery-by-year voice adds the control_imagery tool (last).
-    '302355e52ef018b890d803ac407eca2fa2f7471c73b77225360077eaac4d000f',
+    // drawn/compare/waybackOff speaking rule, description only.
+    '06240dac95ac362c2a66eb2436d1aee2719c599376be51b7e0694a86d77e47b1',
   );
 });
 

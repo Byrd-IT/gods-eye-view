@@ -178,12 +178,11 @@ export async function openBasemap({
               createSplit: createNaipSplit,
             })
           : null;
-      const hookWindow =
-        viewer?.container?.ownerDocument?.defaultView ?? globalThis;
+      const hookWindow = viewer?.container?.ownerDocument?.defaultView ?? null;
       const imageryVoice = createImageryVoice({
         getNaip: () => naip,
         getCatalog: () => config.naip,
-        getWayback: () => hookWindow.__gevWayback ?? null,
+        getWayback: () => hookWindow?.__gevWayback ?? null,
         ensureOpen: () => ensureByrditOpen(controller),
         flyTo: (bounds) => flyToImageryBounds(viewer, Cesium, bounds),
       });

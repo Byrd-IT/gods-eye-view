@@ -1061,10 +1061,11 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // History playback voice adds control_history (+1803: 31592 -> 33395).
   // Sky view voice adds control_sky (+1492: 33395 -> 34887).
   // Imagery-by-year voice adds control_imagery (+1581: 34887 -> 36468).
-  assert.equal(block.length, 36468, 'serialized tool schema length drifted');
+  // drawn/compare/waybackOff speaking rule adds 151 characters (36468 -> 36619).
+  assert.equal(block.length, 36619, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'd7a81bb1b64ac6c0840a40b51aa1d2f2989374e060568dfdd5fc9e6a1f373564',
+    '0eef418e7f4d5f40cc475f2a8bbf204190263e7206ada013ff06bfbd4ff3341f',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

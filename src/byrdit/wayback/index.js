@@ -417,8 +417,7 @@ export async function attachWayback({
     );
   }
 
-  const hookWindow =
-    viewer?.container?.ownerDocument?.defaultView ?? globalThis;
+  const hookWindow = viewer?.container?.ownerDocument?.defaultView ?? null;
   const waybackSlot = {
     enable: api.enable,
     disable: api.disable,
@@ -437,7 +436,7 @@ export async function attachWayback({
       voice: createImageryVoice({
         getNaip: () => null,
         getCatalog: () => null,
-        getWayback: () => hookWindow.__gevWayback ?? null,
+        getWayback: () => hookWindow?.__gevWayback ?? null,
         ensureOpen: () => ensureByrditOpen(controller),
         flyTo: (bounds) => flyToImageryBounds(viewer, Cesium, bounds),
       }),
