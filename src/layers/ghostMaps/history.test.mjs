@@ -82,7 +82,6 @@ function fixtureKmz() {
   return new Uint8Array(Buffer.concat([...local, directory, end]));
 }
 
-
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);
 const C1 = '1'.repeat(40);
@@ -196,7 +195,10 @@ test('history time shows the archived edition by commit and blob', async (t) => 
   assert.equal(layer.getHistoryState().status, 'published');
   assert.equal(layer.getHistoryState().commit, C1);
   assert.equal(layer.getStats().history.committedAt, T1);
-  assert.match(layer.getRowControls().info, /^HISTORY · as published 2026-10-10 12:00Z/);
+  assert.match(
+    layer.getRowControls().info,
+    /^HISTORY · as published 2026-10-10 12:00Z/,
+  );
 });
 
 test('a later slider time swaps to the newer edition', async (t) => {
@@ -218,6 +220,26 @@ test('the same edition at another time reloads nothing', async (t) => {
   calls.length = 0;
   await layer.setHistoryTime(T1 + 1000);
   assert.deepEqual(calls, [['at', T1 + 1000]]);
+});
+
+test('an empty archive is nothing published yet, not a blank edition', async (t) => {
+  const { layer, mounted } = setup(t, {
+    getCatalogAt: async () => ({
+      history: true,
+      position: 'empty',
+      commit: null,
+      committedAt: null,
+      products: [],
+    }),
+  });
+  await layer.setHistoryTime(T1);
+  assert.equal(mounted.size, 0);
+  assert.equal(layer.getHistoryState().status, 'before');
+  assert.equal(layer.getHistoryState().commit, null);
+  assert.equal(
+    layer.getRowControls().info,
+    'HISTORY · nothing published yet at this time',
+  );
 });
 
 test('before the first commit nothing is drawn and the state says so', async (t) => {

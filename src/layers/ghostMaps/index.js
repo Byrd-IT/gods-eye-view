@@ -404,7 +404,9 @@ export function createGhostMapsLayer({
       const catalog = await source.getCatalogAt(at, { signal });
       if (seq !== _historySeq || !_enabled) return false;
       _historyState = {
-        status: catalog.position === 'before' ? 'before' : 'published',
+        // No commit means nothing had been published (before the first
+        // commit, or an empty mirror). A commit means that edition.
+        status: catalog.commit ? 'published' : 'before',
         t: at,
         commit: catalog.commit || null,
         committedAt: catalog.committedAt || null,

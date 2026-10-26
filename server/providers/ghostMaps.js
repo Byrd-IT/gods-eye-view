@@ -413,6 +413,7 @@ export function ghostMapsProxy({
         return json(res, 200, await archive.catalogAt(t));
       }
       const match = /^\/at\/file\/([a-z0-9-]{1,40})$/.exec(url.pathname);
+      if (!match) return json(res, 404, { error: 'unknown_route' });
       const found = await archive.fileAt(
         url.searchParams.get('c') ?? '',
         match[1],

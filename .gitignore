@@ -29,6 +29,8 @@ pinokio/.installed
 # Byrd-IT: generated every 15 min by scripts/export_usgs_water.py
 /public/byrdit/usgs_water/
 /public/byrdit/.usgs_water.*
+__pycache__/
+*.pyc
 
 # Transient: a release interrupted mid-assembly (npm run changelog recovers it)
 changelog.d/.assembling/
