@@ -302,8 +302,11 @@ export function attachBasemapSwitching({
         (error) => {
           const message = error?.message || String(error);
           // Record it where getState().lastError reads it, so a caller of
-          // setMapStack('basemap-auto') sees the failed auto switch.
-          controller._lastError = message;
+          // setMapStack('basemap-auto') sees the failed auto switch. Only
+          // while this job is still the current one: a superseded job must
+          // not overwrite what a newer pick reported. (The write emits no
+          // change event; the notice below is what the user sees.)
+          if (my === seq && !detached) controller._lastError = message;
           notify(message);
           return controller.getState();
         },
@@ -350,6 +353,9 @@ export function attachBasemapSwitching({
     timers.clearTimeout(dwellTimer);
     while (busy) await busy.catch(() => {});
     if (detached || mine !== selection) return controller.getState();
+    // A new selection starts clean: an error from an earlier background
+    // switch must not be reported as this selection's.
+    controller._lastError = null;
     const active = controller.getActiveId();
     const inStep =
       active === GOOGLE_STACK_ID

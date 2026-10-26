@@ -436,6 +436,10 @@ test('an automatic switch that throws is recorded in getState().lastError', asyn
   await w.fly(12_000);
   assert.match(w.notes.join('\n'), /tileset exploded/);
   assert.equal(w.controller.getState().lastError, 'tileset exploded');
+  // A later Auto selection that needs no switch starts clean.
+  await w.pick('basemap-auto');
+  await settle();
+  assert.equal(w.controller.getState().lastError, null);
 });
 
 test('fallback chain: open tiles failing -> Esri (last resort)', async () => {
