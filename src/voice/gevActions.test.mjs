@@ -20,6 +20,7 @@ import {
   normalizeStackId,
 } from './gevActions.js';
 import { MAP_STACKS } from '../mapStackController.js';
+import { BASEMAP_AUTO_STACK_ID, BYRDIT_OPEN_STACK_ID } from '../byrdit/basemap/stack.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
 import { presentResult } from './resultDisplay.js';
 import { attachVoiceResult } from './speech.js';
@@ -41,11 +42,36 @@ test('every live basemap is reachable by its own id — no enum value without a 
   assert.equal(normalizeStackId('esri imagery'), 'esri-imagery');
   // And the voice tool's enum must equal the set of live ids — no drift either way.
   const enumIds = GEV_REALTIME_TOOLS.find(tool => tool.name === 'set_map_stack').parameters.properties.stack.enum;
+  // Byrd-IT Open and Auto are registered by the GEV_BASEMAP flag, not in the
+  // static catalog, so the enum is the catalog plus exactly those two.
   assert.deepEqual(
     [...enumIds].sort(),
-    MAP_STACKS.map((s) => s.id).sort(),
-    'the set_map_stack voice enum and MAP_STACKS must name exactly the same basemaps',
+    [...MAP_STACKS.map((s) => s.id), BYRDIT_OPEN_STACK_ID, BASEMAP_AUTO_STACK_ID].sort(),
+    'the set_map_stack voice enum must be MAP_STACKS plus the Byrd-IT Open and Auto stacks',
   );
+});
+
+test('set_map_stack voice reaches the Byrd-IT Open and Auto stacks', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  for (const id of [BYRDIT_OPEN_STACK_ID, BASEMAP_AUTO_STACK_ID])
+    assert.equal(normalizeStackId(id), id);
+  for (const phrase of ['Byrd-IT map', 'byrd it open', 'Byrd-IT Open', 'byrdit map'])
+    assert.equal(normalizeStackId(phrase), BYRDIT_OPEN_STACK_ID, phrase);
+  for (const phrase of ['auto basemap', 'Auto', 'automatic basemap', 'auto map'])
+    assert.equal(normalizeStackId(phrase), BASEMAP_AUTO_STACK_ID, phrase);
+  assert.equal(normalizeStackId('bing aerial'), 'bing-aerial');
+  const { viewer } = createVoiceNavigationHarness();
+  const seen = [];
+  const styleManager = {
+    setMapStack: async (id) => (seen.push(id), { ok: true, activeStack: id }),
+  };
+  const runner = createActionRunner({ viewer, styleManager });
+  const a = await runner('set_map_stack', { stack: 'Byrd-IT map' });
+  const b = await runner('set_map_stack', { stack: 'auto basemap' });
+  assert.deepEqual(seen, [BYRDIT_OPEN_STACK_ID, BASEMAP_AUTO_STACK_ID]);
+  assert.equal(a.requested, BYRDIT_OPEN_STACK_ID);
+  assert.equal(b.requested, BASEMAP_AUTO_STACK_ID);
+  await assert.rejects(() => runner('set_map_stack', { stack: 'nonsense' }), /Unknown map stack/);
 });
 
 test('track_entity narration names aircraft callsign → registration → icao24', () => {

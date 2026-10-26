@@ -201,6 +201,21 @@ const STACK_ALIASES = new Map([
   ['road', 'osm'],
   ['roads', 'osm'],
   ['road map', 'osm'],
+  // Byrd-IT Open and the Auto override chip (src/byrdit/basemap/stack.js).
+  // Only in the controller registry when GEV_BASEMAP is on; otherwise
+  // setMapStack answers "Unknown map stack" with the available ids.
+  ['byrdit-open', 'byrdit-open'],
+  ['byrd-it open', 'byrdit-open'],
+  ['byrd it open', 'byrdit-open'],
+  ['byrd-it map', 'byrdit-open'],
+  ['byrd it map', 'byrdit-open'],
+  ['byrdit map', 'byrdit-open'],
+  ['byrd-it', 'byrdit-open'],
+  ['basemap-auto', 'basemap-auto'],
+  ['auto', 'basemap-auto'],
+  ['auto basemap', 'basemap-auto'],
+  ['automatic basemap', 'basemap-auto'],
+  ['auto map', 'basemap-auto'],
 ]);
 
 const FRAME_TARGETS = new Map([

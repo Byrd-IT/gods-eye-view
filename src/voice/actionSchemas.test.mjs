@@ -47,7 +47,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // S2 GhostMaps extends the generated layer enums.
     // Panel adds named voice targets and timeout; shared Panel/Cockpit guidance
     // is consolidated without changing either feature's arguments.
-    '423604c4c8745f67d4ba0b74e75f82996a042e07e205bc1f6ba354b167d1d658',
+    'd67dbf533a2f8b8b036d21bbc86ce731ffa2f1e2c36c53772787108025c22fd8',
   );
 });
 
@@ -132,6 +132,10 @@ test('all legacy action arguments are byte-identical after removing the delibera
     'stop',
   ]);
   motion.enum = motion.enum.filter((value) => value !== 'rotate_globe');
+  // Byrd-IT Open and Auto are additive set_map_stack values.
+  const stackEnum = property('set_map_stack').stack.enum;
+  assert.deepEqual(stackEnum.slice(-2), ['byrdit-open', 'basemap-auto']);
+  property('set_map_stack').stack.enum = stackEnum.slice(0, -2);
   const panels = property('set_panel_open').panelId;
   panels.enum = panels.enum.filter(
     (id) =>

@@ -364,6 +364,8 @@ const schemas = [
             'bing-labels',
             'esri-imagery',
             'osm',
+            'byrdit-open',
+            'basemap-auto',
           ],
         },
       },
