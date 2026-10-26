@@ -510,3 +510,43 @@ test('a preset that did not move the clock is not reported as done', async () =>
   assert.equal(r.ok, false);
   assert.match(r.error, /newer time change/);
 });
+
+test('a History-owned preset reports the clamped clock, not a newer change', async () => {
+  const requested = Date.parse('2026-10-26T23:41:00Z');
+  const clamped = Date.parse('2024-01-01T00:00:00Z');
+  const h = voiceFor({
+    provider: 'history',
+    presetResult: { ok: true, timeMs: requested },
+  });
+  h.sky.applyPreset = async (id) => {
+    h.calls.push(['preset', id]);
+    h.state.timeMs = clamped;
+    return h.state.presetResult;
+  };
+  h.state.active = true;
+  const r = await h.voice.preset('sunset');
+  assert.equal(r.ok, true);
+  assert.equal(r.historyMoved, true);
+  assert.equal(r.time, '2024-01-01T00:00:00.000Z');
+  assert.equal(r.timeMode, 'history');
+  assert.equal(r.error, undefined);
+});
+
+test('look returns unavailable if Sky is destroyed while satellites load', async () => {
+  const h = voiceFor({
+    satStatus: 'loading',
+    satelliteWaitMs: 200,
+    search: () => [hit('ISS (ZARYA)', 'satellite')],
+  });
+  h.state.active = true;
+  const pending = h.voice.look('the ISS');
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  h.state.destroyed = true;
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'lookAt'),
+    false,
+  );
+});

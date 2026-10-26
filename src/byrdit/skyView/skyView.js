@@ -1521,22 +1521,30 @@ export function mountSkyView({
   }
 
   /** Voice open: the map centre, with a fixed reason when it cannot. */
-  async function openHere() {
+  let opening = null;
+  function openHere() {
     if (active) return { ok: true, alreadyOpen: true };
-    const { width, height } = canvasSize();
-    const hit = pickAt(new CesiumApi.Cartesian2(width / 2, height / 2));
-    if (!hit)
-      return {
-        ok: false,
-        error: 'No ground at the screen centre. Move the map onto land first.',
-      };
-    const entered = await enterAt({ ...hit, source: 'map' });
-    if (!entered)
-      return {
-        ok: false,
-        error: 'Sky view is not available in this mode.',
-      };
-    return { ok: true };
+    if (opening) return opening;
+    opening = (async () => {
+      const { width, height } = canvasSize();
+      const hit = pickAt(new CesiumApi.Cartesian2(width / 2, height / 2));
+      if (!hit)
+        return {
+          ok: false,
+          error:
+            'No ground at the screen centre. Move the map onto land first.',
+        };
+      const entered = await enterAt({ ...hit, source: 'map' });
+      if (!entered)
+        return {
+          ok: false,
+          error: 'Sky view is not available in this mode.',
+        };
+      return { ok: true };
+    })().finally(() => {
+      opening = null;
+    });
+    return opening;
   }
 
   async function submitQuery() {

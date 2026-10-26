@@ -314,6 +314,31 @@ test('voice hook: open stands at the map centre, close leaves, destroy drops the
   assert.equal((await handle.voice.status()).ok, false);
 });
 
+test('openHere shares one enter when a second call overlaps the first', async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let samples = 0;
+  const { handle, viewer } = setup({ viewer: { pickHeight: 20000 } });
+  viewer.scene.sampleHeightMostDetailed = () => {
+    samples += 1;
+    return gate.then(() => [{ height: 12 }]);
+  };
+  const first = handle.openHere();
+  const second = handle.openHere();
+  assert.equal(samples, 1);
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.ok, true);
+  assert.equal(b.ok, true);
+  assert.equal(handle.active, true);
+  const third = await handle.openHere();
+  assert.equal(third.alreadyOpen, true);
+  assert.equal(samples, 1);
+  handle.destroy();
+});
+
 test('voice: time and a preset use the mounted clock', async () => {
   const voiceWindow = {};
   const { handle } = setup({ voiceWindow });

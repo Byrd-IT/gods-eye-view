@@ -35,7 +35,6 @@ export const SKY_PRESET_IDS = Object.freeze(PRESETS.map((preset) => preset.id));
 /** Spoken ISS names the catalogue stores as ISS (ZARYA). */
 const ISS_ALIASES = new Map([
   ['iss', 'ISS (ZARYA)'],
-  ['the iss', 'ISS (ZARYA)'],
   ['international space station', 'ISS (ZARYA)'],
   ['space station', 'ISS (ZARYA)'],
 ]);
@@ -161,27 +160,31 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         /* planets still search; constellations say they are not loaded */
       }
       const alias = issQuery(target);
+      let live = sky;
       if (alias && satelliteWaitMs && sky.satellites?.status === 'loading') {
         const start = Date.now();
         while (
+          handle() &&
           sky.satellites?.status === 'loading' &&
           Date.now() - start < satelliteWaitMs
         ) {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
+        live = handle();
+        if (!live) return unavailable();
       }
-      let results = alias ? sky.content.search(alias) : [];
-      if (!results.length) results = sky.content.search(target.trim());
+      let results = alias ? live.content.search(alias) : [];
+      if (!results.length) results = live.content.search(target.trim());
       const jumpable = results.filter((hit) => hit.score <= MAX_JUMP_SCORE);
       const best = jumpable[0];
       if (!best) {
-        const sat = sky.satellites?.status;
+        const sat = live.satellites?.status;
         return fail('Nothing matched that name', {
           ...(results.length
             ? { candidates: results.slice(0, 3).map((hit) => hit.label) }
             : {}),
           ...(sat === 'loading' ? { satellites: 'loading' } : {}),
-          ...(sky.content?.status === 'loading' ? { stars: 'loading' } : {}),
+          ...(live.content?.status === 'loading' ? { stars: 'loading' } : {}),
         });
       }
       const tied = jumpable.filter(
@@ -191,9 +194,9 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         return fail('More than one match. Ask which one.', {
           candidates: tied.slice(0, 5).map((hit) => hit.label),
         });
-      const at = sky.content.lookAt(best);
+      const at = live.content.lookAt(best);
       if (!at) return fail('No position for that object right now');
-      return done(sky, {
+      return done(live, {
         opened: opened.opened,
         target: best.label,
         kind: best.kind,
@@ -249,8 +252,10 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       const result = await sky.applyPreset(preset);
       if (!result?.ok)
         return fail(result?.reason || 'That preset was not found');
+      const historyOwned = sky.time?.provider === 'history';
       const clockMs = sky.time?.getTime?.();
       if (
+        !historyOwned &&
         Number.isFinite(result.timeMs) &&
         Number.isFinite(clockMs) &&
         Math.abs(clockMs - result.timeMs) > 1500
@@ -259,7 +264,8 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       return done(sky, {
         opened: opened.opened,
         preset,
-        ...(Number.isFinite(result.timeMs)
+        ...(historyOwned ? { historyMoved: true } : {}),
+        ...(!historyOwned && Number.isFinite(result.timeMs)
           ? { time: new Date(result.timeMs).toISOString() }
           : {}),
       });
