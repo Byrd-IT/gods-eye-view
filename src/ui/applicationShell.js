@@ -1404,7 +1404,7 @@ export class StyleManager extends ShellFacade {
     if (!target.available) {
       return {
         ok: false,
-        error: `${target.label} requires a Cesium ion token`,
+        error: target.unavailableReason || `${target.label} is unavailable`,
         activeStack: this.mapStackController.getActiveId(),
       };
     }

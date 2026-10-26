@@ -256,7 +256,7 @@ export const ACTION_DESCRIPTIONS = {
       properties: {
         stack: {
           description:
-            'photoreal = Google 3D. Use bing-aerial only when the user explicitly says "Bing aerial" — "satellite(s)" never means a basemap; only the explicit phrase "Esri" / "Esri imagery" means esri-imagery. byrdit-open = "Byrd-IT map"; basemap-auto = "auto basemap".',
+            'photoreal = Google 3D. Use bing-aerial only when the user explicitly says "Bing aerial" — "satellite(s)" never means a basemap; only the explicit phrase "Esri" / "Esri imagery" means esri-imagery. byrdit-open = "Byrd-IT map"; basemap-auto = "auto basemap" (both only when the Byrd-IT basemap is on).',
           $position: 2,
         },
       },

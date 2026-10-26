@@ -350,8 +350,8 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   const size = instructions.length + JSON.stringify(GEV_REALTIME_TOOLS).length;
   // Byrd-IT fork: + 297 characters for the four USGS water layers in
   // src/voice/layerManifest.js (upstream ceiling 52000).
-  // + 89 characters: voice set_map_stack enum gains byrdit-open and basemap-auto.
-  assert.ok(size <= 52000 + 297 + 89, `prompt size ${size}`);
+  // + 132 characters: voice set_map_stack enum gains byrdit-open and basemap-auto.
+  assert.ok(size <= 52000 + 297 + 132, `prompt size ${size}`);
 });
 
 

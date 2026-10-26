@@ -300,7 +300,11 @@ export function attachBasemapSwitching({
     return track(
       (action === 'GOOGLE' ? enterGoogle(my, options) : leaveGoogle(my)).catch(
         (error) => {
-          notify(error?.message || String(error));
+          const message = error?.message || String(error);
+          // Record it where getState().lastError reads it, so a caller of
+          // setMapStack('basemap-auto') sees the failed auto switch.
+          controller._lastError = message;
+          notify(message);
           return controller.getState();
         },
       ),

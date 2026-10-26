@@ -210,7 +210,6 @@ const STACK_ALIASES = new Map([
   ['byrd-it map', 'byrdit-open'],
   ['byrd it map', 'byrdit-open'],
   ['byrdit map', 'byrdit-open'],
-  ['byrd-it', 'byrdit-open'],
   ['basemap-auto', 'basemap-auto'],
   ['auto basemap', 'basemap-auto'],
   ['automatic basemap', 'basemap-auto'],

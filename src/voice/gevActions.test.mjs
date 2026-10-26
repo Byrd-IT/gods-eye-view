@@ -53,7 +53,6 @@ test('every live basemap is reachable by its own id — no enum value without a 
 });
 
 test('set_map_stack voice reaches the Byrd-IT Open and Auto stacks', async () => {
-  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
   for (const id of [BYRDIT_OPEN_STACK_ID, BASEMAP_AUTO_STACK_ID])
     assert.equal(normalizeStackId(id), id);
   for (const phrase of ['Byrd-IT map', 'byrd it open', 'Byrd-IT Open', 'byrdit map'])
@@ -93,6 +92,13 @@ test('real setMapStack reports the auto basemap as landed although it shows a co
   assert.deepEqual([ok.ok, ok.activeStack, ok.error], [true, 'photoreal', null]);
   const bad = await run(mk({ activeId: 'photoreal', lastError: 'boom' }), 'basemap-auto');
   assert.equal(bad.ok, false);
+  // An unavailable stack reports its own reason, not an ion-token message.
+  const noKey = mk({ activeId: 'esri-imagery' });
+  noKey.mapStackController.getStacks = () => [
+    { id: 'byrdit-open', label: 'Byrd-IT Open', available: false, unavailableReason: 'service is down' },
+  ];
+  const off = await run(noKey, 'byrdit-open');
+  assert.deepEqual([off.ok, off.error], [false, 'service is down']);
   // Concrete stacks still require activeId to equal the request.
   assert.equal((await run(mk({ activeId: 'photoreal' }), 'byrdit-open')).ok, false);
   assert.equal((await run(mk({ activeId: 'byrdit-open' }), 'byrdit-open')).ok, true);

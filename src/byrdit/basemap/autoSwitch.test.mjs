@@ -415,6 +415,29 @@ test('fallback chain: Google fails -> stays on Byrd-IT Open, no ion, backoff', a
   assert.ok(getGoogleRootCount() <= 3, `${getGoogleRootCount()} roots`);
 });
 
+test('an automatic switch that throws is recorded in getState().lastError', async () => {
+  const w = world();
+  w.viewer.camera.positionCartographic = { height: 3_000 };
+  await w.start();
+  assert.equal(w.controller.getActiveId(), 'photoreal');
+  assert.equal(w.controller.getState().lastError, null);
+  // The leave keeps Google drawn until the base has loaded: that show=true
+  // throws (hiding it, which the controller does itself, still works).
+  const tileset = w.session.tileset;
+  let shown = tileset.show;
+  Object.defineProperty(tileset, 'show', {
+    get: () => shown,
+    set: (value) => {
+      if (value) throw new Error('tileset exploded');
+      shown = value;
+    },
+  });
+  w.advance(6_000);
+  await w.fly(12_000);
+  assert.match(w.notes.join('\n'), /tileset exploded/);
+  assert.equal(w.controller.getState().lastError, 'tileset exploded');
+});
+
 test('fallback chain: open tiles failing -> Esri (last resort)', async () => {
   const w = world();
   await w.start();
