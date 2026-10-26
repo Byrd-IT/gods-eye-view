@@ -1,4 +1,9 @@
 import { t } from '../../i18n/index.js';
+import {
+  createImageryVoice,
+  ensureByrditOpen,
+  flyToImageryBounds,
+} from '../basemap/imageryVoice.js';
 import { createWaybackImageryProvider } from './layer.js';
 import { createWaybackPanel } from './panel.js';
 import {
@@ -412,9 +417,41 @@ export async function attachWayback({
     );
   }
 
+  const hookWindow =
+    viewer?.container?.ownerDocument?.defaultView ?? globalThis;
+  const waybackSlot = {
+    enable: api.enable,
+    disable: api.disable,
+    setIndex: api.setIndex,
+    settleNow: api.settleNow,
+    state: api.state,
+    catalog: () =>
+      releases.map((entry) => ({ release: entry.release, date: entry.date })),
+  };
+  if (hookWindow) hookWindow.__gevWayback = waybackSlot;
+  // Wayback can be on when the Open basemap flag is off. Install a voice
+  // then; the basemap attach replaces it with one that also knows NAIP.
+  let imagerySlot = null;
+  if (hookWindow && !hookWindow.__gevImagery) {
+    imagerySlot = {
+      voice: createImageryVoice({
+        getNaip: () => null,
+        getCatalog: () => null,
+        getWayback: () => hookWindow.__gevWayback ?? null,
+        ensureOpen: () => ensureByrditOpen(controller),
+        flyTo: (bounds) => flyToImageryBounds(viewer, Cesium, bounds),
+      }),
+    };
+    hookWindow.__gevImagery = imagerySlot;
+  }
+
   const detach = () => {
     if (destroyed) return;
     destroyed = true;
+    if (hookWindow?.__gevWayback === waybackSlot)
+      delete hookWindow.__gevWayback;
+    if (imagerySlot && hookWindow?.__gevImagery === imagerySlot)
+      delete hookWindow.__gevImagery;
     disable();
     for (const remove of removers) remove?.();
     panel?.destroy?.();

@@ -197,6 +197,7 @@ export function createApplicationTools({
     annotations,
     history: () => window.__gevHistorySwap?.voice ?? null,
     sky: () => window.__gevSky?.voice ?? null,
+    imagery: () => window.__gevImagery?.voice ?? null,
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });

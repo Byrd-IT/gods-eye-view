@@ -270,6 +270,7 @@ export function createGevActionRunner({
   readVoicePanelOperation = null,
   history = null,
   sky = null,
+  imagery = null,
 }) {
   // Voice enable times and analyst follow-up memory belong to this runner.
   // Speech builders turn results into say/display envelopes; callers extend
@@ -1309,6 +1310,10 @@ export function createGevActionRunner({
       return controlSky(sky?.(), args);
     }
 
+    if (name === 'control_imagery') {
+      return controlImagery(imagery?.(), args);
+    }
+
     if (name === 'control_cctv') {
       const action = String(args.action || '').toLowerCase();
       if (
@@ -1751,6 +1756,28 @@ async function controlSky(voice, args = {}) {
   // put a secret in the action field.
   const token = /^[a-z]{1,20}$/.test(action) ? action : 'missing';
   throw new Error(`Unknown sky action: ${token}`);
+}
+
+/**
+ * Voice aerial-year control (year / wayback / off / status) over the imagery
+ * voice adapter (imageryVoice.js, handed in as `imagery`).
+ */
+async function controlImagery(voice, args = {}) {
+  const action = String(args.action || '').toLowerCase();
+  const wrap = (result) => ({ action: 'control_imagery', ...result });
+  if (!voice)
+    return wrap({
+      ok: false,
+      error: 'Aerial imagery is not available in this host',
+    });
+  if (action === 'status') return wrap(await voice.status());
+  if (action === 'year')
+    return wrap(await voice.year({ year: args.year, county: args.county }));
+  if (action === 'wayback')
+    return wrap(await voice.wayback({ date: args.date }));
+  if (action === 'off') return wrap(await voice.off({ target: args.target }));
+  const token = /^[a-z]{1,20}$/.test(action) ? action : 'missing';
+  throw new Error(`Unknown imagery action: ${token}`);
 }
 
 /** Voice CCTV control over the cctv layer module's public surface. */

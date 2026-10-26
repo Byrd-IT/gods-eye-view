@@ -704,4 +704,38 @@ export const ACTION_DESCRIPTIONS = {
       },
     },
   },
+  control_imagery: {
+    description:
+      'Aerial imagery by year: NAIP and the historic or colour county sets (show 2018 aerial, NAIP 2024, Titus 1940). year uses the live catalog; an unknown year returns the valid years. county is optional and frames that county. wayback is only for Esri Wayback (wayback 2014), not for NAIP. latest or recent satellite imagery stays the recent-imagery layer. Switching the basemap stack stays set_map_stack. Say the resulting year and sets, not the request.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: {
+          description:
+            'year (needs year; county optional), wayback (needs date), off (target aerial, wayback, or both; default aerial), or status.',
+          $position: 2,
+        },
+        year: {
+          description:
+            'For year: the aerial year, such as 1940, 2018 or 2024. Not an enum; an unknown year returns the valid years from the live catalog.',
+          $position: 1,
+        },
+        county: {
+          description:
+            'For year, optional: a county with a set that year (Titus, Camp, Franklin, Wood, Upshur). Frames that set. Omit to show every set of the year.',
+          $position: 1,
+        },
+        date: {
+          description:
+            'For wayback: a year (2014) or YYYY-MM-DD. A year uses the latest release in that year. An unknown date returns the valid years.',
+          $position: 1,
+        },
+        target: {
+          description:
+            'For off: aerial (the year overlay), wayback, or both. Default aerial.',
+          $position: 1,
+        },
+      },
+    },
+  },
 };

@@ -2779,6 +2779,7 @@
       "src/byrdit/basemap/buildings.js",
       "src/byrdit/basemap/health.js",
       "src/byrdit/basemap/naip.js",
+      "src/byrdit/basemap/imageryVoice.js",
       "src/byrdit/basemap/naipConfig.js",
       "src/byrdit/basemap/naipSlider.js",
       "src/i18n/index.js",

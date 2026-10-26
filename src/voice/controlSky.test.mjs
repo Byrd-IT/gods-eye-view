@@ -45,10 +45,11 @@ function harness({ voiceOverrides = {}, sky = undefined } = {}) {
   return { runner, calls, voice };
 }
 
-test('control_sky is the last Realtime tool and does not reorder control_history', () => {
+test('control_sky stays just before control_imagery and does not reorder control_history', () => {
   const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);
-  assert.equal(names.at(-1), 'control_sky');
-  assert.equal(names.at(-2), 'control_history');
+  assert.equal(names.at(-1), 'control_imagery');
+  assert.equal(names.at(-2), 'control_sky');
+  assert.equal(names.at(-3), 'control_history');
   const tool = GEV_REALTIME_TOOLS.find((t) => t.name === 'control_sky');
   assert.deepEqual(tool.parameters.properties.action.enum, [
     ...SKY_VOICE_ACTIONS,

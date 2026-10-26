@@ -354,7 +354,11 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // + 2113 characters: the control_history tool and its routing sentence.
   // + 1812 characters: the control_sky tool and its routing sentence.
   // + 159 characters: the routing sentence keeps map ISS questions on track_entity.
-  assert.ok(size <= 52000 + 297 + 89 + 2113 + 1812 + 159, `prompt size ${size}`);
+  // + 2026 characters: the control_imagery tool and its routing sentence.
+  assert.ok(
+    size <= 52000 + 297 + 89 + 2113 + 1812 + 159 + 2026,
+    `prompt size ${size}`,
+  );
 });
 
 

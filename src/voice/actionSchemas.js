@@ -982,6 +982,39 @@ const schemas = [
       required: ['action'],
     },
   },
+  {
+    name: 'control_imagery',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['year', 'wayback', 'off', 'status'],
+        },
+        year: {
+          type: 'integer',
+          minimum: 1800,
+          maximum: 2999,
+        },
+        county: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 40,
+        },
+        date: {
+          type: 'string',
+          minLength: 4,
+          maxLength: 10,
+        },
+        target: {
+          type: 'string',
+          enum: ['aerial', 'wayback', 'both'],
+        },
+      },
+      required: ['action'],
+    },
+  },
 ];
 
 function freeze(value) {

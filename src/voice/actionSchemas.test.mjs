@@ -49,7 +49,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // is consolidated without changing either feature's arguments.
     // History playback voice adds the control_history tool (last).
     // Sky view voice adds the control_sky tool (last).
-    '17f1f4c2ad137d1d1691b30625e9fc3595481791b299cabed0fc59ec80d14e1b',
+    // Imagery-by-year voice adds the control_imagery tool (last).
+    '302355e52ef018b890d803ac407eca2fa2f7471c73b77225360077eaac4d000f',
   );
 });
 
@@ -114,6 +115,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'set_voice_inactivity_timeout',
         'control_history',
         'control_sky',
+        'control_imagery',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by

@@ -1060,10 +1060,11 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // Voice set_map_stack adds the byrdit-open and basemap-auto stacks (+93: 31499 -> 31592, the serialized tool block; pointAndAsk's +89 measures instructions + JSON.stringify(GEV_REALTIME_TOOLS)).
   // History playback voice adds control_history (+1803: 31592 -> 33395).
   // Sky view voice adds control_sky (+1492: 33395 -> 34887).
-  assert.equal(block.length, 34887, 'serialized tool schema length drifted');
+  // Imagery-by-year voice adds control_imagery (+1581: 34887 -> 36468).
+  assert.equal(block.length, 36468, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'e69322554fcee041e0af57a81d8c8e5e4573e86a05f09e6b4c08f8854d507051',
+    'd7a81bb1b64ac6c0840a40b51aa1d2f2989374e060568dfdd5fc9e6a1f373564',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

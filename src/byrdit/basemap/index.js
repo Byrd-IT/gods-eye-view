@@ -11,6 +11,11 @@ import { createGoogleSession } from './googleSession.js';
 import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
 import { attachBuildings } from './buildings.js';
 import { attachNaip } from './naip.js';
+import {
+  createImageryVoice,
+  ensureByrditOpen,
+  flyToImageryBounds,
+} from './imageryVoice.js';
 import { createNaipSlider, createNaipSplit } from './naipSlider.js';
 import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
 
@@ -173,7 +178,19 @@ export async function openBasemap({
               createSplit: createNaipSplit,
             })
           : null;
+      const hookWindow =
+        viewer?.container?.ownerDocument?.defaultView ?? globalThis;
+      const imageryVoice = createImageryVoice({
+        getNaip: () => naip,
+        getCatalog: () => config.naip,
+        getWayback: () => hookWindow.__gevWayback ?? null,
+        ensureOpen: () => ensureByrditOpen(controller),
+        flyTo: (bounds) => flyToImageryBounds(viewer, Cesium, bounds),
+      });
+      if (hookWindow) hookWindow.__gevImagery = { voice: imageryVoice };
       const detach = () => {
+        if (hookWindow?.__gevImagery?.voice === imageryVoice)
+          delete hookWindow.__gevImagery;
         if (health) health.onChange = null;
         naip?.();
         buildings?.();
