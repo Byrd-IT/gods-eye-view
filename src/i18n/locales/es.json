@@ -2976,6 +2976,8 @@
   "LIVE · GitHub {commit} · {message} · checked every {seconds}s": "EN VIVO · GitHub {commit} · {message} · comprobado cada {seconds} s",
   "GitHub {commit} · {message} · reconnecting for live updates": "GitHub {commit} · {message} · reconectando para recibir actualizaciones en vivo",
   "Connecting to the S2 GhostMaps repository…": "Conectando con el repositorio S2 GhostMaps…",
+  "HISTORY · as published {time} · GitHub {commit} · {message}": "HISTORIA · publicado el {time} · GitHub {commit} · {message}",
+  "HISTORY · nothing published yet at this time": "HISTORIA · aún no había nada publicado en este momento",
   "{count} placemarks": {
     "one": "{count} marcador",
     "many": "{count} de marcadores",

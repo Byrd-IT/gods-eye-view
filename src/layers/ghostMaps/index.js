@@ -144,6 +144,13 @@ export function createGhostMapsLayer({
   let _enabled = false;
   let _catalog = null;
   let _lastError = null;
+  // History playback (card G1): the slider time (ms) while history is on,
+  // what the archive answered for it, and a counter so a slow answer for an
+  // older time never replaces a newer one.
+  let _historyT = null;
+  let _historyState = null;
+  let _historySeq = 0;
+  let _historyListener = null;
   let _unsubscribe = null;
   let _stream = 'closed';
   let _queue = Promise.resolve();
@@ -193,8 +200,13 @@ export function createGhostMapsLayer({
   }
 
   /** Build one product's data source off-scene, then swap it in. */
-  async function load(product, signal) {
-    const bytes = await source.getFile(product.id, product.version, { signal });
+  async function load(product, signal, catalog = _catalog) {
+    // An archived edition is named by its commit and blob; never a live file.
+    const bytes = catalog?.history
+      ? await source.getFileAt(product.id, product.version, catalog.commit, {
+          signal,
+        })
+      : await source.getFile(product.id, product.version, { signal });
     signal.throwIfAborted();
     const entries = await readZipEntries(bytes);
     signal.throwIfAborted();
@@ -331,19 +343,22 @@ export function createGhostMapsLayer({
     const run = _queue.then(async () => {
       if (!_enabled || !_viewer || !_catalog) return;
       const signal = _lifetime.signal;
-      const products = new Map(_catalog.products.map((p) => [p.id, p]));
+      const catalog = _catalog;
+      const products = new Map(catalog.products.map((p) => [p.id, p]));
       for (const id of [..._loaded.keys()]) {
         const product = products.get(id);
         if (!product || !wanted(product)) unload(id);
       }
-      for (const product of _catalog.products) {
+      for (const product of catalog.products) {
         if (!wanted(product) || signal.aborted) continue;
+        // A newer catalog (a seek, LIVE) took over: it syncs next.
+        if (_catalog !== catalog) return;
         if (_loaded.get(product.id)?.version === product.version) continue;
         _loading.set(product.id, product.version);
         _failed.delete(product.id);
         notifyRow();
         try {
-          const next = await load(product, signal);
+          const next = await load(product, signal, catalog);
           if (signal.aborted || !_enabled) {
             next.urls.forEach((url) => URL.revokeObjectURL(url));
             return;
@@ -372,6 +387,56 @@ export function createGhostMapsLayer({
     });
     _queue = run.catch(() => {});
     return run;
+  }
+
+  function notifyHistory() {
+    try {
+      _historyListener?.(layer.getHistoryState());
+    } catch {
+      /* a broken listener must not stop the layer */
+    }
+  }
+
+  /** The catalog S2 had published at the history time (never a live one). */
+  async function refreshHistory(seq, signal) {
+    const at = _historyT;
+    try {
+      const catalog = await source.getCatalogAt(at, { signal });
+      if (seq !== _historySeq || !_enabled) return false;
+      _historyState = {
+        status: catalog.position === 'before' ? 'before' : 'published',
+        t: at,
+        commit: catalog.commit || null,
+        committedAt: catalog.committedAt || null,
+        firstCommittedAt: catalog.firstCommittedAt || null,
+        message: catalog.message || null,
+      };
+      notifyHistory();
+      await applyCatalog({ ...catalog, history: true });
+      return true;
+    } catch (error) {
+      if (signal?.aborted || seq !== _historySeq || !_enabled) return false;
+      console.warn('[Data:GhostMaps] history unavailable:', error);
+      // The archive cannot answer: show live and say so (never a silent mix).
+      _historyState = { status: 'unavailable', t: at };
+      notifyHistory();
+      await refreshLive(signal);
+      return false;
+    }
+  }
+
+  async function refreshLive(signal) {
+    try {
+      const catalog = await source.getCatalog({ signal });
+      if (!_enabled || signal?.aborted) return;
+      if (_historyT !== null && _historyState?.status !== 'unavailable') return;
+      await applyCatalog(catalog);
+    } catch (error) {
+      if (signal?.aborted || !_enabled) return;
+      console.warn('[Data:GhostMaps] catalog error:', error);
+      _lastError = error?.message || msg('GhostMaps catalog unavailable');
+      notifyRow();
+    }
   }
 
   function applyCatalog(catalog) {
@@ -568,7 +633,8 @@ export function createGhostMapsLayer({
       if (!_unsubscribe && typeof source.subscribe === 'function')
         _unsubscribe = source.subscribe(
           (catalog) => {
-            if (_enabled) void applyCatalog(catalog);
+            // History shows the archive; a live push waits for LIVE.
+            if (_enabled && _historyT === null) void applyCatalog(catalog);
           },
           (state) => {
             if (_stream === state) return;
@@ -593,6 +659,11 @@ export function createGhostMapsLayer({
 
     async update(_viewerArg, { signal } = {}) {
       if (!_enabled || signal?.aborted) return false;
+      // In history the poll asks the archive again (also after a failure).
+      if (_historyT !== null) {
+        await refreshHistory(++_historySeq, signal);
+        return true;
+      }
       try {
         const catalog = await source.getCatalog({ signal });
         if (!_enabled) return false;
@@ -615,6 +686,39 @@ export function createGhostMapsLayer({
       _rowListener = null;
     },
 
+    /**
+     * History playback: show the editions S2 had published at `tMs` (epoch
+     * ms), or go back to live with null / a non-number. The History driver
+     * calls this on every released time change; the commit mapping is on the
+     * server, from the local git mirror.
+     */
+    async setHistoryTime(tMs) {
+      const seq = ++_historySeq;
+      if (!Number.isFinite(tMs)) {
+        const was = _historyT !== null;
+        _historyT = null;
+        _historyState = null;
+        notifyHistory();
+        if (was && _enabled) await refreshLive(_lifetime.signal);
+        return;
+      }
+      _historyT = tMs;
+      if (_enabled) await refreshHistory(seq, _lifetime.signal);
+      else {
+        _historyState = null;
+        notifyHistory();
+      }
+    },
+
+    /** {status: 'published'|'before'|'unavailable', t, commit, ...} or null. */
+    getHistoryState() {
+      return _historyT === null || !_historyState ? null : { ..._historyState };
+    },
+
+    setHistoryListener(listener) {
+      _historyListener = listener;
+    },
+
     setRowControlsListener(listener) {
       _rowListener = listener;
     },
@@ -622,20 +726,33 @@ export function createGhostMapsLayer({
     getRowControls() {
       const products = _catalog?.products || [];
       const commit = _catalog?.commit;
-      const info = commit
-        ? _stream === 'open'
-          ? t('LIVE · GitHub {commit} · {message} · checked every {seconds}s', {
-              commit: commit.slice(0, 7),
-              message: _catalog.message || '—',
-              seconds: formatNumber(
-                Math.round((_catalog.pollMs || 15000) / 1000),
-              ),
-            })
-          : t('GitHub {commit} · {message} · reconnecting for live updates', {
+      const stamp = (ms) =>
+        new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+      const info = _catalog?.history
+        ? commit
+          ? t('HISTORY · as published {time} · GitHub {commit} · {message}', {
+              time: stamp(_catalog.committedAt),
               commit: commit.slice(0, 7),
               message: _catalog.message || '—',
             })
-        : t('Connecting to the S2 GhostMaps repository…');
+          : t('HISTORY · nothing published yet at this time')
+        : commit
+          ? _stream === 'open'
+            ? t(
+                'LIVE · GitHub {commit} · {message} · checked every {seconds}s',
+                {
+                  commit: commit.slice(0, 7),
+                  message: _catalog.message || '—',
+                  seconds: formatNumber(
+                    Math.round((_catalog.pollMs || 15000) / 1000),
+                  ),
+                },
+              )
+            : t('GitHub {commit} · {message} · reconnecting for live updates', {
+                commit: commit.slice(0, 7),
+                message: _catalog.message || '—',
+              })
+          : t('Connecting to the S2 GhostMaps repository…');
       return {
         chips: products.map((product) => {
           const loaded = _loaded.get(product.id);
@@ -683,6 +800,7 @@ export function createGhostMapsLayer({
         checkedAt: _catalog?.checkedAt || null,
         stream: _stream,
         loading: _loading.size > 0,
+        history: layer.getHistoryState(),
         error: _lastError || [..._failed.values()][0] || null,
         fallback: false,
       };

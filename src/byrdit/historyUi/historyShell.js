@@ -32,6 +32,7 @@ import { cameraViewBox } from '../history/flightView.js';
 import { createLiveFeedDraw } from './liveFeedDraw.js';
 import { createGreyPainter } from './greyPainter.js';
 import { createHistoryVoice } from './historyVoice.js';
+import { createGhostMapsHistory } from './ghostMapsHistory.js';
 
 const SCRUB_SELECTOR = '.gev-hist-scrub';
 
@@ -41,10 +42,13 @@ export function mountHistoryForShell(
 ) {
   const getDataManager = () => shell?._dataManager ?? null;
   let router = null;
+  // G1: GhostMaps as published at the slider time (the S4 git archive)
+  const ghostMaps = createGhostMapsHistory({ getDataManager });
   const chips = createLayerChips({
     feedChips: createFeedChips({ target: win }),
     getRouter: () => router,
     getDataManager,
+    getHistoryLayers: () => ghostMaps.historyLayers(),
   });
   const handle = mountHistoryControl({
     window: win,
@@ -80,9 +84,16 @@ export function mountHistoryForShell(
     getDataManager,
     client: createHistoryClient({ fetchImpl: router.innerFetch }),
   });
-  const offHistory = handle.subscribe((detail) => driver.onHistory(detail));
+  const offGhostChip = ghostMaps.subscribe(() =>
+    chips.refresh({ base: false }),
+  );
+  const offHistory = handle.subscribe((detail) => {
+    driver.onHistory(detail);
+    ghostMaps.onHistory(detail);
+  });
   // the control may already be in history (ht in the address)
   driver.onHistory(handle.getState());
+  ghostMaps.onHistory(handle.getState());
 
   // no refresh while the scrub is dragged; capture runs before the
   // control's own pointerdown (which already moves the time)
@@ -110,6 +121,8 @@ export function mountHistoryForShell(
     if (destroyed) return;
     destroyed = true;
     offHistory?.();
+    offGhostChip?.();
+    ghostMaps.destroy();
     root?.removeEventListener?.('pointerdown', onDown, true);
     root?.removeEventListener?.('pointerup', onUp, true);
     root?.removeEventListener?.('pointercancel', onUp, true);
@@ -135,13 +148,22 @@ export function mountHistoryForShell(
   });
   // QA / console hook, and the voice tool's way in
   if (win)
-    win.__gevHistorySwap = { router, driver, handle, liveDraw, painter, voice };
+    win.__gevHistorySwap = {
+      router,
+      driver,
+      handle,
+      liveDraw,
+      painter,
+      voice,
+      ghostMaps,
+    };
   return Object.assign(handle, {
     router,
     driver,
     liveDraw,
     painter,
     voice,
+    ghostMaps,
     destroy: destroyAll,
   });
 }

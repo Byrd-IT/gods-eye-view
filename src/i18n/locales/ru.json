@@ -3044,6 +3044,8 @@
   "LIVE · GitHub {commit} · {message} · checked every {seconds}s": "В ЭФИРЕ · GitHub {commit} · {message} · проверка каждые {seconds} с",
   "GitHub {commit} · {message} · reconnecting for live updates": "GitHub {commit} · {message} · переподключение для обновлений в реальном времени",
   "Connecting to the S2 GhostMaps repository…": "Подключение к репозиторию S2 GhostMaps…",
+  "HISTORY · as published {time} · GitHub {commit} · {message}": "ИСТОРИЯ · опубликовано {time} · GitHub {commit} · {message}",
+  "HISTORY · nothing published yet at this time": "ИСТОРИЯ · на это время ещё ничего не было опубликовано",
   "{count} placemarks": {
     "one": "{count} метка",
     "few": "{count} метки",

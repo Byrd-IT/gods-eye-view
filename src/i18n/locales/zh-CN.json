@@ -2874,6 +2874,8 @@
   "LIVE · GitHub {commit} · {message} · checked every {seconds}s": "实时 · GitHub {commit} · {message} · 每 {seconds} 秒检查一次",
   "GitHub {commit} · {message} · reconnecting for live updates": "GitHub {commit} · {message} · 正在重新连接以获取实时更新",
   "Connecting to the S2 GhostMaps repository…": "正在连接 S2 GhostMaps 仓库…",
+  "HISTORY · as published {time} · GitHub {commit} · {message}": "历史 · 发布于 {time} · GitHub {commit} · {message}",
+  "HISTORY · nothing published yet at this time": "历史 · 此时尚未发布任何内容",
   "{count} placemarks": {
     "other": "{count} 个地标"
   },

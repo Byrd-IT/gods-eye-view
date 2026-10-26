@@ -48,6 +48,44 @@ export function createGhostMapsSource({
     },
 
     /**
+     * History playback: the catalog S2 had published at `tMs` (epoch ms),
+     * read from the server's local archive. Never a live answer.
+     */
+    async getCatalogAt(tMs, { signal } = {}) {
+      const response = await fetchImpl(
+        `/api/ghostmaps/at?t=${encodeURIComponent(new Date(tMs).toISOString())}`,
+        { signal },
+      );
+      if (!response.ok)
+        throw new Error(
+          `GhostMaps archive unavailable (HTTP ${response.status})`,
+        );
+      const catalog = await readResponseJsonCapped(
+        response,
+        1024 * 1024,
+        signal,
+      );
+      if (!Array.isArray(catalog?.products))
+        throw new Error(msg('Malformed GhostMaps catalog'));
+      return catalog;
+    },
+
+    /** One archived product file, named by commit and blob sha. */
+    async getFileAt(id, version, commit, { signal } = {}) {
+      const response = await fetchImpl(
+        `/api/ghostmaps/at/file/${encodeURIComponent(id)}?c=${encodeURIComponent(commit)}&v=${encodeURIComponent(version)}`,
+        { signal },
+      );
+      if (!response.ok)
+        throw new Error(`GhostMaps file unavailable (HTTP ${response.status})`);
+      return readResponseBytesCapped(
+        response,
+        GHOSTMAPS_MAX_FILE_BYTES,
+        signal,
+      );
+    },
+
+    /**
      * Call `onCatalog(catalog)` for every catalog the server pushes, and
      * `onState('open' | 'connecting' | 'closed')` as the stream changes. The
      * browser's EventSource reconnects by itself. Returns an unsubscribe.

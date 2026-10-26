@@ -12,6 +12,11 @@ import {
   readResponseJsonCapped,
   readResponseTextCapped,
 } from './common/http.js';
+import { parseHistoryTime } from '../../src/layers/ghostMaps/historyAt.js';
+import {
+  ArchiveUnavailableError,
+  createGhostMapsArchive,
+} from './ghostMapsArchive.js';
 
 // S2 Underground GhostMaps (public GitHub repository of KMZ intel products).
 // The repository is not ours, so there is no webhook: the watcher reads the
@@ -355,7 +360,10 @@ export function createGhostMapsWatcher({
 }
 
 /** Same-origin GhostMaps routes for dev and preview. */
-export function ghostMapsProxy({ watcher = createGhostMapsWatcher() } = {}) {
+export function ghostMapsProxy({
+  watcher = createGhostMapsWatcher(),
+  archive = createGhostMapsArchive(),
+} = {}) {
   const json = (res, status, value) => {
     if (res.destroyed) return;
     res.writeHead(status, {
@@ -390,10 +398,51 @@ export function ghostMapsProxy({ watcher = createGhostMapsWatcher() } = {}) {
     res.on('error', close);
   }
 
+  /**
+   * History playback (card G1): the products S2 had published at a time, read
+   * from the local git mirror. No GitHub request, and the live watcher is not
+   * started by these routes.
+   *   GET /at?t=<ISO with zone | epoch ms>        the catalog at t
+   *   GET /at/file/<id>?c=<commit>&v=<blob sha>   one product file (immutable)
+   */
+  async function historyRoute(url, res) {
+    try {
+      if (url.pathname === '/at') {
+        const t = parseHistoryTime(url.searchParams.get('t') ?? '');
+        if (t === null) return json(res, 400, { error: 'bad_time' });
+        return json(res, 200, await archive.catalogAt(t));
+      }
+      const match = /^\/at\/file\/([a-z0-9-]{1,40})$/.exec(url.pathname);
+      const found = await archive.fileAt(
+        url.searchParams.get('c') ?? '',
+        match[1],
+        url.searchParams.get('v') ?? '',
+      );
+      if (!found) return json(res, 404, { error: 'unknown_product' });
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.google-earth.kmz',
+        'Content-Length': found.bytes.length,
+        'X-GhostMaps-Version': found.product.version,
+        // A commit + blob sha names one immutable file.
+        'Cache-Control': 'private, max-age=31536000, immutable',
+      });
+      return res.end(found.bytes);
+    } catch (error) {
+      if (error instanceof ArchiveUnavailableError)
+        return json(res, 503, { error: 'ghostmaps_archive_unavailable' });
+      return json(res, 502, { error: 'ghostmaps_archive_failed' });
+    }
+  }
+
   async function handler(req, res) {
     if (req.method !== 'GET')
       return json(res, 405, { error: 'method_not_allowed' });
     const url = new URL(req.url || '/', 'http://local');
+    if (
+      url.pathname === '/at' ||
+      /^\/at\/file\/[a-z0-9-]{1,40}$/.test(url.pathname)
+    )
+      return historyRoute(url, res);
     const match = /^\/file\/([a-z0-9-]{1,40})$/.exec(url.pathname);
     if (!['/catalog', '/events'].includes(url.pathname) && !match)
       return json(res, 404, { error: 'unknown_route' });
