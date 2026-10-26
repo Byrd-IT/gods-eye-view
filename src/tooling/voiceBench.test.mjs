@@ -193,6 +193,15 @@ test('gradeCoverage sorts turns into the four verdicts', () => {
   assert.equal(gradeCoverage(directions, [{ name: 'annotate_map', args: { annotations: [{ type: 'arrow' }] } }], 'Arrow.', tools).verdict, 'wrong-tool');
 });
 
+test('History phrases route playback to control_history and a live layer request away from it', () => {
+  assert.equal(byPhrase('Jump back to yesterday at 3 PM').expect, 'control_history');
+  assert.equal(byPhrase('Pause history playback').expect, 'control_history');
+  assert.equal(byPhrase('Go back to live').expect, 'control_history');
+  assert.equal(byPhrase('In history, only play flights').expect, 'control_history');
+  assert.equal(byPhrase('Only show flights').expect, 'set_layer_visibility');
+  assert.notEqual(byPhrase('Only show flights').expect, 'control_history');
+});
+
 test('every coverage item is well-formed and the suites stay the expected size', () => {
   assert.equal(COVERAGE_PROBE.length, 24);
   assert.ok(CORE_PHRASES.length >= 60);

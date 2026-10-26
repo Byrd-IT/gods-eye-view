@@ -3,7 +3,9 @@
  * voice control of History playback). One thin adapter over the mounted
  * control handle (historyControl.js) and the router (historyRouter.js);
  * the voice tool `control_history` (src/voice/gevActions.js) reaches it
- * through the shell hook `window.__gevHistorySwap.voice`.
+ * through `currentHistoryVoice()`, which the shell registers with
+ * `bindHistoryVoice`. The page hook `window.__gevHistorySwap` stays a
+ * QA handle and does not carry this adapter.
  *
  *   jump    move to a time (ISO 8601 with a zone, or minutes ago); enters
  *           History when live, snaps to recorded data like a scrub release
@@ -35,7 +37,25 @@ export const HISTORY_VOICE_ACTIONS = Object.freeze([
 const MAX_MINUTES_AGO = Math.floor(HISTORY_SPAN_MS / 60_000);
 const ZONE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-const ISO_HEAD = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?/;
+// End-anchored. A time of day must use T; a space is not ISO. The zone is
+// optional here so a missing zone still fails the zone check below, not this one.
+const ISO_HEAD =
+  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/i;
+
+let boundVoice = null;
+
+/** Register the mounted adapter. The returned unbind clears only that adapter. */
+export function bindHistoryVoice(voice) {
+  boundVoice = voice ?? null;
+  return () => {
+    if (boundVoice === voice) boundVoice = null;
+  };
+}
+
+/** The adapter the voice tool reads. Null when History is not mounted. */
+export function currentHistoryVoice() {
+  return boundVoice;
+}
 
 const fail = (error, extra = {}) => ({ ok: false, error, ...extra });
 
@@ -108,7 +128,7 @@ export function createHistoryVoice({
     status() {
       return handle() ? done() : unavailable();
     },
-    jump({ time, minutesAgo } = {}) {
+    async jump({ time, minutesAgo } = {}) {
       const h = handle();
       if (!h) return unavailable();
       const t = now();
@@ -125,7 +145,11 @@ export function createHistoryVoice({
       } else return fail('jump needs time (ISO 8601) or minutesAgo');
       const earliest = t - HISTORY_SPAN_MS;
       const clamped = ms > t ? 'future' : ms < earliest ? 'past' : null;
-      h.seek(Math.min(t, Math.max(earliest, ms)), { snap: true });
+      try {
+        await h.seek(Math.min(t, Math.max(earliest, ms)), { snap: true });
+      } catch {
+        // The control already recorded the failure. Report the time it holds.
+      }
       return done({
         requested: new Date(ms).toISOString(),
         ...(clamped ? { clamped } : {}),

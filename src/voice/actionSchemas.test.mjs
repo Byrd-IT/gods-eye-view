@@ -48,7 +48,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Panel adds named voice targets and timeout; shared Panel/Cockpit guidance
     // is consolidated without changing either feature's arguments.
     // History playback voice adds the control_history tool (last).
-    'b7a9180e595aea7355ebda35e2c4d27789c6161e2a46234ac5af05dbd1773426',
+    // History voice follow-up rewords feeds-only so it is not a live layer request.
+    'fc32f8ac661f7a5aa5c8a1377594deaef71fc4f8a195d01007eac33662c9e3b8',
   );
 });
 

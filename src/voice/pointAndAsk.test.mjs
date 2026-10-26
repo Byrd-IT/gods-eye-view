@@ -352,12 +352,14 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // src/voice/layerManifest.js (upstream ceiling 52000).
   // + 89 characters: voice set_map_stack enum gains byrdit-open and basemap-auto.
   // + 2113 characters: the control_history tool and its routing sentence.
-  assert.ok(size <= 52000 + 297 + 89 + 2113, `prompt size ${size}`);
+  // + 268 characters: feeds-only is a playback choice, not a live layer request.
+  assert.ok(size <= 52000 + 297 + 89 + 2113 + 268, `prompt size ${size}`);
 });
 
-
 test('after-tool speech allows returned items to answer requested lists and rankings', () => {
-  const rule = realtimeInstructions().split('\n').find(line => line.startsWith('AFTER TOOLS:'));
+  const rule = realtimeInstructions()
+    .split('\n')
+    .find((line) => line.startsWith('AFTER TOOLS:'));
   assert.match(rule, /requested analyst list or ranking/);
   assert.match(rule, /returned items.*returned values/);
   assert.match(rule, /keep their order/);

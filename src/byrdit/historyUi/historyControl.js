@@ -636,7 +636,10 @@ export function mountHistoryControl({
     emit();
   }
 
-  /** Move the history time; with snap, settle on the nearest recorded snap. */
+  /**
+   * Move the history time. With snap, returns the promise that settles on
+   * the nearest recorded snap (the time is the request until that resolves).
+   */
   function seek(ms, { snap = false } = {}) {
     if (!Number.isFinite(ms) || destroyed) return;
     if (s.mode !== 'history') enter(ms);
@@ -646,7 +649,7 @@ export function mountHistoryControl({
       writeUrl();
       emit();
     }
-    if (snap) snapNow();
+    if (snap) return snapNow();
   }
 
   async function snapNow() {

@@ -5,6 +5,7 @@ import { initGeoFileImport } from '../ui/geoFileImport.js';
 import { initImageryBoxTool } from '../ui/imageryBoxTool.js';
 import { createRecentImageryPanel } from '../ui/recentImagery.js';
 import { initGevVoiceCommands } from '../voice/gevRealtime.js';
+import { currentHistoryVoice } from '../byrdit/historyUi/historyVoice.js';
 import { installViews, isEmbeddedInline } from './embed.js';
 import { installScopeMask, destroyScopeMask } from '../scopeMask.js';
 import { installLayerReleaseTrim } from '../sceneCommandRelease.js';
@@ -195,7 +196,7 @@ export function createApplicationTools({
     dataManager,
     sceneDirector,
     annotations,
-    history: () => window.__gevHistorySwap?.voice ?? null,
+    history: () => currentHistoryVoice(),
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });

@@ -1661,7 +1661,9 @@ async function controlHistory(voice, args = {}, setLayer) {
     });
   if (action === 'status') return wrap(voice.status());
   if (action === 'jump')
-    return wrap(voice.jump({ time: args.time, minutesAgo: args.minutesAgo }));
+    return wrap(
+      await voice.jump({ time: args.time, minutesAgo: args.minutesAgo }),
+    );
   if (action === 'play') return wrap(voice.play());
   if (action === 'pause') return wrap(voice.pause());
   if (action === 'speed') return wrap(voice.speed(args.rate));
@@ -1689,6 +1691,18 @@ async function controlHistory(voice, args = {}, setLayer) {
         error: 'feeds needs at least one feed layer',
         feedLayers: known,
       });
+    // "only" drops every other History feed. That is a playback choice, not
+    // a live layer request: while the globe is live, point at the layer tool.
+    if (mode === 'only') {
+      const state = voice.status();
+      if (state?.mode === 'live')
+        return wrap({
+          ok: false,
+          mode: 'live',
+          error:
+            'History is live: use set_layer_visibility to show a layer, or jump to a time first',
+        });
+    }
     const plan = [
       ...wanted.map((layerId) => [layerId, mode !== 'remove']),
       ...(mode === 'only'

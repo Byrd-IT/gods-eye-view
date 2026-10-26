@@ -628,7 +628,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_history: {
     description:
-      'History playback of the recorded globe (up to two years back): jump to a past time or date, play, pause, change speed, return to live, choose which feeds play, or read status. Jump opens History when the globe is live. Say the resulting state, not the request.',
+      'History playback of the recorded globe (up to two years back): jump to a past time or date, play, pause, change speed, return to live, choose which feeds play, or read status. Jump opens History when the globe is live. feeds only needs History already open; while live, use set_layer_visibility or jump first. Say the resulting state, not the request.',
     $position: 1,
     parameters: {
       properties: {
@@ -659,7 +659,7 @@ export const ACTION_DESCRIPTIONS = {
         },
         feedMode: {
           description:
-            'For feeds: only (default) plays just the listed feeds and turns the other History feeds off; add turns the listed feeds on; remove turns them off.',
+            'For feeds: only (default) plays just the listed feeds and turns the other History feeds off, and only while History is open. While live, use set_layer_visibility or jump first. add turns the listed feeds on; remove turns them off.',
           $position: 2,
         },
       },

@@ -9,7 +9,7 @@ globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdle
 
 const FEEDS = ALL_HISTORY_ADAPTERS.map((a) => a.layerId);
 
-function harness({ failLayers = [], voiceOverrides = {} } = {}) {
+function harness({ failLayers = [], voiceOverrides = {}, mode = 'live' } = {}) {
   const viewer = {
     clock: { onTick: { addEventListener: () => () => {} } },
     scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
@@ -42,7 +42,7 @@ function harness({ failLayers = [], voiceOverrides = {} } = {}) {
     };
   const voice = {
     feedLayerIds: () => FEEDS,
-    status: rec('status', { mode: 'live' }),
+    status: rec('status', { mode }),
     jump: rec('jump', { mode: 'history' }),
     play: rec('play', { playing: true }),
     pause: rec('pause', { playing: false }),
@@ -118,17 +118,51 @@ test('control_history without a History in this host says so', async () => {
   }
 });
 
-test('feeds only: lists turn on, every other history feed turns off', async () => {
-  const h = harness();
+test('feeds only while History is open: lists turn on, every other history feed turns off', async () => {
+  const h = harness({ mode: 'history' });
   for (const id of ['transit', 'wind']) h.on.add(id);
   const r = await h.runner('control_history', { action: 'feeds', feeds: ['flights', 'ais-live-vessels'] });
   assert.equal(r.ok, true);
   assert.equal(r.feedMode, 'only');
-  assert.equal(r.mode, 'live', 'History state rides along');
+  assert.equal(r.mode, 'history', 'History state rides along');
   assert.deepEqual([...h.on].sort(), ['ais-live-vessels', 'flights']);
   assert.deepEqual(r.changed.filter((c) => c.enabled).map((c) => c.layerId), ['flights', 'ais-live-vessels']);
   assert.equal(r.changed.filter((c) => !c.enabled).length, FEEDS.length - 2);
   assert.deepEqual(h.calls.at(-1), ['status'], 'ends with the History state');
+});
+
+test('feeds only while History is live refuses and changes no layer', async () => {
+  const h = harness();
+  const r = await h.runner('control_history', { action: 'feeds', feeds: ['flights'], feedMode: 'ONLY' });
+  assert.equal(r.ok, false);
+  assert.equal(r.mode, 'live');
+  assert.match(r.error, /set_layer_visibility/);
+  assert.match(r.error, /jump/);
+  assert.equal(JSON.stringify(r).includes('flights'), false);
+  assert.deepEqual(h.order, []);
+  assert.equal(h.on.size, 0);
+});
+
+test('control_history jump waits for the History snap before answering', async () => {
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const h = harness({
+    voiceOverrides: {
+      jump: () => pending.then(() => ({ ok: true, time: '2026-10-10T12:00:00.000Z' })),
+    },
+  });
+  let done = false;
+  const result = h.runner('control_history', { action: 'jump', minutesAgo: 5 }).then((r) => {
+    done = true;
+    return r;
+  });
+  await Promise.resolve();
+  assert.equal(done, false);
+  release();
+  const r = await result;
+  assert.equal(done, true);
+  assert.equal(r.ok, true);
+  assert.equal(r.time, '2026-10-10T12:00:00.000Z');
 });
 
 test('feeds add turns only the named feeds on; remove turns only them off', async () => {

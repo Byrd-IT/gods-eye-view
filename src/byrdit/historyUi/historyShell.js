@@ -31,7 +31,7 @@ import { createHistoryClient } from './historyClient.js';
 import { cameraViewBox } from '../history/flightView.js';
 import { createLiveFeedDraw } from './liveFeedDraw.js';
 import { createGreyPainter } from './greyPainter.js';
-import { createHistoryVoice } from './historyVoice.js';
+import { bindHistoryVoice, createHistoryVoice } from './historyVoice.js';
 
 const SCRUB_SELECTOR = '.gev-hist-scrub';
 
@@ -105,10 +105,17 @@ export function mountHistoryForShell(
   }
 
   const destroyControl = handle.destroy.bind(handle);
+  // Voice (control_history): registered for the app, not hung on the QA global.
+  const voice = createHistoryVoice({
+    getHandle: () => handle,
+    getRouter: () => router,
+  });
+  const unbindVoice = bindHistoryVoice(voice);
   let destroyed = false;
   const destroyAll = () => {
     if (destroyed) return;
     destroyed = true;
+    unbindVoice();
     offHistory?.();
     root?.removeEventListener?.('pointerdown', onDown, true);
     root?.removeEventListener?.('pointerup', onUp, true);
@@ -128,14 +135,8 @@ export function mountHistoryForShell(
     if (win?.__gevHistorySwap?.router === router) delete win.__gevHistorySwap;
   };
   shell?._lifetime?.removers?.add?.(destroyAll);
-  // Voice (control_history): the adapter over the control and the router
-  const voice = createHistoryVoice({
-    getHandle: () => handle,
-    getRouter: () => router,
-  });
-  // QA / console hook, and the voice tool's way in
-  if (win)
-    win.__gevHistorySwap = { router, driver, handle, liveDraw, painter, voice };
+  // QA / console hook. The voice adapter is not on this object.
+  if (win) win.__gevHistorySwap = { router, driver, handle, liveDraw, painter };
   return Object.assign(handle, {
     router,
     driver,

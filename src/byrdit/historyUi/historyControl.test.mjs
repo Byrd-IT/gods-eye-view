@@ -198,6 +198,17 @@ test('ht round trip: a reload with the address restores the same moment; LIVE cl
   again.control.destroy();
 });
 
+test('seek with snap returns the promise that settles on recorded data', async () => {
+  const h = setup();
+  const asked = NOW - 3 * DAY_MS + 30_000;
+  const pending = h.control.seek(asked, { snap: true });
+  assert.equal(typeof pending?.then, 'function');
+  assert.equal(h.control.getState().timeMs, asked);
+  await pending;
+  assert.notEqual(h.control.getState().timeMs, asked);
+  h.control.destroy();
+});
+
 test('keyboard: Space toggles play, arrows step recorded snapshots, Shift = 10', async () => {
   const h = setup();
   h.q('.gev-hist-badge').click();

@@ -88,6 +88,13 @@ export const CORE_PHRASES = Object.freeze([
   { phrase: 'Stop the radio', expect: 'control_radio', args: { action: 'stop' }, typedArgs: [where('control_radio', (a) => a.action === 'stop')] },
   { phrase: 'When does the ISS pass over next?', expect: 'next_iss_pass' },
 
+  // — History playback —
+  { phrase: 'Jump back to yesterday at 3 PM', expect: 'control_history', typedArgs: [where('control_history', (a) => a.action === 'jump')] },
+  { phrase: 'Pause history playback', expect: 'control_history', typedArgs: [where('control_history', (a) => a.action === 'pause')] },
+  { phrase: 'Go back to live', expect: 'control_history', typedArgs: [where('control_history', (a) => a.action === 'live')] },
+  { phrase: 'In history, only play flights', expect: 'control_history', typedArgs: [where('control_history', (a) => a.action === 'feeds' && (a.feeds || []).includes('flights') && (a.feedMode ?? 'only') === 'only')] },
+  { phrase: 'Only show flights', expect: 'set_layer_visibility', typedArgs: [where('set_layer_visibility', (a) => a.layerId === 'flights' && a.enabled === true)] },
+
   // — annotations —
   { phrase: 'Annotate the Texas State Capitol and its grounds', expect: 'annotate_map', typedArgs: [where('annotate_map', (a) => (a.annotations || []).some((x) => x.type === 'area'))] },
   { phrase: 'Outline the state of Texas', expect: 'annotate_map', typedArgs: [where('annotate_map', (a) => (a.annotations || []).some((x) => x.type === 'area'))] },

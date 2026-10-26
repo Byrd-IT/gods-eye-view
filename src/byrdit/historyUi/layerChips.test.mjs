@@ -10,6 +10,7 @@ import { createFeedChips } from './feedChips.js';
 import { createHistoryRouter } from './historyRouter.js';
 import { mountHistoryControl } from './historyControl.js';
 import { mountHistoryForShell } from './historyShell.js';
+import { currentHistoryVoice } from './historyVoice.js';
 import { fixtureFetch, fixtureWorld } from './fixtures/b11Coverage.mjs';
 import {
   fakeClock,
@@ -269,6 +270,15 @@ test('mountHistoryForShell wires router + chips + driver: a seek refreshes the s
   try {
     assert.equal(removers.size, 1);
     assert.ok(handle.router && handle.driver);
+    assert.equal(win.__gevHistorySwap.voice, undefined);
+    assert.deepEqual(Object.keys(win.__gevHistorySwap).sort(), [
+      'driver',
+      'handle',
+      'liveDraw',
+      'painter',
+      'router',
+    ]);
+    assert.equal(currentHistoryVoice(), handle.voice);
     handle.seek(Date.now() - 2 * 3_600_000);
     await new Promise((r) => setTimeout(r, 400));
     await handle.driver.settle();
@@ -288,4 +298,5 @@ test('mountHistoryForShell wires router + chips + driver: a seek refreshes the s
   }
   assert.equal(handle.destroyed, true);
   assert.equal(win.__gevHistorySwap, undefined);
+  assert.equal(currentHistoryVoice(), null);
 });
