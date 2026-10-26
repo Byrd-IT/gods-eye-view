@@ -42,6 +42,8 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_HEAD =
   /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/i;
 
+const SNAP_WAIT_MS = 3_000;
+
 let boundVoice = null;
 
 /** Register the mounted adapter. The returned unbind clears only that adapter. */
@@ -92,6 +94,7 @@ export function createHistoryVoice({
   getHandle,
   getRouter = () => null,
   now = () => Date.now(),
+  snapWaitMs = SNAP_WAIT_MS,
 }) {
   const handle = () => {
     const h = getHandle?.();
@@ -145,14 +148,24 @@ export function createHistoryVoice({
       } else return fail('jump needs time (ISO 8601) or minutesAgo');
       const earliest = t - HISTORY_SPAN_MS;
       const clamped = ms > t ? 'future' : ms < earliest ? 'past' : null;
-      try {
-        await h.seek(Math.min(t, Math.max(earliest, ms)), { snap: true });
-      } catch {
-        // The control already recorded the failure. Report the time it holds.
-      }
+      const target = Math.min(t, Math.max(earliest, ms));
+      // A stalled /snapshots must not hold the voice turn. The control keeps
+      // snapping; the answer says the time it holds now is not settled yet.
+      const settle = Promise.resolve(h.seek(target, { snap: true })).then(
+        () => ({ snapped: true }),
+        () => ({ snapped: false }),
+      );
+      let timer;
+      const timed = new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ snapPending: true }), snapWaitMs);
+      });
+      const snap = await Promise.race([settle, timed]);
+      clearTimeout(timer);
+      if (!handle()) return unavailable();
       return done({
         requested: new Date(ms).toISOString(),
         ...(clamped ? { clamped } : {}),
+        ...(snap.snapPending ? { snapPending: true } : {}),
       });
     },
     play() {

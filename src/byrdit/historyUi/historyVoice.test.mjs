@@ -217,7 +217,54 @@ test('bindHistoryVoice is what the app reads; an older unbind does not clear a n
 });
 
 test('the app reads the bound adapter, not the page global', () => {
+  // Source guard, not a behavior test: createApplicationTools needs a live viewer.
   const tools = readFileSync(new URL('../../app/tools.js', import.meta.url), 'utf8');
   assert.match(tools, /currentHistoryVoice\(\)/);
   assert.doesNotMatch(tools, /__gevHistorySwap/);
+});
+
+test('jump answers if the snap never settles, and a destroyed control is not a success', async () => {
+  const clock = fakeClock(NOW);
+  const world = fixtureWorld(NOW);
+  const realFetch = fixtureFetch(world);
+  const hung = (input) => {
+    const url = new URL(String(typeof input === 'string' ? input : input.url), 'http://localhost');
+    if (url.pathname === '/api/history/snapshots') return new Promise(() => {});
+    return realFetch(input);
+  };
+  const mount = () => mountHistoryControl({
+    document: fakeDocument(),
+    window: fakeWindow(HREF, hung),
+    now: clock.now,
+    monotonic: clock.monotonic,
+    timers: clock.timers,
+  });
+  const control = mount();
+  const voice = createHistoryVoice({
+    getHandle: () => control,
+    getRouter: () => ({ adapters: [], getState: () => ({ swapped: [] }) }),
+    now: clock.now,
+    snapWaitMs: 40,
+  });
+  const started = Date.now();
+  const stalled = await voice.jump({ time: '2026-10-10T12:00:30Z' });
+  assert.ok(Date.now() - started < 2000, 'a hung snap must not hold the voice turn');
+  assert.equal(stalled.ok, true);
+  assert.equal(stalled.snapPending, true);
+  assert.equal(stalled.requested, '2026-10-10T12:00:30.000Z');
+  assert.equal(stalled.time, stalled.requested);
+  control.destroy();
+
+  const again = mount();
+  const voice2 = createHistoryVoice({
+    getHandle: () => again,
+    now: clock.now,
+    snapWaitMs: 40,
+  });
+  const gone = voice2.jump({ minutesAgo: 30 });
+  again.destroy();
+  const r = await gone;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.snapPending, undefined);
 });
