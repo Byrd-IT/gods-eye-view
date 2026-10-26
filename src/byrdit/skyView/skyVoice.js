@@ -155,7 +155,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
       let live = handle();
-      if (!live) return unavailable();
+      if (!live || live !== sky) return unavailable();
       try {
         await live.content?.ensureData?.();
       } catch {
@@ -214,7 +214,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
       const current = handle();
-      if (!current) return unavailable();
+      if (!current || current !== sky) return unavailable();
       if (live === true) {
         if (current.goLive?.() === false)
           return fail('History is setting the Sky time. Leave History first.');
@@ -244,7 +244,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
       const current = handle();
-      if (!current) return unavailable();
+      if (!current || current !== sky) return unavailable();
       current.content.setFlags({ lines: enabled }, { notify: true });
       return done(current, { opened: opened.opened });
     },
@@ -257,12 +257,14 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
       const current = handle();
-      if (!current) return unavailable();
+      if (!current || current !== sky) return unavailable();
       const result = await current.applyPreset(preset);
+      const after = handle();
+      if (!after) return unavailable();
       if (!result?.ok)
         return fail(result?.reason || 'That preset was not found');
-      const historyOwned = current.time?.provider === 'history';
-      const clockMs = current.time?.getTime?.();
+      const historyOwned = after.time?.provider === 'history';
+      const clockMs = after.time?.getTime?.();
       if (
         !historyOwned &&
         Number.isFinite(result.timeMs) &&
@@ -270,7 +272,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         Math.abs(clockMs - result.timeMs) > 1500
       )
         return fail('A newer time change won. Ask again.');
-      return done(current, {
+      return done(after, {
         opened: opened.opened,
         preset,
         ...(historyOwned ? { historyMoved: true } : {}),
