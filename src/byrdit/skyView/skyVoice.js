@@ -86,7 +86,7 @@ function issQuery(raw) {
  * @param {object} options
  *   getHandle () => mounted Sky view handle, or null
  */
-export function createSkyVoice({ getHandle }) {
+export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
   const handle = () => {
     const sky = getHandle?.();
     return sky && !sky.destroyed ? sky : null;
@@ -161,6 +161,15 @@ export function createSkyVoice({ getHandle }) {
         /* planets still search; constellations say they are not loaded */
       }
       const alias = issQuery(target);
+      if (alias && satelliteWaitMs && sky.satellites?.status === 'loading') {
+        const start = Date.now();
+        while (
+          sky.satellites?.status === 'loading' &&
+          Date.now() - start < satelliteWaitMs
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
       let results = alias ? sky.content.search(alias) : [];
       if (!results.length) results = sky.content.search(target.trim());
       const jumpable = results.filter((hit) => hit.score <= MAX_JUMP_SCORE);
@@ -175,7 +184,9 @@ export function createSkyVoice({ getHandle }) {
           ...(sky.content?.status === 'loading' ? { stars: 'loading' } : {}),
         });
       }
-      const tied = jumpable.filter((hit) => hit.score === best.score);
+      const tied = jumpable.filter(
+        (hit) => hit.score === best.score && hit.kind === best.kind,
+      );
       if (tied.length > 1)
         return fail('More than one match. Ask which one.', {
           candidates: tied.slice(0, 5).map((hit) => hit.label),
@@ -238,6 +249,13 @@ export function createSkyVoice({ getHandle }) {
       const result = await sky.applyPreset(preset);
       if (!result?.ok)
         return fail(result?.reason || 'That preset was not found');
+      const clockMs = sky.time?.getTime?.();
+      if (
+        Number.isFinite(result.timeMs) &&
+        Number.isFinite(clockMs) &&
+        Math.abs(clockMs - result.timeMs) > 1500
+      )
+        return fail('A newer time change won. Ask again.');
       return done(sky, {
         opened: opened.opened,
         preset,

@@ -110,11 +110,14 @@ function fakeSky(overrides = {}) {
   return { sky, calls, state };
 }
 
-function voiceFor(overrides) {
+function voiceFor(overrides = {}) {
   const fake = fakeSky(overrides);
   return {
     ...fake,
-    voice: createSkyVoice({ getHandle: () => fake.sky }),
+    voice: createSkyVoice({
+      getHandle: () => fake.sky,
+      satelliteWaitMs: overrides.satelliteWaitMs ?? 0,
+    }),
   };
 }
 
@@ -241,7 +244,7 @@ test('look refuses a tie, a weak substring, and a missing name, and does not mov
   const h = voiceFor({
     search: (query) => {
       if (query === 'Orion')
-        return [hit('Orion', 'constellation'), hit('Orion', 'star')];
+        return [hit('Orion', 'star'), hit('Orion', 'star')];
       if (query === 'Meissa') return [hit('Meissa', 'star', 3)];
       return [];
     },
@@ -476,4 +479,34 @@ test('look still finds the ISS when star data fails to load', async () => {
   const r = await h.voice.look('ISS');
   assert.equal(r.ok, true);
   assert.equal(r.target, 'ISS (ZARYA)');
+});
+
+test('look prefers a planet over a same-score satellite, and asks when one kind ties', async () => {
+  const h = voiceFor({
+    search: (query) => {
+      if (query === 'Venus')
+        return [hit('Venus', 'body'), hit('VENUS', 'satellite')];
+      if (query === 'Vega') return [hit('Vega', 'star'), hit('Vega', 'star')];
+      return [];
+    },
+  });
+  h.state.active = true;
+  const planet = await h.voice.look('Venus');
+  assert.equal(planet.ok, true);
+  assert.equal(planet.kind, 'body');
+  assert.equal(planet.target, 'Venus');
+  const tie = await h.voice.look('Vega');
+  assert.equal(tie.ok, false);
+  assert.deepEqual(tie.candidates, ['Vega', 'Vega']);
+});
+
+test('a preset that did not move the clock is not reported as done', async () => {
+  const h = voiceFor({
+    presetResult: { ok: true, timeMs: Date.parse('2026-10-26T23:41:00Z') },
+  });
+  h.sky.applyPreset = async () => h.state.presetResult;
+  h.state.active = true;
+  const r = await h.voice.preset('sunset');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /newer time change/);
 });

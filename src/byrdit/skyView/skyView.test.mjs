@@ -334,6 +334,19 @@ test('voice: time and a preset use the mounted clock', async () => {
   handle.destroy();
 });
 
+test('voice: look at Jupiter uses the real search index', async () => {
+  const { handle } = setup({ voiceWindow: {} });
+  const opened = await handle.voice.open();
+  assert.equal(opened.ok, true);
+  const looked = await handle.voice.look('Jupiter');
+  assert.equal(looked.ok, true, looked.error);
+  assert.equal(looked.target, 'Jupiter');
+  assert.equal(looked.kind, 'body');
+  assert.equal(typeof looked.azimuthDeg, 'number');
+  assert.equal(typeof looked.elevationDeg, 'number');
+  handle.destroy();
+});
+
 test('enter at typed lat, lon: eye at 1.7 m over unknown ground (0, flagged), inputs off, URL written; exit restores the camera to 1e-6', async () => {
   const { doc, viewer, timers, location, handle } = setup();
   const before = {
