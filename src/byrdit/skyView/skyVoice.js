@@ -154,18 +154,21 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         );
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
+      let live = handle();
+      if (!live) return unavailable();
       try {
-        await sky.content?.ensureData?.();
+        await live.content?.ensureData?.();
       } catch {
         /* planets still search; constellations say they are not loaded */
       }
+      live = handle();
+      if (!live) return unavailable();
       const alias = issQuery(target);
-      let live = sky;
-      if (alias && satelliteWaitMs && sky.satellites?.status === 'loading') {
+      if (alias && satelliteWaitMs && live.satellites?.status === 'loading') {
         const start = Date.now();
         while (
           handle() &&
-          sky.satellites?.status === 'loading' &&
+          live.satellites?.status === 'loading' &&
           Date.now() - start < satelliteWaitMs
         ) {
           await new Promise((resolve) => setTimeout(resolve, 50));
@@ -210,10 +213,12 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       if (!sky) return unavailable();
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
+      const current = handle();
+      if (!current) return unavailable();
       if (live === true) {
-        if (sky.goLive?.() === false)
+        if (current.goLive?.() === false)
           return fail('History is setting the Sky time. Leave History first.');
-        return done(sky, { opened: opened.opened, live: true });
+        return done(current, { opened: opened.opened, live: true });
       }
       const parsed = parseSkyTime(time);
       if (parsed.error) return fail(parsed.error);
@@ -223,12 +228,12 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
           : parsed.ms < SKY_TIME_MIN_MS
             ? 'past'
             : null;
-      if (sky.setTime?.(parsed.ms) === false)
+      if (current.setTime?.(parsed.ms) === false)
         return fail('Could not move the Sky time');
-      return done(sky, {
+      return done(current, {
         opened: opened.opened,
         ...(clamped ? { clamped } : {}),
-        ...(sky.time?.provider === 'history' ? { historyMoved: true } : {}),
+        ...(current.time?.provider === 'history' ? { historyMoved: true } : {}),
       });
     },
     async lines(enabled) {
@@ -238,8 +243,10 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         return fail('lines needs enabled true or false');
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
-      sky.content.setFlags({ lines: enabled }, { notify: true });
-      return done(sky, { opened: opened.opened });
+      const current = handle();
+      if (!current) return unavailable();
+      current.content.setFlags({ lines: enabled }, { notify: true });
+      return done(current, { opened: opened.opened });
     },
     async preset(id) {
       const sky = handle();
@@ -249,11 +256,13 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         return fail(`preset must be one of ${SKY_PRESET_IDS.join(', ')}`);
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
-      const result = await sky.applyPreset(preset);
+      const current = handle();
+      if (!current) return unavailable();
+      const result = await current.applyPreset(preset);
       if (!result?.ok)
         return fail(result?.reason || 'That preset was not found');
-      const historyOwned = sky.time?.provider === 'history';
-      const clockMs = sky.time?.getTime?.();
+      const historyOwned = current.time?.provider === 'history';
+      const clockMs = current.time?.getTime?.();
       if (
         !historyOwned &&
         Number.isFinite(result.timeMs) &&
@@ -261,7 +270,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         Math.abs(clockMs - result.timeMs) > 1500
       )
         return fail('A newer time change won. Ask again.');
-      return done(sky, {
+      return done(current, {
         opened: opened.opened,
         preset,
         ...(historyOwned ? { historyMoved: true } : {}),

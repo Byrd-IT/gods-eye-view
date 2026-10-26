@@ -1523,7 +1523,7 @@ export function mountSkyView({
   /** Voice open: the map centre, with a fixed reason when it cannot. */
   let opening = null;
   function openHere() {
-    if (active) return { ok: true, alreadyOpen: true };
+    if (active) return Promise.resolve({ ok: true, alreadyOpen: true });
     if (opening) return opening;
     opening = (async () => {
       const { width, height } = canvasSize();

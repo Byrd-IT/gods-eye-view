@@ -339,6 +339,18 @@ test('openHere shares one enter when a second call overlaps the first', async ()
   handle.destroy();
 });
 
+test('openHere returns a Promise when Sky is already open', async () => {
+  const { handle } = setup({ viewer: { pickHeight: 20000 } });
+  const first = await handle.openHere();
+  assert.equal(first.ok, true);
+  const again = handle.openHere();
+  assert.equal(again instanceof Promise, true);
+  const resolved = await again;
+  assert.equal(resolved.alreadyOpen, true);
+  assert.equal(resolved.ok, true);
+  handle.destroy();
+});
+
 test('voice: time and a preset use the mounted clock', async () => {
   const voiceWindow = {};
   const { handle } = setup({ voiceWindow });

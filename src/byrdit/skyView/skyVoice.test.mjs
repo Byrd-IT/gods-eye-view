@@ -550,3 +550,130 @@ test('look returns unavailable if Sky is destroyed while satellites load', async
     false,
   );
 });
+
+test('look returns unavailable if Sky is destroyed while star data loads', async () => {
+  const h = voiceFor({
+    satelliteWaitMs: 0,
+    search: () => [hit('Jupiter', 'planet')],
+  });
+  h.state.active = true;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  h.sky.content.ensureData = async () => {
+    h.calls.push(['ensureData']);
+    await gate;
+  };
+  const pending = h.voice.look('Jupiter');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  h.state.destroyed = true;
+  release();
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'search'),
+    false,
+  );
+  assert.equal(
+    h.calls.some((c) => c[0] === 'lookAt'),
+    false,
+  );
+});
+
+test('look returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor({
+    search: () => [hit('Jupiter', 'planet')],
+  });
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  h.sky.openHere = async () => {
+    h.calls.push(['openHere']);
+    await gate;
+    h.state.active = true;
+    return { ok: true };
+  };
+  const pending = h.voice.look('Jupiter');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  h.state.destroyed = true;
+  release();
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'ensureData' || c[0] === 'search'),
+    false,
+  );
+});
+
+async function destroyDuringOpen(h, run) {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  h.sky.openHere = async () => {
+    h.calls.push(['openHere']);
+    await gate;
+    h.state.active = true;
+    return { ok: true };
+  };
+  const pending = run();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  h.state.destroyed = true;
+  release();
+  return pending;
+}
+
+test('time returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor();
+  const r = await destroyDuringOpen(h, () =>
+    h.voice.time({ time: '2026-10-26T03:00:00Z' }),
+  );
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'setTime'),
+    false,
+  );
+});
+
+test('lines returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor();
+  const r = await destroyDuringOpen(h, () => h.voice.lines(false));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'setFlags'),
+    false,
+  );
+});
+
+test('preset returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor();
+  const r = await destroyDuringOpen(h, () => h.voice.preset('sunset'));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'preset'),
+    false,
+  );
+});
+
+test('a History-owned preset whose clock already matches still reports the move', async () => {
+  const matched = Date.parse('2026-10-26T23:41:00Z');
+  const h = voiceFor({
+    provider: 'history',
+    timeMs: matched,
+    presetResult: { ok: true, timeMs: matched },
+  });
+  h.state.active = true;
+  const r = await h.voice.preset('sunset');
+  assert.equal(r.ok, true);
+  assert.equal(r.historyMoved, true);
+  assert.equal(r.time, '2026-10-26T23:41:00.000Z');
+  assert.equal(r.timeMode, 'history');
+  assert.equal(r.error, undefined);
+});
