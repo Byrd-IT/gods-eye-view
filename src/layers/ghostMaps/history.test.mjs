@@ -307,15 +307,44 @@ test('an archive failure shows live and does not echo the error', async (t) => {
 });
 
 test('LIVE does not keep the history row if the live catalog fails', async (t) => {
-  const { layer } = setup(t, {
+  const { layer, mounted } = setup(t, {
     getCatalog: async () => {
       throw new Error('HTTP 503');
     },
   });
   await layer.setHistoryTime(T1);
   assert.match(layer.getRowControls().info, /^HISTORY /);
+  assert.equal(mounted.size, 1);
   await layer.setHistoryTime(null);
   assert.equal(layer.getHistoryState(), null);
+  assert.equal(layer.getRowControls().info.includes('HISTORY'), false);
+  assert.equal(mounted.size, 0, 'the archived edition left the globe');
+});
+
+test('a failed archive and a failed live fetch unload the previous edition', async (t) => {
+  let failArchive = false;
+  const { layer, mounted } = setup(t, {
+    getCatalogAt: async (tMs) => {
+      if (failArchive) throw new Error('archive down');
+      return {
+        history: true,
+        position: 'exact',
+        commit: C1,
+        committedAt: tMs,
+        message: 'Oct 10',
+        products: [{ id: 'cip', version: A, defaultOn: true }],
+      };
+    },
+    getCatalog: async () => {
+      throw new Error('live down');
+    },
+  });
+  await layer.setHistoryTime(T1);
+  assert.equal(mounted.size, 1);
+  failArchive = true;
+  await layer.setHistoryTime(T2);
+  assert.equal(layer.getHistoryState().status, 'unavailable');
+  assert.equal(mounted.size, 0);
   assert.equal(layer.getRowControls().info.includes('HISTORY'), false);
 });
 

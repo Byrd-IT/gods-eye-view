@@ -423,6 +423,7 @@ export function createGhostMapsLayer({
       // The archive cannot answer: show live and say so (never a silent mix).
       _historyState = { status: 'unavailable', t: at };
       notifyHistory();
+      await dropHistoryDraw();
       await refreshLive(signal);
       return false;
     }
@@ -447,6 +448,18 @@ export function createGhostMapsLayer({
     _lastError = catalog.error || null;
     notifyRow();
     return sync();
+  }
+
+  /** Unload a history edition before live, including when the live fetch fails. */
+  function dropHistoryDraw() {
+    if (!_catalog?.history && _loaded.size === 0) return Promise.resolve();
+    return applyCatalog({
+      products: [],
+      history: false,
+      commit: null,
+      committedAt: null,
+      message: null,
+    });
   }
 
   function toggleProduct(id) {
@@ -702,11 +715,10 @@ export function createGhostMapsLayer({
         _historyT = null;
         _historyState = null;
         notifyHistory();
-        // A failed live fetch must not leave the row on the history edition.
-        if (_catalog?.history) {
-          _catalog = null;
-          notifyRow();
-        }
+        // Clearing the catalog object is not enough: the archived edition is
+        // still in _loaded. An empty catalog goes through sync and unloads it,
+        // so a failed live fetch cannot leave an old edition on the globe.
+        await dropHistoryDraw();
         if (was && _enabled) await refreshLive(_lifetime.signal);
         return;
       }
