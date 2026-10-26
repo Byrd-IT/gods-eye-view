@@ -276,15 +276,34 @@ test('a live push is ignored while history is on, LIVE restores live', async (t)
   assert.equal(mounted.size, 1);
 });
 
-test('an archive failure shows live and reports unavailable', async (t) => {
-  const { layer, calls } = setup(t, {
+test('an archive failure shows live and does not echo the error', async (t) => {
+  const secret = 'Bearer synth-token-9f3a7c21';
+  const { layer } = setup(t, {
     getCatalogAt: async () => {
-      throw new Error('HTTP 503');
+      const error = new Error(`fetch failed ${secret}`);
+      error.cause = secret;
+      throw error;
+    },
+    getCatalog: async () => {
+      throw new Error(`live ${secret}`);
     },
   });
+  const logs = [];
+  t.mock.method(console, 'warn', (...args) =>
+    logs.push(args.map(String).join(' ')),
+  );
   await layer.setHistoryTime(T1);
   assert.equal(layer.getHistoryState().status, 'unavailable');
-  assert.ok(calls.some((c) => c[0] === 'live-catalog'));
+  assert.equal(layer.getStats().error, 'GhostMaps catalog unavailable');
+  const haystack = [
+    ...logs,
+    JSON.stringify(layer.getHistoryState()),
+    JSON.stringify(layer.getStats()),
+    JSON.stringify(layer.getRowControls()),
+  ].join('\n');
+  assert.equal(haystack.includes(secret), false);
+  assert.equal(haystack.includes('9f3a7c21'), false);
+  assert.match(logs.join('\n'), /history unavailable/);
 });
 
 test('a slow answer for an older time never replaces a newer one', async (t) => {

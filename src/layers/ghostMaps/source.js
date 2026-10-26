@@ -52,19 +52,27 @@ export function createGhostMapsSource({
      * read from the server's local archive. Never a live answer.
      */
     async getCatalogAt(tMs, { signal } = {}) {
-      const response = await fetchImpl(
-        `/api/ghostmaps/at?t=${encodeURIComponent(new Date(tMs).toISOString())}`,
-        { signal },
-      );
+      // A fetch failure's message can carry the URL. Never rethrow it.
+      let response;
+      try {
+        response = await fetchImpl(
+          `/api/ghostmaps/at?t=${encodeURIComponent(new Date(tMs).toISOString())}`,
+          { signal },
+        );
+      } catch {
+        throw new Error(msg('GhostMaps archive unavailable'));
+      }
       if (!response.ok)
         throw new Error(
           `GhostMaps archive unavailable (HTTP ${response.status})`,
         );
-      const catalog = await readResponseJsonCapped(
-        response,
-        1024 * 1024,
-        signal,
-      );
+      let catalog;
+      try {
+        catalog = await readResponseJsonCapped(response, 1024 * 1024, signal);
+      } catch (error) {
+        if (error?.code === 'RESPONSE_TOO_LARGE') throw error;
+        throw new Error(msg('Malformed GhostMaps catalog'));
+      }
       if (!Array.isArray(catalog?.products))
         throw new Error(msg('Malformed GhostMaps catalog'));
       return catalog;
@@ -72,17 +80,27 @@ export function createGhostMapsSource({
 
     /** One archived product file, named by commit and blob sha. */
     async getFileAt(id, version, commit, { signal } = {}) {
-      const response = await fetchImpl(
-        `/api/ghostmaps/at/file/${encodeURIComponent(id)}?c=${encodeURIComponent(commit)}&v=${encodeURIComponent(version)}`,
-        { signal },
-      );
+      let response;
+      try {
+        response = await fetchImpl(
+          `/api/ghostmaps/at/file/${encodeURIComponent(id)}?c=${encodeURIComponent(commit)}&v=${encodeURIComponent(version)}`,
+          { signal },
+        );
+      } catch {
+        throw new Error(msg('GhostMaps file unavailable'));
+      }
       if (!response.ok)
         throw new Error(`GhostMaps file unavailable (HTTP ${response.status})`);
-      return readResponseBytesCapped(
-        response,
-        GHOSTMAPS_MAX_FILE_BYTES,
-        signal,
-      );
+      try {
+        return await readResponseBytesCapped(
+          response,
+          GHOSTMAPS_MAX_FILE_BYTES,
+          signal,
+        );
+      } catch (error) {
+        if (error?.code === 'RESPONSE_TOO_LARGE') throw error;
+        throw new Error(msg('GhostMaps file unavailable'));
+      }
     },
 
     /**

@@ -416,9 +416,10 @@ export function createGhostMapsLayer({
       notifyHistory();
       await applyCatalog({ ...catalog, history: true });
       return true;
-    } catch (error) {
+    } catch {
       if (signal?.aborted || seq !== _historySeq || !_enabled) return false;
-      console.warn('[Data:GhostMaps] history unavailable:', error);
+      // The thrown error can be a fetch failure whose message holds a URL.
+      console.warn('[Data:GhostMaps] history unavailable');
       // The archive cannot answer: show live and say so (never a silent mix).
       _historyState = { status: 'unavailable', t: at };
       notifyHistory();
@@ -433,10 +434,10 @@ export function createGhostMapsLayer({
       if (!_enabled || signal?.aborted) return;
       if (_historyT !== null && _historyState?.status !== 'unavailable') return;
       await applyCatalog(catalog);
-    } catch (error) {
+    } catch {
       if (signal?.aborted || !_enabled) return;
-      console.warn('[Data:GhostMaps] catalog error:', error);
-      _lastError = error?.message || msg('GhostMaps catalog unavailable');
+      console.warn('[Data:GhostMaps] catalog error');
+      _lastError = msg('GhostMaps catalog unavailable');
       notifyRow();
     }
   }
