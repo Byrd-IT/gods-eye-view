@@ -780,6 +780,38 @@ test('preset returns unavailable if a different Sky is mounted while opening', a
   );
 });
 
+test('preset returns unavailable if a different Sky is mounted during applyPreset', async () => {
+  const pair = replaceableVoice();
+  pair.opened.state.active = true;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  pair.opened.sky.applyPreset = async (id) => {
+    pair.opened.calls.push(['preset', id]);
+    await gate;
+    if (
+      pair.opened.state.presetResult?.ok &&
+      Number.isFinite(pair.opened.state.presetResult.timeMs)
+    )
+      pair.opened.state.timeMs = pair.opened.state.presetResult.timeMs;
+    return pair.opened.state.presetResult;
+  };
+  const pending = pair.voice.preset('sunset');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  pair.replace();
+  release();
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.preset, undefined);
+  assert.equal(r.time, undefined);
+  assert.equal(
+    pair.replacement.calls.some((c) => c[0] === 'preset'),
+    false,
+  );
+});
+
 test('look returns unavailable if a different Sky is mounted while opening', async () => {
   const pair = replaceableVoice();
   pair.replacement.state.search = () => [hit('Jupiter', 'planet')];

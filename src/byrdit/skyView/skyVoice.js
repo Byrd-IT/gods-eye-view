@@ -260,7 +260,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       if (!current || current !== sky) return unavailable();
       const result = await current.applyPreset(preset);
       const after = handle();
-      if (!after) return unavailable();
+      if (!after || after !== current) return unavailable();
       if (!result?.ok)
         return fail(result?.reason || 'That preset was not found');
       const historyOwned = after.time?.provider === 'history';
