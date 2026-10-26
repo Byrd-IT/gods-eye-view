@@ -113,6 +113,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'set_cyber_sonar',
         'set_voice_inactivity_timeout',
         'control_history',
+        'control_sky',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by
