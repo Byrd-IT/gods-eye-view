@@ -2,6 +2,7 @@ import { HISTORY_INDICES as IDX } from './historyEs.js';
 import {
   COLLAPSE_CONCURRENCY,
   COLLAPSE_FANOUT,
+  createCutMemo,
   latestPerKey,
   mapLimit,
 } from './historyCollapse.js';
@@ -54,6 +55,31 @@ function geoBox(bbox) {
 
 const sourceOf = (hit) => hit?._source ?? {};
 
+/**
+ * Vessel position fields with their mapped types (field caps over
+ * gev-history-vessels + -vessels-noaa, 2026-10-18; all have doc values):
+ * read from doc values, not the TSDS stored _source (t_5dc0e0c3).
+ */
+export const VESSEL_DOC_VALUES = Object.freeze({
+  mmsi: 'keyword',
+  '@timestamp': 'date',
+  location: 'geo_point',
+  sog_kn: 'float',
+  cog_deg: 'float',
+  heading_deg: 'float',
+  source: 'keyword',
+});
+
+/** Vessel-static fields read per mmsi (mapping 2026-10-18, all doc values). */
+export const VESSEL_STATIC_DOC_VALUES = Object.freeze({
+  mmsi: 'keyword',
+  name: 'keyword',
+  imo: 'keyword',
+  ship_type: 'keyword',
+  destination: 'keyword',
+  '@timestamp': 'date',
+});
+
 export function insideBbox(doc, bbox) {
   if (!bbox) return true;
   const la = doc?.location?.lat;
@@ -83,24 +109,38 @@ const newestFirst = (a, b) =>
  * @param {ReturnType<import('./historyEs.js').createHistoryEsClient>} options.es
  */
 export function createLatestSlices({ es }) {
+  const cutMemo = createCutMemo();
   /** Newest doc per key in the window, then the exact bbox rule above. */
   async function newestIn(
     index,
-    { window, extra = [], field, bbox, _source, probe = false },
+    {
+      window,
+      extra = [],
+      field,
+      bbox,
+      _source,
+      probe = false,
+      docValues = null,
+      lane = null,
+    },
   ) {
     if (!bbox) {
       return latestPerKey(es, index, {
         filter: [...window, ...extra],
         field,
         _source,
+        docValues,
         probe,
         concurrency: probe ? COLLAPSE_FANOUT : COLLAPSE_CONCURRENCY,
+        // t_5dc0e0c3: a global lane starts from its learned cuts (no probe)
+        memo: lane ? cutMemo.lane(lane) : null,
       });
     }
     const cand = await latestPerKey(es, index, {
       filter: [...window, ...extra, ...geoBox(bbox)],
       field,
       _source,
+      docValues,
     });
     const keys = [
       ...new Set(cand.hits.map((h) => sourceOf(h)[field]).filter(Boolean)),
@@ -112,6 +152,7 @@ export function createLatestSlices({ es }) {
           filter: [...window, ...extra, { terms: { [field]: part } }],
           field,
           _source,
+          docValues,
         }),
       ),
     );
@@ -143,6 +184,9 @@ export function createLatestSlices({ es }) {
             'destination',
             '@timestamp',
           ],
+          // t_5dc0e0c3: up to 12 k statics per answer; doc values (all
+          // keyword/date, ignore_above 1024) parse a third fewer bytes
+          docValues: VESSEL_STATIC_DOC_VALUES,
         }),
       ),
     );
@@ -160,6 +204,10 @@ export function createLatestSlices({ es }) {
       bbox,
       // ~32 k vessels in 35 min (2026-10-14): never one page
       probe: true,
+      // t_5dc0e0c3: doc values (every field below has them; TSDS stored
+      // _source is the slow read) and learned cuts for the global lane
+      docValues: VESSEL_DOC_VALUES,
+      lane: 'vessels',
       _source: [
         'mmsi',
         '@timestamp',
