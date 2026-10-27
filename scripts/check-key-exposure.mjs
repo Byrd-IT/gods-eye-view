@@ -23,6 +23,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { decodeGoogleKey } from '../src/byrdit/googleKeyCodec.js';
+import { basemapConfigFindings } from '../src/byrdit/basemap/configSafety.js';
 
 const KEY_NAMES = ['GOOGLE_MAPS_API_KEY', 'GOOGLE_MAPS_SERVER_API_KEY', 'CESIUM_ION_TOKEN', 'MAPILLARY_CLIENT_TOKEN'];
 const PATTERNS = { 'AIza-shaped': /AIza[0-9A-Za-z_-]{30,}/g, 'MLY-shaped': /MLY\|\d{8,}\|[0-9a-f]{20,}/gi };
@@ -87,6 +88,8 @@ async function crawl() {
     '/api/google/tiles-token',
     '/config',
     '/manifest.webmanifest',
+    '/basemap/config.json',
+    '/basemap/health.json',
   ];
   queue.push(...jsonRoutes);
   const ref = /(?:from\s*|import\s*\(\s*|import\s+|src=|href=|url\()["']?(\/[^"')\s>]+)/g;
@@ -116,6 +119,48 @@ async function crawl() {
   }
   report.crawled = seen.size;
   await checkGoogleRoutes(origin);
+  await checkBasemapConfig(origin);
+}
+
+/**
+ * BASEMAP.md 4.5: /basemap/config.json and /basemap/health.json (only served
+ * with GEV_BASEMAP=1) hold no credentials: no credential-named field, no
+ * key/token-shaped value, no absolute upstream URL. Counts and field paths
+ * only.
+ */
+async function checkBasemapConfig(origin) {
+  for (const [path, name, reportKey] of [
+    ['/basemap/config.json', 'basemap config', 'basemapConfig'],
+    ['/basemap/health.json', 'basemap health', 'basemapHealth'],
+  ]) {
+    const res = await fetch(`${origin}${path}`, {
+      headers: { Accept: 'application/json' },
+    });
+    const type = res.headers.get('content-type') ?? '';
+    const result = { status: res.status, served: false };
+    if (res.ok && /json/.test(type)) {
+      result.served = true;
+      let json = null;
+      try {
+        json = await res.json();
+      } catch {
+        result.parseError = true;
+      }
+      const findings = basemapConfigFindings(json);
+      result.credentialFields = findings.credentialFields.length;
+      result.credentialValues = findings.credentialValues.length;
+      result.externalUrls = findings.externalUrls.length;
+      const failures = report.contractFailures ?? (report.contractFailures = []);
+      if (result.parseError) failures.push(`${name} is not JSON`);
+      if (findings.credentialFields.length)
+        failures.push(`${name} credential fields: ${findings.credentialFields.join(',')}`);
+      if (findings.credentialValues.length)
+        failures.push(`${name} credential-shaped values: ${findings.credentialValues.join(',')}`);
+      if (findings.externalUrls.length)
+        failures.push(`${name} absolute URLs: ${findings.externalUrls.join(',')}`);
+    } else await res.body?.cancel();
+    report[reportKey] = result;
+  }
 }
 
 /** Endpoint contract checks. Counts/booleans only; never prints a key. */

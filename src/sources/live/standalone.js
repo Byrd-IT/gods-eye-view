@@ -33,9 +33,7 @@ function openSkyError(response) {
     const reasons = {
       oauth_invalid_or_missing: 'OpenSky OAuth client missing/invalid',
       oauth_invalid_credentials: 'OpenSky OAuth rejected credentials',
-      basic_invalid_credentials: 'OpenSky username/password rejected',
-      missing_basic_creds: 'OpenSky auth missing',
-      missing_oauth_and_basic_creds: 'OpenSky auth missing',
+      missing_oauth_creds: 'OpenSky auth missing',
       auth_required: 'OpenSky auth required',
       forced_anonymous: 'OpenSky auth required',
     };
@@ -67,6 +65,7 @@ export function createFlightSource({
   now = () => Date.now(),
 } = {}) {
   return {
+    // i18n-ignore: feed source name, replaced by the provider from each snapshot and reported to AI tools
     label: 'Flights',
     async getSnapshot(query = {}, { signal } = {}) {
       const params = new URLSearchParams();
@@ -127,8 +126,12 @@ export function createFlightSource({
 export function createMilitarySource({
   fetchImpl = defaultFetch,
   now = () => Date.now(),
+  // Byrd-IT fork: the browser keeps getTrack for the History scrubber (B12e);
+  // the AI tool services pass false (upstream: military track is unsupported).
+  trackHistory = true,
 } = {}) {
   return {
+    // i18n-ignore: feed source name, replaced by the provider from each snapshot and reported to AI tools
     label: 'Military aircraft',
     async getIdentities(_query = {}, { signal } = {}) {
       const { response, payload } = await readResponse(
@@ -159,26 +162,32 @@ export function createMilitarySource({
         status: response.status,
       };
     },
-    async getTrack(reference, { signal } = {}) {
-      const { response, payload } = await readResponse(
-        fetchImpl,
-        '/api/military/track?hex=' + encodeURIComponent(reference),
-        { signal },
-        'Military aircraft',
-      );
-      if (!response.ok) throw httpError(response, 'Military aircraft');
-      const baseTimeMs = epoch(payload?.timestamp, 1000);
-      return {
-        records:
-          baseTimeMs == null
-            ? []
-            : normalizeAircraftTrack(payload?.trace, {
-                baseTimeMs,
-                readsb: true,
-              }),
-        complete: false,
-      };
-    },
+    // Byrd-IT fork: getTrack stays so the History scrubber (B12e) can answer
+    // the tracked aircraft's recorded [t-6h, t] track through the history
+    // router. Live, /api/military/track is upstream's 503 refusal and the
+    // tracking layer keeps its accumulated trail.
+    ...(trackHistory && {
+      async getTrack(reference, { signal } = {}) {
+        const { response, payload } = await readResponse(
+          fetchImpl,
+          '/api/military/track?hex=' + encodeURIComponent(reference),
+          { signal },
+          'Military aircraft',
+        );
+        if (!response.ok) throw httpError(response, 'Military aircraft');
+        const baseTimeMs = epoch(payload?.timestamp, 1000);
+        return {
+          records:
+            baseTimeMs == null
+              ? []
+              : normalizeAircraftTrack(payload?.trace, {
+                  baseTimeMs,
+                  readsb: true,
+                }),
+          complete: false,
+        };
+      },
+    }),
   };
 }
 
@@ -188,6 +197,7 @@ export function createVesselSource({
   origin = () => globalThis.location?.origin || 'http://localhost',
 } = {}) {
   return {
+    // i18n-ignore: feed source name, replaced by the provider from each snapshot and reported to AI tools
     label: 'Vessels',
     async getSnapshot({ maxRows = 12000, area } = {}, { signal } = {}) {
       const url = new URL(apiUrl, origin());

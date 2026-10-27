@@ -168,10 +168,20 @@ export function createIngestion({
   async function performMissionUpdate(token) {
     try {
       ensureActiveTleLookup(token);
-      const payload = await source.getLaunches({
-        signal: layerState._sourceController.signal,
-      });
-      const launches = parts.model.normalizeRocketLaunches(payload);
+      const { payload, stale } = source.getLaunchSnapshot
+        ? await source.getLaunchSnapshot({
+            signal: layerState._sourceController.signal,
+          })
+        : {
+            payload: await source.getLaunches({
+              signal: layerState._sourceController.signal,
+            }),
+            stale: false,
+          };
+      const launches = parts.model.normalizeRocketLaunches(
+        payload,
+        payload?.gevAsOf && new Date(payload.gevAsOf),
+      ); // Byrd-IT B12b: history as-of t
       if (
         !layerState._enabled ||
         token !== layerState._lifecycleToken ||
@@ -214,6 +224,7 @@ export function createIngestion({
       parts.panel.renderMissionPanel();
       layerState._lastUpdate = Date.now();
       layerState._lastError = null;
+      layerState._stale = stale === true;
     } catch (error) {
       if (layerState._enabled && token === layerState._lifecycleToken) {
         layerState._lastError = error.message;

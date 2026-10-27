@@ -24,6 +24,7 @@ export function registerSpriteCollection(layerId, collection) {
   if (!layerId || !collection) return;
   _collections.set(layerId, collection);
 }
+export const spriteCollectionOf = (id) => _collections.get(id) ?? null;
 
 /**
  * Remove a registered collection (primarily useful to lifecycle tests).

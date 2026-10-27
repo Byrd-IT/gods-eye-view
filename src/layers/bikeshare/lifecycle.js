@@ -17,6 +17,23 @@ export function createLifecycle({
 
   const methods = {
     /**
+     * GEV history seam (fork card B12b, touch point; re-check on upstream
+     * merges). Drops every city's station information, status and points
+     * (no station of another time is kept), then loads the cities in range
+     * again. Disabled: only the caches are dropped.
+     */
+    reloadForHistoryFrame() {
+      if (!layerState._stationInfoCache) return; // not initialized
+      parts.ingestion.abortAllInFlight();
+      parts.viewport.deactivateAllCities();
+      for (const cityId of [...layerState._cityRuntime.keys()])
+        parts.rendering.removeCityPoints(cityId);
+      layerState._stationInfoCache.clear();
+      layerState._statusCache.clear();
+      void parts.viewport.runProximityCheck();
+    },
+
+    /**
      * Initialize the bikeshare layer. Creates the point primitive collection,
      * resets all internal state, and installs the click handler.
      * Called once during app bootstrap.
@@ -51,7 +68,7 @@ export function createLifecycle({
       layerState._lastUpdate = null;
       layerState._loading = false;
       layerState._loadingOps = 0;
-      layerState._error = null;
+      layerState._failedCityIds.clear();
       layerState._limitWarned = false;
 
       layerState._overlayHost.setVisible(
@@ -75,7 +92,7 @@ export function createLifecycle({
      */
     enable(viewer) {
       layerState._enabled = true;
-      layerState._error = null;
+      layerState._failedCityIds.clear();
       layerState._pointCollection.show = true;
       layerState._overlayHost.setVisible(
         BIKESHARE_SELECTED_OVERLAY_SOURCE_ID,

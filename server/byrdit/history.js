@@ -1,5 +1,15 @@
 import { weatherProxy } from '../providers/weather.js';
-import { historyPlugins as browserSafeHistoryPlugins } from '../../src/byrdit/history/index.js';
+import { makeCostRateLimiter } from '../providers/common/rate-limit.js';
+import { isAllowedHost } from '../../build/allowedHosts.js';
+import { normalizeProxyAddress, trustedClientAddress } from './trustedProxy.js';
+import {
+  enabledBridgeFeeds,
+  historyPlugins as browserSafeHistoryPlugins,
+  parseCollectorUrls,
+} from '../../src/byrdit/history/index.js';
+import { DEFAULT_HISTORY_PER_MIN } from '../../src/byrdit/history/historyApi.js';
+import { createWindHistoryReader } from './historyWind.js';
+import { createWeatherServingState } from './historyImageryTimes.js';
 
 /**
  * Server-side composition of the Byrd-IT history plugins (gev-history
@@ -10,11 +20,60 @@ import { historyPlugins as browserSafeHistoryPlugins } from '../../src/byrdit/hi
  * GetCapabilities reads come from the collector (single consumer of the
  * recorded metadata); only GetMap image bytes are live.
  *
+ * B12c: /api/history/slice?feed=wind reads past GFS/IFS cycles with the
+ * injected byte-range reader (./historyWind.js, nothing stored).
+ * feed=imagery judges pixel availability by the weather pixel route's OWN
+ * serving state (./historyImageryTimes.js: that route instance's manifest;
+ * the bridge's private instance with GEV_BRIDGE_WEATHER=1, else a loopback
+ * to this server's /api/weather), never by a second capabilities read.
+ *
+ * B9 (/api/history/*, GEV_HISTORY_API=1): the per-client rate limit is the
+ * common cost limiter (server/providers/common/rate-limit.js,
+ * GEV_RATELIMIT_HISTORY_PER_MIN, default 60/min; 0 = off), the Host rule is
+ * Vite's own (build/allowedHosts.js isAllowedHost with the server's
+ * allowedHosts), and the client key is the socket peer, or X-Real-IP when
+ * the peer is a GEV_TRUSTED_PROXIES reverse proxy (NPM), so users behind
+ * the proxy do not share one bucket.
+ *
  * server/standalone/vite.config.js imports historyPlugins from HERE (its one
  * touch-point import line); everything else is in src/byrdit/history.
  *
  * @param {Parameters<typeof browserSafeHistoryPlugins>[0]} [options]
  */
 export function historyPlugins(options = {}) {
-  return browserSafeHistoryPlugins({ weatherProxy, ...options });
+  const env = options.env ?? process.env;
+  const limiter = makeCostRateLimiter(
+    env.GEV_RATELIMIT_HISTORY_PER_MIN,
+    DEFAULT_HISTORY_PER_MIN,
+  );
+  const weatherTimes = createWeatherServingState({
+    bridged: enabledBridgeFeeds(env).includes('weather'),
+  });
+  return browserSafeHistoryPlugins({
+    weatherProxy,
+    weatherServing: weatherTimes,
+    ...options,
+    historyApi: {
+      allow: limiter ?? (() => true),
+      clientKey: historyClientKey(env),
+      hostCheck: (allowed, additional) => (host) =>
+        isAllowedHost(host, allowed, additional),
+      // B12c: wind at a past cycle through GEV's byte-range reader pieces
+      windReader: createWindHistoryReader(),
+      weatherTimes,
+      ...options.historyApi,
+    },
+  });
+}
+
+/**
+ * Rate-limit key: the TCP peer, or its X-Real-IP when the peer is a trusted
+ * reverse proxy. A malformed or absent X-Real-IP from the proxy falls back
+ * to the peer (one shared bucket, never an unbounded key).
+ * @param {Record<string, string|undefined>} env
+ */
+export function historyClientKey(env) {
+  return (req) =>
+    trustedClientAddress(req, env) ??
+    (normalizeProxyAddress(req.socket?.remoteAddress) || 'local');
 }

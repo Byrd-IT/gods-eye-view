@@ -44,7 +44,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   select_nearest_aircraft: {
     description:
-      'Atomically fly to a place, wait for arrival, enable and load Flights or Military Flights in that viewport, exclude on-ground records, and select/follow the nearest airborne aircraft. Healthy fallback feeds remain usable and are reported in the result. This does not open Contacts or Cockpit.',
+      'Atomically fly to a place, wait for arrival, enable and load Flights or Military Flights in that viewport, exclude on-ground records, and select/follow the nearest airborne aircraft. Healthy fallback feeds remain usable and are reported in the result.',
     $position: 1,
     parameters: {
       properties: {
@@ -111,12 +111,18 @@ export const ACTION_DESCRIPTIONS = {
     },
   },
   set_panel_open: {
-    description: 'Open or close a GEV UI panel/dropdown.',
+    description:
+      'Visual Presets/styles/filters=control-panel; Scenes/saved scenes=scene-panel; Voice Settings=voice-settings; voice control/Preview=voice-preview; Provider Settings/API keys=provider-settings. Voice panels exit Cockpit directly.',
+    $position: 1,
+  },
+  set_voice_inactivity_timeout: {
+    description:
+      'Set the requested exact inactivity duration directly: integer minutes 1–60, 0=None. Report applied/persisted truthfully; an unsaved live change is not saved.',
     $position: 1,
   },
   set_context_mode: {
     description:
-      'Enter or exit the Global Context sub-mode used by Contacts and Space Missions. Use Contacts only when the user explicitly requests Contacts, and Space Missions only when explicitly requested. A request to open the parent Context panel alone uses set_panel_open and must not activate either sub-mode. Selecting an aircraft does not imply Context.',
+      'Enter/exit Contacts or Space Missions only when explicitly requested; opening Context alone uses set_panel_open.',
     $position: 1,
     parameters: {
       properties: {
@@ -129,23 +135,23 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_cockpit: {
     description:
-      'Read or control Cockpit when the user explicitly requests Cockpit: establish Contacts and enter from a selected or tracked aircraft; exit; or navigate nearby Contacts with optional filters. Selecting or viewing an aircraft alone must not enter Cockpit.',
+      'Explicit Cockpit requests only: enter from a selected/tracked aircraft (establishes Contacts itself; no set_context_mode), exit, status, or next/previous. Explicit exit-and-show voice: voicePanel preview/settings (Voice Settings), no confirmation.',
     $position: 1,
     parameters: {
       properties: {
         action: {
           description:
-            'previous/next (or prev) navigates through nearby contacts in Cockpit context.',
+            'previous/next (or prev) cycles nearby Cockpit contacts.',
           $position: 2,
         },
         targetLayer: {
           description:
-            'Optional contact layer filter for next/previous (for example military for a military-only cycle).',
+            'Optional next/previous layer filter (e.g. military-only).',
           $position: 2,
         },
         aircraftClass: {
           description:
-            'Optional aircraft class filter (for example helicopter) when using next/previous navigation.',
+            'Optional next/previous aircraft class filter (e.g. helicopter).',
           $position: 1,
         },
       },
@@ -179,7 +185,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   get_current_view_state: {
     description:
-      'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, and layer state before choosing another action.',
+      'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, and layer state before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.',
     $position: 1,
   },
   set_hud: {
@@ -250,7 +256,7 @@ export const ACTION_DESCRIPTIONS = {
       properties: {
         stack: {
           description:
-            'photoreal = Google 3D. Use bing-aerial only when the user explicitly says "Bing aerial" — "satellite(s)" never means a basemap; only the explicit phrase "Esri" / "Esri imagery" means esri-imagery.',
+            'photoreal = Google 3D. Use bing-aerial only when the user explicitly says "Bing aerial" — "satellite(s)" never means a basemap; only the explicit phrase "Esri" / "Esri imagery" means esri-imagery. byrdit-open = "Byrd-IT map"; basemap-auto = "auto basemap".',
           $position: 2,
         },
       },
@@ -511,18 +517,18 @@ export const ACTION_DESCRIPTIONS = {
   },
   move_camera: {
     description:
-      'Direct the camera like a drone operator: orbit the current view target, pan, tilt, or rotate — one bounded nudge (mode=once) or continuous motion until stopped (mode=continuous). Continuous motion also stops on any manual camera input or when a navigation tool runs. Say the RESULTING state when confirming ("Orbiting slowly").',
+      'Direct the camera like a drone operator: orbit the current view target, pan, tilt, or rotate — one bounded nudge (mode=once) or continuous motion until stopped (mode=continuous). Continuous motion also stops on any manual camera input or when a navigation tool runs. Say the RESULTING state when confirming ("Orbiting slowly"). Globe rotation (rotate_globe) spins Earth right continuously by default; explicit direction, mode and speed take precedence. It checks fit and may refuse.',
     $position: 1,
     parameters: {
       properties: {
         direction: {
           description:
-            'Required except for orbit (defaults right/clockwise) and stop.',
+            'Required for pan/tilt/rotate; orbit/rotate_globe default right.',
           $position: 2,
         },
         mode: {
           description:
-            'once = bounded eased nudge (default); continuous = until stop/manual input.',
+            'once = bounded eased nudge; continuous = until stop/manual input. rotate_globe defaults continuous; other motions default once.',
           $position: 2,
         },
       },
@@ -543,7 +549,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   analyst_query: {
     description:
-      'Counts, lists, superlatives and attribute filters over records loaded by ENABLED layers — "how many flights over Texas", "biggest fire near LA", "ships headed to Oakland", "next rocket launch". A requested list or ranking requires this tool even after set_context_mode returned a Contacts count; that count alone has no requested items. complete:false means the count is a floor ("at least") and rankings cover the records examined; partial names unanswered layers. Items carry lat/lon for a follow-up fly_to_location. ok:false codes: LAYER_OFF (offer to enable), NOT_READY (loading), FOLLOW_UP_MISMATCH (ask again without followUp), UNKNOWN_FIELD/UNKNOWN_SCOPE/BAD_VALUE (retry with the allowed values).',
+      'Counts, lists, superlatives and attribute filters over records loaded by ENABLED layers — "how many flights over Texas", "biggest fire near LA", "ships headed to Oakland", "next rocket launch". A requested list or ranking requires this tool even after set_context_mode returned a Contacts count; that count alone has no requested items. complete:false means the count is a floor ("at least") and rankings cover the records examined; partial names unanswered layers. Items carry lat/lon for a follow-up fly_to_location. ok:false codes: LAYER_OFF (offer to enable), NOT_READY (loading), FOLLOW_UP_MISMATCH (ask again without followUp), UNKNOWN_FIELD/UNKNOWN_SCOPE/BAD_VALUE (retry with the allowed values). Aircraft emergency fields describe broadcasts, not confirmed incidents: narrate emergencyBroadcast with emergencySource. emergencyKind values are general, unlawful, nordo, downed, minfuel and lifeguard; GEV treats the last two as priorities (emergency:false). lastContactAtMs says when the transponder was last heard, not when the status arrived.',
     $position: 1,
     parameters: {
       properties: {
@@ -619,5 +625,117 @@ export const ACTION_DESCRIPTIONS = {
     description:
       'Predict the next pass in 24 hours for one satellite in the loaded catalog, identified by exact NORAD ID or name. Ambiguous names return candidates: ask for a choice rather than selecting one. Defaults to geometric passes; visibleOnly requires estimated illumination and a dark observer sky, which does not guarantee naked-eye visibility. Uses camera location unless coordinates are supplied.',
     $position: 1,
+  },
+  control_history: {
+    description:
+      'History playback of the recorded globe (up to two years back): jump to a past time or date, play, pause, change speed, return to live, choose which feeds play, or read status. Jump opens History when the globe is live. Say the resulting state, not the request.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: {
+          description:
+            'jump needs time or minutesAgo; speed needs rate; feeds needs feeds. live leaves History. play and pause need History open (jump first).',
+          $position: 2,
+        },
+        time: {
+          description:
+            'For jump: ISO 8601 date-time WITH a zone, e.g. 2026-03-04T15:30:00Z or 2026-03-04T09:30:00-06:00. Convert the spoken local time first; a date alone means 00:00 UTC.',
+          $position: 1,
+        },
+        minutesAgo: {
+          description:
+            'For jump: relative time instead of time (\"an hour ago\" = 60, \"yesterday\" = 1440).',
+          $position: 3,
+        },
+        rate: {
+          description:
+            'For speed: history seconds per real second: 1, 10, 60 or 600.',
+          $position: 2,
+        },
+        feeds: {
+          description:
+            'For feeds: layer ids that play from History. Flights, military and ships = flights, military, ais-live-vessels; fires = local-firms; quakes = earthquakes.',
+          $position: 1,
+        },
+        feedMode: {
+          description:
+            'For feeds: only (default) plays just the listed feeds and turns the other History feeds off; add turns the listed feeds on; remove turns them off.',
+          $position: 2,
+        },
+      },
+    },
+  },
+  control_sky: {
+    description:
+      'Sky view: open or close it, look at a named planet, the ISS or a constellation, set the time of night, turn constellation lines on or off, or jump to a preset. Open uses the map centre. look at the ISS is look, not preset; preset iss is the next ISS pass. Say the resulting state, not the request.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: {
+          description:
+            'open, close, look (needs target), time (needs time or live), lines (needs enabled), preset (needs preset), or status.',
+          $position: 2,
+        },
+        target: {
+          description:
+            'For look: a planet (Jupiter), the ISS, or a constellation (Orion). One name.',
+          $position: 1,
+        },
+        time: {
+          description:
+            'For time: ISO 8601 WITH a zone, e.g. 2026-03-04T02:00:00Z or 2026-03-03T20:00:00-06:00. Convert the spoken local time first; a date alone means 00:00 UTC.',
+          $position: 1,
+        },
+        live: {
+          description:
+            'For time: true returns the sky clock to now. When true, live wins over time.',
+          $position: 1,
+        },
+        enabled: {
+          description:
+            'For lines: true shows constellation lines, false hides them.',
+          $position: 1,
+        },
+        preset: {
+          description:
+            'sunset, dusk (end of astronomical twilight), midnight (solar midnight), moonrise, or iss (start of the next ISS pass, not a look-at).',
+          $position: 2,
+        },
+      },
+    },
+  },
+  control_imagery: {
+    description:
+      'Aerial imagery by year: NAIP and the historic or colour county sets (show 2018 aerial, NAIP 2024, Titus 1940). year uses the live catalog; an unknown year returns the valid years. county is optional and frames that county. wayback is only for Esri Wayback (wayback 2014), not for NAIP. latest or recent satellite imagery stays the recent-imagery layer. Switching the basemap stack stays set_map_stack. Say the resulting year and sets, not the request. If drawn is false, do not claim the imagery is visible. If compare is true, only the left side changed. If waybackOff is true, say Wayback turned off. If waybackStillOn is true, Wayback is still covering the aerial layer. If starting is true, Wayback is not on yet.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: {
+          description:
+            'year (needs year; county optional), wayback (needs date), off (target aerial, wayback, or both; default aerial), or status.',
+          $position: 2,
+        },
+        year: {
+          description:
+            'For year: the aerial year, such as 1940, 2018 or 2024. Not an enum; an unknown year returns the valid years from the live catalog.',
+          $position: 1,
+        },
+        county: {
+          description:
+            'For year, optional: a county with a set that year (Titus, Camp, Franklin, Wood, Upshur). Frames that set. Omit to show every set of the year.',
+          $position: 1,
+        },
+        date: {
+          description:
+            'For wayback: a year (2014) or YYYY-MM-DD. A year uses the latest release in that year. An unknown date returns the valid years.',
+          $position: 1,
+        },
+        target: {
+          description:
+            'For off: aerial (the year overlay), wayback, or both. Default aerial.',
+          $position: 1,
+        },
+      },
+    },
   },
 };

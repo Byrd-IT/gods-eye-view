@@ -9,13 +9,24 @@ export function createVesselSnapshotRenderer({
 }) {
   function reconcileVessels(viewer, rows, { complete = true } = {}) {
     rendering.ensureCollections(viewer);
+    // GEV history seam (fork card B12a): a history frame is complete, pins
+    // no selected vessel and starts the selected trail over at this time.
+    const historyFrame = state.historyFrameArmed === true;
+    if (historyFrame) {
+      state.historyFrameArmed = false;
+      state.trailAbort?.abort();
+      state.trailBackfillToken += 1;
+      state.trailPositions = [];
+      state.trail?.clear();
+    }
     const occluder = rendering.makeOccluder();
     records.reconcile(
       rows,
       {
-        complete,
+        complete: complete || historyFrame,
         selectedRecord: state.selectedRecord,
         cap: rendering.renderRowLimit(),
+        historyFrame,
       },
       {
         add(record) {

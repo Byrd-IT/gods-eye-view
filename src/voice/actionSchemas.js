@@ -178,6 +178,9 @@ const schemas = [
             'global-context-panel',
             'weather-panel',
             'recent-imagery-panel',
+            'voice-settings',
+            'voice-preview',
+            'provider-settings',
           ],
         },
         open: {
@@ -185,6 +188,15 @@ const schemas = [
         },
       },
       required: ['panelId', 'open'],
+    },
+  },
+  {
+    name: 'set_voice_inactivity_timeout',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { minutes: { type: 'integer', minimum: 0, maximum: 60 } },
+      required: ['minutes'],
     },
   },
   {
@@ -223,6 +235,7 @@ const schemas = [
         aircraftClass: {
           type: 'string',
         },
+        voicePanel: { type: 'string', enum: ['preview', 'settings'] },
       },
       required: ['action'],
     },
@@ -351,6 +364,8 @@ const schemas = [
             'bing-labels',
             'esri-imagery',
             'osm',
+            'byrdit-open',
+            'basemap-auto',
           ],
         },
       },
@@ -729,7 +744,7 @@ const schemas = [
       properties: {
         motion: {
           type: 'string',
-          enum: ['orbit', 'pan', 'tilt', 'rotate', 'stop'],
+          enum: ['orbit', 'pan', 'tilt', 'rotate', 'rotate_globe', 'stop'],
         },
         direction: {
           type: 'string',
@@ -880,6 +895,124 @@ const schemas = [
         minElevationDeg: { type: 'number', minimum: 5, maximum: 60 },
         visibleOnly: { type: 'boolean' },
       },
+    },
+  },
+  {
+    name: 'control_history',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['jump', 'play', 'pause', 'speed', 'live', 'status', 'feeds'],
+        },
+        time: {
+          type: 'string',
+          maxLength: 40,
+        },
+        minutesAgo: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1051200,
+        },
+        rate: {
+          type: 'integer',
+          enum: [1, 10, 60, 600],
+        },
+        feeds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 11,
+          items: {
+            type: 'string',
+            enum: [
+              'flights',
+              'military',
+              'ais-live-vessels',
+              'local-firms',
+              'fire-perimeters',
+              'weather-cyclones',
+              'rocket-launches',
+              'transit',
+              'bikeshare',
+              'earthquakes',
+              'wind',
+            ],
+          },
+        },
+        feedMode: {
+          type: 'string',
+          enum: ['only', 'add', 'remove'],
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'control_sky',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['open', 'close', 'look', 'time', 'lines', 'preset', 'status'],
+        },
+        target: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 80,
+        },
+        time: {
+          type: 'string',
+          maxLength: 40,
+        },
+        live: {
+          type: 'boolean',
+        },
+        enabled: {
+          type: 'boolean',
+        },
+        preset: {
+          type: 'string',
+          enum: ['sunset', 'dusk', 'midnight', 'moonrise', 'iss'],
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'control_imagery',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['year', 'wayback', 'off', 'status'],
+        },
+        year: {
+          type: 'integer',
+          minimum: 1800,
+          maximum: 2999,
+        },
+        county: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 40,
+        },
+        date: {
+          type: 'string',
+          minLength: 4,
+          maxLength: 10,
+        },
+        target: {
+          type: 'string',
+          enum: ['aerial', 'wayback', 'both'],
+        },
+      },
+      required: ['action'],
     },
   },
 ];

@@ -25,12 +25,7 @@ export function createRendering({
    */
 
   function renderCurrentLod(force = false) {
-    if (
-      !layerState._dataSource ||
-      !layerState._fires.length ||
-      !layerState._viewer
-    )
-      return false;
+    if (!layerState._dataSource || !layerState._viewer) return false; // Byrd-IT B12b: an empty answer clears the render
     const lodIndex = components.viewport.selectLodIndex(
       components.viewport.cameraHeight(),
     );

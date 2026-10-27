@@ -10,6 +10,7 @@ import {
   restoreCamera,
   restoreScene,
   snapshotCamera,
+  skyTilesShown,
   snapshotScene,
   worldDirectionToAzEl,
 } from './skyCamera.js';
@@ -242,4 +243,40 @@ test('a running clock resumes where it would be now (no jump back in time)', () 
     t0,
   );
   assert.ok(Math.abs(elapsed - 20) < 1e-6, String(elapsed));
+});
+
+test('skyTilesShown: tiles on screen with a real horizon, none with the flat horizon; unknown = shown (attribution, t_37cf1f79)', () => {
+  const live = { isDestroyed: () => false };
+  const gone = { isDestroyed: () => true };
+  const snap = (globeShow, tilesets = []) => ({ globeShow, tilesets });
+  assert.equal(skyTilesShown(snap(true)), true, 'globe drawn');
+  assert.equal(
+    skyTilesShown(snap(true), { flatHorizon: true }),
+    false,
+    'flat horizon hides the globe and every tileset',
+  );
+  assert.equal(
+    skyTilesShown(snap(false, [{ primitive: live, show: true }])),
+    true,
+    'Google 3D tiles with the globe off',
+  );
+  assert.equal(
+    skyTilesShown(snap(false, [{ primitive: live, show: true }]), {
+      flatHorizon: true,
+    }),
+    false,
+  );
+  assert.equal(
+    skyTilesShown(snap(false, [{ primitive: live, show: false }])),
+    false,
+    'globe off, tileset hidden: only the sky',
+  );
+  assert.equal(
+    skyTilesShown(snap(false, [{ primitive: gone, show: true }])),
+    false,
+    'a destroyed tileset draws nothing',
+  );
+  assert.equal(skyTilesShown(snap(false)), false);
+  assert.equal(skyTilesShown(snap(undefined)), true, 'unknown globe flag');
+  assert.equal(skyTilesShown(null), true, 'no snapshot: cannot tell');
 });

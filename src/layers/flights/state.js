@@ -120,6 +120,20 @@ export function createFlightState({ source, services }) {
 
   flightState._positionHistory = new Map();
 
+  /** GEV history seam (fork card B12a; see lifecycle resetForHistoryFrame /
+   *  setMotionClock): the next applied snapshot is one history frame, the
+   *  wall ms it was applied at, and the motion clock (null = wall clock). */
+
+  flightState._historyFrameArmed = false;
+
+  flightState._historyFrameAppliedAtMs = 0;
+
+  flightState._motionClock = null;
+
+  flightState._scratchMotionNow = new Cesium.JulianDate();
+
+  flightState._scratchMotionDate = new Date(0);
+
   // ---------------------------------------------------------------------------
   // Click-to-track state
   // ---------------------------------------------------------------------------
@@ -242,11 +256,11 @@ export function createFlightState({ source, services }) {
 
   flightState._scratchCarto = new Cesium.Cartographic();
 
-  flightState._scratchEnu = new Cesium.Matrix4();
-
   flightState._scratchArc = { east: 0, north: 0, endCourseDeg: 0 };
 
   flightState._scratchRenderTime = new Cesium.JulianDate();
+
+  flightState._scratchFleetRenderTime = new Cesium.JulianDate();
 
   flightState._scratchFleetPos = new Cesium.Cartesian3();
 

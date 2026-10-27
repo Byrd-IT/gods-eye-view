@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { cyberSonarBaseAlpha } from '../../cyberSonar.js';
 import { CLASS_SCALE_2D } from '../../data/aircraftClass.js';
 import {
   turnRateFromFixHistory,
@@ -7,12 +8,7 @@ import {
 } from '../../data/motionModel.js';
 import { aircraftIcon } from '../../data/aircraftIcons.js';
 import { POSITION_HISTORY_LIMIT } from './recordPolicy.js';
-import {
-  BILLBOARD_SCALE,
-  GROUND_SCALE,
-  TRACKED_ICON_COLOR,
-  MIL_ICON_COLOR,
-} from './policy.js';
+import { BILLBOARD_SCALE, GROUND_SCALE, TRACKED_ICON_COLOR } from './policy.js';
 
 /** Apply military record changes to Cesium resources and existing follow operations. */
 export function createMilitarySnapshotRenderer({
@@ -31,6 +27,19 @@ export function createMilitarySnapshotRenderer({
   const { sampleMeshFloorCells } = meshFloor;
   const { registerMilitaryIcaos } = militaryRegistry;
   return function applySnapshot(snapshot, viewer) {
+    // GEV history seam (fork card B12a): a history frame replaces the scene
+    // state of another time instead of merging into it (see resetForHistoryFrame).
+    const historyFrame = flightState._historyFrameArmed === true;
+    if (historyFrame) {
+      flightState._historyFrameArmed = false;
+      flightState._historyFrameAppliedAtMs = Date.now();
+      records.beginHistoryFrame();
+      flightState._positionHistory.clear();
+      flightState._displayCourse.clear();
+      flightState._trailPositions = [];
+      flightState._trailBackfillToken += 1;
+      motion._resetTrackedDisplay();
+    }
     const currentIcaos = new Set();
     const receiptNowMs = snapshot.observedAtMs;
     // Field-test fix (RS46): coarse floor cells to warm for the below-ground
@@ -125,6 +134,11 @@ export function createMilitarySnapshotRenderer({
 
       if (flightState._billboards.has(icao24)) {
         const bb = flightState._billboards.get(icao24);
+        if (!isTracked) {
+          bb.color = rendering
+            ._fleetBillboardColor(icao24, meta)
+            .withAlpha(cyberSonarBaseAlpha(bb));
+        }
         // Position AND rotation are owned by the fleet pass (_fleetTick);
         // course changes land on the next rotation pass (forced below).
         // Ground flips (landing/takeoff) restyle this SAME billboard in
@@ -161,7 +175,9 @@ export function createMilitarySnapshotRenderer({
           // Screen-projected rotation lands on the next fleet tick.
           rotation: 0,
           alignedAxis: Cesium.Cartesian3.ZERO,
-          color: isTracked ? TRACKED_ICON_COLOR : MIL_ICON_COLOR,
+          color: isTracked
+            ? TRACKED_ICON_COLOR
+            : rendering._fleetBillboardColor(icao24, meta),
           sizeInMeters: false,
           scaleByDistance: rendering._normalBillboardScaleByDistance(),
           // Grounded/near-surface planes sit at/below the photoreal tile
@@ -178,13 +194,12 @@ export function createMilitarySnapshotRenderer({
       // Takeoff while TRACKED: ground traffic drew no trail, so start one
       // from the fresh airborne history (touchdown needs no action — the
       // append gate above simply freezes the existing trail).
-      if (isTracked && groundFlipped && !meta.onGround)
+      if (isTracked && (historyFrame || (groundFlipped && !meta.onGround)))
         tracking._startTrail(icao24);
 
       // If this is the tracked aircraft, update label text
       // (position updates automatically via dead-reckoning CallbackProperty)
       if (isTracked && flightState._trackedEntity) {
-        const info = flightState.records.data.get(icao24);
         tracking._updateTrackedLabelModel(icao24);
       }
     }
@@ -255,10 +270,12 @@ export function createMilitarySnapshotRenderer({
     // feed gap, and the full grace left phantom planes parked at airports.
     for (const [icao24, bb] of flightState._billboards) {
       if (currentIcaos.has(icao24)) continue;
-      const absence = records.absence(icao24, {
-        complete: snapshot.complete,
-        likelyLanded: queries._likelyLanded(icao24),
-      });
+      const absence = historyFrame
+        ? 'remove' // GEV history seam: absent from the frame = not there at t
+        : records.absence(icao24, {
+            complete: snapshot.complete,
+            likelyLanded: queries._likelyLanded(icao24),
+          });
       if (absence === 'retain') continue;
       if (absence === 'stale') {
         if (icao24 === flightState._trackedIcao && flightState._trackedEntity) {
@@ -290,6 +307,11 @@ export function createMilitarySnapshotRenderer({
       flightState._displayCourse.delete(icao24);
       flightState._groundSnap.forget(icao24);
     }
+
+    // GEV history seam: no record of another time outlives a history frame.
+    if (historyFrame)
+      for (const id of [...records.data.keys()])
+        if (!currentIcaos.has(id)) records.forget(id);
 
     // Fresh courses arrived — force a rotation pass on the next fleet tick
     flightState._lastCamPoseSig = '';

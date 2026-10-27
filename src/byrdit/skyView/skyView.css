@@ -505,8 +505,9 @@ body.gev-sky-active #right-context-rail {
   }
 }
 
-/* The cockpit, scene playback, recording and clean view own the screen. */
-body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
+/* The cockpit, scene playback and recording own the screen. Clean view hides
+   these with visibility instead (src/byrdit/cleanView/cleanView.css). */
+body:is(.cockpit-mode, .scene-playback-mode, .recording-mode)
   :is(.gev-sky-btn, .gev-sky-panel) {
   display: none !important;
 }
@@ -886,5 +887,235 @@ body:is(.cockpit-mode, .scene-playback-mode, .recording-mode, .ui-clean-view)
     max-height: calc(
       100vh - 2vh - 7.5rem - var(--gev-sky-bar-bottom, 200px) - 108px
     );
+  }
+}
+
+/* ── Clear view (clearView.js): only the sky ─────────────────────────────── */
+/* The eye button: bottom-right corner, clear of the notch and the gesture
+   bar (env() insets apply where the page uses viewport-fit=cover). It is the
+   only control left in Clear view and fades after 3 s without input. */
+.gev-sky-clear-btn {
+  position: fixed;
+  right: max(12px, calc(env(safe-area-inset-right, 0px) + 8px));
+  bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+  z-index: 99;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(8, 10, 14, 0.45);
+  color: #e8f4ff;
+  opacity: 0.75;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: opacity 0.4s ease;
+}
+
+.gev-sky-clear-btn:hover,
+.gev-sky-clear-btn:focus-visible {
+  opacity: 1;
+}
+
+.gev-sky-clear-btn:focus-visible {
+  outline: 2px solid #78c8ff;
+  outline-offset: 2px;
+}
+
+.gev-sky-clear-btn[aria-pressed='true'] {
+  border-color: rgba(120, 200, 255, 0.55);
+}
+
+.gev-sky-clear-btn[data-dim='true'] {
+  opacity: 0.2;
+}
+
+.gev-sky-clear-icon {
+  width: 22px;
+  height: 22px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M12 5C6.5 5 2.7 9.1 1.5 12c1.2 2.9 5 7 10.5 7s9.3-4.1 10.5-7C21.3 9.1 17.5 5 12 5zm0 2.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M12 5C6.5 5 2.7 9.1 1.5 12c1.2 2.9 5 7 10.5 7s9.3-4.1 10.5-7C21.3 9.1 17.5 5 12 5zm0 2.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+/* The one message line kept over the sky in Clear view (permission, denied,
+   insecure address, calibration figure 8, pointing notes, the hint). */
+.gev-sky-clear-note {
+  position: fixed;
+  top: max(12px, calc(env(safe-area-inset-top, 0px) + 8px));
+  left: 50%;
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: min(
+    520px,
+    calc(
+      100vw - 24px - env(safe-area-inset-left, 0px) -
+        env(safe-area-inset-right, 0px)
+    )
+  );
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: rgba(8, 10, 14, 0.6);
+  color: #e8f4ff;
+  font: 12px/1.4 var(--font-mono);
+  text-align: center;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.gev-sky-clear-btn[hidden],
+.gev-sky-clear-note[hidden],
+.gev-sky-clear-note [hidden],
+body:not(.gev-sky-clear) .gev-sky-clear-note {
+  display: none !important;
+}
+
+.gev-sky-clear-note .gev-sky-figure8 {
+  font-size: 20px;
+}
+
+/* Everything is hidden (visibility keeps every box: no reflow, no resize
+   event, no camera change), then the sky is shown again: the Cesium canvas,
+   the Sky overlay, the centre circle while pointing, the eye and the note. */
+body.gev-sky-active.gev-sky-clear,
+body.gev-sky-active.gev-sky-clear * {
+  visibility: hidden !important;
+  /* app panels that fade (visibility transitions) must go at once */
+  transition-property: none !important;
+}
+
+body.gev-sky-active.gev-sky-clear .gev-sky-clear-btn {
+  transition-property: opacity !important;
+}
+
+body.gev-sky-active.gev-sky-clear
+  :is(
+    .cesium-widget > canvas,
+    .gev-sky-canvas,
+    .gev-sky-crosshair,
+    .gev-sky-clear-btn,
+    .gev-sky-clear-btn *,
+    .gev-sky-clear-note,
+    .gev-sky-clear-note *
+  ) {
+  visibility: visible !important;
+}
+
+/* Attribution (t_37cf1f79): third-party imagery and tiles (Google 3D Tiles,
+   Cesium, NAIP/TxGIO, Sentinel/GIBS, OSM...) need their credits on screen.
+   While map tiles are drawn (body.gev-sky-tiles, set by skyView.js: real
+   horizon; the flat horizon hides the globe and every tileset) Clear view
+   keeps the app's own credit line (#cesium-credits: the same Cesium credits,
+   dim colours and bottom offset as normal mode; no new text) as a
+   tap-through block in the bottom-left corner, above the compass strip and
+   clear of the eye (bottom-right) and of the centre circle.
+   The vertical position is left to the app's credit rules on purpose: the
+   attribution pin (src/creditAttribution.test.mjs) models every
+   position/top/bottom rule on #cesium-credits and fails closed on new ones.
+   #cesium-credits is a 0x0 fixed box; Cesium's .cesium-widget-credits inside
+   it is absolutely placed at its bottom-left. */
+body.gev-sky-active.gev-sky-clear.gev-sky-tiles
+  :is(#cesium-credits, #cesium-credits *) {
+  visibility: visible !important;
+}
+
+body.gev-sky-active.gev-sky-clear #cesium-credits {
+  left: max(0.75rem, calc(env(safe-area-inset-left, 0px) + 8px)) !important;
+  z-index: 98 !important;
+  pointer-events: none !important;
+}
+
+/* Complete attribution (review R1, t_c0f1e535): no credit is cut off. The
+   line wraps inside the corner (the width is capped to clear the eye and
+   the safe areas) and grows upwards from the app's credit placement, so
+   every provider credit Cesium puts on screen stays readable in full.
+   #cesium-credits is a 0x0 box, so the line needs an explicit max-content
+   width (otherwise it would shrink to one word per row). */
+body.gev-sky-active.gev-sky-clear #cesium-credits .cesium-widget-credits {
+  width: max-content !important;
+  max-width: calc(
+    100vw - 80px - env(safe-area-inset-left, 0px) -
+      env(safe-area-inset-right, 0px)
+  ) !important;
+  overflow: visible !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  text-overflow: clip !important;
+  line-height: 1.35;
+}
+
+body.gev-sky-active.gev-sky-clear #cesium-credits .cesium-widget-credits * {
+  max-width: 100%;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+/* The credit text is tap-through: a tap on it reaches the sky. */
+body.gev-sky-active.gev-sky-clear #cesium-credits * {
+  pointer-events: none !important;
+}
+
+/* Credits that Cesium lists only behind its "Data attribution" link stay
+   reachable in Clear view: the link keeps working and its list (Cesium's
+   credit lightbox, the same one as in normal mode) is shown over the clear
+   sky. The rest of the line stays tap-through. */
+body.gev-sky-active.gev-sky-clear.gev-sky-tiles
+  #cesium-credits
+  .cesium-credit-expand-link {
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+
+body.gev-sky-active.gev-sky-clear
+  :is(.cesium-credit-lightbox-overlay, .cesium-credit-lightbox-overlay *) {
+  visibility: visible !important;
+}
+
+/* Map-only controls are not part of the sky: the NAIP year slider and its
+   compare divider (basemap/naipSlider.js). */
+body.gev-sky-active :is(#gev-naip-slider, #gev-naip-split-line) {
+  display: none !important;
+}
+
+/* Wider screens: the app's key-setup chip sits in the bottom-right corner
+   (provider-settings.css: 0.9rem from the edges, 32 px tall), so the eye
+   goes just above it. */
+@media (min-width: 621px) {
+  .gev-sky-clear-btn {
+    bottom: max(58px, calc(env(safe-area-inset-bottom, 0px) + 58px));
+  }
+}
+
+/* Short landscape phones: the Find/Layers tools hang down to the bottom
+   right, so the eye takes the top-right corner (only decoration there). */
+@media (max-height: 520px) {
+  .gev-sky-clear-btn {
+    top: max(12px, calc(env(safe-area-inset-top, 0px) + 8px));
+    bottom: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gev-sky-clear-btn {
+    transition: none;
+  }
+}
+
+/* Phone shell (upstream mobileShell.js, body.mobile-shell, <= 720 px): the
+   tab bar (#mobile-tab-bar, --mobile-tab-space tall) covers the bottom edge
+   while the Sky controls show, and its last tab (More) sat under the eye, so a
+   tap on the eye opened the More sheet instead. The eye rides just above the
+   bar, at the same height in Clear view (bar hidden) so it never jumps. */
+@media (max-width: 720px) and (min-height: 521px) {
+  body.mobile-shell .gev-sky-clear-btn {
+    bottom: calc(var(--mobile-tab-space) + 12px);
   }
 }

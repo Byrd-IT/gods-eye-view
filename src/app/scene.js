@@ -14,6 +14,9 @@ import {
   governorRequestRender,
 } from '../renderGovernor.js';
 import { describeError } from './errors.js';
+import { openBasemap } from '../byrdit/basemap/index.js';
+import { attachWayback } from '../byrdit/wayback/index.js';
+import { t } from '../i18n/index.js';
 
 /** Construct the application globe using the caller's local configuration. */
 export async function createApplicationScene({
@@ -33,7 +36,7 @@ export async function createApplicationScene({
     signal,
   });
   defer(initLogoGaze());
-  loaderStatus.textContent = 'Configuring viewer...';
+  loaderStatus.textContent = t('Configuring viewer...');
   // Provider attribution stays visible, including clean-view and recording.
   const creditContainer = document.createElement('div');
   creditContainer.id = 'cesium-credits';
@@ -50,14 +53,29 @@ export async function createApplicationScene({
   defer(installTrackpadPinchZoom(viewer));
   registerDataCredits(viewer, credits);
   configureCreditKeyboardAccess(document);
-  loaderStatus.textContent =
-    googleApiKey || googleTokens
-      ? 'Loading Google 3D Tiles...'
-      : 'Loading the keyless globe...';
-  const photoreal = await loadPhotorealisticTileset(Cesium, {
+  // Byrd-IT Open base map (BASEMAP.md 4.3): null unless GEV_BASEMAP=1, and
+  // then everything below runs exactly as before.
+  const basemap = await openBasemap({
+    Cesium,
+    viewer,
     googleApiKey,
     googleTokens,
+    cesiumToken,
+    loaderStatus,
+    signal,
   });
+  defer(() => basemap?.destroy());
+  loaderStatus.textContent =
+    googleApiKey || googleTokens
+      ? t('Loading Google 3D Tiles...')
+      : t('Loading the keyless globe...');
+  // With the base map up, the Google root session is lazy (autoSwitch.js).
+  const photoreal = basemap?.lazy
+    ? { tileset: null, route: 'lazy', errors: [] }
+    : await loadPhotorealisticTileset(Cesium, {
+        googleApiKey,
+        googleTokens,
+      });
   const tileset = photoreal.tileset;
   // A provider can finish after cancellation; retain ownership of its result.
   defer(() => {
@@ -80,12 +98,17 @@ export async function createApplicationScene({
         tileError,
       );
       const tileErrorDetail = describeError(tileError);
-      loaderStatus.textContent = `Google 3D Tiles unavailable (${tileErrorDetail}). Loading the non-Google globe...`;
+      loaderStatus.textContent = t(
+        'Google 3D Tiles unavailable ({detail}). Loading the non-Google globe...',
+        {
+          detail: tileErrorDetail,
+        },
+      );
     }
     viewer.scene.globe.show = true;
   }
 
-  loaderStatus.textContent = 'Initializing systems...';
+  loaderStatus.textContent = t('Initializing systems...');
 
   const mapStackController = new MapController(viewer, {
     requestRender: governorRequestRender,
@@ -95,6 +118,7 @@ export async function createApplicationScene({
     googleApiKey,
     cesiumToken,
     initialStack: tileset ? 'photoreal' : 'esri-imagery',
+    ...basemap?.controllerOptions,
     // Task 5 (height-datum fix): rebroadcast stack changes as a window
     // CustomEvent so data layers (CCTV per-regime ground resolution) can
     // react without coupling MapStackController to layer modules. Fires on
@@ -108,9 +132,21 @@ export async function createApplicationScene({
     onError: (message) => console.warn('[MapStack]', message),
   });
   defer(() => mapStackController.destroy());
-  await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', {
-    silent: true,
-  });
+  await mapStackController.setStack(
+    basemap?.initialStack ?? (tileset ? 'photoreal' : 'esri-imagery'),
+    { silent: true },
+  );
+  if (basemap?.lazy) defer(basemap.attach(mapStackController));
+  // Byrd-IT: Esri Wayback time travel. A no-op unless the server rendered the
+  // page with GEV_BYRDIT_WAYBACK=1; never blocks startup.
+  let detachWayback = null;
+  defer(() => detachWayback?.());
+  attachWayback({ Cesium, viewer, controller: mapStackController }).then(
+    (detach) => {
+      if (signal.aborted) detach();
+      else detachWayback = detach;
+    },
+  );
 
   signal.throwIfAborted();
   return { viewer, tileset, mapStackController, operations };

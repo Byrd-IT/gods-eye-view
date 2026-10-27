@@ -1,9 +1,6 @@
 import { VESSEL_OVERLAY_SOURCE_ID } from '../../data/vesselLabels.js';
-import {
-  AIS_FIRST_CONNECT_GRACE_MS,
-  AIS_FIRST_CONNECT_LABEL,
-  AIS_HEALTHY_STATUSES,
-} from './policy.js';
+import { msg, t } from '../../i18n/index.js';
+import { AIS_FIRST_CONNECT_GRACE_MS, AIS_HEALTHY_STATUSES } from './policy.js';
 
 export function createLifecycle({
   vesselState,
@@ -41,7 +38,7 @@ export function createLifecycle({
     state.feed.firstConnectStartedAt = startedAt;
     state.feed.firstConnectDeadline = startedAt + AIS_FIRST_CONNECT_GRACE_MS;
     state.feed.error = null;
-    state.feed.loadingLabel = AIS_FIRST_CONNECT_LABEL;
+    state.feed.loadingLabel = t('awaiting first AIS position…');
     scheduleFirstConnectExpiry(sessionId, AIS_FIRST_CONNECT_GRACE_MS);
   }
 
@@ -63,8 +60,8 @@ export function createLifecycle({
       state.feed.firstConnectPhase = 'unavailable';
       state.feed.loadingLabel = '';
       state.feed.error = state.feed.lastMessageAt
-        ? 'awaiting usable AIS positions…'
-        : 'awaiting first AIS message…';
+        ? t('awaiting usable AIS positions…')
+        : t('awaiting first AIS message…');
       state.feed.stale = state.feed.count > 0;
     }, delayMs);
   }
@@ -85,7 +82,7 @@ export function createLifecycle({
 
   function markAisUnavailable(reason) {
     settleFirstConnectPhase('unavailable');
-    state.feed.error = reason || 'AIS live load failed';
+    state.feed.error = reason || msg('AIS live load failed');
     state.feed.stale = state.feed.count > 0;
   }
 
@@ -139,6 +136,16 @@ export function createLifecycle({
     state.trailBackfillToken = 0;
   }
   const methods = {
+    /**
+     * GEV history seam (fork card B12a, touch point; re-check on upstream
+     * merges). Arms the NEXT reconcile as one history frame: complete (a
+     * vessel absent from the frame leaves at once), no selected-vessel pin
+     * across times, and the selected trail starts over at this time.
+     */
+    resetForHistoryFrame() {
+      state.historyFrameArmed = true;
+    },
+
     /** Configure the source before initialization; an active layer keeps its owner. */
     setSource(source) {
       if (state.viewer)
