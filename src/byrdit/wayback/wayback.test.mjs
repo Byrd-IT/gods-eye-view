@@ -284,6 +284,8 @@ async function setup({
     ...(rest.createPanel === undefined
       ? {}
       : { createPanel: rest.createPanel }),
+    // the floating panel on the globe, unless a test hosts it in a menu
+    timeTravel: rest.timeTravel === undefined ? null : rest.timeTravel,
   });
   return {
     detach,
@@ -880,4 +882,38 @@ test('detach removes the panel, layers and listeners', async () => {
   assert.equal(viewer.container.children.length, 0);
   assert.equal(viewer.imageryLayers.length, 1);
   assert.equal(controller.getActiveId(), 'photoreal');
+});
+
+// ------------------------------------------- hosted in the Time travel menu
+
+test('hosted in the Time travel menu: Imagery section, flow layout, released on detach', async () => {
+  const doc = fakeDoc();
+  const slot = doc.createElement('div');
+  const calls = [];
+  const timeTravel = {
+    claim: (name) => (calls.push(['claim', name]), slot),
+    release: (name) => calls.push(['release', name]),
+  };
+  const { detach, viewer } = await setup({ doc, timeTravel });
+  assert.deepEqual(calls, [['claim', 'imagery']]);
+  assert.equal(viewer.container.children.length, 0, 'not on the globe');
+  const panel = slot.children[0];
+  assert.equal(panel.id, 'gev-wayback');
+  assert.equal(panel.style.position, 'static');
+  assert.equal(panel.style.left, undefined);
+  assert.equal(panel.style.transform, undefined);
+  assert.equal(panel.attributes['aria-label'], 'Esri Wayback imagery');
+  detach();
+  assert.deepEqual(calls.at(-1), ['release', 'imagery']);
+  assert.equal(slot.children.length, 0);
+});
+
+test('flag off: nothing is claimed and no panel is made', async () => {
+  const calls = [];
+  const { viewer } = await setup({
+    doc: fakeDoc({ flag: false }),
+    timeTravel: { claim: (n) => calls.push(n), release() {} },
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(viewer.container.children.length, 0);
 });
