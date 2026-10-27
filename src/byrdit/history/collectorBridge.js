@@ -34,7 +34,9 @@ import {
  *
  * Pattern routes (feed.pathPattern, B7 CelesTrak): one entry answers a family
  * of sub-paths, /api/celestrak/<group> -> /v1/latest/celestrak-<group>; each
- * group has its own last-good copy and state (capped at MAX_PATTERN_SLOTS).
+ * group has its own last-good copy and state (at most MAX_PATTERN_SLOTS
+ * copies, admitted only on a collector 200 and kept for the most recently
+ * requested groups).
  * The group set is not listed here: the collector discovers groups from
  * these requests.
  *
@@ -198,7 +200,6 @@ export function createCollectorBridge({
   }
 
   function cacheSet(key, ck, entry) {
-    if (!remembers(key)) return;
     let slots = caches.get(key);
     if (!slots) {
       slots = new Map();
@@ -214,6 +215,15 @@ export function createCollectorBridge({
       slots.delete(k);
       bytes -= e.body.byteLength;
     }
+    if (!pattern) return;
+    // pattern route (t_eb2c4e10): admitted only here (collector 200), newest
+    // group last; the least recently requested group's copies are dropped
+    caches.delete(key);
+    caches.set(key, slots);
+    while (caches.size > MAX_PATTERN_SLOTS) {
+      caches.delete(caches.keys().next().value);
+    }
+    trimStates();
   }
   /** In-flight collector read shared by concurrent requests, keyed by feed+query. */
   const inflight = new Map();
@@ -234,19 +244,45 @@ export function createCollectorBridge({
   const pattern = feed.pathPattern ? new RegExp(feed.pathPattern) : null;
 
   /**
-   * A pattern route never keeps more than MAX_PATTERN_SLOTS copies/states; an
-   * extra key is still answered, just not remembered. Every answered key gets
-   * a state, so the state keys are the remembered set.
+   * Pattern-route bounds (t_eb2c4e10). The group set comes from requests, so
+   * both Maps are bounded and kept in recency order (Map insertion order,
+   * re-inserted on every request for the key):
+   * - caches: at most MAX_PATTERN_SLOTS last-good copies. Only a group the
+   *   collector answered 200 for is admitted; when full, the copy whose group
+   *   was requested least recently is dropped. A group the collector never
+   *   had (no snapshot) never takes a copy slot, so it cannot keep a useful
+   *   group from keeping its last-good copy.
+   * - states: every group with a copy, plus at most MAX_PATTERN_SLOTS groups
+   *   without one (least recently requested dropped first). A repeated
+   *   request keeps its group's state, so it logs only real transitions.
+   * Resolver/plain entries (B15, B6, ...) are unchanged: their keys are
+   * registry ids, bounded by the registry, and nothing is ever dropped.
    */
-  function remembers(key) {
-    return !pattern || states.has(key) || states.size < MAX_PATTERN_SLOTS;
+  function touch(map, key) {
+    if (!pattern || !map.has(key)) return;
+    const value = map.get(key);
+    map.delete(key);
+    map.set(key, value);
+  }
+
+  function trimStates() {
+    let extra = -MAX_PATTERN_SLOTS;
+    for (const key of states.keys()) if (!caches.has(key)) extra += 1;
+    for (const key of states.keys()) {
+      if (extra <= 0) break;
+      if (caches.has(key)) continue;
+      states.delete(key);
+      extra -= 1;
+    }
   }
 
   function transition(key, next, detail) {
     const state = states.get(key) ?? null;
+    touch(states, key);
     if (next === state) return;
     const previous = state ?? 'start';
-    if (remembers(key)) states.set(key, next);
+    states.set(key, next);
+    if (pattern) trimStates();
     const label = key === feed.collectorFeed ? name : `${name}/${key}`;
     log(
       `[gev-history bridge] ${label}: ${previous} -> ${next}${detail ? ` (${detail})` : ''}`,
@@ -355,6 +391,7 @@ export function createCollectorBridge({
 
   function serveCache(req, res, reason, target, cache) {
     const key = target.collectorFeed;
+    touch(caches, key);
     const t = now();
     const age = Math.max(0, t - cache.lastOkAt);
     const stale = age > staleThresholdMs(target.cadenceMs);

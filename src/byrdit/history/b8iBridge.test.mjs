@@ -233,14 +233,16 @@ test('all flags on: vessels per-query copies, track never cached, B7/B15 single-
   );
 });
 
-test('celestrak pattern cap still holds with per-query slots: past MAX_PATTERN_SLOTS groups are answered, not remembered', async (t) => {
+test('celestrak pattern cap still holds with per-query slots: past MAX_PATTERN_SLOTS groups the most recently requested keep a copy, the oldest is dropped (t_eb2c4e10)', async (t) => {
   t.mock.method(console, 'warn', () => {});
   const r = rig(t);
   for (let i = 0; i <= MAX_PATTERN_SLOTS; i++)
     assert.equal((await r.call(`/api/celestrak/g${i}`)).statusCode, 200);
   r.collector.up = false;
-  assert.equal((await r.call('/api/celestrak/g0')).statusCode, 200, 'kept');
-  const extra = await r.call(`/api/celestrak/g${MAX_PATTERN_SLOTS}`);
-  assert.equal(extra.statusCode, 503, 'over the cap: not remembered');
+  const newest = await r.call(`/api/celestrak/g${MAX_PATTERN_SLOTS}`);
+  assert.equal(newest.statusCode, 200, 'most recent group kept');
+  const oldest = await r.call('/api/celestrak/g0');
+  assert.equal(oldest.statusCode, 503, 'over the cap: least recent dropped');
+  assert.equal((await r.call('/api/celestrak/g1')).statusCode, 200, 'next kept');
   assert.deepEqual(r.blocked, []);
 });

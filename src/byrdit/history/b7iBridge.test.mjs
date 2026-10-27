@@ -92,14 +92,20 @@ function rig(t) {
     blocked.push(String(url));
     throw new TypeError('network blocked in test');
   });
-  const collector = { up: true, calls: [], bodies: new Map() };
+  const collector = {
+    up: true,
+    calls: [],
+    bodies: new Map(),
+    missing: new Set(),
+  };
   const fetchImpl = async (url) => {
     const feed = /\/v1\/latest\/([a-z0-9-]+)$/.exec(String(url))?.[1];
     collector.calls.push(feed);
     if (!collector.up) throw new TypeError('collector down');
-    const body =
-      collector.bodies.get(feed) ??
-      (feed?.startsWith('celestrak-') ? `GP ${feed}\r\n` : null);
+    const body = collector.missing.has(feed)
+      ? null
+      : (collector.bodies.get(feed) ??
+        (feed?.startsWith('celestrak-') ? `GP ${feed}\r\n` : null));
     if (body === null)
       return new Response('{"error":"no snapshot yet","noDataSince":null}', {
         status: 503,
@@ -198,7 +204,7 @@ test('all flags on: B15 resolver routes and B7 launches/celestrak routes each re
   );
 });
 
-test('celestrak cap: the first MAX_PATTERN_SLOTS groups keep a last-good copy; later groups are answered but not remembered; B15 caches are separate', async (t) => {
+test('celestrak cap: the MAX_PATTERN_SLOTS most recently requested groups keep a last-good copy; older copies are dropped; B15 caches are separate', async (t) => {
   t.mock.method(console, 'warn', () => {});
   const r = rig(t);
   const transitBody = fx('b15-collector-transit-translink-seq.body');
@@ -208,19 +214,23 @@ test('celestrak cap: the first MAX_PATTERN_SLOTS groups keep a last-good copy; l
     const res = await r.call(`/api/celestrak/g${i}`);
     assert.equal(res.statusCode, 200, `g${i} live`);
   }
+  // 36 groups: g0..g3 were dropped; g0 asked again is re-admitted (most
+  // recent) and pushes out the now least recent copy, g4
+  assert.equal((await r.call('/api/celestrak/g0')).statusCode, 200);
   assert.equal(
     (await r.call('/api/transit/vehicles/translink-seq')).statusCode,
     200,
   );
   r.collector.up = false;
+  const dropped = new Set([1, 2, 3, 4]);
   for (let i = 0; i < total; i++) {
     const res = await r.call(`/api/celestrak/g${i}`);
-    if (i < MAX_PATTERN_SLOTS) {
+    if (!dropped.has(i)) {
       assert.equal(res.statusCode, 200, `g${i} from its own copy`);
       assert.equal(res.headers['x-feed-bridge'], 'cache');
       assert.equal(res.body.toString(), `GP celestrak-g${i}\r\n`);
     } else {
-      assert.equal(res.statusCode, 503, `g${i} beyond the cap: no copy`);
+      assert.equal(res.statusCode, 503, `g${i} least recent: copy dropped`);
     }
   }
   // the transit copy does not count against the CelesTrak cap
@@ -228,5 +238,77 @@ test('celestrak cap: the first MAX_PATTERN_SLOTS groups keep a last-good copy; l
   assert.equal(cached.statusCode, 200);
   assert.equal(cached.headers['x-feed-bridge'], 'cache');
   assert.equal(Buffer.compare(cached.body, transitBody), 0);
+  assert.deepEqual(r.blocked, []);
+});
+
+test('celestrak: groups the collector has no snapshot for never take a copy slot; a real group requested after them still keeps its last-good copy (t_eb2c4e10)', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const r = rig(t);
+  const junk = MAX_PATTERN_SLOTS + 8;
+  for (let i = 0; i < junk; i++) r.collector.missing.add(`celestrak-junk${i}`);
+  for (let i = 0; i < junk; i++) {
+    const res = await r.call(`/api/celestrak/junk${i}`);
+    assert.equal(res.statusCode, 503, `junk${i}`);
+    assert.equal(res.headers['x-feed-reason'], 'no_snapshot');
+  }
+  // a real group after the junk: live, and its copy is kept
+  const live = await r.call('/api/celestrak/stations');
+  assert.equal(live.statusCode, 200);
+  assert.equal(live.headers['x-feed-bridge'], 'collector');
+  // more junk after it cannot push the copy out either
+  for (let i = 0; i < junk; i++) {
+    assert.equal((await r.call(`/api/celestrak/junk${i}`)).statusCode, 503);
+  }
+  r.collector.up = false;
+  const stale = await r.call('/api/celestrak/stations');
+  assert.equal(stale.statusCode, 200, 'outage: last-good copy, not 503');
+  assert.equal(stale.headers['x-feed-bridge'], 'cache');
+  assert.equal(stale.body.toString(), 'GP celestrak-stations\r\n');
+  // junk groups still have nothing to serve
+  const none = await r.call('/api/celestrak/junk0');
+  assert.equal(none.statusCode, 503);
+  assert.equal(none.headers['x-feed-bridge'], 'none');
+  // a group that was missing and then gets a snapshot is admitted normally
+  r.collector.up = true;
+  r.collector.missing.delete('celestrak-junk1');
+  assert.equal((await r.call('/api/celestrak/junk1')).statusCode, 200);
+  r.collector.up = false;
+  const junk1 = await r.call('/api/celestrak/junk1');
+  assert.equal(junk1.statusCode, 200);
+  assert.equal(junk1.headers['x-feed-bridge'], 'cache');
+  assert.deepEqual(r.blocked, []);
+});
+
+test('celestrak over the cap: repeated identical answers log once per transition, live -> cache -> live (t_eb2c4e10)', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const r = rig(t);
+  const junk = MAX_PATTERN_SLOTS + 8;
+  for (let i = 0; i < junk; i++) {
+    r.collector.missing.add(`celestrak-junk${i}`);
+    await r.call(`/api/celestrak/junk${i}`);
+  }
+  assert.equal(r.lines.length, junk, 'one start -> none per missing group');
+  const label = '[gev-history bridge] celestrak/celestrak-stations';
+  const since = () => r.lines.splice(0);
+  since();
+  for (let i = 0; i < 5; i++)
+    assert.equal((await r.call('/api/celestrak/stations')).statusCode, 200);
+  assert.deepEqual(since(), [`${label}: start -> collector`]);
+  r.collector.up = false;
+  for (let i = 0; i < 5; i++) {
+    const res = await r.call('/api/celestrak/stations');
+    assert.equal(res.headers['x-feed-bridge'], 'cache');
+  }
+  assert.deepEqual(since(), [`${label}: collector -> cache (collector_down)`]);
+  r.collector.up = true;
+  for (let i = 0; i < 5; i++) await r.call('/api/celestrak/stations');
+  assert.deepEqual(since(), [`${label}: cache -> collector`]);
+  // the last missing group (still remembered), asked 5 more times: silent
+  for (let i = 0; i < 5; i++)
+    assert.equal(
+      (await r.call(`/api/celestrak/junk${junk - 1}`)).statusCode,
+      503,
+    );
+  assert.deepEqual(since(), []);
   assert.deepEqual(r.blocked, []);
 });
