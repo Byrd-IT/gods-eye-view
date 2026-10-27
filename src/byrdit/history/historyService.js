@@ -1,6 +1,7 @@
 import { HISTORY_INDICES as IDX } from './historyEs.js';
 import {
   ADSBLOL_BUCKET_S,
+  MILITARY_CADENCE_MS,
   MILITARY_MAX_SNAP_AGE_MS,
   STALE_POSITION_MAX_MS,
   STALE_UNION_SPAN_MS,
@@ -50,9 +51,14 @@ export const LOG_FEED = Object.freeze({
   opensky: 'aircraft-opensky',
 });
 
-/** Recorder cadence per ingest-log feed (collector feed definitions). */
+/**
+ * Recorder cadence per ingest-log feed (collector feed definitions).
+ * polls_expected = floor(bucket / cadence): military (300 s) expects 1 poll
+ * per 5m bucket, 12 per 1h, and 0 per 1m bucket (a 1-minute bucket holds a
+ * poll only every 5th minute, so none is expected).
+ */
 export const CADENCE_MS = Object.freeze({
-  military: 60_000,
+  military: MILITARY_CADENCE_MS,
   firms: 1_800_000,
   'fire-perimeters': 900_000,
   cyclones: 900_000,
@@ -1027,8 +1033,52 @@ export function createHistoryService({
     return SLICES[params.feed](params);
   }
 
-  /** Coverage lane from the ingest-log (polls_ok / expected / docs). */
+  /**
+   * Coverage lane from the ingest-log (polls_ok / expected / docs).
+   *
+   * Buckets SHORTER than the recorder cadence (military 300 s polls at 1m
+   * buckets: polls_expected 0) hold a poll only every few buckets, yet each
+   * poll serves the slice until the next one is due. For those (`hold`) the
+   * lane also returns, per bucket with an OK poll, its last OK poll time
+   * (`last_ok`) and the last OK poll in the cadence before `from` (`prevOk`,
+   * so a window starting between polls is not blank at its left edge). The
+   * ribbon paints each poll ONE cadence forward from these (review
+   * t_77c13cca F1). Buckets >= cadence: ES request and answer unchanged.
+   * @returns {Promise<{buckets: Array, prevOk: string|null}>}
+   */
   async function logLane(logFeed, { from, to, bucketMs }) {
+    const cadence = CADENCE_MS[logFeed];
+    const hold = Boolean(cadence) && cadence > bucketMs;
+    const lastOk = { last: { max: { field: '@timestamp' } } };
+    const okAgg = { filter: { term: { ok: true } } };
+    if (hold) okAgg.aggs = lastOk;
+    const aggs = {
+      b: {
+        date_histogram: {
+          field: '@timestamp',
+          fixed_interval: `${bucketMs / 1000}s`,
+          min_doc_count: 0,
+          extended_bounds: { min: from, max: to - 1 },
+          hard_bounds: { min: from, max: to - 1 },
+        },
+        aggs: {
+          ok: okAgg,
+          docs: { sum: { field: 'docs_written' } },
+        },
+      },
+    };
+    if (hold)
+      aggs.prev = {
+        filter: {
+          bool: {
+            filter: [
+              { term: { ok: true } },
+              range('@timestamp', from - cadence, from - 1),
+            ],
+          },
+        },
+        aggs: lastOk,
+      };
     const json = await es.search(IDX.ingestLog, {
       size: 0,
       query: {
@@ -1036,33 +1086,31 @@ export function createHistoryService({
           filter: [
             { term: { feed: logFeed } },
             { term: { kind: 'poll' } },
-            range('@timestamp', from, to),
+            // hold: one cadence of lookback for `prev`; hard_bounds keep
+            // those polls out of the buckets
+            range('@timestamp', hold ? from - cadence : from, to),
           ],
         },
       },
-      aggs: {
-        b: {
-          date_histogram: {
-            field: '@timestamp',
-            fixed_interval: `${bucketMs / 1000}s`,
-            min_doc_count: 0,
-            extended_bounds: { min: from, max: to - 1 },
-            hard_bounds: { min: from, max: to - 1 },
-          },
-          aggs: {
-            ok: { filter: { term: { ok: true } } },
-            docs: { sum: { field: 'docs_written' } },
-          },
-        },
-      },
+      aggs,
     });
-    const cadence = CADENCE_MS[logFeed];
-    return (json?.aggregations?.b?.buckets ?? []).map((b) => ({
-      t: new Date(b.key).toISOString(),
-      polls_ok: b.ok?.doc_count ?? 0,
-      polls_expected: cadence ? Math.floor(bucketMs / cadence) : null,
-      docs: Math.round(b.docs?.value ?? 0),
-    }));
+    const isoOf = (v) =>
+      Number.isFinite(v) ? new Date(v).toISOString() : null;
+    const buckets = (json?.aggregations?.b?.buckets ?? []).map((b) => {
+      const out = {
+        t: new Date(b.key).toISOString(),
+        polls_ok: b.ok?.doc_count ?? 0,
+        polls_expected: cadence ? Math.floor(bucketMs / cadence) : null,
+        docs: Math.round(b.docs?.value ?? 0),
+      };
+      const last = hold && out.polls_ok > 0 ? isoOf(b.ok?.last?.value) : null;
+      if (last) out.last_ok = last;
+      return out;
+    });
+    const prevOk = hold
+      ? isoOf(json?.aggregations?.prev?.last?.value ?? null)
+      : null;
+    return { buckets, prevOk };
   }
 
   /** Recorded gaps (type=gap docs written by the gap detector). */
@@ -1095,7 +1143,12 @@ export function createHistoryService({
    * (tilesOmitted: true) so the answer stays bounded.
    */
   async function openskyLane({ from, to, bucketMs }) {
-    const lane = await logLane(LOG_FEED.opensky, { from, to, bucketMs });
+    // demand-driven: no cadence, so no hold fields (lane shape unchanged)
+    const { buckets: lane } = await logLane(LOG_FEED.opensky, {
+      from,
+      to,
+      bucketMs,
+    });
     const total = lane.reduce((n, b) => n + b.polls_ok, 0);
     if (to - from > 7 * DAY_MS || total > OPENSKY_LANE_MAX_POLLS)
       return { buckets: lane, tilesOmitted: total > 0 };
@@ -1172,12 +1225,21 @@ export function createHistoryService({
       logLane(logFeed, { from, to, bucketMs }),
       gaps(logFeed, { from, to }),
     ]);
+    const collector = {
+      source: 'collector',
+      bucket,
+      // recorder cadence: the ribbon holds each poll this long when the
+      // bucket is shorter (null = no fixed cadence)
+      cadence_ms: CADENCE_MS[logFeed] ?? null,
+      buckets: lane.buckets,
+    };
+    if (lane.prevOk) collector.prev_ok = lane.prevOk;
     return {
       feed,
       from: new Date(from).toISOString(),
       to: new Date(to).toISOString(),
       bucket,
-      lanes: [{ source: 'collector', bucket, buckets: lane }],
+      lanes: [collector],
       gaps: gapList,
     };
   }

@@ -122,4 +122,20 @@ export const HISTORY_CSS = `
   .gev-hist-thumb { height: 32px; }
 }
 @media (prefers-reduced-motion: reduce) { .gev-hist * { transition: none !important; } }
+/* Hosted in the Time travel menu: the menu owns placement and the glass, so
+   the control flows in it (no fixed bottom-left box). Last, so it wins over
+   the desktop and phone placement rules above. */
+.gev-hist[data-embedded='true'],
+.gev-hist[data-embedded='true'][data-expanded='false'] {
+  position: static;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 `;

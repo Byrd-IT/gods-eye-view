@@ -1,4 +1,5 @@
-import { keySetupRequirement } from '../keySetupCore.mjs';
+import { keySetupRequirementEnvVars } from '../keySetupCore.mjs';
+import { t } from '../i18n/index.js';
 /**
  * Why Google 3D is unavailable, phrased so the tooltip and toast recommend the
  * RIGHT fix. With no Google key the fix is a key (Cesium ion's hosted Google
@@ -10,6 +11,11 @@ import { keySetupRequirement } from '../keySetupCore.mjs';
  */
 export function photorealUnavailableReason(hasCredentials) {
   if (hasCredentials)
-    return "Google 3D tiles unavailable — check the key's API restrictions, quota, or network";
-  return keySetupRequirement('google-maps');
+    return t(
+      "Google 3D tiles unavailable — check the key's API restrictions, quota, or network",
+    );
+  // Byrd-IT: no Cesium ion route for Google 3D (ion asset 2275207 is refused),
+  // so the advice names only the Google key.
+  const envVars = keySetupRequirementEnvVars('google-maps');
+  return t('Needs {envVars} — add it in Provider Settings', { envVars });
 }

@@ -1498,9 +1498,11 @@ function healthFail(answers) {
 
 test('health: first ACTIVE collector, N5 lastOK/staleSince/reason per feed, nothing internal leaks', async () => {
   const feeds = {
+    // military polls every 300 s (t_5ad2b9a4): 10 min since the last OK poll
+    // is inside 3 x 300 s, so still live (the 60 s rule said stale at 180 s)
     military: {
-      cadenceMs: 60_000,
-      lastOkAt: NOW - 30_000,
+      cadenceMs: 300_000,
+      lastOkAt: NOW - 600_000,
       halted: null,
       lastReason: 'secret upstream text',
     },
@@ -1553,7 +1555,7 @@ test('health: first ACTIVE collector, N5 lastOK/staleSince/reason per feed, noth
       fake: {
         fail: healthFail({
           's4.test:4180': collectorHealth('standby', {
-            military: { cadenceMs: 60_000, lastOkAt: NOW - 86_400_000 },
+            military: { cadenceMs: 300_000, lastOkAt: NOW - 86_400_000 },
           }),
           's5.test:4180': collectorHealth('active', feeds),
         }),
@@ -1568,8 +1570,8 @@ test('health: first ACTIVE collector, N5 lastOK/staleSince/reason per feed, noth
   assert.equal(h.collector.state, 'active');
   assert.equal(h.collector.reachable, 2);
   assert.deepEqual(h.feeds.military, {
-    cadenceMs: 60_000,
-    lastOK: NOW - 30_000,
+    cadenceMs: 300_000,
+    lastOK: NOW - 600_000,
     staleSince: null,
     reason: null,
     state: 'live',
@@ -2030,4 +2032,16 @@ test('t_5dc0e0c3 aircraft slice reads only the state columns; the military archi
     const names = c.body.docvalue_fields.map((d) => (typeof d === 'string' ? d : d.field));
     assert.deepEqual(new Set(names), new Set(['icao24', ...Object.keys(AIRCRAFT_STATE_DOC_VALUES)]));
   }
+});
+
+test('feedHealth: military at 300 s polls (t_5ad2b9a4) is stale only after 3 x 300 s', () => {
+  const live = feedHealth({ cadenceMs: 300_000, lastOkAt: NOW - 900_000 }, NOW);
+  assert.equal(live.state, 'live');
+  assert.equal(live.staleSince, null);
+  const stale = feedHealth(
+    { cadenceMs: 300_000, lastOkAt: NOW - 900_001 },
+    NOW,
+  );
+  assert.equal(stale.state, 'stale');
+  assert.equal(stale.staleSince, NOW - 1);
 });

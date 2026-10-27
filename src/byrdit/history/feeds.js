@@ -8,6 +8,7 @@ import {
   resolveWeather,
   transitHeaders,
 } from './feedsC.js';
+import { MILITARY_CADENCE_MS } from './historyMerge.js';
 // B20: `view` / `vsid` exactly as the browser helper sends them
 import { SID_RE, VIEW_PARAM_RE } from './flightView.js';
 
@@ -127,8 +128,9 @@ export const BRIDGE_FEEDS = Object.freeze({
   military: Object.freeze({
     route: '/api/military',
     collectorFeed: 'military',
-    // gev-history src/feeds/military.js cadenceMs (adsb.lol /v2/mil, 60 s).
-    cadenceMs: 60_000,
+    // gev-history src/feeds/military.js cadenceMs (adsb.lol /v2/mil, 300 s
+    // since t_5ad2b9a4): the last-good copy goes STALE after 3 x = 900 s.
+    cadenceMs: MILITARY_CADENCE_MS,
     source: 'adsb.lol',
     flag: 'GEV_BRIDGE_MILITARY',
     forwardQuery: false,

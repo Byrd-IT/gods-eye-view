@@ -348,7 +348,17 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // policy once (WHERE precedence, AREAS routing, AFTER TOOLS speech) brought
   // it to 51,646. A new tool or rule has to fit under this ceiling.
   const size = instructions.length + JSON.stringify(GEV_REALTIME_TOOLS).length;
-  assert.ok(size <= 52000, `prompt size ${size}`);
+  // Byrd-IT fork: + 297 characters for the four USGS water layers in
+  // src/voice/layerManifest.js (upstream ceiling 52000).
+  // + 89 characters: voice set_map_stack enum gains byrdit-open and basemap-auto.
+  // + 2113 characters: the control_history tool and its routing sentence.
+  // + 1812 characters: the control_sky tool and its routing sentence.
+  // + 159 characters: the routing sentence keeps map ISS questions on track_entity.
+  // + 2026 characters: the control_imagery tool and its routing sentence.
+  assert.ok(
+    size <= 52000 + 297 + 89 + 2113 + 1812 + 159 + 2026,
+    `prompt size ${size}`,
+  );
 });
 
 

@@ -89,8 +89,9 @@ function bridgeHeaders(extra = {}) {
     'x-feed-last-ok': String(MIL_LAST_OK),
     'x-feed-age-ms': String(Date.now() - MIL_LAST_OK),
     'x-feed-cache': 'STALE',
-    'x-feed-stale-since': String(MIL_LAST_OK + 3 * 60_000),
-    'x-feed-grey-until': String(MIL_LAST_OK + 63 * 60_000),
+    // bridge: stale after 3 x the 300 s military cadence, grey 60 min later
+    'x-feed-stale-since': String(MIL_LAST_OK + 3 * 300_000),
+    'x-feed-grey-until': String(MIL_LAST_OK + 75 * 60_000),
     ...extra,
   };
 }

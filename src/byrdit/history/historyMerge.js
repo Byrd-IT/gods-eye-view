@@ -7,12 +7,20 @@
 export const ADSBLOL_BUCKET_S = 60;
 /** DESIGN 1.3 #1c: samples of the two sources within 5 s -> OpenSky wins. */
 export const MERGE_TIE_MS = 5_000;
-/** Military recorder cadence (collector militaryFeed.cadenceMs). */
-export const MILITARY_CADENCE_MS = 60_000;
+/**
+ * Military recorder cadence: the ONE app-side copy of the collector's
+ * military poll interval (gev-history src/feeds/military.js
+ * MILITARY_CADENCE_MS / GEV_COLLECTOR_MILITARY_CADENCE_MS, default 300 s
+ * since t_5ad2b9a4: adsb.lol allows 500 requests / 24 h per IP). The history
+ * merge (below), the coverage lane's polls_expected (historyService.js
+ * CADENCE_MS.military) and the bridge's last-good staleness (feeds.js
+ * BRIDGE_FEEDS.military) all read this constant.
+ */
+export const MILITARY_CADENCE_MS = 300_000;
 /**
  * A military poll is "the poll at t" when its snap is in [t - 3 x cadence, t]
- * (the collector's own stale threshold, DESIGN 2.4b); older = recording gap
- * -> the adsb.lol archive fallback.
+ * (the collector's own stale threshold, DESIGN 2.4b): 900 s at 300 s polls.
+ * Older = recording gap -> the adsb.lol archive fallback.
  */
 export const MILITARY_MAX_SNAP_AGE_MS = 3 * MILITARY_CADENCE_MS;
 /**
@@ -22,6 +30,22 @@ export const MILITARY_MAX_SNAP_AGE_MS = 3 * MILITARY_CADENCE_MS;
  * older than STALE_POSITION_MAX_MS before S. MEASURED 2026-10-14 on six
  * military polls: term(snap) + this union = 358-382 rows vs the live poll's
  * 358-381 positioned rows (docs_received), i.e. within -0/+3 %.
+ *
+ * Both limits are NOT cadence multiples, so they stay as measured at 300 s
+ * polls (t_a6faec15):
+ * - STALE_POSITION_MAX_MS is a limit on the POSITION age (upstream
+ *   seen_pos), an upstream property. In the captured /v2/mil answers every
+ *   current position is < 60 s old; only lastPosition fallbacks are older
+ *   (in the 3 captures 8-14 % of positioned rows are > 300 s old, up to
+ *   ~53 min; collector test/fixtures/military-v2-mil*.json). Keeping 180 s
+ *   keeps the measured row match and the same rows for the same instant in
+ *   the 60 s era (history before the cutover) and the 300 s era.
+ * - A held position with time F was first written by the first poll at or
+ *   after F, so its snap is >= F >= S - STALE_POSITION_MAX_MS. Any span >=
+ *   STALE_POSITION_MAX_MS therefore finds it, whatever the cadence; 300 s
+ *   covers 180 s. At 300 s polls the prior poll S - 300 s cannot hold a
+ *   position newer than S - 300 s, so the union adds rows only around poll
+ *   jitter; at 60 s polls (older history) it still does the measured work.
  */
 export const STALE_UNION_SPAN_MS = 300_000;
 export const STALE_POSITION_MAX_MS = 180_000;

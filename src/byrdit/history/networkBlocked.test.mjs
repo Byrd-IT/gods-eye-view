@@ -147,11 +147,12 @@ test('collector stopped: last-good body STALE with X-Feed-Stale-Since and ZERO u
   assert.equal(stale.statusCode, 200);
   assert.ok(stale.body.equals(FIXTURE), 'last-good body, not cleared');
   assert.equal(stale.headers['x-feed-cache'], 'STALE');
-  assert.equal(stale.headers['x-feed-stale-since'], String(lastOk + 180_000));
+  // 3 x the 300 s military cadence (t_5ad2b9a4)
+  assert.equal(stale.headers['x-feed-stale-since'], String(lastOk + 900_000));
   assert.equal(stale.headers['x-feed-reason'], 'collector_down');
   assert.equal(
     stale.headers['x-feed-grey-until'],
-    String(lastOk + 180_000 + 3_600_000),
+    String(lastOk + 900_000 + 3_600_000),
   );
   assert.deepEqual(blocked, [], 'GEV made no upstream request');
 });
@@ -231,10 +232,12 @@ test('bridge ON leaves /api/military/track to its live handler', async (t) => {
     adsbLolProxy(),
     trackBackfillProxies(),
   ]);
-  await request('/api/military/track?hex=ae1234');
-  assert.ok(
-    seen.some((href) => href.includes('ae1234')),
-    'the on-demand trace stays live in v1 (DESIGN 4.2 exception)',
-  );
+  const res = await request('/api/military/track?hex=ae1234');
+  // Upstream retired the adsb.lol trace route (5f3d1eaa): the live handler
+  // refuses locally. The bridge still leaves the route to it (no collector
+  // answer, no upstream request).
+  assert.equal(res.statusCode, 503);
+  assert.match(String(res.body), /history_unavailable/);
+  assert.deepEqual(seen, [], 'the live handler makes no upstream request');
   assert.ok(!seen.includes('https://api.adsb.lol/v2/mil'));
 });

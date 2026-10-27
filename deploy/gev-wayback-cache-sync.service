@@ -1,0 +1,17 @@
+[Unit]
+Description=GEV Wayback tile cache -> S1 (append-only rsync, no --delete) (GEV_BYRDIT_WAYBACK)
+Documentation=file:///home/brandonabyrd/gods-eye-view/docs/WAYBACK.md
+After=network-online.target
+Wants=network-online.target
+OnFailure=job-failure-notify@%n.service
+
+[Service]
+Type=oneshot
+User=brandonabyrd
+Group=brandonabyrd
+Environment=GEV_WAYBACK_CACHE_DIR=/srv/gev-wayback-cache
+Environment=GEV_WAYBACK_SYNC_DEST=S1:/srv/gev-basemap/wayback-cache
+ExecStart=/home/brandonabyrd/gods-eye-view/deploy/gev-wayback-cache-sync.sh
+TimeoutStartSec=6h
+Nice=15
+IOSchedulingClass=idle

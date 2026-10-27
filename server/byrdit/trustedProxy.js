@@ -21,7 +21,15 @@
 // A trusted peer sending a malformed X-Forwarded-Proto (a list, or any other
 // value) is treated as untrusted, i.e. refused as a proxied request.
 //
-// Only the sameSiteGated routes use this. The credential panel
+// This file is the ONE copy of the same-site trust rule (socket peer in the list;
+// src/keySetupCore.mjs GEV_KEY_SETUP_TRUSTED_PEERS is a separate upstream peer
+// list for the credential panel only). Every
+// gate that treats forwarded requests differently asks it:
+//   - sameSiteTransport      (same-site gate, Gemini voice token gate)
+//   - hasUntrustedForwarding (CCTV Street View fallback)
+//   - trustedClientAddress   (per-client rate-limit key)
+//
+// Only the sameSiteGated routes use the same-site part. The credential panel
 // (admitKeySetupRequest) and /mcp stay loopback-only and never read it.
 // No imports, so it can sit in any package boundary.
 
@@ -64,6 +72,50 @@ export function parseTrustedProxies(value) {
 }
 
 /**
+ * Whether the TCP peer is a configured trusted proxy (exact IP match, same
+ * rule for every caller). False when GEV_TRUSTED_PROXIES is unset or empty.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {boolean}
+ */
+export function isTrustedProxyPeer(req, env = process.env) {
+  const trusted = parseTrustedProxies(env?.[TRUSTED_PROXIES_ENV]);
+  if (!trusted.size) return false;
+  const peer = normalizeProxyAddress(req?.socket?.remoteAddress);
+  return Boolean(peer) && trusted.has(peer);
+}
+
+/**
+ * True when the request carries ANY of the given forwarding header names (even
+ * an empty one) and its peer is NOT a trusted proxy. A trusted proxy peer is
+ * never "forwarded": the proxy authenticates its users, who get what a
+ * loopback/LAN user gets. With the setting unset this is exactly upstream's
+ * `signals.some((name) => headers[name] !== undefined)`.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {readonly string[]} signals Lower-case header names.
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {boolean}
+ */
+export function hasUntrustedForwarding(req, signals, env = process.env) {
+  const forwarded = signals.some((name) => req?.headers?.[name] !== undefined);
+  return forwarded && !isTrustedProxyPeer(req, env);
+}
+
+/**
+ * Per-client address for rate limiting when the peer is a trusted proxy that
+ * forwards a well-formed X-Real-IP: `proxied:<ip>`. Null otherwise, so callers
+ * keep their own socket-peer key (and unset = upstream).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {string|null}
+ */
+export function trustedClientAddress(req, env = process.env) {
+  if (!isTrustedProxyPeer(req, env)) return null;
+  const real = normalizeProxyAddress(req?.headers?.['x-real-ip']);
+  return /^[0-9a-f:.]{2,45}$/.test(real) ? `proxied:${real}` : null;
+}
+
+/**
  * Transport facts for the same-site gate. For an untrusted peer (or with the
  * setting unset) this is exactly what upstream computed: the socket protocol
  * and every request header as proxy-signal input. For a trusted proxy peer it
@@ -75,10 +127,7 @@ export function parseTrustedProxies(value) {
 export function sameSiteTransport(req, env = process.env) {
   const socketProtocol = req?.socket?.encrypted ? 'https:' : 'http:';
   const legacy = { protocol: socketProtocol, proxyHeaders: req?.headers || {} };
-  const trusted = parseTrustedProxies(env?.[TRUSTED_PROXIES_ENV]);
-  if (!trusted.size) return legacy;
-  const peer = normalizeProxyAddress(req?.socket?.remoteAddress);
-  if (!peer || !trusted.has(peer)) return legacy;
+  if (!isTrustedProxyPeer(req, env)) return legacy;
   const forwarded = req?.headers?.['x-forwarded-proto'];
   if (forwarded === undefined)
     return { protocol: socketProtocol, proxyHeaders: {} };

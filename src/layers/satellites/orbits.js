@@ -9,6 +9,7 @@ import {
 } from 'satellite.js';
 import { findNextSatellitePass } from '../../data/satellitePass.js';
 import { parseGP } from '../../byrdit/gpCsv.js'; // Byrd-IT: shared
+import { noradIdFromSatnum } from '../../sources/tle.js';
 import { ORBIT_PATH_STEPS, ISS_NORAD } from './policy.js';
 
 export function createOrbits({ state: layerState, services, parts, source }) {
@@ -283,7 +284,7 @@ export function createOrbits({ state: layerState, services, parts, source }) {
     const current = propagatePosition(satrec, referenceDate);
     if (!current) return null;
     return {
-      noradId: Number(satrec.satnum),
+      noradId: noradIdFromSatnum(satrec.satnum),
       name: String(name || '').trim(),
       current,
       periodSec: orbitalPeriodSeconds(satrec),

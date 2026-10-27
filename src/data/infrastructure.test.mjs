@@ -74,7 +74,7 @@ test('infrastructure factory preserves identity and creates independent state wi
       ].map(([id, name]) => ({
         id,
         name,
-        source: 'USGS · refreshed every 15 min',
+        source: 'USGS · refreshed every 30 min',
       })),
     ],
   );

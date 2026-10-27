@@ -108,6 +108,7 @@ import {
   orientationMessage,
 } from './orientationMath.js';
 import { DEFAULT_SKY_FLAGS, readSkyUrl, writeSkyUrl } from './skyUrl.js';
+import { createSkyVoice } from './skyVoice.js';
 import {
   CLEAR_MESSAGE_STATES,
   createClearView,
@@ -487,12 +488,17 @@ export function mountSkyView({
   nextIssPass = null,
   /** Clear view: where the session's choice is kept (sessionStorage). */
   clearStorage,
+  /** Window that receives __gevSky. Defaults to the document's window. */
+  voiceWindow,
 } = {}) {
   if (!viewer?.camera || !viewer?.scene || !doc?.createElement) return null;
   const existing = mounted.get(viewer);
   if (existing && !existing.destroyed) return existing;
   const host = parent || doc.body;
   if (!host) return null;
+  const hookWindow =
+    voiceWindow !== undefined ? voiceWindow : (doc.defaultView ?? null);
+  let skyVoice = null;
 
   const dom = buildDom(doc);
   const satDom = buildSatPanel(doc);
@@ -1514,6 +1520,25 @@ export function mountSkyView({
     enterAt({ ...hit, source: 'map' });
   }
 
+  /** Voice open: the map centre, with a fixed reason when it cannot. */
+  async function openHere() {
+    if (active) return { ok: true, alreadyOpen: true };
+    const { width, height } = canvasSize();
+    const hit = pickAt(new CesiumApi.Cartesian2(width / 2, height / 2));
+    if (!hit)
+      return {
+        ok: false,
+        error: 'No ground at the screen centre. Move the map onto land first.',
+      };
+    const entered = await enterAt({ ...hit, source: 'map' });
+    if (!entered)
+      return {
+        ok: false,
+        error: 'Sky view is not available in this mode.',
+      };
+    return { ok: true };
+  }
+
   async function submitQuery() {
     const text = String(dom.input.value || '').trim();
     if (!text) return;
@@ -2017,6 +2042,13 @@ export function mountSkyView({
     elements: dom,
     enterAt,
     exit: () => exit(),
+    openHere: () => openHere(),
+    setTime: (ms) => timeControl.jumpTo(ms),
+    goLive() {
+      if (time.provider === 'history') return false;
+      clock.setLive();
+      return true;
+    },
     setView: (next) => applyView({ ...view, ...next }),
     redraw,
     /** Overlay redraw timings (ms): count, p50, p95, max. */
@@ -2040,6 +2072,7 @@ export function mountSkyView({
     occlusion: (azDeg, elDeg) => profileOcclusion(profile, azDeg, elDeg),
     destroy() {
       if (destroyed) return;
+      if (hookWindow?.__gevSky?.voice === skyVoice) delete hookWindow.__gevSky;
       exit();
       stopPicking();
       content.destroy();
@@ -2063,6 +2096,11 @@ export function mountSkyView({
     },
   };
   mounted.set(viewer, handle);
+  skyVoice = createSkyVoice({
+    getHandle: () => (handle.destroyed ? null : handle),
+  });
+  handle.voice = skyVoice;
+  if (hookWindow) hookWindow.__gevSky = { voice: skyVoice };
   lifetime?.removers?.add?.(() => handle.destroy());
   return handle;
 }

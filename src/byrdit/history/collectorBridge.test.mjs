@@ -167,7 +167,10 @@ test('collector STALE answers pass through and gain X-Feed-Grey-Until', async ()
   assert.equal(res.headers['x-feed-grey-until'], String(since + 3_600_000));
 });
 
-test('no collector: last-good copy, HIT inside the threshold, STALE after it (3 x 60 s)', async () => {
+test('no collector: last-good copy, HIT inside the threshold, STALE after it (3 x 300 s)', async () => {
+  // military polls every 300 s (t_5ad2b9a4): 3 x cadence = 900 s, the same
+  // stale threshold the collector's own X-Feed-* headers use
+  assert.equal(BRIDGE_FEEDS.military.cadenceMs, 300_000);
   let up = true;
   const { fetchImpl } = fakeCollectors(() =>
     up ? collectorOk({ lastOk: T0 }) : new Error('ECONNREFUSED'),
@@ -183,7 +186,13 @@ test('no collector: last-good copy, HIT inside the threshold, STALE after it (3 
   assert.equal(fresh.headers['x-feed-bridge'], 'cache');
   assert.equal(fresh.headers['x-feed-age-ms'], '61000');
   assert.equal(fresh.headers['x-feed-stale-since'], undefined);
-  b.advance(120_000); // age 181 s > 180 s
+  // one missed 300 s poll (and the old 60 s rule's 180 s) is not stale yet
+  b.advance(839_000); // age exactly 900 s: still HIT (stale is age > 900 s)
+  const edge = await call(b.handler);
+  assert.equal(edge.headers['x-feed-cache'], 'HIT');
+  assert.equal(edge.headers['x-feed-age-ms'], '900000');
+  assert.equal(edge.headers['x-feed-stale-since'], undefined);
+  b.advance(1_000); // age 901 s > 900 s
   const stale = await call(b.handler);
   assert.equal(stale.statusCode, 200);
   assert.equal(
@@ -193,10 +202,10 @@ test('no collector: last-good copy, HIT inside the threshold, STALE after it (3 
   );
   assert.equal(stale.headers['x-feed-cache'], 'STALE');
   assert.equal(stale.headers['x-feed-last-ok'], String(T0));
-  assert.equal(stale.headers['x-feed-age-ms'], '181000');
-  assert.equal(stale.headers['x-feed-stale-since'], String(T0 + 180_000));
+  assert.equal(stale.headers['x-feed-age-ms'], '901000');
+  assert.equal(stale.headers['x-feed-stale-since'], String(T0 + 900_000));
   assert.equal(stale.headers['x-feed-reason'], 'collector_down');
-  assert.equal(stale.headers['x-feed-grey-until'], String(T0 + 780_000));
+  assert.equal(stale.headers['x-feed-grey-until'], String(T0 + 1_500_000));
   b.advance(48 * 3_600_000);
   const later = await call(b.handler);
   assert.equal(later.statusCode, 200, 'still the last-good body days later');
