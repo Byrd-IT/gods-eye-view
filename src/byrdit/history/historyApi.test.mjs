@@ -8,6 +8,7 @@ import {
   esConfigFromEnv,
 } from './historyEs.js';
 import { MAX_ROWS } from './historyParams.js';
+import { buildRibbon } from '../historyUi/coverageRibbon.js';
 import { historyPlugins } from './index.js';
 
 /**
@@ -147,7 +148,44 @@ function createFakeEs(data, { keyName = 'gev-history-reader', fail } = {}) {
           .map(([key, doc_count]) => ({ key, doc_count })),
       };
     }
-    if (aggs.b) out.b = { buckets: [] };
+    if (aggs.b?.date_histogram?.extended_bounds) {
+      // coverage logLane: fixed_interval '<n>s', min_doc_count 0 over the
+      // extended bounds, sub-aggs ok (filter ok:true) + docs (sum)
+      // (+ ok.last max @timestamp when the bucket < cadence: hold)
+      const dh = aggs.b.date_histogram;
+      const iv = Number(/^(\d+)s$/.exec(dh.fixed_interval)[1]) * 1000;
+      const maxTs = (hs) =>
+        hs.length
+          ? Math.max(...hs.map((h) => dateOf(h._source['@timestamp'])))
+          : null;
+      const buckets = [];
+      for (
+        let k = dh.extended_bounds.min;
+        k <= dh.extended_bounds.max;
+        k += iv
+      ) {
+        const hs = hits.filter((h) => {
+          const t = dateOf(h._source['@timestamp']);
+          return t >= k && t < k + iv && t <= dh.hard_bounds.max;
+        });
+        const okHits = hs.filter((h) => h._source.ok === true);
+        const ok = { doc_count: okHits.length };
+        if (aggs.b.aggs.ok.aggs?.last) ok.last = { value: maxTs(okHits) };
+        buckets.push({
+          key: k,
+          doc_count: hs.length,
+          ok,
+          docs: {
+            value: hs.reduce((n, h) => n + (h._source.docs_written ?? 0), 0),
+          },
+        });
+      }
+      out.b = { buckets };
+      if (aggs.prev) {
+        const ph = hits.filter((h) => matches(h._source, aggs.prev.filter, h));
+        out.prev = { doc_count: ph.length, last: { value: maxTs(ph) } };
+      }
+    } else if (aggs.b) out.b = { buckets: [] };
     if (aggs.s) {
       const { field, size, order } = aggs.s.terms;
       const keys = [...new Set(hits.map((h) => get(h._source, field)))];
@@ -766,6 +804,247 @@ test('military slice: recording gap -> adsb.lol archive rows with dbFlags & 1', 
   assert.equal(r.headers['x-history-source'], 'adsblol');
   assert.deepEqual(r.json.ac.map((a) => a.hex).sort(), ['ae1234', 'ae9999']);
   assert.ok(r.json.ac.every((a) => a.source === 'adsblol'));
+});
+
+// ------------------------------------- military at 300 s polls (t_a6faec15)
+// The collector polls adsb.lol /v2/mil every 300 s since t_5ad2b9a4 (500
+// requests / 24 h per IP). 3 x cadence = 900 s max snap age.
+const S5 = NOW - 7_200_000; // a 300 s-era military poll
+const military300 = {
+  'gev-history-ingest-log': [
+    {
+      feed: 'military',
+      kind: 'poll',
+      ok: true,
+      snap: S5 - 300_000,
+      docs_written: 2,
+      '@timestamp': iso(S5 - 300_000),
+    },
+    {
+      feed: 'military',
+      kind: 'poll',
+      ok: true,
+      snap: S5,
+      docs_written: 1,
+      '@timestamp': iso(S5),
+    },
+  ],
+  'gev-history-military': [
+    {
+      '@timestamp': iso(S5 - 4_000),
+      snap: S5,
+      hex: 'ae5001',
+      location: { lat: 30, lon: -97 },
+      source: 'adsb.lol',
+    },
+    {
+      '@timestamp': iso(S5 - 302_000),
+      snap: S5 - 300_000,
+      hex: 'ae5001',
+      location: { lat: 29, lon: -96 },
+      source: 'adsb.lol',
+    },
+    {
+      // only in the previous poll: its position is > 180 s old at S5
+      '@timestamp': iso(S5 - 303_000),
+      snap: S5 - 300_000,
+      hex: 'ae5002',
+      location: { lat: 31, lon: -98 },
+      source: 'adsb.lol',
+    },
+  ],
+};
+
+test('military slice at 300 s polls: a poll 250 s before t is the poll at t', async () => {
+  const { api } = makeApi(military300);
+  for (const dt of [0, 250_000, 299_999, 900_000]) {
+    const r = await call(
+      api,
+      `/api/history/slice?feed=military&t=${iso(S5 + dt)}`,
+    );
+    assert.equal(r.status, 200, r.body);
+    assert.equal(r.headers['x-history-snap'], String(S5), `dt ${dt}`);
+    assert.equal(r.headers['x-history-source'], 'adsb.lol');
+    assert.equal(r.headers['x-history-fallback'], undefined);
+    assert.deepEqual(
+      r.json.ac.map((a) => a.hex),
+      ['ae5001'],
+      'the poll at S5 only; ae5002 is not carried over from S5 - 300 s',
+    );
+    assert.equal(r.json.ac[0].lat, 30);
+  }
+  // between the two polls: the earlier one, never the later (future) poll
+  const mid = await call(
+    api,
+    `/api/history/slice?feed=military&t=${iso(S5 - 50_000)}`,
+  );
+  assert.equal(mid.headers['x-history-snap'], String(S5 - 300_000));
+  assert.deepEqual(mid.json.ac.map((a) => a.hex).sort(), ['ae5001', 'ae5002']);
+});
+
+test('military slice at 300 s polls: newest poll > 900 s before t -> archive fallback', async () => {
+  const { api } = makeApi(military300);
+  const r = await call(
+    api,
+    `/api/history/slice?feed=military&t=${iso(S5 + 900_001)}`,
+  );
+  assert.equal(r.status, 200, r.body);
+  assert.equal(r.headers['x-history-fallback'], 'adsblol-dbflags');
+  assert.notEqual(r.headers['x-history-snap'], String(S5));
+  assert.deepEqual(r.json.ac, []); // no archive rows in this fixture
+});
+
+test('military coverage: polls_expected = bucket / 300 s', async () => {
+  const from = S5 - 3_600_000 + 300_000; // 12 buckets of 5 m, last one = S5
+  const to = S5 + 300_000;
+  const { api } = makeApi(military300);
+  const want = { '1m': 0, '5m': 1, '15m': 3, '1h': 12 };
+  for (const [bucket, expected] of Object.entries(want)) {
+    const r = await call(
+      api,
+      `/api/history/coverage?feed=military&from=${iso(from)}&to=${iso(to)}&bucket=${bucket}`,
+    );
+    assert.equal(r.status, 200, r.body);
+    const lane = r.json.lanes[0];
+    assert.ok(lane.buckets.length > 0, bucket);
+    for (const b of lane.buckets)
+      assert.equal(b.polls_expected, expected, `${bucket} ${b.t}`);
+  }
+  // 5 m buckets: one poll each where the recorder polled, 1 of 1 expected
+  const r = await call(
+    api,
+    `/api/history/coverage?feed=military&from=${iso(from)}&to=${iso(to)}&bucket=5m`,
+  );
+  const byT = Object.fromEntries(r.json.lanes[0].buckets.map((b) => [b.t, b]));
+  assert.equal(r.json.lanes[0].buckets.length, 12);
+  assert.deepEqual(byT[iso(S5)], {
+    t: iso(S5),
+    polls_ok: 1,
+    polls_expected: 1,
+    docs: 1,
+  });
+  assert.equal(byT[iso(S5 - 300_000)].polls_ok, 1);
+  assert.equal(byT[iso(S5 - 600_000)].polls_ok, 0);
+  // bucket >= cadence: no hold fields (answer as before t_e6c6c535)
+  assert.equal(r.json.lanes[0].cadence_ms, 300_000);
+  assert.equal(r.json.lanes[0].prev_ok, undefined);
+});
+
+// ---------------- coverage hold at buckets < cadence (review t_77c13cca F1)
+// 300 s polls at 1m buckets: 4 of 5 buckets hold no poll, yet each poll
+// serves the slice until the next is due. The lane carries cadence_ms,
+// per-bucket last_ok and prev_ok so the ribbon paints each poll ONE cadence
+// forward; a missed poll still leaves a hole.
+const H0 = NOW - 3 * 3_600_000; // window start (minute-aligned)
+const POLL_OFFSET = 7_000; // polls land 7 s into their minute
+function military300Polls({ skip = [] } = {}) {
+  const docs = [];
+  for (let k = -2; k <= 12; k++) {
+    if (skip.includes(k)) continue;
+    const at = H0 + k * 300_000 + POLL_OFFSET;
+    docs.push({
+      feed: 'military',
+      kind: 'poll',
+      ok: true,
+      snap: at,
+      docs_written: 300,
+      '@timestamp': iso(at),
+    });
+  }
+  return { 'gev-history-ingest-log': docs };
+}
+async function militaryCoverage1h(data, bucket = '1m') {
+  const { api } = makeApi(data);
+  const r = await call(
+    api,
+    `/api/history/coverage?feed=military&from=${iso(H0)}&to=${iso(H0 + 3_600_000)}&bucket=${bucket}`,
+  );
+  assert.equal(r.status, 200, r.body);
+  return r.json;
+}
+const recordedShare = (ribbon) => {
+  const lane = ribbon.lanes.find((l) => l.id === 'military');
+  const ms = lane.segments
+    .filter((s) => s.kind === 'recorded')
+    .reduce((n, s) => n + s.to - s.from, 0);
+  return { lane, share: ms / 3_600_000 };
+};
+
+test('military coverage 1m at 300 s polls: cadence_ms, last_ok, prev_ok', async () => {
+  const json = await militaryCoverage1h(military300Polls());
+  const lane = json.lanes[0];
+  assert.equal(lane.cadence_ms, 300_000);
+  assert.equal(lane.buckets.length, 60);
+  // last OK poll in the cadence before the window: H0 - 300 s + 7 s
+  assert.equal(lane.prev_ok, iso(H0 - 300_000 + POLL_OFFSET));
+  const polled = lane.buckets.filter((b) => b.polls_ok > 0);
+  assert.equal(polled.length, 12);
+  for (const b of polled) {
+    assert.equal(b.polls_expected, 0);
+    assert.equal(b.last_ok, iso(Date.parse(b.t) + POLL_OFFSET));
+  }
+  for (const b of lane.buckets.filter((x) => x.polls_ok === 0))
+    assert.equal('last_ok' in b, false, b.t);
+});
+
+test('military ribbon from the 1m coverage answer: 300 s polls = 100 % recorded', async () => {
+  const json = await militaryCoverage1h(military300Polls());
+  const ribbon = buildRibbon({
+    win: { from: H0, to: H0 + 3_600_000 },
+    now: NOW,
+    military: json,
+  });
+  const { lane, share } = recordedShare(ribbon);
+  assert.equal(share, 1);
+  assert.deepEqual(
+    lane.segments.map((s) => s.kind),
+    ['recorded'],
+  );
+});
+
+test('military ribbon from the 1m coverage answer: one missed poll = one hole', async () => {
+  // poll k=4 (H0 + 20 min + 7 s) missed: k=3 holds to H0 + 20 min + 7 s,
+  // k=5 is in the 25 min bucket -> hole [20:07, 25:00), one cadence less
+  // the 7 s poll offset; NOT bridged by the 900 s max snap age
+  const json = await militaryCoverage1h(military300Polls({ skip: [4] }));
+  const ribbon = buildRibbon({
+    win: { from: H0, to: H0 + 3_600_000 },
+    now: NOW,
+    military: json,
+  });
+  const { lane } = recordedShare(ribbon);
+  assert.deepEqual(
+    lane.segments.map((s) => [s.from - H0, s.to - H0, s.kind]),
+    [
+      [0, 1_200_000 + POLL_OFFSET, 'recorded'],
+      [1_200_000 + POLL_OFFSET, 1_500_000, 'none'],
+      [1_500_000, 3_600_000, 'recorded'],
+    ],
+  );
+});
+
+test('military coverage 5m at 300 s polls: no hold fields, ribbon as before', async () => {
+  const json = await militaryCoverage1h(military300Polls({ skip: [4] }), '5m');
+  const lane = json.lanes[0];
+  assert.equal(lane.prev_ok, undefined);
+  for (const b of lane.buckets) {
+    assert.equal(b.polls_expected, 1);
+    assert.equal('last_ok' in b, false);
+  }
+  const ribbon = buildRibbon({
+    win: { from: H0, to: H0 + 3_600_000 },
+    now: NOW,
+    military: json,
+  });
+  const { lane: built } = recordedShare(ribbon);
+  assert.deepEqual(
+    built.segments.map((s) => [s.from - H0, s.to - H0, s.kind]),
+    [
+      [0, 1_200_000, 'recorded'],
+      [1_200_000, 1_500_000, 'none'],
+      [1_500_000, 3_600_000, 'recorded'],
+    ],
+  );
 });
 
 test('aircraft slice: two sources merged per icao24, X-History-Source lists both', async () => {

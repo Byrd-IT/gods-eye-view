@@ -6,6 +6,201 @@ import { enforceRateLimit, openAiRateLimiter } from './rate-limit.js';
 import { readRequestBody } from '../common/request.js';
 import { OPENAI_HUD_SUMMARY_MODEL_DEFAULT } from './constants.js';
 
+const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
+/**
+ * Default upstream backstop for one HUD summary (ms); bounds headers and body.
+ * The only caller, src/hud.js (_refreshSummary), aborts its request after
+ * 5 s, whatever model is configured, so a reply slower than that is never
+ * shown: 15 s (3x the client's abandon point) never cuts off a reply the
+ * HUD could still use and only bounds a paid request nobody waits for.
+ * Override with GEV_HUD_SUMMARY_TIMEOUT_MS (1000-600000).
+ */
+export const HUD_SUMMARY_TIMEOUT_MS = 15_000;
+
+/** Effective HUD timeout: GEV_HUD_SUMMARY_TIMEOUT_MS when valid, else the default. */
+export function hudSummaryTimeoutMs(env = process.env) {
+  const ms = Number(env?.GEV_HUD_SUMMARY_TIMEOUT_MS);
+  return Number.isInteger(ms) && ms >= 1000 && ms <= 600_000
+    ? ms
+    : HUD_SUMMARY_TIMEOUT_MS;
+}
+
+/**
+ * Upstream error identifiers the HUD may log, as fixed constants of this file.
+ * Only a value equal to one of these strings is logged; any other value is
+ * reported as `unlisted`. The logged text is therefore always a string from
+ * this source, never upstream bytes, so it cannot carry the API key or the
+ * HUD context, however OpenAI (or anything answering in its place) reflects
+ * them. Identifier shape alone is not a confidentiality boundary.
+ * Sources: OpenAI "Error codes" guide (rate_limit_error/slow_down,
+ * service_unavailable_error/server_is_overloaded, credit_balance_exhausted,
+ * *_spend_limit_exceeded, organization_usage_limit_exceeded,
+ * insufficient_quota) plus the long-standing Responses API error types and
+ * codes. Missing an identifier only loses detail, never confidentiality.
+ */
+const OPENAI_ERROR_TYPES = new Set([
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'not_found_error',
+  'conflict_error',
+  'rate_limit_error',
+  'insufficient_quota',
+  'tokens',
+  'requests',
+  'server_error',
+  'api_error',
+  'service_unavailable_error',
+]);
+const OPENAI_ERROR_CODES = new Set([
+  'invalid_api_key',
+  'invalid_authentication',
+  'invalid_organization',
+  'no_organization',
+  'account_deactivated',
+  'unsupported_country_region_territory',
+  'ip_not_authorized',
+  'model_not_found',
+  'insufficient_quota',
+  'billing_hard_limit_reached',
+  'billing_not_active',
+  'credit_balance_exhausted',
+  'organization_spend_limit_exceeded',
+  'project_spend_limit_exceeded',
+  'organization_usage_limit_exceeded',
+  'rate_limit_exceeded',
+  'slow_down',
+  'context_length_exceeded',
+  'string_above_max_length',
+  'invalid_value',
+  'invalid_type',
+  'unsupported_value',
+  'unsupported_parameter',
+  'unknown_parameter',
+  'missing_required_parameter',
+  'integer_below_min_value',
+  'integer_above_max_value',
+  'invalid_prompt',
+  'server_error',
+  'server_is_overloaded',
+]);
+/** error.param names a request field: only the fields this handler sends. */
+const OPENAI_ERROR_PARAMS = new Set([
+  'model',
+  'instructions',
+  'input',
+  'reasoning',
+  'reasoning.effort',
+  'max_output_tokens',
+]);
+const OPENAI_ERROR_ALLOWLISTS = {
+  type: OPENAI_ERROR_TYPES,
+  code: OPENAI_ERROR_CODES,
+  param: OPENAI_ERROR_PARAMS,
+};
+
+/**
+ * Log facts about an OpenAI reply body WITHOUT any of its free text: an
+ * error message can quote the request (the HUD context the browser sent),
+ * so the HUD never logs body text at all, escaped or not. Only the byte
+ * count, the body shape and error.type/code/param are logged, and those
+ * three only as allow-listed constants (other values: `unlisted`).
+ */
+function openAiBodyFacts(raw) {
+  const facts = [`body_bytes=${new TextEncoder().encode(raw).length}`];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    if (raw) facts.push('body_format=non-json');
+    return facts.join(' ');
+  }
+  const error = parsed?.error;
+  if (!error || typeof error !== 'object') {
+    facts.push('body_format=json-without-error');
+    return facts.join(' ');
+  }
+  for (const [field, allowed] of Object.entries(OPENAI_ERROR_ALLOWLISTS)) {
+    const value = error[field];
+    if (value === undefined || value === null) continue;
+    facts.push(
+      `error_${field}=${typeof value === 'string' && allowed.has(value) ? value : 'unlisted'}`,
+    );
+  }
+  return facts.join(' ');
+}
+
+/**
+ * OpenAI's x-request-id is never logged, in any form: only whether one was
+ * sent (`request_id=withheld`; no header: nothing). The header is upstream
+ * bytes, and no shape, substring or encoding check can prove it carries none
+ * of the API key, the HUD context or the prompt, so it is omitted rather
+ * than filtered. Correlate with OpenAI through status, target and time.
+ */
+function requestIdFact(response) {
+  const id = response?.headers?.get?.('x-request-id');
+  return typeof id === 'string' && id ? ' request_id=withheld' : '';
+}
+
+/**
+ * Thrown-error classes the HUD logs, as fixed constants of this file. The
+ * error's `cause.code`/`code` and `name` are only looked up here, never
+ * printed: a code or name outside these tables (any library, any shape) is
+ * logged as the constant `code=OTHER` / `error`, so the log never carries a
+ * string from the error object itself.
+ */
+const TIMEOUT_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'ETIMEDOUT',
+]);
+const DNS_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN']);
+const NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'EPIPE',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'EHOSTDOWN',
+  'EPROTO',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CLOSED',
+  'UND_ERR_DESTROYED',
+  'UND_ERR_ABORTED',
+  'UND_ERR_INFO',
+  'UND_ERR_RES_CONTENT_LENGTH_MISMATCH',
+  'UND_ERR_REQ_CONTENT_LENGTH_MISMATCH',
+  'UND_ERR_RES_EXCEEDED_MAX_SIZE',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'CERT_HAS_EXPIRED',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'ERR_SSL_WRONG_VERSION_NUMBER',
+]);
+/** Local (client-body stage) codes from ../common/request.js. */
+const LOCAL_CODES = new Set(['BODY_TOO_LARGE']);
+const ERROR_NAMES = new Set(['AbortError', 'TypeError', 'RangeError', 'Error']);
+
+/** Cause class of a thrown error: constants only, never its message, code or name. */
+function failureClass(error) {
+  // String codes only: DOMException carries a numeric legacy `code`.
+  const rawCode =
+    [error?.cause?.code, error?.code].find((c) => typeof c === 'string') || '';
+  const name = typeof error?.name === 'string' ? error.name : '';
+  if (name === 'TimeoutError' || TIMEOUT_CODES.has(rawCode))
+    return `timeout${TIMEOUT_CODES.has(rawCode) ? ` code=${rawCode}` : ''}`;
+  if (DNS_CODES.has(rawCode)) return `dns code=${rawCode}`;
+  if (NETWORK_CODES.has(rawCode)) return `network code=${rawCode}`;
+  if (LOCAL_CODES.has(rawCode)) return `local code=${rawCode}`;
+  if (error instanceof SyntaxError) return 'malformed';
+  if (rawCode) return 'error code=OTHER';
+  return ERROR_NAMES.has(name) ? name : 'error';
+}
+
 function extractOpenAiResponseText(data) {
   if (typeof data?.output_text === 'string' && data.output_text.trim()) {
     return data.output_text.trim();
@@ -51,10 +246,22 @@ async function handleHudSummary(req, res) {
   // consuming a paid-endpoint quota slot.
   if (!enforceRateLimit(openAiRateLimiter(), req, res)) return;
 
+  // `stage` tells a client-side failure (oversized/invalid request body) from
+  // an upstream one in the log. The prompt, the context and the key are never
+  // logged.
+  let stage = 'client-body';
+  let startedAt = 0;
+  let upstreamStatus = 0;
+  const timeoutMs = hudSummaryTimeoutMs();
+  const target = `target="POST ${OPENAI_RESPONSES_URL}"`;
+  const elapsed = () => Math.round(performance.now() - startedAt);
   try {
     const body = await readRequestBody(req, 64 * 1024);
     const context = JSON.parse(body || '{}');
-    const response = await fetch('https://api.openai.com/v1/responses', {
+    const input = JSON.stringify(context);
+    stage = 'upstream';
+    startedAt = performance.now();
+    const response = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -65,18 +272,62 @@ async function handleHudSummary(req, res) {
           process.env.OPENAI_HUD_SUMMARY_MODEL ||
           OPENAI_HUD_SUMMARY_MODEL_DEFAULT,
         instructions: HUD_SUMMARY_INSTRUCTIONS,
-        input: JSON.stringify(context),
+        input,
         reasoning: { effort: 'minimal' },
         max_output_tokens: 100,
       }),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    const data = await response.json().catch(() => ({}));
+    upstreamStatus = response.status;
+    // Body phase: a read or parse failure keeps the old reply (an empty
+    // reply object, so no summary) but is logged with its cause.
+    let raw = '';
+    let bodyRead = true;
+    try {
+      raw = await response.text();
+    } catch (error) {
+      bodyRead = false;
+      console.warn(
+        `[hud-summary] upstream body read failed class=${failureClass(error)} ${target} ` +
+          `status=${response.status} elapsed_ms=${elapsed()} timeout_ms=${timeoutMs}` +
+          requestIdFact(response),
+      );
+    }
+    let data = {};
+    let parsed = false;
+    if (bodyRead) {
+      try {
+        data = JSON.parse(raw);
+        parsed = true;
+      } catch {
+        data = {};
+        if (response.ok)
+          console.warn(
+            `[hud-summary] upstream body malformed class=malformed ${target} ` +
+              `status=${response.status} elapsed_ms=${elapsed()} ` +
+              openAiBodyFacts(raw) +
+              requestIdFact(response),
+          );
+      }
+    }
     const summary = toFiveWordHudSummary(extractOpenAiResponseText(data));
     res.statusCode = response.ok && summary ? 200 : response.status || 502;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     if (!response.ok)
-      console.warn(`[hud-summary] upstream HTTP ${response.status}`);
+      console.warn(
+        `[hud-summary] upstream HTTP ${response.status} ${target} ` +
+          `status=${response.status} elapsed_ms=${elapsed()} ` +
+          openAiBodyFacts(raw) +
+          requestIdFact(response),
+      );
+    else if (parsed && !summary)
+      console.warn(
+        `[hud-summary] upstream reply has no summary text ${target} ` +
+          `status=${response.status} elapsed_ms=${elapsed()} ` +
+          openAiBodyFacts(raw) +
+          requestIdFact(response),
+      );
     res.end(
       JSON.stringify({
         summary: summary || null,
@@ -85,8 +336,14 @@ async function handleHudSummary(req, res) {
         error: response.ok ? null : 'OpenAI HUD summary request failed',
       }),
     );
-  } catch {
-    console.warn('[hud-summary] request failed');
+  } catch (error) {
+    console.warn(
+      `[hud-summary] request failed stage=${stage} class=${failureClass(error)}` +
+        (stage === 'upstream'
+          ? ` ${target} status=${upstreamStatus || 'none'} ` +
+            `elapsed_ms=${elapsed()} timeout_ms=${timeoutMs}`
+          : ''),
+    );
     res.statusCode = 502;
     res.setHeader('Content-Type', 'application/json');
     res.end(

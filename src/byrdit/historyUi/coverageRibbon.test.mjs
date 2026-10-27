@@ -305,3 +305,151 @@ test("snap is blocked per feed: only that feed's gap, and only with no other lan
   assert.equal(snapBlockedAt('aircraft', inMissing, blank), true);
   assert.equal(snapBlockedAt('military', inMissing, blank), false);
 });
+
+// ---------- buckets shorter than the cadence (review t_77c13cca F1)
+// Military polls every 300 s; the ribbon uses 1m buckets for windows up to
+// ~16.6 h, so 4 of 5 buckets hold no poll. Each poll is painted ONE cadence
+// forward (lane cadence_ms); a missed poll still leaves a hole.
+const H0 = Date.parse('2026-10-14T13:00:00Z');
+const HOUR = 60 * MINUTE_MS;
+function militaryAnswer({
+  bucketMs = MINUTE_MS,
+  cadenceMs = 300_000, // lane cadence_ms (null: field absent)
+  pollMs = cadenceMs ?? 300_000, // the recorder polls at every multiple
+  skip = [], // missed poll offsets from H0
+  gaps = [],
+  extra = {},
+} = {}) {
+  const buckets = [];
+  for (let t = H0; t < H0 + HOUR; t += bucketMs) {
+    let polls = 0;
+    for (let off = 0; off < HOUR; off += pollMs)
+      if (off >= t - H0 && off < t - H0 + bucketMs && !skip.includes(off))
+        polls++;
+    buckets.push({
+      t: new Date(t).toISOString(),
+      polls_ok: polls,
+      polls_expected: cadenceMs ? Math.floor(bucketMs / cadenceMs) : null,
+      docs: polls * 300,
+    });
+  }
+  const bucket = { [MINUTE_MS]: '1m', [5 * MINUTE_MS]: '5m' }[bucketMs];
+  const lane = { source: 'collector', bucket, buckets, ...extra };
+  if (cadenceMs !== null) lane.cadence_ms = cadenceMs;
+  return { feed: 'military', bucket, lanes: [lane], gaps };
+}
+const milSegments = (military, now = H0 + 2 * HOUR) =>
+  buildRibbon({ win: { from: H0, to: H0 + HOUR }, now, military })
+    .lanes.find((l) => l.id === 'military')
+    .segments.map((s) => [
+      (s.from - H0) / MINUTE_MS,
+      (s.to - H0) / MINUTE_MS,
+      s.kind,
+    ]);
+
+test('1h window, 1m buckets, 300 s polls: 100 % recorded (was 20 % stripes)', () => {
+  assert.deepEqual(milSegments(militaryAnswer()), [[0, 60, 'recorded']]);
+  // without cadence_ms (pre-fix server answer, the reviewer's probe shape)
+  // the lane keeps the old 1-min recorded / 4-min blank stripes
+  const old = milSegments(militaryAnswer({ cadenceMs: null, pollMs: 300_000 }));
+  assert.equal(old.length, 24);
+  assert.deepEqual(old.slice(0, 2), [
+    [0, 1, 'recorded'],
+    [1, 5, 'none'],
+  ]);
+});
+
+test('1m buckets, 300 s polls: one missed poll leaves exactly a 5-min none hole', () => {
+  assert.deepEqual(milSegments(militaryAnswer({ skip: [20 * MINUTE_MS] })), [
+    [0, 20, 'recorded'],
+    [20, 25, 'none'],
+    [25, 60, 'recorded'],
+  ]);
+  // two missed polls: 10 min, still not bridged by the 900 s snap age
+  assert.deepEqual(
+    milSegments(militaryAnswer({ skip: [20 * MINUTE_MS, 25 * MINUTE_MS] })),
+    [
+      [0, 20, 'recorded'],
+      [20, 30, 'none'],
+      [30, 60, 'recorded'],
+    ],
+  );
+});
+
+test('1m buckets: the hold runs one cadence from last_ok and prev_ok covers the left edge', () => {
+  const ans = militaryAnswer({
+    skip: [0, 20 * MINUTE_MS],
+    extra: { prev_ok: new Date(H0 - 4 * MINUTE_MS - 30_000).toISOString() },
+  });
+  // polls land 50 s into their minute
+  for (const b of ans.lanes[0].buckets)
+    if (b.polls_ok)
+      b.last_ok = new Date(Date.parse(b.t) + 50_000).toISOString();
+  const segs = buildRibbon({
+    win: { from: H0, to: H0 + HOUR },
+    now: H0 + 2 * HOUR,
+    military: ans,
+  }).lanes.find((l) => l.id === 'military').segments;
+  assert.deepEqual(
+    segs.map((s) => [s.from - H0, s.to - H0, s.kind]),
+    [
+      // prev poll at -4:30 holds to 0:30; poll at 0:00 missed; 5:50 next
+      [0, 30_000, 'recorded'],
+      [30_000, 5 * MINUTE_MS, 'none'],
+      // 15:50 holds to 20:50; the 20 min poll missed; 25:50 next
+      [5 * MINUTE_MS, 20 * MINUTE_MS + 50_000, 'recorded'],
+      [20 * MINUTE_MS + 50_000, 25 * MINUTE_MS, 'none'],
+      [25 * MINUTE_MS, HOUR, 'recorded'],
+    ],
+  );
+});
+
+test('1m buckets, 60 s cadence: identical to the answer without a hold', () => {
+  const sixty = militaryAnswer({ cadenceMs: 60_000, skip: [20 * MINUTE_MS] });
+  const plain = structuredClone(sixty);
+  delete plain.lanes[0].cadence_ms;
+  assert.deepEqual(milSegments(sixty), milSegments(plain));
+  assert.deepEqual(milSegments(sixty), [
+    [0, 20, 'recorded'],
+    [20, 21, 'none'],
+    [21, 60, 'recorded'],
+  ]);
+});
+
+test('5m buckets, 300 s polls: unchanged (bucket = cadence, no hold)', () => {
+  const five = militaryAnswer({
+    bucketMs: 5 * MINUTE_MS,
+    skip: [20 * MINUTE_MS],
+  });
+  const plain = structuredClone(five);
+  delete plain.lanes[0].cadence_ms;
+  assert.deepEqual(milSegments(five), milSegments(plain));
+  assert.deepEqual(milSegments(five), [
+    [0, 20, 'recorded'],
+    [20, 25, 'none'],
+    [25, 60, 'recorded'],
+  ]);
+});
+
+test('1m buckets: a recorded gap still wins over a held poll; never held past now', () => {
+  const gap = {
+    from: new Date(H0 + 31 * MINUTE_MS).toISOString(),
+    to: new Date(H0 + 33 * MINUTE_MS).toISOString(),
+  };
+  assert.deepEqual(milSegments(militaryAnswer({ gaps: [gap] })), [
+    [0, 31, 'recorded'],
+    [31, 33, 'gap'],
+    [33, 60, 'recorded'],
+  ]);
+  // now = 32:00: the 30 min poll is held to now only, not to 35:00
+  const ans = militaryAnswer();
+  for (const b of ans.lanes[0].buckets)
+    if (Date.parse(b.t) >= H0 + 32 * MINUTE_MS) {
+      b.polls_ok = 0;
+      b.docs = 0;
+    }
+  assert.deepEqual(milSegments(ans, H0 + 32 * MINUTE_MS), [
+    [0, 32, 'recorded'],
+    [32, 60, 'none'],
+  ]);
+});

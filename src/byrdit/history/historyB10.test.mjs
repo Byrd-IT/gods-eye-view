@@ -35,6 +35,33 @@ const ENV = {
 const get = (doc, field) => field.split('.').reduce((o, k) => o?.[k], doc);
 const dateOf = (v) => (typeof v === 'number' ? v : Date.parse(v));
 
+/** Lucene geo_point round trip (GeoEncodingUtils), as doc values return it. */
+const LAT_DECODE = 180 / 2 ** 32;
+const LON_DECODE = 360 / 2 ** 32;
+const geoDv = (p) =>
+  `${Math.floor(p.lat / LAT_DECODE) * LAT_DECODE}, ${Math.floor(p.lon / LON_DECODE) * LON_DECODE}`;
+
+function docValuesOf(source, specs) {
+  const out = {};
+  for (const s of specs) {
+    const field = typeof s === 'string' ? s : s.field;
+    const format = typeof s === 'string' ? undefined : s.format;
+    const v = get(source, field);
+    if (v === undefined || v === null) continue;
+    let dv;
+    if (field === '@timestamp')
+      dv =
+        format === 'epoch_millis'
+          ? String(dateOf(v))
+          : new Date(dateOf(v)).toISOString();
+    else if (typeof v === 'object' && 'lat' in v) dv = geoDv(v);
+    else if (typeof v === 'number' && !Number.isInteger(v)) dv = Math.fround(v);
+    else dv = v;
+    out[field] = [dv];
+  }
+  return out;
+}
+
 function matches(doc, q, hit) {
   if (!q || q.match_all) return true;
   if (q.bool) {
@@ -136,13 +163,25 @@ function createFakeEs(data, { maxWindow = 10_000, fail } = {}) {
       });
     }
     const keep = Array.isArray(body._source) ? body._source : null;
+    // t_5dc0e0c3: stored_fields '_none_' drops _source; docvalue_fields
+    // come back as ES formats them (arrays; geo "lat, lon" from the Lucene
+    // encoding; non-integer numbers widened from float32; dates ISO or
+    // epoch_millis strings)
+    const noStored = body.stored_fields === '_none_';
+    const dv = Array.isArray(body.docvalue_fields) ? body.docvalue_fields : null;
     return hits.map((h, i) => ({
-      ...h,
-      _source: keep
-        ? Object.fromEntries(
-            Object.entries(h._source).filter(([k]) => keep.includes(k)),
-          )
-        : h._source,
+      _index: h._index,
+      _id: h._id,
+      ...(noStored
+        ? {}
+        : {
+            _source: keep
+              ? Object.fromEntries(
+                  Object.entries(h._source).filter(([k]) => keep.includes(k)),
+                )
+              : h._source,
+          }),
+      ...(dv ? { fields: docValuesOf(h._source, dv) } : {}),
       sort: [i],
     }));
   }
@@ -1459,9 +1498,11 @@ function healthFail(answers) {
 
 test('health: first ACTIVE collector, N5 lastOK/staleSince/reason per feed, nothing internal leaks', async () => {
   const feeds = {
+    // military polls every 300 s (t_5ad2b9a4): 10 min since the last OK poll
+    // is inside 3 x 300 s, so still live (the 60 s rule said stale at 180 s)
     military: {
-      cadenceMs: 60_000,
-      lastOkAt: NOW - 30_000,
+      cadenceMs: 300_000,
+      lastOkAt: NOW - 600_000,
       halted: null,
       lastReason: 'secret upstream text',
     },
@@ -1514,7 +1555,7 @@ test('health: first ACTIVE collector, N5 lastOK/staleSince/reason per feed, noth
       fake: {
         fail: healthFail({
           's4.test:4180': collectorHealth('standby', {
-            military: { cadenceMs: 60_000, lastOkAt: NOW - 86_400_000 },
+            military: { cadenceMs: 300_000, lastOkAt: NOW - 86_400_000 },
           }),
           's5.test:4180': collectorHealth('active', feeds),
         }),
@@ -1529,8 +1570,8 @@ test('health: first ACTIVE collector, N5 lastOK/staleSince/reason per feed, noth
   assert.equal(h.collector.state, 'active');
   assert.equal(h.collector.reachable, 2);
   assert.deepEqual(h.feeds.military, {
-    cadenceMs: 60_000,
-    lastOK: NOW - 30_000,
+    cadenceMs: 300_000,
+    lastOK: NOW - 600_000,
     staleSince: null,
     reason: null,
     state: 'live',
@@ -1685,4 +1726,322 @@ test('every B10 ES request targets an allowlisted index, auth or PIT endpoint', 
     const idx = c.path.replace(/\/(_search|_pit)$/, '');
     assert.ok(allowed.has(decodeURIComponent(idx)), c.path);
   }
+});
+
+// ------------------------------------- t_5dc0e0c3: doc values, probe, memo
+test('t_5dc0e0c3 compareKeys is UTF-8 byte order without encoding (surrogates vs U+E000-U+FFFF)', () => {
+  const enc = new TextEncoder();
+  const ref = (a, b) => {
+    const x = enc.encode(a);
+    const y = enc.encode(b);
+    const n = Math.min(x.length, y.length);
+    for (let i = 0; i < n; i += 1) if (x[i] !== y[i]) return x[i] - y[i];
+    return x.length - y.length;
+  };
+  const pool = ['a', 'Z', '0', '~', 'é', '\u07ff', '\u0800', '\ud7ff', '\ue000', '\uff5e', '\uffff', '\u{10000}', '\u{1f600}', '\u{10ffff}'];
+  const rnd = seeded(7);
+  const word = () => {
+    let s = '';
+    const n = 1 + Math.floor(rnd() * 4);
+    for (let i = 0; i < n; i += 1) s += pool[Math.floor(rnd() * pool.length)];
+    return s;
+  };
+  for (let i = 0; i < 20_000; i += 1) {
+    const a = word();
+    const b = rnd() < 0.2 ? a + word() : word();
+    assert.equal(Math.sign(compareKeys(a, b)), Math.sign(ref(a, b)), `${a} vs ${b}`);
+  }
+});
+
+test('t_5dc0e0c3 fromDocValues gives back the indexed _source values (float32, Lucene geo, epoch_millis)', async () => {
+  const { fromDocValues, shortestFloat32, geoCellValue, docValueFields } = await import('./historyCollapse.js');
+  // live adsb.lol doc values (2026-10-18) vs the same doc's _source
+  const doc = fromDocValues(
+    {
+      icao24: ['adc313'],
+      '@timestamp': ['1792186918690'],
+      location: ['31.10224798321724, -100.38872701115906'],
+      geo_alt_m: [10622.2998046875],
+      baro_alt_m: [10058.400390625],
+      velocity_ms: [241.39999389648438],
+      vert_rate_ms: [0.0],
+      on_ground: [false],
+      position_source: [0],
+      snap: [1792186920],
+      db_flags: [0],
+      tags: ['a', 'b'],
+    },
+    {
+      icao24: 'keyword',
+      '@timestamp': 'date',
+      location: 'geo_point',
+      geo_alt_m: 'float',
+      baro_alt_m: 'float',
+      velocity_ms: 'float',
+      vert_rate_ms: 'float',
+      on_ground: 'boolean',
+      position_source: 'byte',
+      snap: 'long',
+      db_flags: 'integer',
+      tags: 'keyword',
+      callsign: 'keyword', // no value: left out, as from _source
+    },
+  );
+  assert.deepEqual(doc, {
+    icao24: 'adc313',
+    '@timestamp': 1792186918690,
+    location: { lat: 31.102248, lon: -100.388727 },
+    geo_alt_m: 10622.3,
+    baro_alt_m: 10058.4,
+    velocity_ms: 241.4,
+    vert_rate_ms: 0,
+    on_ground: false,
+    position_source: 0,
+    snap: 1792186920,
+    db_flags: 0,
+    tags: ['a', 'b'],
+  });
+  assert.deepEqual(docValueFields({ a: 'keyword', '@timestamp': 'date' }), [
+    'a',
+    { field: '@timestamp', format: 'epoch_millis' },
+  ]);
+  // exhaustive-ish round trips: <= 7-decimal coordinates, <= 7-digit floats
+  const rnd = seeded(11);
+  for (let i = 0; i < 50_000; i += 1) {
+    const dec = Math.floor(rnd() * 8);
+    const lat = Number((rnd() * 180 - 90).toFixed(dec)) + 0; // no -0
+    const lon = Number((rnd() * 360 - 180).toFixed(dec)) + 0;
+    const [dl, dn] = geoDv({ lat, lon }).split(', ').map(Number);
+    assert.equal(geoCellValue(dl, LAT_DECODE), lat);
+    assert.equal(geoCellValue(dn, LON_DECODE), lon);
+    const f = Number((rnd() * 20_000 - 5_000).toFixed(Math.floor(rnd() * 3))) + 0;
+    assert.equal(shortestFloat32(Math.fround(f)), f);
+  }
+  // a double that is not a float32 value is never touched
+  assert.equal(shortestFloat32(0.1), 0.1);
+});
+
+function bucketDocs(n, snapS, prefix = '') {
+  return Array.from({ length: n }, (_, i) => ({
+    '@timestamp': snapS * 1000 - 1_000 - (i % 40) * 1_000,
+    snap: snapS,
+    icao24: prefix + (0x100000 + i * 7919).toString(16).padStart(6, '0'),
+    location: {
+      lat: Number((30.123457 + i / 1e6).toFixed(6)),
+      lon: Number((-97.654321 - i / 1e6).toFixed(6)),
+    },
+    baro_alt_m: 10058.4,
+    velocity_ms: 241.4,
+    callsign: `CS${i}`,
+    source: 'adsblol',
+  }));
+}
+
+test('t_5dc0e0c3 latestPerKey docValues: same docs as _source, no stored fields read, keys-only probe split by its keys', async () => {
+  const docs = bucketDocs(57, 1_791_000_000);
+  // an older duplicate per key must lose to the newest
+  for (const d of docs.slice(0, 10))
+    docs.push({ ...d, '@timestamp': d['@timestamp'] - 30_000, callsign: 'OLD' });
+  const fake = createFakeEs({ 'gev-history-aircraft-adsblol': docs }, { maxWindow: 10 });
+  const { createHistoryEsClient } = await import('./historyEs.js');
+  const es = createHistoryEsClient({ url: 'https://es.example.test', apiKey: 'k', fetchImpl: fake.fetchImpl });
+  const IDXA = 'gev-history-aircraft-adsblol,gev-history-aircraft-adsblol-hist';
+  const spec = { '@timestamp': 'date', location: 'geo_point', baro_alt_m: 'float', velocity_ms: 'float', callsign: 'keyword', source: 'keyword' };
+  const common = { filter: [], field: 'icao24', pageSize: 10, maxQueries: 1_000 };
+  const viaSource = await latestPerKey(es, IDXA, { ...common, _source: ['icao24', ...Object.keys(spec)] });
+  const before = fake.calls.length;
+  for (const [probe, partDocs] of [[false, 1_500], [true, 1_500], [true, 3]]) {
+    const viaDv = await latestPerKey(es, IDXA, { ...common, docValues: spec, probe, partDocs });
+    assert.equal(viaDv.truncated, false);
+    const want = new Map(viaSource.hits.map((h) => [h._source.icao24, h._source]));
+    assert.equal(viaDv.hits.length, want.size);
+    for (const h of viaDv.hits)
+      assert.deepEqual(h._source, want.get(h._source.icao24), h._source.icao24);
+    assert.ok(viaDv.hits.every((h) => h._source.callsign !== 'OLD'));
+  }
+  const dvCalls = fake.calls.slice(before).filter((c) => c.body?.collapse);
+  assert.ok(dvCalls.length > 0);
+  for (const c of dvCalls) {
+    assert.equal(c.body.stored_fields, '_none_', 'never the stored _source');
+    assert.equal(c.body._source, undefined);
+  }
+  // probes ask for the key column only
+  assert.ok(dvCalls.some((c) => c.body.docvalue_fields.length === 1 && c.body.docvalue_fields[0] === 'icao24'));
+  // a probe that fits a page is cut at its own keys (partDocs 3): every
+  // part is fetched once, none comes back full (no wasted page)
+  const fake2 = createFakeEs({ 'gev-history-aircraft-adsblol': bucketDocs(9, 1_791_000_000) }, { maxWindow: 10 });
+  const es2 = createHistoryEsClient({ url: 'https://es.example.test', apiKey: 'k', fetchImpl: fake2.fetchImpl });
+  const r2 = await latestPerKey(es2, IDXA, { ...common, docValues: spec, probe: true, partDocs: 3 });
+  assert.equal(r2.hits.length, 9);
+  const c2 = fake2.calls.filter((c) => c.body?.collapse);
+  assert.equal(c2.length, 1 + 3, 'one probe + three parts');
+  assert.equal(r2.queries, 4);
+});
+
+test('t_5dc0e0c3 latestPerKey memo: later answers start from learned cuts (no probe); any cuts stay exact; small answers learn one request', async () => {
+  const IDXA = 'gev-history-aircraft-adsblol,gev-history-aircraft-adsblol-hist';
+  const { createHistoryEsClient } = await import('./historyEs.js');
+  const { createCutMemo } = await import('./historyCollapse.js');
+  const spec = { '@timestamp': 'date', location: 'geo_point' };
+  const docs = bucketDocs(95, 1_791_000_000);
+  const fake = createFakeEs({ 'gev-history-aircraft-adsblol': docs }, { maxWindow: 20 });
+  const es = createHistoryEsClient({ url: 'https://es.example.test', apiKey: 'k', fetchImpl: fake.fetchImpl });
+  const memo = createCutMemo(2);
+  const opts = (lane) => ({ filter: [], field: 'icao24', pageSize: 20, maxQueries: 1_000, docValues: spec, probe: true, partDocs: 8, memo: memo.lane(lane) });
+  const keysOf = (r) => r.hits.map((h) => h._source.icao24).sort();
+  const want = [...new Set(docs.map((d) => d.icao24))].sort();
+  const first = await latestPerKey(es, IDXA, opts('a'));
+  assert.deepEqual(keysOf(first), want);
+  const learned = memo.lane('a').cuts;
+  assert.ok(Array.isArray(learned) && learned.length >= 1, 'cuts learned');
+  let n = fake.calls.length;
+  const second = await latestPerKey(es, IDXA, opts('a'));
+  assert.deepEqual(keysOf(second), want);
+  const secondCalls = fake.calls.slice(n).filter((c) => c.body?.collapse);
+  assert.ok(secondCalls.every((c) => c.body.docvalue_fields.length > 1), 'no probe when cuts are known');
+  assert.equal(secondCalls.length, learned.length + 1, 'one request per learned part');
+  assert.equal(learned.length + 1, 8, '95 docs / 8 per part, capped at the fanout');
+  // stale / skewed / foreign cuts: still the exact answer
+  for (const cuts of [['zzzz'], ['0', '1', '100000'], ['\u{1f600}'], []]) {
+    memo.lane('a').cuts = cuts;
+    const r = await latestPerKey(es, IDXA, opts('a'));
+    assert.deepEqual(keysOf(r), want, JSON.stringify(cuts));
+    assert.equal(r.truncated, false);
+  }
+  // a small answer learns [] -> next answer is one request, no probe
+  const small = createFakeEs({ 'gev-history-aircraft-adsblol': bucketDocs(4, 1_791_000_000) }, { maxWindow: 20 });
+  const es3 = createHistoryEsClient({ url: 'https://es.example.test', apiKey: 'k', fetchImpl: small.fetchImpl });
+  await latestPerKey(es3, IDXA, opts('b'));
+  assert.deepEqual(memo.lane('b').cuts, []);
+  n = small.calls.length;
+  const again = await latestPerKey(es3, IDXA, opts('b'));
+  assert.equal(again.hits.length, 4);
+  assert.equal(small.calls.slice(n).filter((c) => c.body?.collapse).length, 1);
+  // bounded LRU: a third lane evicts the least recent
+  memo.lane('c');
+  assert.equal(memo.size, 2);
+});
+
+test('t_5dc0e0c3 aircraft slice: rows read from doc values carry the _source values; second frame of a lane skips the probe', async () => {
+  const T0 = Date.UTC(2026, 9, 10, 12, 0, 0);
+  const snapS = T0 / 1000;
+  const docs = bucketDocs(30, snapS);
+  const { api, fake } = makeApi({ 'gev-history-aircraft-adsblol': docs });
+  const r = await call(api, `/api/history/slice?feed=aircraft&t=${iso(T0)}`);
+  assert.equal(r.status, 200, r.body);
+  assert.equal(r.json.states.length, 30);
+  const byId = new Map(r.json.states.map((s) => [s[0], s]));
+  for (const d of docs) {
+    const s = byId.get(d.icao24);
+    assert.equal(s[5], d.location.lon);
+    assert.equal(s[6], d.location.lat);
+    assert.equal(s[7], 10058.4);
+    assert.equal(s[9], 241.4);
+    assert.equal(s[1], d.callsign);
+    assert.equal(s[3], Math.round(d['@timestamp'] / 1000));
+  }
+  const adsb = (c) => c.body?.collapse && c.path.includes('adsblol');
+  const firstCalls = fake.calls.filter(adsb);
+  assert.ok(firstCalls.every((c) => c.body.stored_fields === '_none_'));
+  assert.equal(firstCalls[0].body.docvalue_fields.length, 1, 'first frame probes keys');
+  const n = fake.calls.length;
+  // next frame (a different, older moment: not cached), same lane
+  const r2 = await call(api, `/api/history/slice?feed=aircraft&t=${iso(T0 + 60_000)}`);
+  assert.equal(r2.status, 200, r2.body);
+  const later = fake.calls.slice(n).filter(adsb);
+  assert.ok(later.length >= 1);
+  assert.ok(later.every((c) => c.body.docvalue_fields.length > 1), 'memo: no probe');
+});
+
+test('t_5dc0e0c3 vessels slice reads positions from doc values (no stored _source), same live row values', async () => {
+  const t = NOW - 3_600_000;
+  const docs = Array.from({ length: 12 }, (_, i) => ({
+    '@timestamp': iso(t - (i + 1) * 30_000),
+    mmsi: String(211_000_000 + i),
+    location: {
+      lat: Number((59.33168 + i / 1e5).toFixed(5)),
+      lon: Number((18.07906 - i / 1e5).toFixed(5)),
+    },
+    sog_kn: Number((0.1 * i).toFixed(1)),
+    cog_deg: 236.1,
+    heading_deg: 34,
+    source: 'aisstream',
+  }));
+  const { api, fake } = makeApi({ 'gev-history-vessels': docs });
+  const r = await call(api, `/api/history/slice?feed=vessels&t=${iso(t)}`);
+  assert.equal(r.status, 200, r.body);
+  assert.equal(r.json.rows.length, 12);
+  const byMmsi = new Map(r.json.rows.map((row) => [row.mmsi, row]));
+  for (const d of docs) {
+    const row = byMmsi.get(d.mmsi);
+    assert.equal(row.lat, d.location.lat);
+    assert.equal(row.lon, d.location.lon);
+    assert.equal(row.speed, d.sog_kn);
+    assert.equal(row.course, 236.1);
+    assert.equal(row.heading, 34);
+    assert.equal(row.last_position_UTC, d['@timestamp']);
+  }
+  const vesselCalls = fake.calls.filter((c) => c.body?.collapse && c.path.includes('gev-history-vessels,'));
+  assert.ok(vesselCalls.length >= 1);
+  assert.ok(vesselCalls.every((c) => c.body.stored_fields === '_none_'));
+});
+
+test('t_5dc0e0c3 doc-value pages ask ES for the allowlisted response filter only; other filters are refused', async () => {
+  const { DOC_VALUE_FILTER_PATH } = await import('./historyCollapse.js');
+  const { SEARCH_FILTER_PATHS, createHistoryEsClient } = await import('./historyEs.js');
+  assert.ok(SEARCH_FILTER_PATHS.includes(DOC_VALUE_FILTER_PATH));
+  assert.match(DOC_VALUE_FILTER_PATH, /(^|,)timed_out(,|$)/);
+  assert.match(DOC_VALUE_FILTER_PATH, /(^|,)_shards\.failed(,|$)/);
+  const urls = [];
+  const fake = createFakeEs({ 'gev-history-aircraft-adsblol': bucketDocs(5, 1_791_000_000) });
+  const es = createHistoryEsClient({
+    url: 'https://es.example.test',
+    apiKey: 'k',
+    fetchImpl: (u, init) => {
+      urls.push(String(u));
+      return fake.fetchImpl(u, init);
+    },
+  });
+  const IDXA = 'gev-history-aircraft-adsblol,gev-history-aircraft-adsblol-hist';
+  await latestPerKey(es, IDXA, { filter: [], field: 'icao24', docValues: { location: 'geo_point' }, probe: true });
+  const searches = urls.filter((u) => u.includes('/_search'));
+  assert.ok(searches.length >= 2);
+  for (const u of searches)
+    assert.equal(new URL(u).searchParams.get('filter_path'), DOC_VALUE_FILTER_PATH);
+  // a _source page is never filtered
+  urls.length = 0;
+  await latestPerKey(es, IDXA, { filter: [], field: 'icao24', _source: ['location'] });
+  assert.ok(urls.filter((u) => u.includes('/_search')).every((u) => !u.includes('filter_path')));
+  await assert.rejects(
+    es.search(IDXA, { size: 0 }, { filterPath: 'hits.hits._source' }),
+    (e) => e.reason === 'filter_path_denied',
+  );
+});
+
+test('t_5dc0e0c3 aircraft slice reads only the state columns; the military archive fallback keeps registration/type/db_flags', async () => {
+  const { AIRCRAFT_STATE_DOC_VALUES, AIRCRAFT_DOC_VALUES } = await import('./historyService.js');
+  for (const f of ['hex', 'snap', 'registration', 'type', 'db_flags'])
+    assert.ok(!(f in AIRCRAFT_STATE_DOC_VALUES) && f in AIRCRAFT_DOC_VALUES, f);
+  const T0 = Date.UTC(2026, 9, 10, 12, 0, 0);
+  const { api, fake } = makeApi({ 'gev-history-aircraft-adsblol': bucketDocs(3, T0 / 1000) });
+  const r = await call(api, `/api/history/slice?feed=aircraft&t=${iso(T0)}`);
+  assert.equal(r.status, 200, r.body);
+  const pages = fake.calls.filter((c) => c.body?.collapse && c.body.docvalue_fields.length > 1);
+  assert.ok(pages.length >= 1);
+  for (const c of pages) {
+    const names = c.body.docvalue_fields.map((d) => (typeof d === 'string' ? d : d.field));
+    assert.deepEqual(new Set(names), new Set(['icao24', ...Object.keys(AIRCRAFT_STATE_DOC_VALUES)]));
+  }
+});
+
+test('feedHealth: military at 300 s polls (t_5ad2b9a4) is stale only after 3 x 300 s', () => {
+  const live = feedHealth({ cadenceMs: 300_000, lastOkAt: NOW - 900_000 }, NOW);
+  assert.equal(live.state, 'live');
+  assert.equal(live.staleSince, null);
+  const stale = feedHealth(
+    { cadenceMs: 300_000, lastOkAt: NOW - 900_001 },
+    NOW,
+  );
+  assert.equal(stale.state, 'stale');
+  assert.equal(stale.staleSince, NOW - 1);
 });

@@ -250,6 +250,7 @@ function setup(options = {}) {
       ? { orientationOptions: options.orientationOptions }
       : {}),
     ...(options.declinationAt ? { declinationAt: options.declinationAt } : {}),
+    ...(options.voiceWindow !== undefined ? { voiceWindow: options.voiceWindow } : {}),
   });
   return { doc, viewer, timers, location, history, handle };
 }
@@ -288,6 +289,99 @@ test('mount: Sky button, panel, toolbar, overlay canvas; once per viewer; null w
   handle.destroy();
   assert.equal(doc.body.find('open'), null);
   assert.equal(skyViewFor(viewer), null);
+});
+
+test('voice hook: open stands at the map centre, close leaves, destroy drops the hook', async () => {
+  const voiceWindow = {};
+  const { handle } = setup({ voiceWindow });
+  assert.equal(voiceWindow.__gevSky.voice, handle.voice);
+  const opened = await handle.voice.open();
+  assert.equal(opened.ok, true);
+  assert.equal(opened.open, true);
+  assert.equal(handle.active, true);
+  const again = await handle.voice.open();
+  assert.equal(again.opened, false);
+  const lines = await handle.voice.lines(false);
+  assert.equal(lines.ok, true);
+  assert.equal(lines.lines, false);
+  assert.equal(handle.content.flags.lines, false);
+  const closed = handle.voice.close();
+  assert.equal(closed.ok, true);
+  assert.equal(closed.open, false);
+  assert.equal(handle.active, false);
+  handle.destroy();
+  assert.equal(voiceWindow.__gevSky, undefined);
+  assert.equal((await handle.voice.status()).ok, false);
+});
+
+test('openHere shares one enter when a second call overlaps the first', async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let samples = 0;
+  const { handle, viewer } = setup({ viewer: { pickHeight: 20000 } });
+  viewer.scene.sampleHeightMostDetailed = () => {
+    samples += 1;
+    return gate.then(() => [{ height: 12 }]);
+  };
+  const first = handle.openHere();
+  const second = handle.openHere();
+  assert.equal(samples, 1);
+  release();
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.ok, true);
+  assert.equal(b.ok, true);
+  assert.equal(handle.active, true);
+  const third = await handle.openHere();
+  assert.equal(third.alreadyOpen, true);
+  assert.equal(samples, 1);
+  handle.destroy();
+});
+
+test('openHere returns a Promise when Sky is already open', async () => {
+  const { handle } = setup({ viewer: { pickHeight: 20000 } });
+  const first = await handle.openHere();
+  assert.equal(first.ok, true);
+  const again = handle.openHere();
+  assert.equal(again instanceof Promise, true);
+  const resolved = await again;
+  assert.equal(resolved.alreadyOpen, true);
+  assert.equal(resolved.ok, true);
+  handle.destroy();
+});
+
+test('voice: time and a preset use the mounted clock', async () => {
+  const voiceWindow = {};
+  const { handle } = setup({ voiceWindow });
+  const opened = await handle.voice.open();
+  assert.equal(opened.ok, true);
+  const set = await handle.voice.time({ time: '2026-10-12T04:00:00Z' });
+  assert.equal(set.ok, true, set.error);
+  assert.equal(set.time, '2026-10-12T04:00:00.000Z');
+  assert.equal(handle.clock.mode, 'fixed');
+  const back = await handle.voice.time({ live: true });
+  assert.equal(back.ok, true);
+  assert.equal(back.live, true);
+  assert.equal(handle.clock.mode, 'live');
+  const preset = await handle.voice.preset('sunset');
+  assert.equal(preset.ok, true, preset.error);
+  assert.equal(preset.preset, 'sunset');
+  assert.equal(handle.clock.mode, 'fixed');
+  handle.destroy();
+});
+
+test('voice: look at Jupiter uses the real search index', async () => {
+  const { handle } = setup({ voiceWindow: {} });
+  const opened = await handle.voice.open();
+  assert.equal(opened.ok, true);
+  const looked = await handle.voice.look('Jupiter');
+  assert.equal(looked.ok, true, looked.error);
+  assert.equal(looked.target, 'Jupiter');
+  assert.equal(looked.kind, 'body');
+  assert.equal(typeof looked.azimuthDeg, 'number');
+  assert.equal(typeof looked.elevationDeg, 'number');
+  handle.destroy();
 });
 
 test('enter at typed lat, lon: eye at 1.7 m over unknown ground (0, flagged), inputs off, URL written; exit restores the camera to 1e-6', async () => {
@@ -1410,4 +1504,92 @@ test('P2b x P5: Next ISS pass / Go to peak jump through the time control; the P5
   assert.ok(Number.isFinite(preset.timeMs));
   assert.equal(handle.clock.getTime(), preset.timeMs);
   assert.match(doc.body.find('time-status').textContent, /^ISS pass: /);
+});
+
+test('pass row tap keeps the tapped row and Go to peak time in the panel when the card appears above (t_46725675)', async () => {
+  const { doc, handle, worker } = satSetup({
+    nakedEyeDefault: true,
+    groups: { stations: ISS_STATIONS },
+    fetchRcs: async () => ({ rcs: FIXTURE_RCS }),
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  await waitFor(() => handle.satellites.passes.done, worker);
+  // a tiny layout model: body viewport 0..H; card (CARD px) sits above the
+  // passes block, so it pushes rows and Go to peak down by CARD when shown
+  const body = doc.body.find('sats-body');
+  const card = doc.body.find('sats-card');
+  const go = doc.body.find('pass-go');
+  const row = doc.body.find('passes-list').children[0].children[0];
+  let CARD = 282;
+  const box = (top, h) => ({ top, bottom: top + h, left: 0, right: 300, width: 300, height: h });
+  const layout = ({ H, rowAt, goAt }) => {
+    const shift = () => (card.hidden ? 0 : CARD) - body.scrollTop;
+    body.getBoundingClientRect = () => box(0, H);
+    row.getBoundingClientRect = () => box(rowAt + shift(), 34);
+    go.getBoundingClientRect = () => box(goAt + shift(), 28);
+  };
+  const reach = (node, H) => {
+    const r = node.getBoundingClientRect();
+    return r.top >= 0 && r.bottom <= H;
+  };
+  // tall panel scrolled to the bottom: the row and its action stay in view
+  body.scrollTop = 0;
+  layout({ H: 376, rowAt: 140, goAt: 330 });
+  clickWithTarget(doc.body.find('passes-list'), row);
+  assert.ok(handle.selectedPass, 'pass selected');
+  assert.equal(card.hidden, false, 'card shown');
+  assert.equal(body.scrollTop, CARD, 'scrolled by the card height');
+  assert.ok(reach(row, 376) && reach(go, 376), 'row and Go to peak in view');
+  // a later refresh grows the card (e.g. its Next pass line arrives): the
+  // tapped row is held in place ...
+  const heldTop = row.getBoundingClientRect().top;
+  CARD = 380;
+  handle.setNakedEye({});
+  assert.equal(row.getBoundingClientRect().top, heldTop, 'held after refresh');
+  // ... until the user takes over the panel (wheel/touch/pointer/key)
+  body.dispatchEvent(new Event('wheel'));
+  CARD = 300;
+  handle.setNakedEye({});
+  assert.equal(row.getBoundingClientRect().top, heldTop - 80, 'released');
+  CARD = 282;
+  // short panel: Go to peak is revealed only as far as the row stays visible;
+  // the card is NOT forced into view
+  click(doc.body.find('sats-clear'));
+  assert.equal(card.hidden, true);
+  body.scrollTop = 0;
+  layout({ H: 180, rowAt: 100, goAt: 200 });
+  clickWithTarget(doc.body.find('passes-list'), row);
+  assert.ok(reach(row, 180), 'tapped row still in view');
+  assert.ok(reach(go, 180), 'Go to peak in view (fits with the row)');
+  assert.equal(body.scrollTop, CARD + 48, 'just enough for Go to peak');
+  // when Go to peak cannot fit, the tapped row wins (not pushed off the top)
+  click(doc.body.find('sats-clear'));
+  body.scrollTop = 0;
+  layout({ H: 180, rowAt: 20, goAt: 200 });
+  clickWithTarget(doc.body.find('passes-list'), row);
+  assert.equal(row.getBoundingClientRect().top, 0, 'row kept at the top edge');
+  // review round 1 (844x390): row + rest of the list + action taller than the
+  // panel. In a browser the enabled action sticks to the body bottom (a fixed
+  // box here); the tapped row is lifted just clear of it, both stay in view
+  click(doc.body.find('sats-clear'));
+  body.scrollTop = 0;
+  layout({ H: 104, rowAt: 60, goAt: 400 });
+  go.getBoundingClientRect = () => box(76, 28); // sticky once enabled
+  clickWithTarget(doc.body.find('passes-list'), row);
+  const r2 = row.getBoundingClientRect();
+  assert.ok(r2.top >= 0, 'row not pushed off the top');
+  assert.ok(r2.bottom <= 76, 'row clear of the sticky Go to peak');
+  assert.equal(r2.top, 38, 'lifted by the overlap plus a 4 px gap');
+  layout({ H: 180, rowAt: 20, goAt: 200 });
+  // selection semantics are unchanged: Go to peak jumps to the selected peak
+  const selected = handle.selectedPass;
+  handle.clock.setFixed(selected.riseMs - 3_600_000);
+  click(go);
+  assert.equal(handle.clock.getTime(), selected.peakMs);
+  assert.equal(handle.selectedPass, selected);
+  // the programmatic hook (no anchor) does not touch the scroll position
+  body.scrollTop = 7;
+  handle.selectPass(selected, { look: false });
+  assert.equal(body.scrollTop, 7);
 });

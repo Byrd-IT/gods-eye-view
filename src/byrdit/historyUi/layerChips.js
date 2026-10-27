@@ -50,6 +50,7 @@ export function createLayerChips({
   feedChips,
   getRouter = () => null,
   getDataManager = () => null,
+  getHistoryLayers = () => [],
 } = {}) {
   const listeners = new Set();
   let lastSig = '';
@@ -160,8 +161,34 @@ export function createLayerChips({
         greyUntil: null,
         reason: null,
       });
+    // G1: a layer answered from history by another path than the slice
+    // router (GhostMaps: the git archive) says what it shows, or that the
+    // archive failed (live shown, D3)
+    const own = new Set();
+    for (const h of safeGet(getHistoryLayers) ?? []) {
+      if (!enabled.has(h.layerId)) continue;
+      if (h.status === 'unavailable') {
+        failedLayers.add(h.layerId);
+        continue;
+      }
+      if (!h.text) continue;
+      own.add(h.layerId);
+      out.push({
+        feed: `history-note:${h.layerId}`,
+        layerId: h.layerId,
+        label: all.find((l) => l.id === h.layerId)?.name || h.layerId,
+        state: h.status === 'before' ? EMPTY_NOTE_STATE : NOTE_STATE,
+        draw: h.status !== 'before',
+        chip: h.text,
+        age: null,
+        lastOkAt: null,
+        staleSince: null,
+        greyUntil: null,
+        reason: null,
+      });
+    }
     for (const id of ids) {
-      if (swappedLayers.has(id)) continue;
+      if (swappedLayers.has(id) || own.has(id)) continue;
       const label = all.find((l) => l.id === id)?.name || id;
       out.push({
         feed: `layer:${id}`,

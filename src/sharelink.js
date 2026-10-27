@@ -5,6 +5,7 @@ import {
   normalizeAllocationStrategy,
 } from './data/detectionPolicy.js';
 import { clampScopeTerminusPct } from './scopeMask.js';
+import { clampScopeFeatherPct } from './scopeMaskPolicy.js';
 import {
   decodeLayerStateParams,
   encodeLayerStateParams,
@@ -112,10 +113,7 @@ export class ShareLinkManager {
     this._detectionOutsideOpacityPct = 1;
     this._celestialRingEnabled = false;
     this._scopeEnabled = true;
-    // Feather opens on a soft 11% scope-mask edge (owner final lock 2026-08-24,
-    // superseding the 08-22 hard-crop and 08-23 8% rulings) — mirrors
-    // SCOPE_FEATHER_RATIO_DEFAULT in scopeMask.js and the slider's markup value.
-    this._scopeFeatherPct = 11;
+    this._scopeFeatherPct = 100;
     // null = the altitude-adaptive terminus (the default). A number pins the
     // outside-fill opacity as a percent, 94..100. (`sce`, 2026-08-17)
     this._scopeTerminusPct = null;
@@ -175,7 +173,9 @@ export class ShareLinkManager {
       parseOr(params.get('dd'), 50),
       50,
     );
-    const style = URL_TO_STYLE[params.get('style')] || 'normal';
+    const style = Object.hasOwn(URL_TO_STYLE, params.get('style'))
+      ? URL_TO_STYLE[params.get('style')]
+      : 'normal';
     const decodedLayerState = decodeLayerStateParams(params);
     const state = {
       lat,
@@ -225,10 +225,7 @@ export class ShareLinkManager {
       // (`_scopeFeatherPct` in the constructor tracks the default: that one
       // mirrors live state for the link this session generates, so it must match
       // the mask, not the archive.)
-      scopeFeatherPct: Math.max(
-        0,
-        Math.min(100, Math.round(parseOr(params.get('scf'), 35))),
-      ),
+      scopeFeatherPct: clampScopeFeatherPct(parseOr(params.get('scf'), 35)),
       // Absent (or non-numeric) `sce` = adaptive (null), the default behavior;
       // a value pins the terminus opacity percent, clamped into the SUPPORTED
       // 94..100 band. `sce=0` used to survive as a sub-94 terminus — a hole in
@@ -492,10 +489,7 @@ export class ShareLinkManager {
     if (typeof extras.scopeEnabled === 'boolean')
       this._scopeEnabled = extras.scopeEnabled;
     if (typeof extras.scopeFeatherPct === 'number') {
-      this._scopeFeatherPct = Math.max(
-        0,
-        Math.min(100, Math.round(extras.scopeFeatherPct)),
-      );
+      this._scopeFeatherPct = clampScopeFeatherPct(extras.scopeFeatherPct);
     }
     if (extras.scopeTerminusPct === null) this._scopeTerminusPct = null;
     else if (typeof extras.scopeTerminusPct === 'number') {
@@ -511,6 +505,8 @@ export class ShareLinkManager {
     if (!params) return false;
     params.set(SHARE_CREATED_AT_PARAM, String(Math.floor(nowMs / 1000)));
     const copiedUrl = new URL(window.location.href);
+    // ?lang is the sender's language override; the recipient keeps their own.
+    copiedUrl.searchParams.delete('lang');
     copiedUrl.hash = params.toString();
     try {
       await navigator.clipboard.writeText(copiedUrl.href);

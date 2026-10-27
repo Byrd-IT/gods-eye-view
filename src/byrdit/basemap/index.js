@@ -11,7 +11,12 @@ import { createGoogleSession } from './googleSession.js';
 import { attachBasemapSwitching, createSwitchMachine } from './autoSwitch.js';
 import { attachBuildings } from './buildings.js';
 import { attachNaip } from './naip.js';
-import { createNaipSlider, createNaipSplit } from './naipSlider.js';
+import {
+  createImageryVoice,
+  ensureByrditOpen,
+  flyToImageryBounds,
+} from './imageryVoice.js';
+import { createNaipMenuSlider, createNaipSplit } from './naipSlider.js';
 import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
 
 /**
@@ -169,11 +174,30 @@ export async function openBasemap({
               controller,
               session,
               naip: config.naip,
-              createSlider: createNaipSlider,
+              createSlider: createNaipMenuSlider,
               createSplit: createNaipSplit,
             })
           : null;
+      const hookWindow = viewer?.container?.ownerDocument?.defaultView ?? null;
+      const imageryVoice = createImageryVoice({
+        getNaip: () => naip,
+        getCatalog: () => config.naip,
+        getWayback: () => hookWindow?.__gevWayback ?? null,
+        ensureOpen: () => ensureByrditOpen(controller),
+        flyTo: (bounds) => flyToImageryBounds(viewer, Cesium, bounds),
+      });
+      if (hookWindow) hookWindow.__gevImagery = { voice: imageryVoice };
       const detach = () => {
+        if (hookWindow?.__gevImagery?.voice === imageryVoice) {
+          delete hookWindow.__gevImagery;
+          // Wayback may still be mounted. Put its voice back; its own
+          // detach removes that voice, so it does not stay after Wayback leaves.
+          try {
+            hookWindow.__gevWayback?.restoreVoice?.();
+          } catch {
+            /* a failed restore leaves the voice off, which is the old result */
+          }
+        }
         if (health) health.onChange = null;
         naip?.();
         buildings?.();

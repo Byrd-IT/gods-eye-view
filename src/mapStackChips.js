@@ -10,7 +10,8 @@
 // state is re-synced from controller state (never optimistically), so a failed
 // or superseded switch still leaves the truly-active stack lit.
 
-import { keySetupRequirement } from './keySetupCore.mjs';
+import { keySetupRequirementEnvVars } from './keySetupCore.mjs';
+import { t } from './i18n/index.js';
 
 export const MAP_STACK_CHIP_CLASS = 'map-stack-chip';
 export const PRESENTED_MAP_STACK_IDS = Object.freeze([
@@ -44,9 +45,14 @@ export function mapStackChipModel(stack, activeId) {
   const available = stack?.available !== false;
   const label = String(stack?.label ?? stack?.id ?? '');
   const requiresIon = stack?.requiresIon === true;
+  // Stack labels are provider names and stay English; the sentence translates.
   const fallbackReason = requiresIon
-    ? keySetupRequirement('cesium-ion')
-    : `${label || 'This map stack'} is unavailable`;
+    ? t('Needs {envVars} — add it in Provider Settings', {
+        envVars: keySetupRequirementEnvVars('cesium-ion'),
+      })
+    : t('{label} is unavailable', {
+        label: label || t('This map stack'),
+      });
   const unavailableHint = available
     ? ''
     : String(stack?.unavailableReason || fallbackReason);
@@ -56,8 +62,13 @@ export function mapStackChipModel(stack, activeId) {
       : '';
   const degraded = Boolean(degradedHint);
   let ariaLabel = null;
-  if (!available) ariaLabel = `${label} unavailable: ${unavailableHint}`;
-  else if (degraded) ariaLabel = `${label} degraded: ${degradedHint}`;
+  if (!available)
+    ariaLabel = t('{label} unavailable: {hint}', {
+      label,
+      hint: unavailableHint,
+    });
+  else if (degraded)
+    ariaLabel = t('{label} degraded: {hint}', { label, hint: degradedHint });
   return {
     id: String(stack?.id ?? ''),
     label,

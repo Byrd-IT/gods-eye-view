@@ -1,6 +1,7 @@
 import { createStandaloneApplication } from './standalone/application.js';
 import { describeError } from './standalone/errors.js';
 import { fetchGoogleKey, fetchIonCredential } from './byrdit/serverKeys.js';
+import { t } from './i18n/index.js';
 
 // No third-party key is injected into this bundle. Cesium ion and Mapillary
 // credentials stay on the server (server/byrdit/keyIsolation); the browser only
@@ -20,7 +21,9 @@ const application = Promise.all([fetchIonCredential(), fetchGoogleKey()]).then(
       const loaderStatus = document.querySelector(
         '#loading-screen .loader-status',
       );
-      loaderStatus.textContent = `Error: ${describeError(error)}`;
+      loaderStatus.textContent = t('Error: {message}', {
+        message: describeError(error),
+      });
       loaderStatus.style.color = '#ff4444';
     });
     return app;

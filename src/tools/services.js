@@ -52,7 +52,7 @@ export function createToolServices({ fetchImpl, appUrl, panelKey }) {
     fires: createFirmsSource({ fetchImpl }),
     launches: createLaunchSource({ fetchImpl }),
     aircraft: createFlightSource({ fetchImpl }),
-    military: createMilitarySource({ fetchImpl }),
+    military: createMilitarySource({ fetchImpl, trackHistory: false }),
     vessels: createVesselSource({
       fetchImpl,
       origin: () => new URL(appUrl).origin,

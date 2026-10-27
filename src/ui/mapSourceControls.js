@@ -3,6 +3,7 @@ import {
   syncMapStackChipStatus,
   syncMapStackChips,
 } from '../mapStackChips.js';
+import { t } from '../i18n/index.js';
 
 /**
  * Own Map Source presentation and selection without constructing map providers.
@@ -35,12 +36,12 @@ export function createMapSourceControls({
       const degraded =
         typeof stack?.degradedReason === 'string' &&
         stack.degradedReason.trim() !== '';
-      const name = stack?.shortLabel || stack?.label || 'MAP';
+      const name = stack?.shortLabel || stack?.label || t('MAP');
       statusElement.textContent =
         state.status === 'switching'
           ? '...'
           : degraded
-            ? `${name} (degraded)`
+            ? t('{name} (degraded)', { name })
             : name;
       // Only clear a tooltip this control set itself.
       if (degraded) {
