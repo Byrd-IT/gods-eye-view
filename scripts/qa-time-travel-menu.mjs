@@ -185,6 +185,24 @@ async function run(label, viewport) {
   check(`${label}: aerial inside menu`, o.aerialInMenu && o.aerial?.visible);
   check(`${label}: no floating NAIP bar`, !o.floatingNaip);
   console.log(label, "headings", JSON.stringify(o.headings));
+  // The three check boxes (Esri Wayback, Aerial, Compare) must look alike.
+  const boxes = await page.evaluate(() => {
+    const m = (e) => {
+      if (!e) return null;
+      const r = e.getBoundingClientRect();
+      const row = e.closest("label");
+      const cs = row ? getComputedStyle(row) : null;
+      return { w: r.width, h: r.height, font: cs ? cs.fontFamily.split(",")[0] + " " + cs.fontSize : null };
+    };
+    const nb = [...document.querySelectorAll("#gev-naip-slider input[type=checkbox]")];
+    return { wayback: m(document.querySelector("#gev-wayback input[type=checkbox]")), aerial: m(nb[0]), compare: m(nb[1]) };
+  });
+  console.log(label, "checkboxes", JSON.stringify(boxes));
+  if (waybackFlag === "1") {
+    check(`${label}: Esri box is the same size as the Aerial box - ${boxes.wayback?.w}x${boxes.wayback?.h} vs ${boxes.aerial?.w}x${boxes.aerial?.h}`, boxes.wayback && boxes.aerial && boxes.wayback.w === boxes.aerial.w && boxes.wayback.h === boxes.aerial.h);
+    check(`${label}: Esri box is the same size as the Compare box`, boxes.wayback && boxes.compare && boxes.wayback.w === boxes.compare.w && boxes.wayback.h === boxes.compare.h);
+    check(`${label}: Esri label font matches the Aerial label - ${boxes.wayback?.font} vs ${boxes.aerial?.font}`, boxes.wayback && boxes.aerial && boxes.wayback.font === boxes.aerial.font);
+  }
   check(`${label}: menu within viewport`, o.menu.x >= 0 && o.menu.x + o.menu.w <= o.vw + 1 && o.menu.y + o.menu.h <= o.vh + 1);
   await page.screenshot({ path: path.join(outDir, `${tag}-${label}-open.png`) });
   await page.evaluate(() => window.__qaNaip.setVisible(false));
