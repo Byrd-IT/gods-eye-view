@@ -234,6 +234,53 @@ test('a newer seek tells the waiting snap its own snap did not land', async () =
   h.control.destroy();
 });
 
+test('leave() during a snap is reported as left, not superseded', async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let snaps = 0;
+  const real = fixtureFetch(fixtureWorld(NOW));
+  const fetchImpl = async (input) => {
+    const url = new URL(
+      String(typeof input === 'string' ? input : input.url),
+      'http://localhost',
+    );
+    if (url.pathname === '/api/history/snapshots') {
+      snaps += 1;
+      if (snaps === 1) await gate;
+    }
+    return real(input);
+  };
+  const h = setup({ fetchImpl });
+  const pending = h.control.seek(NOW - 3 * DAY_MS + 30_000, { snap: true });
+  for (let i = 0; i < 20 && snaps < 1; i += 1) await Promise.resolve();
+  h.control.leave();
+  release();
+  const r = await pending;
+  assert.equal(r.landed, false);
+  assert.equal(r.superseded, undefined);
+  assert.equal(r.left, true);
+  h.control.destroy();
+});
+
+test('an unavailable /snapshots settles the snap as unavailable', async () => {
+  const real = fixtureFetch(fixtureWorld(NOW));
+  const fetchImpl = async (input) => {
+    const url = new URL(
+      String(typeof input === 'string' ? input : input.url),
+      'http://localhost',
+    );
+    if (url.pathname === '/api/history/snapshots') throw new Error('boom');
+    return real(input);
+  };
+  const h = setup({ fetchImpl });
+  const r = await h.control.seek(NOW - 3 * DAY_MS, { snap: true });
+  assert.equal(r.landed, false);
+  assert.equal(r.unavailable, true);
+  h.control.destroy();
+});
+
 test('seek with snap returns the promise that settles on recorded data', async () => {
   const h = setup();
   const asked = NOW - 3 * DAY_MS + 30_000;

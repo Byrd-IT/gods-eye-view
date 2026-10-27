@@ -638,8 +638,10 @@ export function mountHistoryControl({
 
   /**
    * Move the history time. With snap, the promise settles when this request's
-   * own snap finishes: { landed: true }, or { landed: false, superseded: true }
-   * when a newer seek took the generation before this snap landed.
+   * own snap finishes: { landed: true }; { landed: false, superseded: true }
+   * when a newer seek took the generation before this snap landed;
+   * { landed: false, left: true } when the control went live or was destroyed;
+   * { landed: false, unavailable: true } when /snapshots is unavailable.
    */
   function seek(ms, { snap = false } = {}) {
     if (!Number.isFinite(ms) || destroyed) return;
@@ -658,8 +660,11 @@ export function mountHistoryControl({
     const t = s.timeMs;
     const tolerance = snapToleranceMs(spanOf());
     const ownSnap = () => {
+      // Left (LIVE press, scrub grab, destroy) also bumps seekGen: check it
+      // first so it is not reported as a newer seek taking over.
+      if (destroyed || s.mode !== 'history')
+        return { landed: false, left: true };
       if (gen !== seekGen) return { landed: false, superseded: true };
-      if (destroyed || s.mode !== 'history') return { landed: false };
       return { landed: true };
     };
     for (const feed of SNAP_FEEDS) {
@@ -670,7 +675,10 @@ export function mountHistoryControl({
       try {
         snaps = await api.snapshots({ feed, around: t, n: 10 });
       } catch (error) {
-        if (error instanceof HistoryUnavailableError) markUnavailable();
+        if (error instanceof HistoryUnavailableError) {
+          markUnavailable();
+          return { landed: false, unavailable: true };
+        }
         return { landed: false };
       }
       if (destroyed || gen !== seekGen || s.mode !== 'history')

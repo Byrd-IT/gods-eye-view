@@ -316,7 +316,65 @@ test('a jump whose snap is overtaken does not report the newer seek time', async
   assert.equal(r.ok, true);
   assert.equal(r.superseded, true);
   assert.equal(r.snapPending, undefined);
-  assert.equal(r.time, '2026-10-10T12:00:30.000Z');
-  assert.notEqual(r.time, new Date(control.getState().timeMs).toISOString());
+  assert.equal(r.ownTarget, '2026-10-10T12:00:30.000Z');
+  assert.equal(r.time, new Date(control.getState().timeMs).toISOString());
+  assert.notEqual(r.time, r.ownTarget);
+  control.destroy();
+});
+
+function gatedVoice({ failSnapshots = false } = {}) {
+  const clock = fakeClock(NOW);
+  const realFetch = fixtureFetch(fixtureWorld(NOW));
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let snaps = 0;
+  const fetchImpl = async (input) => {
+    const url = new URL(String(typeof input === 'string' ? input : input.url), 'http://localhost');
+    if (url.pathname === '/api/history/snapshots') {
+      snaps += 1;
+      if (failSnapshots) throw new Error('boom');
+      if (snaps === 1) await gate;
+    }
+    return realFetch(input);
+  };
+  const control = mountHistoryControl({
+    document: fakeDocument(),
+    window: fakeWindow(HREF, fetchImpl),
+    now: clock.now,
+    monotonic: clock.monotonic,
+    timers: clock.timers,
+  });
+  const voice = createHistoryVoice({
+    getHandle: () => control,
+    getRouter: () => ({ adapters: [], getState: () => ({ swapped: [] }) }),
+    now: clock.now,
+  });
+  const waitSnap = async () => {
+    for (let i = 0; i < 20 && snaps < 1; i += 1) await Promise.resolve();
+    assert.equal(snaps, 1, 'the snap is waiting');
+  };
+  return { control, voice, release, waitSnap };
+}
+
+test('a LIVE press during a jump is not superseded and time is live', async () => {
+  const { control, voice, release, waitSnap } = gatedVoice();
+  const first = voice.jump({ time: '2026-10-10T12:00:30Z' });
+  await waitSnap();
+  control.leave();
+  release();
+  const r = await first;
+  assert.equal(r.ok, true);
+  assert.equal(r.superseded, undefined);
+  assert.equal(r.ownTarget, undefined);
+  assert.equal(r.snapPending, undefined);
+  assert.equal(r.time, null);
+  control.destroy();
+});
+
+test('an unavailable /snapshots answers unavailable without snapPending', async () => {
+  const { control, voice } = gatedVoice({ failSnapshots: true });
+  const r = await voice.jump({ time: '2026-10-10T12:00:30Z' });
+  assert.equal(r.snapPending, undefined);
+  assert.equal(r.superseded, undefined);
   control.destroy();
 });

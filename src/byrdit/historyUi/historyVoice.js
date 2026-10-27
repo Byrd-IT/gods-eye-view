@@ -163,6 +163,8 @@ export function createHistoryVoice({
       const settle = Promise.resolve(h.seek(target, { snap: true })).then(
         (result) => {
           if (result?.superseded) return { superseded: true };
+          // left / unavailable: the snap has stopped, nothing is pending
+          if (result?.left || result?.unavailable) return {};
           if (result && result.landed === false) return { snapPending: true };
           return {};
         },
@@ -180,7 +182,9 @@ export function createHistoryVoice({
         return done({
           requested,
           ...(clamped ? { clamped } : {}),
-          time: new Date(target).toISOString(),
+          // time (from done) is where the control is now; the request's own
+          // target is under ownTarget
+          ownTarget: new Date(target).toISOString(),
           superseded: true,
         });
       }
