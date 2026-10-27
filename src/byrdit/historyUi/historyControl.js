@@ -641,7 +641,8 @@ export function mountHistoryControl({
    * own snap finishes: { landed: true }; { landed: false, superseded: true }
    * when a newer seek took the generation before this snap landed;
    * { landed: false, left: true } when the control went live or was destroyed;
-   * { landed: false, unavailable: true } when /snapshots is unavailable.
+   * { landed: false, unavailable: true } when /snapshots is unavailable;
+   * { landed: false, failed: true } when /snapshots failed another way.
    */
   function seek(ms, { snap = false } = {}) {
     if (!Number.isFinite(ms) || destroyed) return;
@@ -677,9 +678,14 @@ export function mountHistoryControl({
       } catch (error) {
         if (error instanceof HistoryUnavailableError) {
           markUnavailable();
+          if (destroyed || gen !== seekGen || s.mode !== 'history')
+            return ownSnap();
           return { landed: false, unavailable: true };
         }
-        return { landed: false };
+        // any other failure also stops the snap: not pending, not landed
+        if (destroyed || gen !== seekGen || s.mode !== 'history')
+          return ownSnap();
+        return { landed: false, failed: true };
       }
       if (destroyed || gen !== seekGen || s.mode !== 'history')
         return ownSnap();

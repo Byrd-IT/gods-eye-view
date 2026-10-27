@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { HISTORY_EVENT, mountHistoryControl } from './historyControl.js';
-import { HISTORY_UNAVAILABLE } from './historyClient.js';
+import { HISTORY_UNAVAILABLE, createHistoryClient, HistoryUnavailableError } from './historyClient.js';
 import { HISTORY_STYLE_ID } from './historyStyles.js';
 import { DAY_MS, MINUTE_MS, readHtFromUrl } from './historyTimeline.js';
 import { createHistoryProvider } from '../skyView/historyTime.js';
@@ -18,6 +18,7 @@ function setup({
   fetchImpl,
   tileOutlines = null,
   worldOptions = {},
+  client,
 } = {}) {
   const clock = fakeClock(NOW);
   const world = fixtureWorld(NOW, worldOptions);
@@ -31,6 +32,7 @@ function setup({
     monotonic: clock.monotonic,
     timers: clock.timers,
     tileOutlines,
+    ...(client ? { client } : {}),
   });
   const root = control.root;
   const q = (sel) => root.find(sel);
@@ -255,6 +257,7 @@ test('leave() during a snap is reported as left, not superseded', async () => {
   const h = setup({ fetchImpl });
   const pending = h.control.seek(NOW - 3 * DAY_MS + 30_000, { snap: true });
   for (let i = 0; i < 20 && snaps < 1; i += 1) await Promise.resolve();
+  assert.equal(snaps, 1);
   h.control.leave();
   release();
   const r = await pending;
@@ -278,6 +281,58 @@ test('an unavailable /snapshots settles the snap as unavailable', async () => {
   const r = await h.control.seek(NOW - 3 * DAY_MS, { snap: true });
   assert.equal(r.landed, false);
   assert.equal(r.unavailable, true);
+  h.control.destroy();
+});
+
+test('a non-unavailable snapshots error settles as failed, not pending or unavailable', async () => {
+  const real = createHistoryClient({
+    fetchImpl: fixtureFetch(fixtureWorld(NOW)),
+    now: () => NOW,
+  });
+  const client = {
+    ...real,
+    coverage: (...a) => real.coverage(...a),
+    snapshots: async () => {
+      throw new TypeError('bad payload');
+    },
+  };
+  const h = setup({ client });
+  const r = await h.control.seek(NOW - 3 * DAY_MS, { snap: true });
+  assert.equal(r.landed, false);
+  assert.equal(r.failed, true);
+  assert.equal(r.unavailable, undefined);
+  assert.equal(h.control.getState().unavailable, false);
+  h.control.destroy();
+});
+
+test('an unavailable snap after leave() reports left, not unavailable', async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const real = createHistoryClient({
+    fetchImpl: fixtureFetch(fixtureWorld(NOW)),
+    now: () => NOW,
+  });
+  let asked = 0;
+  const client = {
+    ...real,
+    coverage: (...a) => real.coverage(...a),
+    snapshots: async () => {
+      asked += 1;
+      await gate;
+      throw new HistoryUnavailableError('down');
+    },
+  };
+  const h = setup({ client });
+  const pending = h.control.seek(NOW - 3 * DAY_MS, { snap: true });
+  for (let i = 0; i < 20 && asked < 1; i += 1) await Promise.resolve();
+  assert.equal(asked, 1);
+  h.control.leave();
+  release();
+  const r = await pending;
+  assert.equal(r.left, true);
+  assert.equal(r.unavailable, undefined);
   h.control.destroy();
 });
 

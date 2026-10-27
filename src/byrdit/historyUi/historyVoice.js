@@ -35,7 +35,7 @@ export const HISTORY_VOICE_ACTIONS = Object.freeze([
 ]);
 
 const MAX_MINUTES_AGO = Math.floor(HISTORY_SPAN_MS / 60_000);
-const ZONE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
+const ZONE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 // End-anchored. A time of day must use T, and Z is uppercase; a space is not
 // ISO. The zone is optional here so a missing zone still fails the zone check
@@ -63,9 +63,16 @@ export function currentHistoryVoice() {
 
 const fail = (error, extra = {}) => ({ ok: false, error, ...extra });
 
-/** Date.parse does not accept an hour-only offset (+05). Read it as +05:00. */
+/**
+ * Date.parse does not accept an hour-only offset (+05): read it as +05:00.
+ * A colonless +0530 is normalized to +05:30. Only called on a time of day
+ * (a bare date takes the other branch), so the date's own -MM-DD is safe:
+ * the offset must follow a minute or second field.
+ */
 function withMinuteOffset(text) {
-  return text.replace(/([+-]\d{2})$/, '$1:00');
+  return text
+    .replace(/(\d)([+-]\d{2})(\d{2})$/, '$1$2:$3')
+    .replace(/(\d)([+-]\d{2})$/, '$1$2:00');
 }
 
 /**
@@ -164,7 +171,8 @@ export function createHistoryVoice({
         (result) => {
           if (result?.superseded) return { superseded: true };
           // left / unavailable: the snap has stopped, nothing is pending
-          if (result?.left || result?.unavailable) return {};
+          if (result?.left) return { left: true };
+          if (result?.unavailable || result?.failed) return {};
           if (result && result.landed === false) return { snapPending: true };
           return {};
         },
@@ -191,6 +199,9 @@ export function createHistoryVoice({
       return done({
         requested,
         ...(clamped ? { clamped } : {}),
+        // LIVE was pressed (or the control destroyed) during the jump: the
+        // jump was abandoned, time is null/live now
+        ...(snap.left ? { left: true } : {}),
         ...(snap.snapPending ? { snapPending: true } : {}),
       });
     },

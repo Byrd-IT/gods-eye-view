@@ -52,6 +52,13 @@ test('parseJumpTime rejects a lowercase t or z on the ISO shape check', () => {
   assert.match(parseJumpTime('2026-03-04T09:30:00z').error, /ISO 8601/);
 });
 
+test('parseJumpTime reads a colonless offset as HH:MM and ZONE is case-exact', () => {
+  assert.equal(parseJumpTime('2026-03-04T09:30:00+0530').ms, Date.parse('2026-03-04T09:30:00+05:30'));
+  assert.equal(parseJumpTime('2026-03-04T09:30-0600').ms, Date.parse('2026-03-04T09:30:00-06:00'));
+  assert.equal(parseJumpTime('2026-03-04T09:30:00.250+0530').ms, Date.parse('2026-03-04T09:30:00.250+05:30'));
+  assert.match(parseJumpTime('2026-03-04T09:30:00').error, /zone/);
+});
+
 test('parseJumpTime reads an hour-only offset as HH:00', () => {
   assert.equal(parseJumpTime('2026-03-04T09:30:00+05').ms, Date.parse('2026-03-04T09:30:00+05:00'));
   assert.equal(parseJumpTime('2026-03-04T09:30:00-06').ms, Date.parse('2026-03-04T09:30:00-06:00'));
@@ -368,6 +375,7 @@ test('a LIVE press during a jump is not superseded and time is live', async () =
   assert.equal(r.ownTarget, undefined);
   assert.equal(r.snapPending, undefined);
   assert.equal(r.time, null);
+  assert.equal(r.left, true);
   control.destroy();
 });
 
@@ -376,5 +384,7 @@ test('an unavailable /snapshots answers unavailable without snapPending', async 
   const r = await voice.jump({ time: '2026-10-10T12:00:30Z' });
   assert.equal(r.snapPending, undefined);
   assert.equal(r.superseded, undefined);
+  assert.equal(r.unavailable, true);
+  assert.equal(typeof r.time, 'string');
   control.destroy();
 });
