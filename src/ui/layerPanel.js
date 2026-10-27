@@ -1,5 +1,13 @@
 import { syncChipGroup } from './chipGroup.js';
 import { syncRowList } from './rowList.js';
+import {
+  CombinedSelection,
+  combinedChips,
+  combinedRowOf,
+  combinedRowState,
+  planChipToggle,
+  planRowSwitch,
+} from './combinedRows.js';
 import { layerFeedState } from '../data/feedState.js';
 export { layerFeedState } from '../data/feedState.js';
 import { GUIDANCE_STATUSES } from '../loadingFeedback.js';
@@ -231,6 +239,8 @@ export class LayerPanel {
     this._cancelRowControlsRefresh = null;
     this._recentImageryFactory = null;
     this._recentImageryPanel = null;
+    this._combinedSelection = new CombinedSelection();
+    this._combinedRows = [];
   }
   mount(container) {
     if (this._destroyed) return;
@@ -301,6 +311,8 @@ export class LayerPanel {
           (PANEL_POSITIONS.get(b.id) ?? PANEL_ORDER.length),
       );
     let previousGroup = '';
+    const renderedCombined = new Set();
+    this._combinedRows = [];
     for (const layer of layers) {
       if (!layer.showInTogglePanel) continue;
       const group =
@@ -313,6 +325,14 @@ export class LayerPanel {
         this._toggleContainer.appendChild(heading);
       }
       previousGroup = group;
+      const combined = combinedRowOf(layer.id);
+      if (combined) {
+        if (!renderedCombined.has(combined.id)) {
+          renderedCombined.add(combined.id);
+          this._renderCombinedRow(combined, generation);
+        }
+        continue;
+      }
       const row = document.createElement('div');
       row.className = 'data-toggle-row';
       row.dataset.layerId = layer.id;
@@ -636,7 +656,186 @@ export class LayerPanel {
         row.querySelector('.data-row-list'),
       );
     }
+    for (const row of this._combinedRows) this._syncCombinedRow(row);
     this._refreshWeatherPanel();
+  }
+
+  _combinedMembers(def) {
+    const all = this.getAll();
+    return def.members
+      .map((member) => all.find(({ id }) => id === member.id))
+      .filter(Boolean);
+  }
+
+  /**
+   * One row standing for several layers (see combinedRows.js): its state is
+   * derived from the member layers every time, never stored.
+   */
+  _renderCombinedRow(def, generation) {
+    const row = document.createElement('div');
+    row.className = 'data-toggle-row data-toggle-row--combined';
+    row.dataset.combinedRow = def.id;
+    row.dataset.combinedMembers = def.members.map(({ id }) => id).join(' ');
+    row.dataset.layerName = def.name;
+
+    const topRow = document.createElement('div');
+    topRow.className = 'data-toggle-top';
+    const left = document.createElement('div');
+    left.className = 'data-toggle-left';
+    const icon = document.createElement('span');
+    icon.className = 'data-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = def.icon;
+    const name = document.createElement('span');
+    name.className = 'data-name';
+    setRowText(name, t(def.name));
+    left.append(icon, name);
+    const right = document.createElement('div');
+    right.className = 'data-toggle-right';
+    const count = document.createElement('span');
+    count.className = 'data-count';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'data-toggle-btn';
+    right.append(count, toggle);
+    topRow.append(left, right);
+
+    const meta = document.createElement('div');
+    meta.className = 'data-toggle-meta';
+    meta.style.whiteSpace = 'pre-line';
+    const controls = document.createElement('div');
+    controls.className = 'data-toggle-controls';
+    row.append(topRow, meta, controls);
+
+    this._bind(toggle, 'click', async () => {
+      if (
+        this._destroyed ||
+        this._generation !== generation ||
+        toggle.getAttribute('aria-disabled') === 'true'
+      )
+        return;
+      toggle.setAttribute('aria-disabled', 'true');
+      toggle.setAttribute('aria-busy', 'true');
+      try {
+        await this._applyCombinedPlan(
+          planRowSwitch(
+            def,
+            (id) => this.isEnabled(id),
+            this._combinedSelection,
+          ),
+        );
+      } finally {
+        if (!this._destroyed && this._generation === generation)
+          this._syncCombinedRow(row);
+      }
+    });
+    this._bind(controls, 'click', async (event) => {
+      const button = event.target?.closest?.('.data-toggle-chip');
+      if (!button || button.disabled) return;
+      await this._applyCombinedPlan(
+        planChipToggle(
+          def,
+          button.dataset.chipId,
+          (id) => this.isEnabled(id),
+          this._combinedSelection,
+        ),
+      );
+      if (!this._destroyed && this._generation === generation)
+        this._syncCombinedRow(row);
+    });
+    this._toggleContainer.appendChild(row);
+    this._combinedRows.push(row);
+    this._syncCombinedRow(row);
+  }
+
+  async _applyCombinedPlan(plan) {
+    const results = await Promise.allSettled(
+      plan.map(([id, enabled]) =>
+        this.setEnabled(id, enabled, { origin: 'user' }),
+      ),
+    );
+    for (const result of results)
+      if (result.status === 'rejected')
+        console.warn('[Data] combined row toggle error:', result.reason);
+  }
+
+  /** Presentation of a combined row, from the member layers' live state. */
+  _combinedPresentation(def) {
+    const members = this._combinedMembers(def);
+    const enabled = members.filter((layer) => layer.enabled);
+    const severity = [
+      'nominal',
+      'loading',
+      'fallback',
+      'partial',
+      'stale',
+      'degraded',
+      'unavailable',
+    ];
+    const lead =
+      enabled
+        .slice()
+        .sort(
+          (a, b) =>
+            severity.indexOf(layerFeedState(b.stats)) -
+            severity.indexOf(layerFeedState(a.stats)),
+        )[0] || members[0];
+    const states = new Set(members.map((layer) => layer.lifecycleState));
+    const lifecycleState = states.has('enabling')
+      ? 'enabling'
+      : states.has('disabling')
+        ? 'disabling'
+        : lead?.lifecycleState;
+    const total = enabled.reduce(
+      (sum, layer) => sum + (Number(layer.stats?.count) || 0),
+      0,
+    );
+    const label = (layer) =>
+      t(def.members.find(({ id }) => id === layer.id).label);
+    const metaLines = enabled.length
+      ? enabled.map((layer) =>
+          enabled.length > 1
+            ? `${label(layer)}: ${this._buildMetaText(layer)}`
+            : this._buildMetaText(layer),
+        )
+      : [members[0] ? this._buildMetaText(members[0]) : ''];
+    return {
+      layer: {
+        ...lead,
+        id: def.id,
+        name: t(def.name),
+        enabled: enabled.length > 0,
+        lifecycleState,
+        lifecycleUncertain: members.some((layer) => layer.lifecycleUncertain),
+        stats: { ...(lead?.stats || {}), count: total, countLabel: undefined },
+      },
+      meta: metaLines.join('\n'),
+    };
+  }
+
+  _syncCombinedRow(row) {
+    const def = combinedRowOf(row.dataset.combinedMembers.split(' ')[0]);
+    if (!def) return;
+    const state = combinedRowState(def, (id) => this.isEnabled(id));
+    const { layer, meta } = this._combinedPresentation(def);
+    const toggle = row.querySelector('.data-toggle-btn');
+    if (toggle) this._syncToggleButton(toggle, layer);
+    const count = row.querySelector('.data-count');
+    if (count) this._syncCount(row, count, layer.stats);
+    const metaNode = row.querySelector('.data-toggle-meta');
+    if (metaNode) setRowText(metaNode, meta);
+    const controls = row.querySelector('.data-toggle-controls');
+    if (controls) {
+      controls.hidden = !state.enabled;
+      syncChipGroup(
+        controls,
+        combinedChips(
+          def,
+          (id) => this.isEnabled(id),
+          (text) => t(text),
+        ),
+      );
+    }
   }
 
   _buildMetaText(layer) {
