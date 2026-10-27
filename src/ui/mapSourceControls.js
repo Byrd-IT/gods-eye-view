@@ -1,4 +1,9 @@
-import { renderMapStackChips, syncMapStackChips } from '../mapStackChips.js';
+import {
+  renderMapStackChips,
+  syncMapStackChipStatus,
+  syncMapStackChips,
+} from '../mapStackChips.js';
+import { t } from '../i18n/index.js';
 
 /**
  * Own Map Source presentation and selection without constructing map providers.
@@ -15,6 +20,7 @@ export function createMapSourceControls({
 }) {
   let destroyed = false;
   let generation = 0;
+  let statusTitled = false;
   const removers = [];
   const bind = (element, type, listener) => {
     element.addEventListener(type, listener);
@@ -23,16 +29,40 @@ export function createMapSourceControls({
   function render(state) {
     if (destroyed || !state) return;
     syncMapStackChips(container, state.activeId);
+    if (Array.isArray(state.stacks))
+      syncMapStackChipStatus(container, state.stacks);
     if (statusElement) {
       const stack = state.activeStack;
+      const degraded =
+        typeof stack?.degradedReason === 'string' &&
+        stack.degradedReason.trim() !== '';
+      const name = stack?.shortLabel || stack?.label || t('MAP');
       statusElement.textContent =
         state.status === 'switching'
           ? '...'
-          : stack?.shortLabel || stack?.label || 'MAP';
-      statusElement.classList.toggle('warn', !!state.lastError);
+          : degraded
+            ? t('{name} (degraded)', { name })
+            : name;
+      // Only clear a tooltip this control set itself.
+      if (degraded) {
+        statusElement.title = stack.degradedReason;
+        statusTitled = true;
+      } else if (statusTitled) {
+        statusElement.title = '';
+        statusTitled = false;
+      }
+      statusElement.classList.toggle('warn', !!state.lastError || degraded);
     }
   }
-  async function select(stackId, { syncShare = true } = {}) {
+  /**
+   * `intent` tells the controller who chose the stack: 'user' (a chip, the
+   * dropdown, voice, the API - every selection that also updates the share
+   * link) or 'restore' (a share link or recipe being applied).
+   */
+  async function select(
+    stackId,
+    { syncShare = true, intent = syncShare ? 'user' : 'restore' } = {},
+  ) {
     if (destroyed) return null;
     const current = ++generation;
     if (syncShare) claimSelection();
@@ -40,7 +70,7 @@ export function createMapSourceControls({
     render(controller.getState('switching'));
     let state;
     try {
-      state = await controller.setStack(stackId);
+      state = await controller.setStack(stackId, { intent });
     } catch (error) {
       if (!destroyed && current === generation) {
         render(controller.getState());

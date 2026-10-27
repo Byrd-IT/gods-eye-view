@@ -9,7 +9,6 @@ import {
   FEED_STALE_AFTER_MS,
   MAX_VEHICLES_TOTAL,
   MISSED_POLLS_TO_DROP,
-  TRANSIT_POLL_MS,
   isStaleVehicleFix,
   transitVehicleKey,
   vehicleReportTimeMs,
@@ -202,6 +201,16 @@ export function createIngestion({ state, services, parts, source }) {
     let seen = 0;
     let rejectedFixes = 0;
 
+    // GEV history seam (fork card B12b; see lifecycle resetForHistoryFrame):
+    // an armed snapshot replaces this feed's fleet, the selection kept.
+    const historyFrame = state._historyFrameFeeds?.delete(feed.id) === true;
+    const keepSelected = historyFrame ? state._selectedKey : null;
+    if (historyFrame) {
+      removeFeedVehicles(feed.id);
+      status.lag = null;
+      status.snapshotAt = null;
+    }
+
     const records = snapshot.vehicles || [];
     if (!status.lag) status.lag = createLagReservoir();
     const replayed = status.snapshotAt === fetchedAt || stale === true;
@@ -221,8 +230,12 @@ export function createIngestion({ state, services, parts, source }) {
     for (const record of records) {
       if (isStaleVehicleFix(record, now, fetchedAt)) continue;
       const key = transitVehicleKey(feed.id, record.id);
-      const mode = transitModeFor(feed, record.routeId);
-      const modeInferred = !transitModeResolved(feed, record.routeId);
+      const mode = transitModeFor(feed, record.routeId, record.id);
+      const modeInferred = !transitModeResolved(
+        feed,
+        record.routeId,
+        record.id,
+      );
       // A stamp ahead of the fetch is a clock fault; the fetch time bounds it.
       const stamped = vehicleReportTimeMs(record, fetchedAt);
       const reportAt =
@@ -382,6 +395,12 @@ export function createIngestion({ state, services, parts, source }) {
       }
     }
     sweepAgedVehicles(now);
+    if (
+      keepSelected &&
+      !state._selectedKey &&
+      state._vehicles.has(keepSelected)
+    )
+      parts.selection.selectVehicle(keepSelected);
 
     status.count = seen;
     status.lastUpdate = fetchedAt;
@@ -472,6 +491,7 @@ export function createIngestion({ state, services, parts, source }) {
           `[Data:Transit] ${feed.id} poll failed:`,
           error?.message || error,
         );
+        // i18n-ignore: English data, translated on display (ui/statusText.js)
         status.error = `${feed.name} feed unavailable`;
         status.retryInSec = Number.isFinite(error?.retryInSec)
           ? error.retryInSec

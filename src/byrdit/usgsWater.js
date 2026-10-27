@@ -1,7 +1,7 @@
 /**
  * Byrd-IT fork: USGS water layers.
  *
- * The exporter (scripts/export_usgs_water.py, every 15 min) writes one file
+ * The exporter (scripts/export_usgs_water.py, every 30 min) writes one file
  * per site class under /byrdit/usgs_water/ (served from public/ as plain
  * static files). Streams are ~85-90% of all sites, so they are also cut into
  * 4-degree tiles and this module loads ONLY the tiles that intersect the
@@ -11,7 +11,7 @@
  *
  * The small classes (wells, lakes/reservoirs, springs, other) load whole —
  * each is a few hundred KB — but still re-fetch on every enable so the
- * 15-minute refresh shows up without a page reload.
+ * 30-minute refresh shows up without a page reload.
  */
 import * as Cesium from 'cesium';
 import { createLocalGeoJsonLayer } from '../data/localGeojsonCore.js';
@@ -22,7 +22,7 @@ export const STREAM_MAX_VIEW_DEG = 24;
 /** Hard ceiling on stream tiles fetched for one view. */
 export const STREAM_MAX_TILES = 40;
 
-const SOURCE = 'USGS · refreshed every 15 min';
+const SOURCE = 'USGS · refreshed every 30 min';
 
 /** Byrd-IT water layers in panel order. `cls` matches the exporter classes. */
 export const USGS_WATER_LAYERS = Object.freeze([

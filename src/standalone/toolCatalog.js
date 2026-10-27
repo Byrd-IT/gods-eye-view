@@ -15,7 +15,7 @@ export function loadToolCatalog() {
         composeCatalog({
           tools: coreTools,
           services: createToolServices({
-            fetchImpl: (...args) => globalThis.fetch(...args),
+            fetchImpl: (u, o) => globalThis.fetch(u, { ...o, gevLive: true }),
             appUrl: new URL(globalThis.document.baseURI).origin,
           }),
         }),

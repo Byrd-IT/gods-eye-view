@@ -22,6 +22,14 @@ map showed weeks-old readings.
 Set USGS_WATER_ES_URL and USGS_WATER_ES_API_KEY (ApiKey only; no
 username/password fallback since t_dc58fb90). Optional
 USGS_WATER_OUT_DIR overrides the output directory (tests).
+
+Errors (script-audit b13, t_ef283cf3, STANDARD KB SeY7S6EBs9sMHq_KSKLr R1/R3/R4/R7):
+one timestamped line on stderr, e.g.
+    2026-10-19T01:30:00Z ERROR: ES request failed: POST https://es.example:9200/usgs-water-levels/_search
+        status=401 elapsed=0.04s body="{...}" (check USGS_WATER_ES_API_KEY in ...)
+The URL has credentials/query removed, the body is redacted before it is cut
+to 300 bytes, and the API key is never printed. Exit 1 = run failed, 2 = config
+error (missing env), 3 = unexpected internal error (traceback, redacted).
 """
 
 from __future__ import annotations
@@ -29,13 +37,16 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import ssl
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 INDEX = "usgs-water-levels"
@@ -76,27 +87,114 @@ SITE_TYPE_NAMES = {
 # site_type_code -> output class. Anything else (including blank) is "other".
 CLASS_BY_CODE = {"ST": "stream", "GW": "well", "LK": "lake", "SP": "spring"}
 CLASSES = ("stream", "well", "lake", "spring", "other")
+ENV_FILE = "/home/brandonabyrd/.config/gev/export_usgs_water.env"
+REQUEST_TIMEOUT_S = 120
+BODY_SNIPPET_BYTES = 300
+
+
+class ConfigError(RuntimeError):
+    """Missing/invalid configuration (exit 2)."""
+
+
+class FetchError(RuntimeError):
+    """An Elasticsearch request failed; the message carries target, status, elapsed, body."""
+
+
+_SECRET_PATTERNS = [
+    # Authorization schemes with their credential
+    (re.compile(r"(?i)\b(ApiKey|Bearer|Basic|Digest)\s+[A-Za-z0-9._~+/=-]+"), r"\1 <redacted>"),
+    # key=value / "key": "value" where the key looks secret; quoted values removed whole
+    (re.compile(
+        r"""(?i)\b([A-Za-z_-]*(?:authorization|api[_-]?key|token|secret|password|passwd|credential|cookie)[A-Za-z_-]*)"""
+        r"""(["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"?|'[^']*'?|[^\s,;&}]+)"""), r"\1\2<redacted>"),
+    # URL userinfo
+    (re.compile(r"(//)[^/@\s\"']*@"), r"\1<redacted>@"),
+]
+
+
+def redact(text: str) -> str:
+    """Remove credentials from text. Callers redact the WHOLE text, then clip."""
+    text = str(text)
+    for pattern, repl in _SECRET_PATTERNS:
+        text = pattern.sub(repl, text)
+    api_key = (os.environ.get("USGS_WATER_ES_API_KEY") or "").strip()
+    if len(api_key) >= 8:
+        text = text.replace(api_key, "<redacted>")
+    return text
+
+
+def safe_url(url: str) -> str:
+    """scheme://host[:port]/path only: no userinfo, no query, no fragment."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        return urlunsplit((parts.scheme, host, parts.path, "", ""))
+    except ValueError:
+        return "<unparseable url>"
+
+
+def snippet(raw: bytes | str | None) -> str:
+    if raw is None:
+        return '""'
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+    return json.dumps(redact(text)[:BODY_SNIPPET_BYTES])
+
+
+def log_error(message: str) -> None:
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    print(f"{stamp} ERROR: {redact(message)}", file=sys.stderr)
 
 
 def config() -> tuple[str, dict[str, str]]:
     url = os.environ.get("USGS_WATER_ES_URL", "").rstrip("/")
     if not url:
-        raise RuntimeError("USGS_WATER_ES_URL is required")
+        raise ConfigError(f"USGS_WATER_ES_URL is required (empty or unset; expected in {ENV_FILE})")
+    if urlsplit(url).scheme not in ("http", "https"):
+        raise ConfigError(f"USGS_WATER_ES_URL is not an http(s) URL: {safe_url(url)!r} (from {ENV_FILE})")
     api_key = (os.environ.get("USGS_WATER_ES_API_KEY") or "").strip()
     if not api_key:
         # t_dc58fb90 2026-10-03: ApiKey ONLY (byrdit-es-gev-usgs-water); the
         # username/password (elastic) fallback was removed per owner rule.
-        raise RuntimeError("USGS_WATER_ES_API_KEY is required")
+        raise ConfigError(f"USGS_WATER_ES_API_KEY is required (empty or unset; expected in {ENV_FILE})")
     authorization = f"ApiKey {api_key}"
     return url, {"Authorization": authorization, "Content-Type": "application/json"}
 
 
 def request_json(url: str, headers: dict[str, str], path: str, body: dict) -> dict:
+    target = f"POST {safe_url(url + path)}"
     request = Request(
         f"{url}{path}", data=json.dumps(body).encode(), headers=headers, method="POST"
     )
-    with urlopen(request, timeout=120) as response:
-        return json.load(response)
+    started = time.monotonic()
+    try:
+        with urlopen(request, timeout=REQUEST_TIMEOUT_S) as response:
+            raw = response.read()
+            status = response.status
+    except HTTPError as error:
+        try:
+            err_body = error.read()
+        except OSError as read_error:
+            err_body = f"<body unreadable: {read_error}>"
+        hint = " (check USGS_WATER_ES_API_KEY / its privileges)" if error.code in (401, 403) else ""
+        raise FetchError(
+            f"ES request failed: {target} status={error.code} {error.reason} "
+            f"elapsed={time.monotonic() - started:.2f}s body={snippet(err_body)}{hint}"
+        ) from None
+    except (URLError, TimeoutError, OSError) as error:
+        reason = getattr(error, "reason", error)
+        raise FetchError(
+            f"ES request failed: {target} status=none error={type(reason).__name__}: {reason} "
+            f"elapsed={time.monotonic() - started:.2f}s timeout={REQUEST_TIMEOUT_S}s"
+        ) from None
+    try:
+        return json.loads(raw)
+    except ValueError as error:
+        raise FetchError(
+            f"ES response is not JSON: {target} status={status} ({error}) "
+            f"elapsed={time.monotonic() - started:.2f}s body={snippet(raw)}"
+        ) from None
 
 
 def fetch_latest(url: str, headers: dict[str, str]) -> list[dict]:
@@ -133,7 +231,13 @@ def fetch_latest(url: str, headers: dict[str, str]) -> list[dict]:
             },
         }
         result = request_json(url, headers, f"/{INDEX}/_search", body)
-        agg = result["aggregations"]["pairs"]
+        try:
+            agg = result["aggregations"]["pairs"]
+        except (KeyError, TypeError):
+            raise FetchError(
+                f"ES response has no aggregations.pairs: POST {safe_url(url)}/{INDEX}/_search "
+                f"body={snippet(json.dumps(result))}"
+            ) from None
         for bucket in agg["buckets"]:
             hits = bucket["newest"]["hits"]["hits"]
             if hits:
@@ -299,7 +403,11 @@ def main() -> int:
     docs = fetch_latest(url, headers)
     features = group_sites(docs)
     if not features:
-        print("ERROR: no current readings returned from Elasticsearch", file=sys.stderr)
+        log_error(
+            f"no current readings returned from Elasticsearch: {len(docs)} site/parameter docs "
+            f"in the last {LOOKBACK_DAYS}d from {safe_url(url)}/{INDEX}, 0 with a location; "
+            f"expected > 0 gauges; output {out_dir} left unchanged"
+        )
         return 1
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".usgs_water.", dir=out_dir.parent))
@@ -325,6 +433,12 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (HTTPError, URLError, RuntimeError, ValueError, KeyError, OSError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
+    except ConfigError as error:
+        log_error(f"config: {error}")
+        raise SystemExit(2)
+    except (FetchError, HTTPError, URLError, RuntimeError, ValueError, KeyError, OSError) as error:
+        log_error(f"{type(error).__name__}: {error}" if not isinstance(error, FetchError) else str(error))
         raise SystemExit(1)
+    except Exception:  # noqa: BLE001 - unexpected bug: say so, with a redacted traceback, exit 3
+        log_error("unexpected internal error (exit 3):\n" + traceback.format_exc())
+        raise SystemExit(3)

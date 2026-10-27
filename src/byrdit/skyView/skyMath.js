@@ -1,12 +1,15 @@
 /**
  * Sky view maths (pure, no DOM, no Cesium): az/el <-> camera heading/pitch,
  * the Cesium field-of-view rule, the rectilinear projection the overlay draws
- * with, drag/zoom/key mapping, and the sky-brightness curve.
+ * with, drag/zoom/key mapping, the sky-brightness curve, and (P3a) star
+ * positions: proper motion, IAU 2006 precession, GMST, az/el, refraction.
  *
  * Conventions: azimuth is degrees clockwise from TRUE north, elevation is
  * degrees above the geometric horizon. That is Cesium's local East-North-Up
  * frame, so heading = azimuth and pitch = elevation by construction.
  */
+
+import { gstime } from 'satellite.js';
 
 export const DEG = Math.PI / 180;
 export const FOV_MIN_DEG = 5;
@@ -332,4 +335,207 @@ export function twilightWash(sunAltDeg) {
     alpha: Math.max(0, Math.min(0.55, alpha)),
     ...skyGradient(sunAltDeg),
   };
+}
+
+// ── star positions (SKYVIEW.md 5.2) ────────────────────────────────────────
+//
+// J2000 catalogue place -> proper motion to the date -> IAU 2006 precession
+// to the mean equator/equinox of date -> hour angle from GMST
+// (satellite.js gstime, the same clock the satellites use) -> az/el.
+// Nutation (~17") and aberration (~20") are ignored on purpose: together
+// about 0.01 deg, far below a pixel at FOV >= 5 deg. UTC is used for UT1 and
+// TT (|UT1-UTC| < 0.9 s; TT-UTC ~ 69 s moves precession by ~0.001").
+
+const MS_PER_DAY = 86_400_000;
+const J2000_MS = Date.UTC(2000, 0, 1, 12, 0, 0);
+const ARCSEC = DEG / 3600;
+const MAS_PER_RAD = 3600_000 / DEG;
+
+/** Julian centuries since J2000.0 for a UTC epoch in ms. */
+export const julianCenturies = (ms) => (ms - J2000_MS) / MS_PER_DAY / 36525;
+
+/** Julian years since J2000.0 for a UTC epoch in ms. */
+export const julianYears = (ms) => (ms - J2000_MS) / MS_PER_DAY / 365.25;
+
+/** Unit vector for RA/Dec in degrees. */
+export function radecToVector(raDeg, decDeg) {
+  const ra = raDeg * DEG;
+  const dec = decDeg * DEG;
+  return [
+    Math.cos(dec) * Math.cos(ra),
+    Math.cos(dec) * Math.sin(ra),
+    Math.sin(dec),
+  ];
+}
+
+/** RA (0..360) / Dec in degrees for a (not necessarily unit) vector. */
+export function vectorToRadec([x, y, z]) {
+  return {
+    raDeg: normalizeAz(Math.atan2(y, x) / DEG),
+    decDeg: Math.atan2(z, Math.hypot(x, y)) / DEG,
+  };
+}
+
+/**
+ * Linear proper motion in the tangent plane (stable at the poles).
+ * pmRaMasYr is mu_alpha* (already multiplied by cos dec, as in Hipparcos/HYG).
+ */
+export function applyProperMotion(raDeg, decDeg, pmRaMasYr, pmDecMasYr, years) {
+  if (!years || (!pmRaMasYr && !pmDecMasYr)) return { raDeg, decDeg };
+  const ra = raDeg * DEG;
+  const dec = decDeg * DEG;
+  const p = radecToVector(raDeg, decDeg);
+  const e = [-Math.sin(ra), Math.cos(ra), 0];
+  const n = [
+    -Math.sin(dec) * Math.cos(ra),
+    -Math.sin(dec) * Math.sin(ra),
+    Math.cos(dec),
+  ];
+  const a = ((pmRaMasYr || 0) / MAS_PER_RAD) * years;
+  const d = ((pmDecMasYr || 0) / MAS_PER_RAD) * years;
+  return vectorToRadec([0, 1, 2].map((i) => p[i] + a * e[i] + d * n[i]));
+}
+
+/**
+ * IAU 2006 precession angles zeta_A, z_A, theta_A in radians
+ * (Capitaine et al. 2003, IERS Conventions 2010 eq. 5.40).
+ */
+export function precessionAngles(T) {
+  const zeta =
+    2.650545 +
+    T *
+      (2306.083227 +
+        T *
+          (0.2988499 +
+            T * (0.01801828 + T * (-0.000005971 + T * -0.0000003173))));
+  const z =
+    -2.650545 +
+    T *
+      (2306.077181 +
+        T *
+          (1.0927348 +
+            T * (0.01826837 + T * (-0.000028596 + T * -0.0000002904))));
+  const theta =
+    T *
+    (2004.191903 +
+      T *
+        (-0.4294934 +
+          T * (-0.04182264 + T * (-0.000007089 + T * -0.0000001274))));
+  return { zeta: zeta * ARCSEC, z: z * ARCSEC, theta: theta * ARCSEC };
+}
+
+/** Row-major 3x3 matrix J2000 mean equator -> mean equator of date. P = R3(-z) R2(theta) R3(-zeta). */
+export function precessionMatrix(T) {
+  const { zeta, z, theta } = precessionAngles(T);
+  const [cz, sz] = [Math.cos(zeta), Math.sin(zeta)];
+  const [cZ, sZ] = [Math.cos(z), Math.sin(z)];
+  const [ct, st] = [Math.cos(theta), Math.sin(theta)];
+  return [
+    [cZ * ct * cz - sZ * sz, -cZ * ct * sz - sZ * cz, -cZ * st],
+    [sZ * ct * cz + cZ * sz, -sZ * ct * sz + cZ * cz, -sZ * st],
+    [st * cz, -st * sz, ct],
+  ];
+}
+
+const mulVec = (m, v) =>
+  m.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
+
+/** Precess a J2000 RA/Dec (degrees) to the mean equator and equinox of a UTC epoch. */
+export function precessToDate(raDeg, decDeg, ms) {
+  return vectorToRadec(
+    mulVec(precessionMatrix(julianCenturies(ms)), radecToVector(raDeg, decDeg)),
+  );
+}
+
+/** Greenwich mean sidereal time in radians (satellite.js gstime, UTC taken as UT1). */
+export const gmstRad = (ms) => gstime(new Date(ms));
+
+/**
+ * Equatorial (of date) -> horizontal. Azimuth degrees clockwise from true
+ * north, elevation degrees above the geometric horizon (no refraction).
+ */
+export function equatorialToHorizontal(raDeg, decDeg, latDeg, lonDeg, gmst) {
+  const ha = gmst + lonDeg * DEG - raDeg * DEG;
+  const dec = decDeg * DEG;
+  const lat = latDeg * DEG;
+  // ENU components of the direction.
+  const east = -Math.cos(dec) * Math.sin(ha);
+  const north =
+    Math.sin(dec) * Math.cos(lat) -
+    Math.cos(dec) * Math.cos(ha) * Math.sin(lat);
+  const up =
+    Math.sin(dec) * Math.sin(lat) +
+    Math.cos(dec) * Math.cos(ha) * Math.cos(lat);
+  return azElFromEnu([east, north, up]);
+}
+
+/**
+ * Atmospheric refraction in degrees for a TRUE (airless) altitude, Saemundsson
+ * (1986) as given by Meeus eq. 16.4, scaled for pressure and temperature.
+ * Below -1 deg the value at -1 deg is used (the formula diverges at -5.11);
+ * 0 at the zenith. Standard air: 0.48 deg at true altitude 0, and 0.57 deg
+ * for a body whose APPARENT altitude is 0 (true -0.57).
+ */
+export function refractionDeg(
+  trueAltDeg,
+  { pressureHPa = 1010, temperatureC = 10 } = {},
+) {
+  const h0 = Number(trueAltDeg);
+  if (!Number.isFinite(h0) || h0 >= 90) return 0;
+  const h = Math.max(-1, h0);
+  const arcmin = 1.02 / Math.tan((h + 10.3 / (h + 5.11)) * DEG);
+  const scale = (pressureHPa / 1010) * (283 / (273 + temperatureC));
+  return Math.max(0, (arcmin / 60) * scale);
+}
+
+/** Apparent altitude for a true altitude (degrees), refraction added. */
+export const apparentAltitude = (trueAltDeg, conditions) =>
+  trueAltDeg + refractionDeg(trueAltDeg, conditions);
+
+/**
+ * A reusable frame for one observer and instant, so a whole catalogue shares
+ * one precession matrix and one sidereal time.
+ */
+export function starFrame(ms, latDeg, lonDeg) {
+  return {
+    ms,
+    latDeg,
+    lonDeg,
+    years: julianYears(ms),
+    precession: precessionMatrix(julianCenturies(ms)),
+    gmst: gmstRad(ms),
+  };
+}
+
+/**
+ * Az/el (degrees, geometric unless refraction is asked for) of a J2000
+ * catalogue star with proper motion, at frame.ms for frame's observer.
+ */
+export function starAzEl(
+  frame,
+  raDeg,
+  decDeg,
+  pmRaMasYr = 0,
+  pmDecMasYr = 0,
+  { refraction = false } = {},
+) {
+  const moved = applyProperMotion(
+    raDeg,
+    decDeg,
+    pmRaMasYr,
+    pmDecMasYr,
+    frame.years,
+  );
+  const ofDate = vectorToRadec(
+    mulVec(frame.precession, radecToVector(moved.raDeg, moved.decDeg)),
+  );
+  const out = equatorialToHorizontal(
+    ofDate.raDeg,
+    ofDate.decDeg,
+    frame.latDeg,
+    frame.lonDeg,
+    frame.gmst,
+  );
+  if (refraction) out.elDeg = apparentAltitude(out.elDeg);
+  return { ...out, raDeg: ofDate.raDeg, decDeg: ofDate.decDeg };
 }

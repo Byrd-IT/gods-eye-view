@@ -3,7 +3,9 @@ import test from 'node:test';
 import { createSkyClock } from './skyClock.js';
 import { makeView } from './skyMath.js';
 import {
+  DEFAULT_SKY_FLAGS,
   SKY_FLAGS,
+  SKY_FLAG_BITS,
   decodeFlags,
   decodeSkyState,
   encodeFlags,
@@ -105,12 +107,58 @@ test('decodeSkyState rejects bad input and clamps the view', () => {
   assert.equal(readSkyUrl('not a url'), null);
 });
 
-test('flags encode/decode; unknown bits ignored', () => {
+test('flags encode/decode; P1 bits keep their meaning; unknown bits ignored', () => {
   assert.equal(encodeFlags({ flatHorizon: true, grid: true }), 3);
-  assert.deepEqual(decodeFlags('3'), { flatHorizon: true, grid: true });
-  assert.deepEqual(decodeFlags('256'), { flatHorizon: false, grid: false });
-  assert.deepEqual(decodeFlags('-1'), { flatHorizon: false, grid: false });
-  assert.deepEqual(decodeFlags(null), { flatHorizon: false, grid: false });
+  assert.deepEqual(decodeFlags('3'), {
+    ...DEFAULT_SKY_FLAGS,
+    flatHorizon: true,
+    grid: true,
+  });
+  assert.deepEqual(decodeFlags('1024'), DEFAULT_SKY_FLAGS);
+  assert.deepEqual(decodeFlags('-1'), DEFAULT_SKY_FLAGS);
+  assert.deepEqual(decodeFlags(null), DEFAULT_SKY_FLAGS);
+  // the default view encodes to 0 (no svf parameter at all)
+  assert.equal(encodeFlags(DEFAULT_SKY_FLAGS), 0);
+  assert.equal(encodeFlags({}), 0);
+});
+
+test('svf round trip: every combination of the 9 switches survives encode -> URL -> decode', () => {
+  const names = Object.keys(SKY_FLAG_BITS);
+  assert.deepEqual(names, [
+    'flatHorizon',
+    'grid',
+    'stars',
+    'lines',
+    'names',
+    'boundaries',
+    'planets',
+    'starNames',
+    'telescopic',
+  ]);
+  const seen = new Set();
+  for (let combo = 0; combo < 1 << names.length; combo++) {
+    const flags = Object.fromEntries(
+      names.map((name, i) => [name, Boolean(combo & (1 << i))]),
+    );
+    const href = writeSkyUrl('https://gev.test/?x=1#l=abc', {
+      latDeg: 29.76,
+      lonDeg: -95.37,
+      view: makeView({ azDeg: 90, elDeg: 30, fovDeg: 60 }),
+      flags,
+    });
+    const back = readSkyUrl(href);
+    assert.deepEqual(back.flags, flags, href);
+    seen.add(new URL(href).searchParams.get('svf'));
+  }
+  assert.equal(seen.size, 512, 'each combination has its own svf value');
+  // single switches: one bit each, defaults written as no parameter
+  assert.equal(encodeFlags({ stars: false }), 4);
+  assert.equal(encodeFlags({ lines: false }), 8);
+  assert.equal(encodeFlags({ names: false }), 16);
+  assert.equal(encodeFlags({ boundaries: true }), 32);
+  assert.equal(encodeFlags({ planets: false }), 64);
+  assert.equal(encodeFlags({ starNames: false }), 128);
+  assert.equal(encodeFlags({ telescopic: true }), 256);
 });
 
 test('isoUtc drops zero milliseconds', () => {

@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import {
-  readResponseTextCapped,
-  coalesceProxyRequest,
-} from './sources/httpBody.js';
+import { providerCooldownMs } from '../server/providers/space/cooldown.js';
+import { parseTerrainPoints } from './data/terrainHeightsProxy.js';
+import { readResponseTextCapped, coalesceProxyRequest } from './sources/httpBody.js';
+import { makeRateLimiter, clientKey } from '../server/providers/common/rate-limit.js';
 
 const source = [
   'local.js',
@@ -39,10 +39,14 @@ function extract(name) {
 function fixture(name, overrides = {}, preview = false) {
   const logs = [];
   const deps = {
-    readResponseTextCapped,
-    coalesceProxyRequest,
-    path,
-    process: { cwd: () => '/fixture', env: {} },
+    readResponseTextCapped, coalesceProxyRequest, providerCooldownMs,
+    // The rate-limited proxies reach for these; give them the real ones so a
+    // fixture request is throttled exactly as production would be.
+    makeRateLimiter, clientKey,
+    // terrain.js gates cross-site requests first; fixture requests carry no
+    // browser headers, so admit them like a loopback tool.
+    admitSameSiteKeyless: () => false,
+    path, process: { cwd: () => '/fixture', env: {} },
     fsp: {
       readFile: async () => {
         throw new Error('cache absent');
@@ -209,7 +213,7 @@ test('CelesTrak unexpected failures hide details', async () => {
       },
     },
   });
-  const res = await app.request('/active');
+  const res = await app.request('/stations');
   assert.equal(res.status, 500);
   assert.equal(res.body, 'celestrak proxy error');
   assert.equal(res.headers['x-tle-cache'], 'ERROR');
@@ -218,7 +222,7 @@ test('CelesTrak unexpected failures hide details', async () => {
 test('CelesTrak retains invalid-group and unavailable responses', async () => {
   const app = fixture('celestrakProxy');
   assert.equal((await app.request('/../')).status, 400);
-  const res = await app.request('/active');
+  const res = await app.request('/stations');
   assert.equal(res.status, 502);
   assert.equal(res.headers['x-tle-cache'], 'NONE');
 });
@@ -227,7 +231,11 @@ test('CelesTrak retains fresh and stale GP CSV caches', async () => {
   let now = Date.now();
   let calls = 0;
   const app = fixture('celestrakProxy', {
-    Date: { now: () => now },
+    Date: class extends Date {
+      static now() {
+        return now;
+      }
+    },
     fetch: async () => {
       if (++calls > 1) throw new Error(detail);
       return new Response(
@@ -235,10 +243,10 @@ test('CelesTrak retains fresh and stale GP CSV caches', async () => {
       );
     },
   });
-  assert.equal((await app.request('/active')).headers['x-tle-cache'], 'MISS');
-  assert.equal((await app.request('/active')).headers['x-tle-cache'], 'HIT');
+  assert.equal((await app.request('/stations')).headers['x-tle-cache'], 'MISS');
+  assert.equal((await app.request('/stations')).headers['x-tle-cache'], 'HIT');
   now += 7 * 3600_000;
-  const stale = await app.request('/active');
+  const stale = await app.request('/stations');
   assert.equal(stale.status, 200);
   assert.equal(
     stale.body,
@@ -294,3 +302,18 @@ test('ADSBDB retains validation and missing-aircraft semantics', async () => {
   assert.equal(absent.status, 200);
   assert.deepEqual(JSON.parse(absent.body), { found: false });
 });
+
+for (const preview of [false, true]) {
+  test(`terrain server rejects out-of-range points before upstream resolution in ${preview ? 'preview' : 'development'}`, async () => {
+    let calls = 0;
+    const app = fixture('terrainHeightsProxy', { parseTerrainPoints,
+      resolveTerrainHeightRequest: async () => { calls++; return { status: 200, body: { results: [] } }; },
+    }, preview);
+    for (const points of ['181,0', '-181,0', '0,91', '0,-91', '1,2;0,91']) {
+      assert.equal((await app.request('/?points=' + encodeURIComponent(points))).status, 400);
+    }
+    assert.equal(calls, 0);
+    assert.equal((await app.request('/?points=-180,-90;180,90')).status, 200);
+    assert.equal(calls, 1);
+  });
+}

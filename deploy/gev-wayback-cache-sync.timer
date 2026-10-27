@@ -1,0 +1,10 @@
+[Unit]
+Description=GEV Wayback tile cache nightly copy to S1 (GEV_BYRDIT_WAYBACK)
+
+[Timer]
+OnCalendar=*-*-* 08:40:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

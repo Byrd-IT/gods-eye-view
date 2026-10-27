@@ -10,11 +10,14 @@
 // state is re-synced from controller state (never optimistically), so a failed
 // or superseded switch still leaves the truly-active stack lit.
 
-import { keySetupRequirement } from './keySetupCore.mjs';
+import { keySetupRequirementEnvVars } from './keySetupCore.mjs';
+import { t } from './i18n/index.js';
 
 export const MAP_STACK_CHIP_CLASS = 'map-stack-chip';
 export const PRESENTED_MAP_STACK_IDS = Object.freeze([
+  'basemap-auto',
   'photoreal',
+  'byrdit-open',
   'bing-aerial',
   'bing-labels',
   'esri-imagery',
@@ -29,24 +32,50 @@ export const PRESENTED_MAP_STACK_IDS = Object.freeze([
  * case), and a future stack may have its own reason. The ION badge is therefore
  * gated on the stack's own `requiresIon` flag, and the tooltip quotes the
  * controller's `unavailableReason` rather than assuming one.
- * @param {{id: string, label: string, available?: boolean, requiresIon?: boolean, unavailableReason?: string|null}} stack - Stack descriptor from `getStacks()`.
+ *
+ * Degraded is a third state, separate from unavailable: the stack works and
+ * stays selectable, but its service reported a problem (`degradedReason`,
+ * the Byrd-IT Open health warning). The chip then reads "<label>
+ * (degraded)" with the reason as its tooltip.
+ * @param {{id: string, label: string, available?: boolean, requiresIon?: boolean, unavailableReason?: string|null, degradedReason?: string|null}} stack - Stack descriptor from `getStacks()`.
  * @param {string|null} activeId - Currently active stack id.
- * @returns {{id: string, label: string, available: boolean, active: boolean, requiresIon: boolean, requirement: string, unavailableHint: string, title: string}}
+ * @returns {{id: string, label: string, text: string, available: boolean, degraded: boolean, degradedHint: string, active: boolean, requiresIon: boolean, requirement: string, unavailableHint: string, title: string, ariaLabel: string|null}}
  */
 export function mapStackChipModel(stack, activeId) {
   const available = stack?.available !== false;
   const label = String(stack?.label ?? stack?.id ?? '');
   const requiresIon = stack?.requiresIon === true;
+  // Stack labels are provider names and stay English; the sentence translates.
   const fallbackReason = requiresIon
-    ? keySetupRequirement('cesium-ion')
-    : `${label || 'This map stack'} is unavailable`;
+    ? t('Needs {envVars} — add it in Provider Settings', {
+        envVars: keySetupRequirementEnvVars('cesium-ion'),
+      })
+    : t('{label} is unavailable', {
+        label: label || t('This map stack'),
+      });
   const unavailableHint = available
     ? ''
     : String(stack?.unavailableReason || fallbackReason);
+  const degradedHint =
+    available && typeof stack?.degradedReason === 'string'
+      ? stack.degradedReason.trim()
+      : '';
+  const degraded = Boolean(degradedHint);
+  let ariaLabel = null;
+  if (!available)
+    ariaLabel = t('{label} unavailable: {hint}', {
+      label,
+      hint: unavailableHint,
+    });
+  else if (degraded)
+    ariaLabel = t('{label} degraded: {hint}', { label, hint: degradedHint });
   return {
     id: String(stack?.id ?? ''),
     label,
+    text: degraded ? `${label} (degraded)` : label,
     available,
+    degraded,
+    degradedHint,
     active: !!stack?.id && stack.id === activeId,
     requiresIon,
     // Dropdown parity: unavailable options read "<label> · ion key". A chip has
@@ -54,7 +83,8 @@ export function mapStackChipModel(stack, activeId) {
     // unavailable chip carries the real reason in its tooltip.
     requirement: !available && requiresIon ? 'ION' : '',
     unavailableHint,
-    title: available ? label : unavailableHint,
+    title: !available ? unavailableHint : degraded ? degradedHint : label,
+    ariaLabel,
   };
 }
 
@@ -109,6 +139,7 @@ export function renderMapStackChips(
       MAP_STACK_CHIP_CLASS,
       model.active ? 'active' : '',
       model.available ? '' : 'unavailable',
+      model.degraded ? 'degraded' : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -116,16 +147,11 @@ export function renderMapStackChips(
     chip.title = model.title;
     chip.setAttribute('aria-pressed', String(model.active));
     chip.setAttribute('aria-disabled', String(!model.available));
-    if (!model.available) {
-      chip.setAttribute(
-        'aria-label',
-        `${model.label} unavailable: ${model.unavailableHint}`,
-      );
-    }
+    if (model.ariaLabel) chip.setAttribute('aria-label', model.ariaLabel);
 
     const label = ownerDoc.createElement('span');
     label.className = 'map-stack-chip-label';
-    label.textContent = model.label;
+    label.textContent = model.text;
     chip.appendChild(label);
 
     if (model.requirement) {
@@ -161,5 +187,39 @@ export function syncMapStackChips(container, activeId) {
     const active = stackId === activeId;
     chip.classList?.toggle('active', active);
     chip.setAttribute?.('aria-pressed', String(active));
+  }
+}
+
+/**
+ * Re-applies the degraded state (label text, tooltip, aria-label, class) of
+ * already-rendered chips from fresh `getStacks()` output, in place, so a
+ * health change does not rebuild the row or move keyboard focus.
+ * Availability is not touched here (it does not change at runtime).
+ * @param {HTMLElement} container - Row element.
+ * @param {Array<object>} stacks - `MapStackController.getStacks()` output.
+ * @returns {void}
+ */
+export function syncMapStackChipStatus(container, stacks) {
+  const chips = container?.children;
+  if (!chips) return;
+  const byId = new Map(
+    (Array.isArray(stacks) ? stacks : []).map((stack) => [stack?.id, stack]),
+  );
+  for (const chip of Array.from(chips)) {
+    const stack = byId.get(chip?.dataset?.stackId);
+    if (!stack) continue;
+    const model = mapStackChipModel(stack, null);
+    if (!model.available) continue;
+    chip.classList?.toggle('degraded', model.degraded);
+    chip.title = model.title;
+    if (model.ariaLabel) chip.setAttribute?.('aria-label', model.ariaLabel);
+    else chip.removeAttribute?.('aria-label');
+    const label = Array.from(chip.children ?? []).find((child) =>
+      String(child?.className ?? '')
+        .split(/\s+/)
+        .includes('map-stack-chip-label'),
+    );
+    if (label && label.textContent !== model.text)
+      label.textContent = model.text;
   }
 }

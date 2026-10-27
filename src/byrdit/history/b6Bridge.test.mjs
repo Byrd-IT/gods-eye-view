@@ -123,6 +123,9 @@ test('registry: B6 entries, cadences match the collector, FIRMS status shares th
     'weather',
     'launches',
     'celestrak',
+    'vessels', // B8
+    'vesselsTrack', // B8
+    'flights', // B20 (t_1f5bcfa6)
   ]);
   assert.equal(BRIDGE_FEEDS.firms.cadenceMs, 1_800_000);
   assert.equal(BRIDGE_FEEDS.firePerimeters.cadenceMs, 900_000);

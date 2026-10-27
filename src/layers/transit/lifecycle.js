@@ -97,6 +97,7 @@ export function createLifecycle({ state, services, parts }) {
     else if (hidden) {
       hidden = false;
       parts.rendering.resumePlayback();
+      parts.viewport.runProximityCheck();
     }
   }
   function bindVisibility() {
@@ -119,6 +120,16 @@ export function createLifecycle({ state, services, parts }) {
     name: 'Transit',
     icon: '🚌',
     source: 'GTFS-RT',
+
+    /**
+     * GEV history seam (fork card B12b, touch point; re-check on upstream
+     * merges). The next snapshot of every feed polled now replaces that
+     * feed's fleet (ingestion applySnapshot): no fix of another time, and
+     * a vehicle absent from it leaves at once.
+     */
+    resetForHistoryFrame() {
+      state._historyFrameFeeds = new Set(state._activeFeeds.keys());
+    },
 
     /**
      * Create the point collection. Called once at bootstrap.

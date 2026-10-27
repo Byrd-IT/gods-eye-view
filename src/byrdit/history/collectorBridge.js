@@ -40,6 +40,14 @@ import {
  * The group set is not listed here: the collector discovers groups from
  * these requests.
  *
+ * Last-good copies are kept per collector snapshot and, inside it, per
+ * feed.cacheKey(url) (B8; default: one slot), so a query-shaped answer
+ * (vessels ?maxRows=) is never served for a different query: the vessels key
+ * is GEV's normalised maxRows. At most feed.cacheEntries copies (default 1)
+ * and BRIDGE_CACHE_MAX_BYTES in total are kept per snapshot, least recently
+ * used evicted first. A query with no copy of its own gets the 503
+ * no-snapshot answer, never another query's.
+ *
  * Owner N5: the server never clears a layer. It adds X-Feed-Grey-Until
  * (X-Feed-Stale-Since + GEV_STALE_GREY_MS) so the client decides grey vs
  * cleared on the server clock (staleness.js feedDisplayState).
@@ -56,6 +64,8 @@ export const DEFAULT_COLLECTOR_URLS = Object.freeze(['http://127.0.0.1:4180']);
 export const DEFAULT_COLLECTOR_TIMEOUT_MS = 2_000;
 /** Most per-path copies one pattern route keeps (CelesTrak groups). */
 export const MAX_PATTERN_SLOTS = 32;
+/** Upper bound of the last-good copies one snapshot keeps (all keys together). */
+export const BRIDGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Collector response headers relayed to the browser. */
 export const RELAYED_HEADERS = Object.freeze([
@@ -68,6 +78,9 @@ export const RELAYED_HEADERS = Object.freeze([
   'x-feed-stale-since',
   'x-feed-reason',
   'x-collector-role',
+  // B20 flights: what the viewport answer covers (GEV's flights source
+  // shows it as the layer coverage)
+  'x-flight-coverage',
 ]);
 
 const CANONICAL = Object.freeze({
@@ -80,6 +93,7 @@ const CANONICAL = Object.freeze({
   'x-feed-stale-since': 'X-Feed-Stale-Since',
   'x-feed-reason': 'X-Feed-Reason',
   'x-collector-role': 'X-Collector-Role',
+  'x-flight-coverage': 'X-Flight-Coverage',
 });
 
 /** Parse GEV_COLLECTOR_URLS (comma separated http(s) base URLs). */
@@ -143,6 +157,8 @@ function epoch(value) {
  * @param {Function} [options.weatherProxy] GEV's weatherProxy factory,
  *   injected server-side (server/byrdit/history.js); absent = weather
  *   tile/image fail closed (503)
+ * @param {{attachRoute?: Function}} [options.weatherServing] B12c R1b:
+ *   history imagery is told this bridge's private weather route manifest
  * @param {() => number} [options.now]
  * @param {(line: string) => void} [options.log] state transitions only
  */
@@ -154,6 +170,7 @@ export function createCollectorBridge({
   fetchImpl = (...args) => globalThis.fetch(...args),
   liveFetchImpl = (...args) => globalThis.fetch(...args),
   weatherProxy,
+  weatherServing,
   now = () => Date.now(),
   log = (line) => console.warn(line),
 }) {
@@ -161,13 +178,53 @@ export function createCollectorBridge({
   if (!feed) throw new Error(`unknown bridge feed: ${name}`);
   /**
    * Per collector snapshot (B15: one route can resolve to many, e.g. one per
-   * transit feed or GBFS system): last good copy { body: Uint8Array,
-   * contentType, lastOkAt } and the last served answer ('collector' |
-   * 'cache' | 'none') for transition logging. Keys are bounded by the
-   * resolvers (registry ids only).
+   * transit feed or GBFS system): last good copies and the last served answer
+   * ('collector' | 'cache' | 'none') for transition logging. Keys are bounded
+   * by the resolvers (registry ids only) or MAX_PATTERN_SLOTS.
+   * caches: snapshot -> Map(cache key -> { body: Uint8Array, contentType,
+   * lastOkAt }), Map order = least recently used first (B8 R3).
    */
   const caches = new Map();
   const states = new Map();
+  const cacheKeyOf = feed.cacheKey ?? (() => '');
+  const cacheEntries = Math.max(1, feed.cacheEntries ?? 1);
+
+  function cacheGet(key, ck) {
+    const slots = caches.get(key);
+    const entry = slots?.get(ck);
+    if (entry) {
+      slots.delete(ck);
+      slots.set(ck, entry);
+    }
+    return entry ?? null;
+  }
+
+  function cacheSet(key, ck, entry) {
+    let slots = caches.get(key);
+    if (!slots) {
+      slots = new Map();
+      caches.set(key, slots);
+    }
+    slots.delete(ck);
+    slots.set(ck, entry);
+    let bytes = 0;
+    for (const e of slots.values()) bytes += e.body.byteLength;
+    for (const [k, e] of slots) {
+      if (k === ck) break; // the newest copy is always kept
+      if (slots.size <= cacheEntries && bytes <= BRIDGE_CACHE_MAX_BYTES) break;
+      slots.delete(k);
+      bytes -= e.body.byteLength;
+    }
+    if (!pattern) return;
+    // pattern route (t_eb2c4e10): admitted only here (collector 200), newest
+    // group last; the least recently requested group's copies are dropped
+    caches.delete(key);
+    caches.set(key, slots);
+    while (caches.size > MAX_PATTERN_SLOTS) {
+      caches.delete(caches.keys().next().value);
+    }
+    trimStates();
+  }
   /** In-flight collector read shared by concurrent requests, keyed by feed+query. */
   const inflight = new Map();
   const trails = feed.trails ? createTransitTrails({ now }) : null;
@@ -180,6 +237,7 @@ export function createCollectorBridge({
         now,
       })
     : null;
+  if (imagery) weatherServing?.attachRoute?.(imagery.manifest);
 
   // B7 pattern route (CelesTrak): one entry, one collector snapshot per
   // group (/api/celestrak/<group> -> celestrak-<group>)
@@ -218,16 +276,6 @@ export function createCollectorBridge({
     }
   }
 
-  function keepCopy(key, copy) {
-    if (pattern) caches.delete(key);
-    caches.set(key, copy);
-    if (!pattern) return;
-    while (caches.size > MAX_PATTERN_SLOTS) {
-      caches.delete(caches.keys().next().value);
-    }
-    trimStates();
-  }
-
   function transition(key, next, detail) {
     const state = states.get(key) ?? null;
     touch(states, key);
@@ -241,26 +289,47 @@ export function createCollectorBridge({
     );
   }
 
-  async function readCollector(collectorFeed, search) {
+  /**
+   * One collector read, collectors tried in order. `lease` (B20 flights):
+   * POST /v1/aircraft/view {sid, bbox} instead of GET /v1/latest/<feed>;
+   * the answer has the same contract (body + X-Feed-* headers).
+   */
+  async function readCollector(collectorFeed, search, lease = null) {
     let reason = 'collector_down';
     for (const base of urls) {
       try {
         const response = await fetchImpl(
-          `${base}/v1/latest/${collectorFeed}${search}`,
-          {
-            headers: { Accept: 'application/json' },
-            redirect: 'error',
-            signal: AbortSignal.timeout(timeoutMs),
-          },
+          lease
+            ? `${base}/v1/aircraft/view`
+            : `${base}/v1/latest/${collectorFeed}${search}`,
+          lease
+            ? {
+                method: 'POST',
+                headers: {
+                  Accept: 'application/json',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(lease),
+                redirect: 'error',
+                signal: AbortSignal.timeout(timeoutMs),
+              }
+            : {
+                headers: { Accept: 'application/json' },
+                redirect: 'error',
+                signal: AbortSignal.timeout(timeoutMs),
+              },
         );
         const body = new Uint8Array(await response.arrayBuffer());
-        if (response.status === 200) {
+        if (
+          response.status === 200 ||
+          (feed.relayStatus ?? []).includes(response.status)
+        ) {
           const headers = {};
           for (const key of RELAYED_HEADERS) {
             const value = response.headers.get(key);
             if (value !== null) headers[CANONICAL[key]] = value;
           }
-          return { ok: true, body, headers };
+          return { ok: true, status: response.status, body, headers };
         }
         // Standby (503, no X-Feed-Reason) or an active collector with no
         // snapshot yet: keep its reason, try the next collector.
@@ -273,11 +342,31 @@ export function createCollectorBridge({
     return { ok: false, reason };
   }
 
-  function sharedRead(collectorFeed, search) {
-    const key = `${collectorFeed}${search}`;
+  /**
+   * Query string sent to the collector: the raw one (forwardQuery), only
+   * the allow-listed parameters in a canonical order (forwardParams, B8), or
+   * nothing.
+   */
+  function forwardedSearch(url) {
+    if (feed.forwardParams) {
+      const out = new URLSearchParams();
+      for (const key of feed.forwardParams) {
+        const value = url.searchParams.get(key);
+        if (value !== null) out.set(key, value);
+      }
+      const text = out.toString();
+      return text ? `?${text}` : '';
+    }
+    return feed.forwardQuery ? url.search : '';
+  }
+
+  function sharedRead(collectorFeed, search, lease = null) {
+    const key = lease
+      ? `${collectorFeed} view ${lease.sid} ${lease.bbox}`
+      : `${collectorFeed}${search}`;
     let pending = inflight.get(key);
     if (!pending) {
-      pending = readCollector(collectorFeed, search).finally(() =>
+      pending = readCollector(collectorFeed, search, lease).finally(() =>
         inflight.delete(key),
       );
       inflight.set(key, pending);
@@ -300,9 +389,8 @@ export function createCollectorBridge({
     return feed.decorate ? feed.decorate(headers, target) : headers;
   }
 
-  function serveCache(req, res, reason, target) {
+  function serveCache(req, res, reason, target, cache) {
     const key = target.collectorFeed;
-    const cache = caches.get(key);
     touch(caches, key);
     const t = now();
     const age = Math.max(0, t - cache.lastOkAt);
@@ -399,14 +487,42 @@ export function createCollectorBridge({
       return;
     }
     const key = target.collectorFeed;
+    const fallback = (reason) => {
+      const entry = cacheGet(key, cacheKeyOf(url));
+      if (entry) serveCache(req, res, reason, target, entry);
+      else serveNone(req, res, reason, target);
+    };
     try {
-      const result = await sharedRead(key, feed.forwardQuery ? url.search : '');
+      const lease = feed.viewLease ? feed.viewLease(url) : null;
+      const result = await sharedRead(
+        key,
+        lease ? '' : forwardedSearch(url),
+        lease,
+      );
+      if (result.ok && result.status !== 200) {
+        // relayed client error (vessels track 400): never cached
+        transition(key, 'collector');
+        send(
+          req,
+          res,
+          result.status,
+          { ...result.headers, 'X-Feed-Bridge': 'collector' },
+          result.body,
+        );
+        return;
+      }
       if (result.ok) {
         const headers = withGrey({ ...result.headers });
         headers['X-Feed-Bridge'] = 'collector';
+        if (feed.cache === false) {
+          // per-request answer (vessels track): no last-good copy
+          transition(key, 'collector');
+          send(req, res, 200, decorate(headers, target), result.body);
+          return;
+        }
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
-        keepCopy(key, {
+        cacheSet(key, cacheKeyOf(url), {
           body: result.body,
           contentType: headers['Content-Type'] ?? 'application/json',
           lastOkAt: lastOk ?? now() - (age ?? 0),
@@ -417,16 +533,14 @@ export function createCollectorBridge({
         send(req, res, 200, decorate(headers, target), result.body);
         return;
       }
-      if (caches.has(key)) serveCache(req, res, result.reason, target);
-      else serveNone(req, res, result.reason, target);
+      fallback(result.reason);
     } catch {
       // Never fall through to the upstream plugin, whatever failed here.
       if (res.headersSent) {
         res.end();
         return;
       }
-      if (caches.has(key)) serveCache(req, res, 'bridge_error', target);
-      else serveNone(req, res, 'bridge_error', target);
+      fallback('bridge_error');
     }
   };
 }
@@ -485,6 +599,7 @@ export function collectorBridgePlugin({
   fetchImpl,
   liveFetchImpl,
   weatherProxy,
+  weatherServing,
   now,
   log,
 } = {}) {
@@ -501,6 +616,7 @@ export function collectorBridgePlugin({
         fetchImpl,
         liveFetchImpl,
         weatherProxy,
+        weatherServing,
         now,
         log,
       });

@@ -12,6 +12,7 @@ import {
   launchLibraryRecentUrl,
 } from 'gods-eye-view/sources/space';
 import * as compatibility from '../../server/providers/local.js';
+import { createLaunchSource } from 'gods-eye-view/layers/launches/source';
 
 function install(plugin, preview = false) {
   const routes = new Map();
@@ -22,17 +23,23 @@ function install(plugin, preview = false) {
       },
     },
   });
-  return async (route, url = '/', method = 'GET') => {
+  return async (route, url = '/', method = 'GET', headers = {}) => {
     const res = {
       headersSent: false,
+      headers: {},
       writeHead(status, headers) {
         Object.assign(this, { status, headers, headersSent: true });
       },
+      // The same-site gates answer 403 through statusCode + setHeader.
+      setHeader(name, value) {
+        this.headers[name] = value;
+      },
       end(body) {
         this.body = body;
+        this.status ??= this.statusCode;
       },
     };
-    await routes.get(route)({ url, method }, res);
+    await routes.get(route)({ url, method, headers, socket: {} }, res);
     return res;
   };
 }
@@ -47,6 +54,42 @@ function isolateDisk(t) {
   t.mock.method(fsp, 'writeFile', async () => {});
 }
 
+/** Disk mock that keeps written files (the halt latch lives on disk) readable. */
+function haltableDisk(t) {
+  const disk = new Map();
+  t.mock.method(fsp, 'writeFile', async (file, text) => {
+    disk.set(String(file), String(text));
+  });
+  t.mock.method(fsp, 'readFile', async (file) => {
+    if (disk.has(String(file))) return disk.get(String(file));
+    throw Object.assign(new Error('no such file'), { code: 'ENOENT' });
+  });
+  return disk;
+}
+
+/** A response that streams 1 MiB chunks of `text` well past every cap, then ends. */
+function oversizedResponse(text) {
+  const state = { pulled: 0, cancelled: false };
+  const chunk = new TextEncoder().encode(
+    text.repeat(Math.ceil((1 << 20) / text.length)),
+  );
+  const response = new Response(
+    new ReadableStream(
+      {
+        pull(controller) {
+          if (++state.pulled > 40) controller.close();
+          else controller.enqueue(chunk);
+        },
+        cancel() {
+          state.cancelled = true;
+        },
+      },
+      { highWaterMark: 0 },
+    ),
+  );
+  return { response, state };
+}
+
 test('portable requests keep fixed origins, encode group data and preserve the 30-day UTC window', () => {
   const tle = celestrakTleUrl('stations&FORMAT=json');
   assert.equal(tle.origin, 'https://celestrak.org');
@@ -58,8 +101,8 @@ test('portable requests keep fixed origins, encode group data and preserve the 3
   assert.equal(url.origin, 'https://ll.thespacedevs.com');
   assert.equal(url.pathname, '/2.3.0/launches/');
   assert.deepEqual(Object.fromEntries(url.searchParams), {
-    net__gte: '2026-01-30T12:34:56.000Z',
-    net__lte: '2026-03-01T12:34:56.000Z',
+    net__gte: '2026-01-30T12:34:00.000Z',
+    net__lte: '2026-03-01T12:34:00.000Z',
     limit: '100',
     mode: 'detailed',
   });
@@ -121,6 +164,47 @@ test('exported CelesTrak plugin coalesces GP CSV refreshes, retains stale data, 
   assert.equal(disk.body, csv);
 });
 
+test('CelesTrak answers 502 to an oversized body without caching it, then halts', async (t) => {
+  // Byrd-IT fork: an oversized body is a failed refresh, so the halt latch
+  // (CelesTrak usage policy) is written and CelesTrak is not asked again.
+  isolateDisk(t);
+  // The halt latch lives on disk: keep what is written readable.
+  const disk = new Map();
+  t.mock.method(fsp, 'writeFile', async (file, text) => {
+    disk.set(String(file), String(text));
+  });
+  t.mock.method(fsp, 'readFile', async (file) => {
+    if (disk.has(String(file))) return disk.get(String(file));
+    throw Object.assign(new Error('no such file'), { code: 'ENOENT' });
+  });
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
+  const bodies = [];
+  t.mock.method(globalThis, 'fetch', async () => {
+    const oversized = oversizedResponse(
+      'ISS\n1 25544U fixture\n2 25544 fixture\n',
+    );
+    bodies.push(oversized.state);
+    return oversized.response;
+  });
+  const request = install(celestrakProxy());
+  const first = await request('/api/celestrak', '/stations');
+  assert.equal(first.status, 502);
+  assert.equal(bodies[0].cancelled, true);
+  assert.ok(bodies[0].pulled <= 17, 'reading stops at the 16 MiB cap');
+  const written = fsp.writeFile.mock.calls.map((call) =>
+    String(call.arguments[0]).split(/[\\/]/).pop(),
+  );
+  assert.ok(written.length > 0, 'the halt latch is written');
+  assert.ok(
+    written.every((name) => name === 'celestrak-HALT.json'),
+    `no cache file is written: ${written.join(', ')}`,
+  );
+  const second = await request('/api/celestrak', '/stations');
+  assert.equal(second.status, 503, 'halted, nothing cached to serve');
+  assert.equal(bodies.length, 1, 'halted: CelesTrak is not asked again');
+});
+
 for (const preview of [false, true])
   test(`exported launch plugin preserves optional server auth and cache in ${preview ? 'preview' : 'development'}`, async (t) => {
     isolateDisk(t);
@@ -147,3 +231,234 @@ for (const preview of [false, true])
     assert.equal(hit.body, first.body);
     assert.equal(calls, 1);
   });
+
+const GP_CSV =
+  'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION\r\nISS (ZARYA),1998-067A,2026-09-19T00:00:00.000000,15.5';
+
+test('CelesTrak gates groups; a refused refresh serves the cached GP CSV stale, latches the halt and asks no group again', async (t) => {
+  // Byrd-IT fork: the CelesTrak usage-policy halt latch replaces upstream's
+  // Retry-After cooldown. A refusal stops every group until an operator
+  // clears the latch (deletes celestrak-HALT.json).
+  isolateDisk(t);
+  const disk = haltableDisk(t);
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  let fail = false;
+  let cancelled = false;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    if (fail)
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 403, headers: { 'Retry-After': '90' } },
+      );
+    return new Response(GP_CSV);
+  });
+  const request = install(celestrakProxy());
+  assert.equal(
+    (await request('/api/celestrak', '/not-a-supported-group')).status,
+    400,
+  );
+  assert.equal(calls, 0);
+  const first = await request('/api/celestrak', '/stations');
+  assert.equal(first.headers['x-tle-cache'], 'MISS');
+  now += 7 * 3600000;
+  fail = true;
+  const stale = await request('/api/celestrak', '/stations');
+  assert.equal(stale.status, 200);
+  assert.equal(stale.body, first.body);
+  assert.equal(stale.headers['x-tle-cache'], 'STALE-ERROR');
+  assert.ok(stale.headers['X-TLE-Cached-At']);
+  assert.equal(cancelled, true);
+  const halted = await request('/api/celestrak', '/stations');
+  assert.equal(halted.status, 200);
+  assert.equal(halted.headers['x-tle-cache'], 'STALE-HALTED');
+  const other = await request('/api/celestrak', '/visual');
+  assert.equal(other.status, 503);
+  assert.equal(other.headers['x-tle-cache'], 'HALTED');
+  assert.equal(calls, 2, 'halted: no group is asked again');
+  // An operator clears the latch.
+  for (const file of [...disk.keys()])
+    if (/celestrak-HALT\.json$/.test(file)) disk.delete(file);
+  fail = false;
+  assert.equal((await request('/api/celestrak', '/visual')).status, 200);
+  assert.equal(calls, 3);
+});
+
+test('launch proxy honors Retry-After, preserves stale dates and recovers', async (t) => {
+  isolateDisk(t);
+  t.mock.method(console, 'warn', () => {});
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  for (const kind of ['launches']) {
+    for (const retryAfter of ['90', new Date(now + 90000).toUTCString()]) {
+      let calls = 0;
+      let fail = false;
+      let cancelled = false;
+      t.mock.method(globalThis, 'fetch', async () => {
+        calls++;
+        if (fail)
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            {
+              status: kind === 'tle' ? 403 : 429,
+              headers: { 'Retry-After': retryAfter },
+            },
+          );
+        return new Response(
+          kind === 'tle'
+            ? 'ISS\n1 25544U fixture\n2 25544 fixture\n'
+            : '{"results":[]}',
+        );
+      });
+      const request = install(
+        kind === 'tle' ? celestrakProxy() : rocketLaunchesProxy(),
+      );
+      const route = kind === 'tle' ? '/api/celestrak' : '/api/launches';
+      const url = kind === 'tle' ? '/stations' : '/';
+      if (kind === 'tle') {
+        assert.equal(
+          (await request(route, '/not-a-supported-group')).status,
+          400,
+        );
+        assert.equal(calls, 0);
+      }
+      const first = await request(route, url);
+      now += 7 * 3600000;
+      // Recompute the HTTP-date relative to the clock at the failed refresh.
+      const originalFetch = globalThis.fetch;
+      t.mock.method(globalThis, 'fetch', async (...args) => {
+        const response = await originalFetch(...args);
+        if (fail && !/^\d+$/.test(retryAfter))
+          response.headers.set(
+            'Retry-After',
+            new Date(now + 90000).toUTCString(),
+          );
+        return response;
+      });
+      fail = true;
+      const stale = await request(route, url);
+      assert.equal(stale.status, 200);
+      assert.equal(stale.body, first.body);
+      assert.equal(stale.headers['Retry-After'], '90');
+      assert.ok(
+        stale.headers[kind === 'tle' ? 'X-TLE-Cached-At' : 'X-GEV-Cached-At'],
+      );
+      assert.equal(cancelled, true);
+      await request(route, url);
+      if (kind === 'tle')
+        assert.equal((await request(route, '/visual')).status, 502);
+      assert.equal(calls, 2, 'cooldown applies across TLE groups');
+      now += 91000;
+      fail = false;
+      assert.equal((await request(route, url)).status, 200);
+      assert.equal(calls, 3);
+    }
+  }
+});
+
+test('Space Missions reads the active catalog through the real proxy while unknown groups stay rejected', async (t) => {
+  isolateDisk(t);
+  const tle = GP_CSV;
+  const fetched = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    fetched.push(new URL(url).searchParams.get('GROUP'));
+    return new Response(tle);
+  });
+  const request = install(celestrakProxy());
+  // Route the browser source's real request into the middleware.
+  const source = createLaunchSource({
+    fetchImpl: async (url) => {
+      const prefix = '/api/celestrak';
+      assert.ok(url.startsWith(`${prefix}/`));
+      const res = await request(prefix, url.slice(prefix.length));
+      return new Response(res.body, { status: res.status });
+    },
+  });
+  assert.equal(await source.getActiveTle(), tle);
+  assert.deepEqual(fetched, ['active']);
+  for (const group of ['/not-a-group', '/active-extra', '/../active'])
+    assert.equal((await request('/api/celestrak', group)).status, 400);
+  assert.deepEqual(fetched, ['active'], 'rejected groups never reach upstream');
+});
+
+test('CelesTrak admits a same-origin request behind the documented reverse proxy and refuses foreign origins', async (t) => {
+  isolateDisk(t);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return new Response(GP_CSV);
+  });
+  const request = install(celestrakProxy());
+  const proxied = {
+    host: 'gev.example.test',
+    'x-forwarded-for': '203.0.113.7',
+    'x-forwarded-host': 'gev.example.test',
+    'x-forwarded-proto': 'https',
+    via: '1.1 proxy',
+  };
+  const app = await request('/api/celestrak', '/stations', 'GET', {
+    ...proxied,
+    origin: 'https://gev.example.test',
+    'sec-fetch-site': 'same-origin',
+  });
+  assert.equal(app.status, 200);
+  assert.equal(app.headers['x-tle-cache'], 'MISS');
+  assert.equal(calls, 1);
+  for (const headers of [
+    { ...proxied, origin: 'https://unrelated.example' },
+    { ...proxied, origin: 'null' },
+    { ...proxied, 'sec-fetch-site': 'cross-site' },
+  ]) {
+    const refused = await request('/api/celestrak', '/visual', 'GET', headers);
+    assert.equal(refused.status, 403);
+  }
+  assert.equal(calls, 1, 'refused requests do no provider or cache work');
+});
+
+test('CelesTrak concurrent refusals latch one halt; later groups are refused without a request', async (t) => {
+  isolateDisk(t);
+  haltableDisk(t);
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
+  const pending = new Map();
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    calls++;
+    const group = new URL(url).searchParams.get('GROUP');
+    await new Promise((resolve) => pending.set(group, resolve));
+    return group === 'stations'
+      ? new Response('slow down', {
+          status: 429,
+          headers: { 'Retry-After': '1800' },
+        })
+      : new Response('unavailable', { status: 503 });
+  });
+  const request = install(celestrakProxy());
+  const long = request('/api/celestrak', '/stations');
+  const short = request('/api/celestrak', '/visual');
+  while (pending.size < 2) await new Promise(setImmediate);
+  for (const [group, response] of [
+    ['stations', long],
+    ['visual', short],
+  ]) {
+    pending.get(group)();
+    assert.equal((await response).status, 502);
+  }
+  assert.equal(calls, 2);
+  const halted = await request('/api/celestrak', '/geo');
+  assert.equal(halted.status, 503);
+  assert.equal(halted.headers['x-tle-cache'], 'HALTED');
+  assert.equal(calls, 2, 'halted: CelesTrak is not asked again');
+});

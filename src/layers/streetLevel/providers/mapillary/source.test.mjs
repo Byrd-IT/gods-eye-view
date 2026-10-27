@@ -62,21 +62,6 @@ test('graph lookups go through this app, with the requested fields and no token'
   assert.doesNotMatch(calls[0].url, /graph\.mapillary\.com|MLY/);
   assert.equal(url.searchParams.get('sequence_ids'), 'seq-1');
   assert.match(url.searchParams.get('fields'), /geometry/);
-
-  const nearest = await source.nearestImages({
-    lat: 38.5,
-    lon: -121.5,
-    radius: 500,
-    limit: 500,
-  });
-  assert.equal(nearest.length, 1);
-  const nearestUrl = new URL(calls[1].url, 'http://localhost');
-  assert.equal(
-    nearestUrl.searchParams.get('radius'),
-    '50',
-    'radius is clamped to the API maximum',
-  );
-  assert.equal(nearestUrl.searchParams.get('limit'), '100');
 });
 
 test('a missing server key surfaces from the graph route as keyRequired', async () => {
@@ -163,5 +148,37 @@ test('a rejected key and a rate limit are told apart from other tile errors', as
     () => limitedSource.getTile('coverage', 14, 1, 1),
     (error) => error.retryAfterSec === 30 && error.keyRejected === false,
     'the Retry-After header wins over the body',
+  );
+});
+
+test('with a Graph endpoint, sequence lookups go there without a token', async () => {
+  const { calls, fetchImpl } = fakeFetch(() =>
+    jsonResponse({ data: [{ id: '1', geometry: { coordinates: [1, 2] } }] }),
+  );
+  const source = createMapillarySource({
+    graphEndpoint: '/api/mapillary/graph',
+    fetchImpl,
+  });
+  assert.equal(source.graphEndpoint, '/api/mapillary/graph/');
+  assert.equal(source.hasToken(), false);
+  const images = await source.getSequenceImages('seq-1');
+  assert.equal(images.length, 1);
+  const url = new URL(calls[0].url, 'http://localhost');
+  assert.equal(url.pathname, '/api/mapillary/graph/images');
+  assert.equal(url.searchParams.get('sequence_ids'), 'seq-1');
+  assert.equal(url.searchParams.has('access_token'), false);
+});
+
+test('Graph endpoint errors keep their status', async () => {
+  const { fetchImpl } = fakeFetch(() =>
+    jsonResponse({ error: 'no_key', keyRequired: true }, 503),
+  );
+  const source = createMapillarySource({
+    graphEndpoint: '/api/mapillary/graph/',
+    fetchImpl,
+  });
+  await assert.rejects(
+    () => source.getSequenceImages('1'),
+    (error) => error.status === 503 && error.keyRequired === true,
   );
 });

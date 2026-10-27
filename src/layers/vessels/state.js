@@ -70,6 +70,8 @@ export function createVesselState({ source, services }) {
     activeFocusCount: 0,
     activeLabelCount: 0,
     selectedRecord: null,
+    /** GEV history seam (fork card B12a): the next reconcile is a history frame. */
+    historyFrameArmed: false,
     /** @type {{setPositions: Function, clear: Function, destroy: Function}|null} Selected-vessel fading trail */
     trail: null,
     /** @type {Cesium.Cartesian3[]} Chronological trail vertices (oldest first) */

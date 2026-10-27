@@ -16,6 +16,27 @@ export function createLifecycle({
   const { setMilitaryLayerActive } = services.militaryRegistry;
 
   const methods = {
+    /**
+     * GEV history seam (fork card B12a, touch point; re-check on upstream
+     * merges). Arms the NEXT applied snapshot as one history frame: it
+     * replaces every position history (no append across times), keeps only
+     * identity enrichment of the records, drops every aircraft absent from
+     * the frame at once (the tracked one included, no STALE grace) and the
+     * tracked trail. Deferred to the apply so nothing blinks in between.
+     */
+    resetForHistoryFrame() {
+      flightState._historyFrameArmed = true;
+    },
+
+    /**
+     * GEV history seam (fork card B12a): dead-reckoning "now". null = the
+     * wall clock; else clock(frameAppliedAtMs) -> epoch ms (the history
+     * driver freezes it at t while paused, rate x wall time while playing).
+     */
+    setMotionClock(clock) {
+      flightState._motionClock = typeof clock === 'function' ? clock : null;
+    },
+
     /** Configure the source before initialization; an active layer keeps its owner. */
     setSource(source) {
       if (flightState._viewer)
