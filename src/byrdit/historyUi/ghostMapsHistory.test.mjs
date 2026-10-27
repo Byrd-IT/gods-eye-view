@@ -269,7 +269,10 @@ test('playing into the present while the archive is down is not retried every 2 
     // The control stops at the present; the time sent is capped there.
     driver.onHistory({
       active: true,
-      timeMs: Math.min(start + 60 * (clock.now() - base) + 60 * 400, clock.now()),
+      timeMs: Math.min(
+        start + 60 * (clock.now() - base) + 60 * 400,
+        clock.now(),
+      ),
       playing: true,
       rate: 60,
     });
@@ -322,7 +325,6 @@ test('a real +10 min seek at 600x while the archive is down is still one call', 
   clock.advance(400);
   assert.equal(layer.times.length, 1, 'exactly one setHistoryTime');
 });
-
 
 test('a pending setHistoryTime plus an unavailable answer: the heartbeat does not call again and the slow answer lands', async () => {
   const clock = fakeTimers();
