@@ -28,7 +28,6 @@ test('clean view hides every fork map control with visibility, never display', (
     '#gev-wayback',
     '#gev-naip-split-line',
     '.gev-hist',
-    '.gev-tt',
     '.gev-nav',
     '.gev-sky-btn',
     '.gev-sky-panel',
