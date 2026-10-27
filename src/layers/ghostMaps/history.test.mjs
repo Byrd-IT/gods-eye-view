@@ -572,6 +572,69 @@ test('a live push missed in history is answered by the live redraw after an arch
   assert.equal(calls.filter(([k]) => k === 'live-catalog').length, 0);
 });
 
+test('an archive failure that is superseded during the drop neither applies live nor asks for it', async (t) => {
+  let n = 0;
+  const { layer, calls, mounted, archive } = setup(t, {
+    getCatalogAt: async (tMs) => {
+      n += 1;
+      calls.push(['at', tMs]);
+      // the second request (a failure) is the stale one
+      if (n === 2) throw new Error('archive down');
+      return archive.get(tMs);
+    },
+  });
+  await layer.setHistoryTime(T1); // a history edition is drawn
+  assert.equal(layer.getHistoryState().commit, C1);
+  calls.length = 0;
+  // The failed request drops the history draw; a newer request starts then.
+  let newer = null;
+  const realDelete = mounted.delete.bind(mounted);
+  t.mock.method(mounted, 'delete', (ds) => {
+    if (!newer) newer = layer.setHistoryTime(T2);
+    return realDelete(ds);
+  });
+  await layer.setHistoryTime(T1 + 1);
+  assert.ok(newer, 'the drop started the newer request');
+  await newer;
+  assert.equal(
+    calls.some(([k]) => k === 'live-catalog'),
+    false,
+    'the stale failure did not ask for live',
+  );
+  assert.equal(layer.getHistoryState().status, 'published');
+  assert.equal(layer.getHistoryState().commit, C2);
+});
+
+test('LIVE whose live fetch fails keeps the missed push for the next fetch', async (t) => {
+  let liveFails = false;
+  const { layer, calls, push } = setup(t, {
+    getCatalogAt: async () => {
+      throw new Error('archive down');
+    },
+    getCatalog: async () => {
+      calls.push(['live-catalog']);
+      if (liveFails) throw new Error('live down');
+      return {
+        commit: 'f'.repeat(40),
+        products: [{ id: 'cip', version: 'c'.repeat(40), defaultOn: true }],
+      };
+    },
+  });
+  await layer.update({});
+  await layer.setHistoryTime(T1); // unavailable, live from the cache
+  push({
+    commit: 'e'.repeat(40),
+    products: [{ id: 'cip', version: 'd'.repeat(40), defaultOn: true }],
+  });
+  liveFails = true;
+  await layer.setHistoryTime(null); // the live fetch fails
+  liveFails = false;
+  calls.length = 0;
+  // the push is still owed: the cache is stale, so live is fetched
+  await layer.setHistoryTime(T2);
+  assert.equal(calls.filter(([k]) => k === 'live-catalog').length, 1);
+});
+
 test('disabling the layer forgets a missed live push and the cached live catalog', async (t) => {
   const { layer, calls, push } = setup(t, {
     getCatalogAt: async () => {

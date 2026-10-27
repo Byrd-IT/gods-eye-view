@@ -426,6 +426,9 @@ export function createGhostMapsLayer({
       _historyState = { status: 'unavailable', t: at };
       notifyHistory();
       await dropHistoryDraw();
+      // A newer request (or disable/abort) arrived during the drop: this
+      // one is stale and must not draw or fetch.
+      if (seq !== _historySeq || !_enabled || signal?.aborted) return false;
       // Reuse the last live catalog while no live push was missed; ask the
       // live source only when there is none or it is known to be stale.
       if (
@@ -757,8 +760,8 @@ export function createGhostMapsLayer({
         const hadHistoryCatalog = Boolean(_catalog?.history);
         _historyT = null;
         _historyState = null;
+        // _liveMissed is cleared only inside refreshLive, on its own fetch.
         const missed = _liveMissed;
-        _liveMissed = false;
         notifyHistory();
         // Only a history catalog is unloaded. After an archive failure the
         // live edition is already drawn; fetching it again would only reload it.

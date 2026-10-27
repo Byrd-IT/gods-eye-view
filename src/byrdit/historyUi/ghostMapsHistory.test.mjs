@@ -302,6 +302,28 @@ test('timer delay at 600x while the archive is down is not mistaken for a seek',
   assert.deepEqual(layer.times, [], 'normal play: no retry');
 });
 
+test('a real +10 min seek at 600x while the archive is down is still one call', async () => {
+  const { clock, layer, driver } = setup();
+  const start = T;
+  driver.onHistory({ active: true, timeMs: start, playing: true, rate: 600 });
+  clock.advance(400);
+  await new Promise((r) => setImmediate(r));
+  layer.history = { status: 'unavailable', t: start };
+  layer.times.length = 0;
+  const base = clock.now();
+  clock.advance(2_000);
+  // well past the tolerance (600 * 2 * 250 ms = 5 min): a seek, not drift
+  driver.onHistory({
+    active: true,
+    timeMs: start + 600 * (clock.now() - base) + 600 * 400 + 10 * 60_000,
+    playing: true,
+    rate: 600,
+  });
+  clock.advance(400);
+  assert.equal(layer.times.length, 1, 'exactly one setHistoryTime');
+});
+
+
 test('a pending setHistoryTime plus an unavailable answer: the heartbeat does not call again and the slow answer lands', async () => {
   const clock = fakeTimers();
   const layer = fakeLayer();

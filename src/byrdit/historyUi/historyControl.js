@@ -60,7 +60,7 @@ export const SNAP_FEEDS = Object.freeze(['aircraft', 'military']);
 /** Feeds drawn in the coverage ribbon. */
 export const RIBBON_FEEDS = Object.freeze(['aircraft', 'military']);
 
-const TICK_MS = 250;
+export const TICK_MS = 250;
 /** Outward rounds when stepping over an empty stretch (each doubles it). */
 const STEP_SEARCH_ROUNDS = 12;
 /** A Space tap shorter than voice push-to-talk's hold delay (500 ms). */

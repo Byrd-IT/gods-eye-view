@@ -23,6 +23,8 @@
  * D3), never a silent mix.
  */
 
+import { TICK_MS as CONTROL_TICK_MS } from './historyControl.js';
+
 /** The GhostMaps layer id (src/layers/ghostMaps/index.js). */
 export const GHOSTMAPS_HISTORY_LAYER_ID = 's2-ghostmaps';
 export const GHOSTMAPS_RELEASE_DEBOUNCE_MS = 300;
@@ -30,8 +32,6 @@ export const GHOSTMAPS_PLAY_MIN_INTERVAL_MS = 2_000;
 /** After an unavailable answer, the archive (and the live catalog fallback)
  * is asked again at most this often by the History heartbeat. */
 export const GHOSTMAPS_UNAVAILABLE_RETRY_MS = 30_000;
-/** How often the History control updates its time (historyControl.js). */
-const CONTROL_TICK_MS = 250;
 
 /** Chip text (constants: no lowercase literal in a textContent=). */
 export const GHOSTMAPS_PUBLISHED_PREFIX = 'As published ';
@@ -249,10 +249,11 @@ export function createGhostMapsHistory({
       // "same time" never matches. A jump (seek) still goes through at once.
       // The expected time is capped at the present (playing runs into it and
       // stops there). The tolerance (timeline ms) is two ticks of the History
-      // control (it updates its time every 250 ms) at this rate, never under
-      // two play intervals. That is a few seconds at 60x, against minutes
-      // before, so a short seek is not swallowed, and normal timer delay at
-      // 600x is not mistaken for one.
+      // control (it updates its time every CONTROL_TICK_MS) at this rate,
+      // never under two play intervals: 30 s at 60x and 5 min at 600x. It
+      // used to be a fixed 4 s, which normal timer delay at 600x exceeded.
+      // A seek smaller than the tolerance is swallowed; a larger one goes
+      // through.
       if (
         was &&
         unavailable &&
