@@ -164,7 +164,8 @@ test('entity construction failure releases parsed image URLs', async (t) => {
   assert.equal(created.length, 1);
   assert.deepEqual(revoked, created);
   assert.equal(mounted.size, 0);
-  assert.equal(layer.getStats().error, 'fixture entity failure');
+  // A fixed reason: a construction error's own text is not copied out.
+  assert.equal(layer.getStats().error, 'GhostMaps file could not be read');
 });
 
 test('successful load keeps icons until the product is disabled', async (t) => {
