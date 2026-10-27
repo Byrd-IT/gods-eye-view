@@ -208,11 +208,20 @@ export function createImageryVoice({
   const unavailable = () => fail('Aerial imagery is not available right now');
 
   const snapshot = (handle, block) => {
-    const year = handle?.state?.().year ?? null;
+    const st = handle?.state?.() ?? {};
+    const year = st.year ?? null;
     const plan = year === null || !block ? null : planYear(block, year);
+    const layers = Array.isArray(st.layers) ? st.layers : null;
+    // naip.js wanted() splits only when compare is on and yearB is set.
+    const compare = st.compare === true && st.yearB !== null;
     return {
       year,
-      enabled: Boolean(handle?.state?.().enabled),
+      enabled: Boolean(st.enabled),
+      // compare true means this year is only the left side of the split.
+      // drawn is false when Google 3D or another stack is covering the layers.
+      compare,
+      drawn: layers ? layers.some((layer) => layer?.show === true) : false,
+      ...(compare ? { yearB: st.yearB ?? null } : {}),
       label: plan?.label ?? null,
       years: sliderYears(block),
       sets: (plan?.regional ?? []).map((entry) => ({
@@ -281,15 +290,33 @@ export function createImageryVoice({
         framed = matches[0];
       }
 
+      const archive = wayback();
+      const wasOn = Boolean(archive?.state?.().on);
       const opened = await openStack();
       if (!opened.ok) return fail(opened.error, { years: ticks });
+      // byrdit-open covers Wayback. The stack switch turns it off; say so
+      // even when that switch already ran inside openStack.
+      if (wasOn) {
+        try {
+          await archive.disable?.();
+        } catch {
+          /* waybackStillOn reports that Wayback is still covering the layer */
+        }
+      }
       handle.setEnabled?.(true);
       handle.setYear(year);
       const flew = framed ? await frame(framed.bounds) : false;
+      const shot = snapshot(handle, block);
+      const stillOn = wasOn && archive?.state?.().on === true;
       return {
         ok: true,
-        ...snapshot(handle, block),
+        ...shot,
+        // A thrown disable leaves Wayback on. Do not claim the aerial layer
+        // is visible while that basemap is still covering it.
+        drawn: stillOn ? false : shot.drawn,
+        ...(stillOn ? { waybackStillOn: true } : {}),
         switched: opened.switched,
+        waybackOff: wasOn && !stillOn,
         framed: framed ? { id: framed.id, name: framed.name, flew } : null,
       };
     },
@@ -318,14 +345,31 @@ export function createImageryVoice({
       );
       if (index < 0) return fail('Wayback is not available right now');
       handle.setIndex?.(index);
-      if (!handle.state?.().on) {
+      const before = handle.state?.() ?? {};
+      // enable() sets on true before the lease is ready. Settling then
+      // reports a release that is not on the map yet.
+      const starting = before.on === true && before.ready === false;
+      if (!before.on || starting) {
         let enabled = false;
         try {
           enabled = await handle.enable();
         } catch {
           enabled = false;
         }
-        if (!enabled) return fail('Wayback could not be turned on', { years });
+        if (!enabled) {
+          const after = handle.state?.() ?? {};
+          if (after.on === true && after.ready === false) {
+            return {
+              ok: true,
+              starting: true,
+              date: match.date,
+              release: match.release,
+              on: false,
+              years,
+            };
+          }
+          return fail('Wayback could not be turned on', { years });
+        }
       } else {
         try {
           handle.settleNow?.();
@@ -353,21 +397,29 @@ export function createImageryVoice({
       if (!which) return fail('target must be aerial, wayback, or both');
       const aerial = naip();
       const archive = wayback();
-      if ((which === 'aerial' || which === 'both') && !aerial)
-        return unavailable();
-      if ((which === 'wayback' || which === 'both') && !archive)
+      // both: turn off whichever handle exists. Fail only if neither does.
+      if (which === 'both') {
+        if (!aerial && !archive) return unavailable();
+      } else if (which === 'aerial') {
+        if (!aerial) return unavailable();
+      } else if (!archive) {
         return fail('Wayback is not available right now');
+      }
       const out = { ok: true, target: which };
-      if (which === 'aerial' || which === 'both') {
+      if ((which === 'aerial' || which === 'both') && aerial) {
         aerial.setEnabled?.(false);
         out.aerial = false;
       }
-      if (which === 'wayback' || which === 'both') {
+      if ((which === 'wayback' || which === 'both') && archive) {
         const handle = archive;
         try {
           await handle.disable?.();
         } catch {
-          return fail('Wayback could not be turned off');
+          // Aerial may already be off. Keep that on the failure.
+          return fail('Wayback could not be turned off', {
+            target: which,
+            ...(Object.hasOwn(out, 'aerial') ? { aerial: out.aerial } : {}),
+          });
         }
         out.wayback = false;
       }

@@ -922,6 +922,43 @@ test('detach removes the panel, layers and listeners', async () => {
   assert.equal(controller.getActiveId(), 'photoreal');
 });
 
+test('a second enable while the first is still starting waits for that start', async () => {
+  const { detach } = await setup({
+    controller: fakeController('photoreal'),
+  });
+  const first = detach.enable();
+  assert.equal(detach.state().on, true);
+  assert.equal(detach.state().ready, false);
+  const second = detach.enable();
+  let secondSettled = false;
+  second.then(() => {
+    secondSettled = true;
+  });
+  await Promise.resolve();
+  assert.equal(secondSettled, false);
+  assert.equal(await first, true);
+  assert.equal(await second, true);
+  assert.equal(detach.state().ready, true);
+  assert.equal(detach.state().on, true);
+});
+
+test('enable after disable during start begins again', async () => {
+  const { detach } = await setup({
+    controller: fakeController('photoreal'),
+  });
+  const first = detach.enable();
+  assert.equal(detach.state().on, true);
+  assert.equal(detach.state().ready, false);
+  const stopping = detach.disable();
+  assert.equal(detach.state().on, false);
+  const again = detach.enable();
+  assert.equal(await first, false);
+  assert.equal(await stopping, undefined);
+  assert.equal(await again, true);
+  assert.equal(detach.state().on, true);
+  assert.equal(detach.state().ready, true);
+});
+
 // ------------------------------------------- hosted in the Time travel menu
 
 test('hosted in the Time travel menu: Imagery section, flow layout, released on detach', async () => {

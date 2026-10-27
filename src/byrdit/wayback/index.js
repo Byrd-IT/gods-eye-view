@@ -280,8 +280,25 @@ export async function attachWayback({
     if (OWN_STACKS_THAT_COVER.has(controller.getActiveId?.())) disable();
   }
 
+  let startWait = null;
+
   async function enable() {
-    if (destroyed || state.on) return false;
+    if (destroyed) return false;
+    // A second call while the lease is still coming up waits for that
+    // start instead of returning false and letting the voice settle early.
+    // After disable, that start is cancelled: do not hand it back.
+    if (startWait && state.on) return startWait;
+    if (state.on) return false;
+    const run = startEnable();
+    startWait = run;
+    try {
+      return await run;
+    } finally {
+      if (startWait === run) startWait = null;
+    }
+  }
+
+  async function startEnable() {
     if (releasing) await releasing;
     if (destroyed || state.on) return false;
     const mine = ++enabling;
@@ -325,6 +342,8 @@ export async function attachWayback({
   }
 
   function disable() {
+    // The in-flight start is cancelled. A later enable must start fresh.
+    startWait = null;
     if (!state.on && !lease) return releasing ?? Promise.resolve();
     enabling += 1;
     state.on = false;
@@ -430,8 +449,7 @@ export async function attachWayback({
     );
   }
 
-  const hookWindow =
-    viewer?.container?.ownerDocument?.defaultView ?? globalThis;
+  const hookWindow = viewer?.container?.ownerDocument?.defaultView ?? null;
   const waybackSlot = {
     enable: api.enable,
     disable: api.disable,
@@ -444,19 +462,27 @@ export async function attachWayback({
   if (hookWindow) hookWindow.__gevWayback = waybackSlot;
   // Wayback can be on when the Open basemap flag is off. Install a voice
   // then; the basemap attach replaces it with one that also knows NAIP.
+  // If that basemap later detaches, restoreVoice puts this voice back.
+  // detach below removes whatever voice this slot still owns.
   let imagerySlot = null;
-  if (hookWindow && !hookWindow.__gevImagery) {
+  function mountWaybackVoice() {
     imagerySlot = {
       voice: createImageryVoice({
         getNaip: () => null,
         getCatalog: () => null,
-        getWayback: () => hookWindow.__gevWayback ?? null,
+        getWayback: () => hookWindow?.__gevWayback ?? null,
         ensureOpen: () => ensureByrditOpen(controller),
         flyTo: (bounds) => flyToImageryBounds(viewer, Cesium, bounds),
       }),
     };
     hookWindow.__gevImagery = imagerySlot;
   }
+  waybackSlot.restoreVoice = () => {
+    if (destroyed || !hookWindow || hookWindow.__gevImagery) return false;
+    mountWaybackVoice();
+    return true;
+  };
+  if (hookWindow && !hookWindow.__gevImagery) mountWaybackVoice();
 
   const detach = () => {
     if (destroyed) return;

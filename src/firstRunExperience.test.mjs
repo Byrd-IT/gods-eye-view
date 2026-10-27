@@ -1028,7 +1028,7 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
     'minimal',
     'cyber',
   ]);
-  // Cyber deliberately adds one layout; first-run missions still change no tools.
+  // Cyber deliberately adds one layout; first-run missions still change no tool shapes.
   hudLayout.enum = hudLayout.enum.filter((layout) => layout !== 'cyber');
   const cameraMotion = legacyTools.find((tool) => tool.name === 'move_camera')
     .parameters.properties.motion;
@@ -1046,7 +1046,7 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // consolidation (shorter analyst, annotate_map and ISS wording), plus the
   // referent-only track_entity alternative (kept out of the model-facing
   // schema, which may not carry top-level anyOf), and Contacts requested-radius
-  // list descriptions; the missions still ride existing tools.
+  // list descriptions; the missions still change no tool shapes.
   // Street Level and GNSS extend the manifest; broadcast caveats describe tracked and analyst aircraft.
   // Air quality (ECCC AQHI) extends the manifest.
   // Byrd-IT fork: + the four USGS water layers in src/voice/layerManifest.js
@@ -1061,11 +1061,15 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // History playback voice adds control_history (+1803: 31592 -> 33395).
   // Sky view voice adds control_sky (+1492: 33395 -> 34887).
   // Imagery-by-year voice adds control_imagery (+1581: 34887 -> 36468).
-  assert.equal(block.length, 36468, 'serialized tool schema length drifted');
+  // drawn/compare/waybackOff speaking rule adds 151 characters (36468 -> 36619).
+  // waybackStillOn and starting speaking rule adds 115 characters (36619 -> 36734).
+  assert.equal(block.length, 36734, 'serialized tool schema length drifted');
+  // Description-only edits of tool text are allowed. Re-pin both the length
+  // (with a changelog line above) and this hash when they land.
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'd7a81bb1b64ac6c0840a40b51aa1d2f2989374e060568dfdd5fc9e6a1f373564',
-    'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
+    '1d1c8e4110e038e60f4c25a8d3e69dadf183b45e3d49aea59ff7a82aaa273dae',
+    'the first-run missions must ride EXISTING tools: no schema-shape edits; description-only edits are allowed but must re-pin this hash and the length above',
   );
   const instructions = fs.readFileSync(
     new URL('../server/providers/openai/instructions.js', import.meta.url),
