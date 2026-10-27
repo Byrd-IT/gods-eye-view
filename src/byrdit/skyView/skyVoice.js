@@ -133,7 +133,9 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       if (!sky) return unavailable();
       const opened = await ensureOpen(sky);
       if (!opened.ok) return opened;
-      return done(sky, { opened: opened.opened });
+      const current = handle();
+      if (!current || current !== sky) return unavailable();
+      return done(current, { opened: opened.opened });
     },
     close() {
       const sky = handle();
@@ -162,19 +164,19 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         /* planets still search; constellations say they are not loaded */
       }
       live = handle();
-      if (!live) return unavailable();
+      if (!live || live !== sky) return unavailable();
       const alias = issQuery(target);
       if (alias && satelliteWaitMs && live.satellites?.status === 'loading') {
         const start = Date.now();
         while (
-          handle() &&
+          handle() === sky &&
           live.satellites?.status === 'loading' &&
           Date.now() - start < satelliteWaitMs
         ) {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
         live = handle();
-        if (!live) return unavailable();
+        if (!live || live !== sky) return unavailable();
       }
       let results = alias ? live.content.search(alias) : [];
       if (!results.length) results = live.content.search(target.trim());
@@ -258,7 +260,12 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       if (!opened.ok) return opened;
       const current = handle();
       if (!current || current !== sky) return unavailable();
-      const result = await current.applyPreset(preset);
+      let result;
+      try {
+        result = await current.applyPreset(preset);
+      } catch {
+        return fail('That preset could not be applied');
+      }
       const after = handle();
       if (!after || after !== current) return unavailable();
       if (!result?.ok)
