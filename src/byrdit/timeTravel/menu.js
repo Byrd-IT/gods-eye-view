@@ -21,7 +21,7 @@
  * hide the rail and its Display panel); clean view fades it with the other
  * fork controls (cleanView.css).
  */
-import { t } from '../../i18n/index.js';
+import { msg, t } from '../../i18n/index.js';
 
 export const TIME_TRAVEL_ID = 'gev-time-travel';
 export const TIME_TRAVEL_TOGGLE_ID = 'gev-time-travel-toggle';
@@ -30,8 +30,8 @@ export const TIME_TRAVEL_STYLE_ID = 'gev-time-travel-style';
 
 /** Section name -> heading. Order is the order they appear in. */
 export const SECTIONS = Object.freeze([
-  Object.freeze({ name: 'history', title: 'History' }),
-  Object.freeze({ name: 'imagery', title: 'Imagery' }),
+  Object.freeze({ name: 'history', title: msg('History') }),
+  Object.freeze({ name: 'imagery', title: msg('Imagery') }),
 ]);
 
 export const TIME_TRAVEL_CSS = `
