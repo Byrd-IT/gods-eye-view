@@ -30,6 +30,8 @@ export const GHOSTMAPS_PLAY_MIN_INTERVAL_MS = 2_000;
 /** After an unavailable answer, the archive (and the live catalog fallback)
  * is asked again at most this often by the History heartbeat. */
 export const GHOSTMAPS_UNAVAILABLE_RETRY_MS = 30_000;
+/** How often the History control updates its time (historyControl.js). */
+const CONTROL_TICK_MS = 250;
 
 /** Chip text (constants: no lowercase literal in a textContent=). */
 export const GHOSTMAPS_PUBLISHED_PREFIX = 'As published ';
@@ -246,8 +248,11 @@ export function createGhostMapsHistory({
       // Playing on while the archive is down: the time moves by itself, so
       // "same time" never matches. A jump (seek) still goes through at once.
       // The expected time is capped at the present (playing runs into it and
-      // stops there), and the tolerance is a fixed wall-clock slack: it does
-      // not grow with the rate, so a short seek at 60x is not swallowed.
+      // stops there). The tolerance (timeline ms) is two ticks of the History
+      // control (it updates its time every 250 ms) at this rate, never under
+      // two play intervals. That is a few seconds at 60x, against minutes
+      // before, so a short seek is not swallowed, and normal timer delay at
+      // 600x is not mistaken for one.
       if (
         was &&
         unavailable &&
@@ -259,7 +264,11 @@ export function createGhostMapsHistory({
           lastRequested + state.rate * (now() - lastApplied),
           now(),
         );
-        if (Math.abs(t - expected) < playMinIntervalMs * 2) return;
+        const tolerance = Math.max(
+          playMinIntervalMs * 2,
+          state.rate * 2 * CONTROL_TICK_MS,
+        );
+        if (Math.abs(t - expected) < tolerance) return;
       }
       schedule(state.playing && was);
     },

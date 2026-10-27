@@ -278,6 +278,30 @@ test('playing into the present while the archive is down is not retried every 2 
   assert.deepEqual(layer.times, [], 'reached the present: no retry');
 });
 
+test('timer delay at 600x while the archive is down is not mistaken for a seek', async () => {
+  const { clock, layer, driver } = setup();
+  const start = T;
+  driver.onHistory({ active: true, timeMs: start, playing: true, rate: 600 });
+  clock.advance(400);
+  await new Promise((r) => setImmediate(r));
+  layer.history = { status: 'unavailable', t: start };
+  layer.times.length = 0;
+  const base = clock.now();
+  for (let i = 1; i <= 7; i++) {
+    clock.advance(2_000);
+    // the control's tick and timer delay put the sent time ~80 ms of wall
+    // time (48 s of timeline) off the exact value
+    driver.onHistory({
+      active: true,
+      timeMs: start + 600 * (clock.now() - base) + 600 * 400 + 600 * 80,
+      playing: true,
+      rate: 600,
+    });
+  }
+  clock.advance(400);
+  assert.deepEqual(layer.times, [], 'normal play: no retry');
+});
+
 test('a pending setHistoryTime plus an unavailable answer: the heartbeat does not call again and the slow answer lands', async () => {
   const clock = fakeTimers();
   const layer = fakeLayer();

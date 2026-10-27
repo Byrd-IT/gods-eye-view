@@ -428,7 +428,13 @@ export function createGhostMapsLayer({
       await dropHistoryDraw();
       // Reuse the last live catalog while no live push was missed; ask the
       // live source only when there is none or it is known to be stale.
-      if (_lastLive && !_liveMissed && _enabled && !signal?.aborted) {
+      if (
+        seq === _historySeq &&
+        _lastLive &&
+        !_liveMissed &&
+        _enabled &&
+        !signal?.aborted
+      ) {
         await applyCatalog(_lastLive);
       } else {
         await refreshLive(signal);
