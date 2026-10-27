@@ -436,7 +436,11 @@ body.gev-sky-active #right-context-rail {
    the selection; skyView.js (revealPassGo) keeps it off the selected row. */
 .gev-sky-passes > [data-sky='pass-go']:not(:disabled) {
   position: sticky;
-  bottom: 0;
+  /* sticky offsets are measured from the body CONTENT edge, which stops
+     short of the body bottom padding (10px): without the negative offset the
+     action rides 10px above the body bottom, and on a 67px body (844x390) row
+     + action no longer fit. Keep equal to the body padding-bottom. */
+  bottom: -10px;
   z-index: 1;
   background: rgb(22, 24, 34);
   box-shadow: 0 -6px 8px rgba(8, 9, 14, 0.85);

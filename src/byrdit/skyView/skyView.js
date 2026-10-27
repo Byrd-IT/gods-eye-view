@@ -1056,6 +1056,26 @@ export function mountSkyView({
       );
       passesList.scrollTop -= body.scrollTop - s1;
     }
+    // a tapped row that pokes out below the nested list (the list box is
+    // shorter than its rows, e.g. 109 px on a 390 px screen) is clipped there
+    // and, with the action sticking to the body bottom, cannot be reached by
+    // scrolling the body alone: slide the row up inside the list and let the
+    // body follow so the row stays put (the body scrolls back by what the list
+    // scrolled; the sticky action then rides the body bottom, below the row)
+    if (
+      anchor !== passGo &&
+      inList &&
+      typeof passesList.scrollTop === 'number'
+    ) {
+      const clip =
+        anchor.getBoundingClientRect().bottom -
+        passesList.getBoundingClientRect().bottom;
+      if (clip > 0.5) {
+        const s2 = passesList.scrollTop;
+        passesList.scrollTop += clip;
+        body.scrollTop -= passesList.scrollTop - s2;
+      }
+    }
     // in a browser the enabled action sticks to the body bottom (skyView.css),
     // so it is in view but may cover the tapped row: lift the row clear of it
     if (anchor === passGo) return;

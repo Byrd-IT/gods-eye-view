@@ -1799,3 +1799,76 @@ test('P4 R2 + P5 integration: iOS Align needs both the compass reference and Liv
   assert.ok(Math.abs(Number(store.get('gev.sky.headingOffsetDeg')) - miss) < 1e-6);
   handle.destroy();
 });
+
+test('Go to peak time sticky bottom reaches the panel body bottom padding (844x390 phone landscape)', () => {
+  const css = readFileSync(new URL('./skyView.css', import.meta.url), 'utf8');
+  const rule = (sel) => {
+    const m = css.match(new RegExp(sel + '\\s*\\{([^}]*)\\}'));
+    assert.ok(m, 'rule ' + sel);
+    return m[1];
+  };
+  const pad = Number(
+    rule('\\.gev-sky-sats-body').match(/padding:\s*0 \d+px (\d+)px/)?.[1],
+  );
+  const sticky = rule(
+    "\\.gev-sky-passes > \\[data-sky='pass-go'\\]:not\\(:disabled\\)",
+  );
+  assert.ok(pad > 0, 'body has bottom padding');
+  assert.match(sticky, /position:\s*sticky/);
+  const bottom = Number(sticky.match(/bottom:\s*(-?\d+)px/)?.[1]);
+  // sticky is measured from the content edge; the offset must cancel the
+  // padding or the action floats `pad` px above the body bottom and covers the
+  // selected row when row + action only just fit (body ~67px)
+  assert.equal(bottom, -pad, 'sticky bottom offset equals -padding-bottom');
+});
+
+test('pass row clipped by the nested list is slid fully into it and stays clear of the sticky Go to peak (844x390)', async () => {
+  const { doc, handle, worker } = satSetup({
+    nakedEyeDefault: true,
+    groups: { stations: ISS_STATIONS },
+    fetchRcs: async () => ({ rcs: FIXTURE_RCS }),
+  });
+  await handle.enterAt({ latDeg: 29.7604, lonDeg: -95.3698, source: 'manual' });
+  await pumpSats(worker);
+  await waitFor(() => handle.satellites.passes.done, worker);
+  const body = doc.body.find('sats-body');
+  const card = doc.body.find('sats-card');
+  const list = doc.body.find('passes-list');
+  const go = doc.body.find('pass-go');
+  const row = list.children[1].children[0];
+  const box = (top, h) => ({
+    top,
+    bottom: top + h,
+    left: 0,
+    right: 300,
+    width: 300,
+    height: h,
+  });
+  const CARD = 100;
+  const H = 67; // body viewport 0..67 (phone landscape), rows 38 px
+  const LIST_H = 71; // list box a little shorter than its two rows
+  // list top at 300 (+CARD once the card shows) minus the body scroll; the
+  // second row starts 38 px into the list, the action sits 4 px under the list
+  // and, sticky, rides the body bottom whenever it would fall below it
+  const listTop = () => 300 + (card.hidden ? 0 : CARD) - body.scrollTop;
+  body.getBoundingClientRect = () => box(0, H);
+  list.getBoundingClientRect = () => box(listTop(), LIST_H);
+  row.getBoundingClientRect = () => box(listTop() + 38 - list.scrollTop, 38);
+  go.getBoundingClientRect = () => {
+    const bottom = Math.min(listTop() + LIST_H + 4 + 28, H);
+    return box(bottom - 28, 28);
+  };
+  list.contains = (node) => node === list || node === row; // no DOM here
+  list.scrollTop = 0;
+  body.scrollTop = 338; // row top at the body top edge, 5 px below the list box
+  assert.equal(row.getBoundingClientRect().top, 0);
+  clickWithTarget(list, row);
+  assert.ok(handle.selectedPass, 'pass selected');
+  const r = row.getBoundingClientRect();
+  const l = list.getBoundingClientRect();
+  const g = go.getBoundingClientRect();
+  assert.ok(r.top >= 0, 'row not above the body top');
+  assert.ok(r.bottom <= l.bottom + 0.5, 'row not clipped by the nested list');
+  assert.ok(r.bottom <= g.top + 0.5, 'row clear of the sticky Go to peak');
+  assert.ok(g.bottom <= H + 0.5, 'Go to peak in view');
+});
