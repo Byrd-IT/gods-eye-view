@@ -33,6 +33,7 @@ import { createLiveFeedDraw } from './liveFeedDraw.js';
 import { createGreyPainter } from './greyPainter.js';
 import { createHistoryVoice } from './historyVoice.js';
 import { createGhostMapsHistory } from './ghostMapsHistory.js';
+import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
 
 const SCRUB_SELECTOR = '.gev-hist-scrub';
 
@@ -50,9 +51,14 @@ export function mountHistoryForShell(
     getDataManager,
     getHistoryLayers: () => ghostMaps.historyLayers(),
   });
+  // The control lives in the right-hand Time travel menu (History section);
+  // without a document to host it, it falls back to its own fixed box.
+  const menu = ensureTimeTravelMenu(doc ?? win?.document);
+  const historyHost = menu?.claim('history') ?? null;
   const handle = mountHistoryControl({
     window: win,
     ...(doc ? { document: doc } : {}),
+    ...(historyHost ? { parent: historyHost, embedded: true } : {}),
     chips,
     tileOutlines: shell?.viewer ? createTileOutlines(shell.viewer) : null,
   });
@@ -138,6 +144,7 @@ export function mountHistoryForShell(
     router.destroy();
     liveDraw.destroy();
     destroyControl();
+    if (historyHost) menu.release('history');
     if (win?.__gevHistorySwap?.router === router) delete win.__gevHistorySwap;
   };
   shell?._lifetime?.removers?.add?.(destroyAll);

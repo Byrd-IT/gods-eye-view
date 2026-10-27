@@ -43,7 +43,10 @@ function el(doc, tag, parent, { text, style, attrs } = {}) {
 /**
  * @param {{container: object, count: number,
  *   onToggle: (on: boolean) => void, onIndex: (index: number) => void,
- *   onStep: (delta: number) => void, onLatest: () => void, doc?: object}} options
+ *   onStep: (delta: number) => void, onLatest: () => void, doc?: object,
+ *   embedded?: boolean}} options `embedded`: the container (the Time travel
+ *   menu) owns placement and the glass, so the panel flows in it instead of
+ *   floating top centre on the globe.
  */
 export function createWaybackPanel({
   container,
@@ -52,6 +55,7 @@ export function createWaybackPanel({
   onIndex,
   onStep,
   onLatest,
+  embedded = false,
   doc = container?.ownerDocument ?? globalThis.document,
 }) {
   if (!doc?.createElement || !container) return null;
@@ -59,29 +63,44 @@ export function createWaybackPanel({
     attrs: {
       id: WAYBACK_PANEL_ID,
       role: 'group',
-      'aria-label': t('Time travel'),
+      'aria-label': embedded ? t('Esri Wayback imagery') : t('Time travel'),
     },
-    style: {
-      position: 'absolute',
-      // Top centre, just under the toolbar icons: the bottom edge is taken
-      // by the dock, the credits and the NAIP slider.
-      left: '50%',
-      top: '80px',
-      transform: 'translateX(-50%)',
-      boxSizing: 'border-box',
-      width: 'max-content',
-      maxWidth: 'calc(100% - 16px)',
-      padding: '6px 10px',
-      background: 'rgba(12, 16, 22, 0.88)',
-      color: '#e6edf3',
-      font: '13px/1.4 system-ui, sans-serif',
-      borderRadius: '6px',
-      zIndex: '21',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '6px',
-      pointerEvents: 'auto',
-    },
+    style: embedded
+      ? {
+          // In the Time travel menu: normal flow, the menu is the card.
+          position: 'static',
+          boxSizing: 'border-box',
+          width: '100%',
+          minWidth: '0',
+          padding: '0',
+          color: 'inherit',
+          font: '13px/1.4 system-ui, sans-serif',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          pointerEvents: 'auto',
+        }
+      : {
+          position: 'absolute',
+          // Top centre, just under the toolbar icons: the bottom edge is
+          // taken by the dock, the credits and the NAIP slider.
+          left: '50%',
+          top: '80px',
+          transform: 'translateX(-50%)',
+          boxSizing: 'border-box',
+          width: 'max-content',
+          maxWidth: 'calc(100% - 16px)',
+          padding: '6px 10px',
+          background: 'rgba(12, 16, 22, 0.88)',
+          color: '#e6edf3',
+          font: '13px/1.4 system-ui, sans-serif',
+          borderRadius: '6px',
+          zIndex: '21',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          pointerEvents: 'auto',
+        },
   });
   // Keys typed here are for this control only.
   panel.addEventListener('keydown', (event) => {
@@ -111,11 +130,14 @@ export function createWaybackPanel({
       cursor: 'pointer',
     },
   });
+  // In the Time travel menu the title is the menu's; this switch is the
+  // Esri Wayback layer's own.
+  const title = embedded ? t('Esri Wayback imagery') : t('Time travel');
   const toggle = el(doc, 'input', head, {
-    attrs: { type: 'checkbox', 'aria-label': t('Time travel') },
+    attrs: { type: 'checkbox', 'aria-label': title },
     style: { width: '22px', height: '22px', margin: '0' },
   });
-  el(doc, 'span', head, { text: t('Time travel') });
+  el(doc, 'span', head, { text: title });
   toggle.addEventListener('change', () => onToggle(Boolean(toggle.checked)));
 
   const label = el(doc, 'output', top, {
@@ -189,6 +211,7 @@ export function createWaybackPanel({
   // free band is between the HUD summary line and the Display rail.
   const media = doc.defaultView?.matchMedia?.('(max-width: 767.98px)') ?? null;
   const place = () => {
+    if (embedded) return;
     const phone = Boolean(media?.matches);
     panel.style.top = phone ? '256px' : '80px';
   };
@@ -202,9 +225,10 @@ export function createWaybackPanel({
       toggle.checked = Boolean(next.on);
       body.style.display = next.on ? 'flex' : 'none';
       label.style.display = next.on ? '' : 'none';
-      panel.style.width = next.on
-        ? 'min(460px, calc(100% - 16px))'
-        : 'max-content';
+      if (!embedded)
+        panel.style.width = next.on
+          ? 'min(460px, calc(100% - 16px))'
+          : 'max-content';
       range.value = String(next.index);
       range.setAttribute('aria-valuetext', next.label ?? '');
       older.disabled = next.index <= 0;
