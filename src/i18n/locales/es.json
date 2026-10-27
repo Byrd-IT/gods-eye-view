@@ -3006,8 +3006,6 @@
   "Another imagery tool is using the map": "Otra herramienta de imágenes está usando el mapa",
   "Esri imagery is unavailable right now": "Las imágenes de Esri no están disponibles ahora",
   "Time travel": "Viaje en el tiempo",
-  "Expand Time travel": "Expandir Viaje en el tiempo",
-  "Collapse Time travel": "Contraer Viaje en el tiempo",
   "Esri Wayback imagery": "Imágenes Esri Wayback",
   "Older imagery": "Imágenes más antiguas",
   "Imagery date": "Fecha de las imágenes",
@@ -3030,5 +3028,11 @@
   "Your choice applies now, but could not be saved.": "Tu elección se aplica ahora, pero no se pudo guardar.",
   "Voice replies appear here.": "Las respuestas de voz aparecen aquí.",
   "Preview is off.": "La vista previa está desactivada.",
-  "Automatic stop is unavailable for this voice connection.": "La parada automática no está disponible para esta conexión de voz."
+  "Automatic stop is unavailable for this voice connection.": "La parada automática no está disponible para esta conexión de voz.",
+  "TIME TRAVEL": "VIAJE EN EL TIEMPO",
+  "Aerial (NAIP)": "Aérea (NAIP)",
+  "Aerial": "Aérea",
+  "Compare": "Comparar",
+  "Aerial imagery year": "Año de las imágenes aéreas",
+  "Compare with year (right side)": "Comparar con el año (lado derecho)"
 }

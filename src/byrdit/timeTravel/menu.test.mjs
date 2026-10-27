@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   SECTIONS,
   TIME_TRAVEL_CSS,
+  TIME_TRAVEL_BODY_ID,
   TIME_TRAVEL_ID,
+  TIME_TRAVEL_TOGGLE_ID,
   TIME_TRAVEL_STYLE_ID,
   ensureTimeTravelMenu,
 } from './menu.js';
@@ -28,10 +30,12 @@ test('built once per document, collapsed, hidden until a host claims a section',
   assert.equal(doc.head.findAll((n) => n.id === TIME_TRAVEL_STYLE_ID).length, 1);
   assert.equal(menu.root.hidden, true, 'nothing to show yet');
   assert.equal(menu.isOpen(), false);
-  assert.equal(menu.root.getAttribute('data-expanded'), 'false');
+  assert.match(menu.root.className, /\bpanel-collapsible\b/);
+  assert.match(menu.root.className, /\bcollapsed\b/);
+  assert.equal(menu.root.getAttribute('data-panel-id'), TIME_TRAVEL_ID);
+  assert.equal(menu.toggle.getAttribute('data-collapse-target'), TIME_TRAVEL_ID);
   assert.equal(menu.toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(menu.toggle.getAttribute('aria-controls'), menu.body.id);
-  assert.equal(menu.body.hidden, true);
   for (const { name } of SECTIONS)
     assert.equal(
       menu.root.find(`[data-section="${name}"]`).hidden,
@@ -45,15 +49,16 @@ test('toggle opens and closes; Escape closes and returns focus to the header', (
   const menu = ensureTimeTravelMenu(doc);
   menu.claim('history');
   assert.equal(menu.root.hidden, false);
-  assert.equal(menu.root.getAttribute('data-expanded'), 'false', 'still collapsed');
+  assert.equal(menu.isOpen(), false, 'still collapsed');
   menu.toggle.click();
   assert.equal(menu.isOpen(), true);
   assert.equal(menu.toggle.getAttribute('aria-expanded'), 'true');
-  assert.equal(menu.root.getAttribute('data-expanded'), 'true');
-  assert.equal(menu.body.hidden, false);
+  assert.doesNotMatch(menu.root.className, /\bcollapsed\b/);
+  assert.equal(menu.toggle.textContent, '▶');
   menu.toggle.click();
   assert.equal(menu.isOpen(), false);
-  assert.equal(menu.body.hidden, true);
+  assert.match(menu.root.className, /\bcollapsed\b/);
+  assert.equal(menu.toggle.textContent, '◀');
   menu.toggle.click();
   menu.body.dispatch('keydown', { key: 'Escape' });
   assert.equal(menu.isOpen(), false);
@@ -63,7 +68,7 @@ test('toggle opens and closes; Escape closes and returns focus to the header', (
   assert.equal(menu.isOpen(), false);
 });
 
-test('sections: History and Imagery are claimed separately; Imagery absent unless claimed', () => {
+test('sections: History, Imagery and Aerial are claimed separately; absent unless claimed', () => {
   const doc = fakeDocument();
   const menu = ensureTimeTravelMenu(doc);
   const history = menu.claim('history');
@@ -71,6 +76,7 @@ test('sections: History and Imagery are claimed separately; Imagery absent unles
   assert.equal(history, menu.slot('history'));
   assert.equal(section('history').hidden, false);
   assert.equal(section('imagery').hidden, true, 'Wayback flag off: no Imagery');
+  assert.equal(section('aerial').hidden, true, 'no NAIP offer: no Aerial');
   assert.equal(
     section('history').find('.gev-tt-heading').textContent,
     'History',
@@ -82,6 +88,21 @@ test('sections: History and Imagery are claimed separately; Imagery absent unles
     section('imagery').find('.gev-tt-heading').textContent,
     'Imagery',
   );
+  const aerial = menu.claim('aerial');
+  assert.equal(aerial, menu.slot('aerial'));
+  assert.notEqual(aerial, imagery);
+  assert.equal(section('aerial').hidden, false);
+  assert.equal(
+    section('aerial').find('.gev-tt-heading').textContent,
+    'Aerial (NAIP)',
+  );
+  assert.deepEqual(
+    menu.body.findAll('section').map((n) => n.getAttribute('data-section')),
+    ['history', 'imagery', 'aerial'],
+    'sections keep their order',
+  );
+  menu.release('aerial');
+  assert.equal(section('aerial').hidden, true);
   menu.release('imagery');
   assert.equal(section('imagery').hidden, true);
   assert.equal(menu.root.hidden, false, 'History still there');
@@ -100,12 +121,105 @@ test('destroy removes the menu; the next ensure builds a fresh one', () => {
   assert.equal(next.isOpen(), false);
 });
 
-test('CSS: a right-side panel, a phone sheet clear of the bottom nav, hidden for cockpit', () => {
-  assert.match(TIME_TRAVEL_CSS, /\.gev-tt \{[^}]*right: var\(--right-rail-x/);
-  assert.doesNotMatch(TIME_TRAVEL_CSS, /\.gev-tt \{[^}]*\bleft:/);
-  assert.match(TIME_TRAVEL_CSS, /@media \(max-width: 900px\)/);
-  assert.match(TIME_TRAVEL_CSS, /\.gev-tt\[data-expanded='true'\] \{ left: 8px;/);
-  assert.match(TIME_TRAVEL_CSS, /cockpit-mode[^{]*\.gev-tt \{ display: none !important/);
+test('CSS: sections only; the card itself is rail CSS, not a fixed box', () => {
+  assert.doesNotMatch(TIME_TRAVEL_CSS, /position:\s*fixed/);
+  assert.doesNotMatch(TIME_TRAVEL_CSS, /\.gev-tt \{/);
+  assert.match(TIME_TRAVEL_CSS, /\.gev-tt-section\[hidden\]/);
+});
+
+function railDocument() {
+  const doc = fakeDocument();
+  const rail = doc.createElement('aside');
+  rail.setAttribute('id', 'right-context-rail');
+  const context = doc.createElement('div');
+  context.setAttribute('id', 'global-context-panel');
+  rail.append(context);
+  doc.body.append(rail);
+  return { doc, rail, context };
+}
+
+test('without a static card one is built in the rail (before Context)', () => {
+  const { doc, rail } = railDocument();
+  const menu = ensureTimeTravelMenu(doc);
+  assert.equal(menu.root.parentNode, rail);
+  assert.equal(doc.getElementById(TIME_TRAVEL_ID), menu.root);
+});
+
+function staticCard(doc, { chrome = false } = {}) {
+  const root = doc.createElement('div');
+  root.setAttribute('id', TIME_TRAVEL_ID);
+  root.setAttribute('class', 'panel-collapsible collapsed');
+  root.hidden = true;
+  const inner = doc.createElement('div');
+  const button = doc.createElement('button');
+  button.setAttribute('id', TIME_TRAVEL_TOGGLE_ID);
+  button.setAttribute('class', 'panel-collapse-btn');
+  const body = doc.createElement('div');
+  body.setAttribute('id', TIME_TRAVEL_BODY_ID);
+  inner.append(button, body);
+  root.append(inner);
+  doc.body.append(root);
+  let clicks = 0;
+  if (chrome)
+    // what panelChrome binds for [data-collapse-target]
+    button.addEventListener('click', () => {
+      clicks++;
+      const open = root.className.includes('collapsed');
+      root.setAttribute(
+        'class',
+        open ? 'panel-collapsible' : 'panel-collapsible collapsed',
+      );
+    });
+  return { root, button, body, clicks: () => clicks };
+}
+
+test('adopts the static rail card instead of building a floating one', () => {
+  const doc = fakeDocument();
+  const card = staticCard(doc);
+  const menu = ensureTimeTravelMenu(doc);
+  assert.equal(menu.root, card.root);
+  assert.equal(menu.toggle, card.button);
+  assert.equal(menu.body, card.body);
+  assert.equal(doc.body.findAll((n) => n.id === TIME_TRAVEL_ID).length, 1);
+  assert.equal(card.root.hidden, true, 'stays hidden until claimed');
+  assert.equal(card.button.getAttribute('aria-controls'), TIME_TRAVEL_BODY_ID);
+  menu.claim('aerial');
+  assert.equal(card.root.hidden, false);
+  assert.equal(card.body.findAll('section').length, SECTIONS.length);
+  menu.release('aerial');
+  assert.equal(card.root.hidden, true);
+  menu.destroy();
+  assert.equal(doc.getElementById(TIME_TRAVEL_ID), card.root, 'static card stays');
+  assert.equal(card.root.hidden, true);
+  assert.equal(card.body.children.length, 0, 'sections removed');
+});
+
+test('adopted card: open/close goes through the panel chrome button', () => {
+  const doc = fakeDocument();
+  const card = staticCard(doc, { chrome: true });
+  const menu = ensureTimeTravelMenu(doc);
+  menu.claim('history');
+  assert.equal(menu.isOpen(), false);
+  menu.setOpen(true);
+  assert.equal(card.clicks(), 1, 'the chrome handler did the work');
+  assert.equal(menu.isOpen(), true);
+  menu.setOpen(true);
+  assert.equal(card.clicks(), 1, 'no click when already open');
+  card.root.dispatch('keydown', { key: 'Escape' });
+  assert.equal(menu.isOpen(), false);
+  assert.equal(card.clicks(), 2);
+  assert.equal(doc.activeElement, card.button);
+});
+
+test('adopted card without a chrome handler is still opened by setOpen', () => {
+  const doc = fakeDocument();
+  const card = staticCard(doc);
+  const menu = ensureTimeTravelMenu(doc);
+  menu.setOpen(true);
+  assert.equal(menu.isOpen(), true);
+  assert.equal(card.button.getAttribute('aria-expanded'), 'true');
+  menu.setOpen(false);
+  assert.equal(menu.isOpen(), false);
 });
 
 test('History embedded in the menu: flows in the section, drops its bottom-left box', () => {

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * Rendered proof for the right-side Time travel menu (History + Imagery).
+ * Rendered proof for the right-rail Time travel card (#time-travel-panel:
+ * History, Imagery, Aerial). It must measure the same as the collapsed
+ * Context card, and the NAIP slider must live in its Aerial section.
  * QA_BASE_URL (default http://127.0.0.1:5199) must serve the app; the Wayback
  * releases API is stubbed so the Imagery section can be exercised offline.
  * Screenshots go to QA_OUT_DIR (default ./qa-artifacts-tt).
@@ -31,7 +33,9 @@ const check = (name, ok, detail = "") => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function run(label, viewport) {
-  const page = await browser.newPage();
+  // a fresh profile per viewport: collapsed state is remembered like any rail card
+  const context = await browser.createBrowserContext();
+  const page = await context.newPage();
   await page.setViewport(viewport);
   await page.setRequestInterception(true);
   page.on("request", (r) => {
@@ -67,10 +71,53 @@ async function run(label, viewport) {
   }, waybackFlag);
   page.on("pageerror", (e) => console.log("  pageerror:", e.message));
   await page.goto(appUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("#gev-time-travel", { timeout: 60000 });
+  await page.waitForSelector("#time-travel-panel", { timeout: 60000 });
   await sleep(Number(process.env.QA_SETTLE_MS || 12000));
   await page.keyboard.press("Escape"); // first-run chooser
   await sleep(500);
+  if (await page.evaluate(() => document.body.classList.contains("mobile-shell"))) {
+    // phones: rail cards live in sheets; Time travel is in the Context sheet
+    await page.click(".mobile-tab[data-mobile-sheet=\"context\"]");
+    await sleep(600);
+  }
+  await page.waitForSelector("#time-travel-panel", { visible: true, timeout: 30000 });
+  const rects = () =>
+    page.evaluate(() => {
+      const rect = (s) => {
+        const e = document.querySelector(s);
+        if (!e) return null;
+        const r = e.getBoundingClientRect();
+        const cs = getComputedStyle(e);
+        return {
+          x: r.x,
+          y: r.y,
+          w: r.width,
+          h: r.height,
+          right: r.right,
+          bottom: r.bottom,
+          radius: cs.borderTopLeftRadius,
+          font: cs.fontFamily + " " + cs.fontSize,
+          visible: r.width > 0 && r.height > 0,
+        };
+      };
+      const inner = (id) => rect(`#${id} > [data-rail-scroller]`);
+      return {
+        vw: innerWidth,
+        vh: innerHeight,
+        tt: rect("#time-travel-panel"),
+        ttInner: inner("time-travel-panel"),
+        ctx: rect("#global-context-panel"),
+        ctxInner: inner("global-context-panel"),
+        sl: rect("#street-level-panel"),
+        slInner: inner("street-level-panel"),
+        ttTitle: rect("#time-travel-panel .panel-title"),
+        ctxTitle: rect("#global-context-panel .panel-title"),
+        ttHidden: document.querySelector("#time-travel-panel")?.hidden,
+        collapsed: document.querySelector("#time-travel-panel")?.classList.contains("collapsed"),
+        btnText: document.querySelector("#gev-time-travel-toggle")?.textContent,
+        floating: Boolean(document.querySelector("#gev-time-travel")),
+      };
+    });
   const probe = () =>
     page.evaluate(() => {
       const rect = (s) => {
@@ -79,40 +126,78 @@ async function run(label, viewport) {
         const r = e.getBoundingClientRect();
         return { x: r.x, y: r.y, w: r.width, h: r.height, visible: r.width > 0 && r.height > 0 };
       };
-      const panel = document.querySelector("#gev-time-travel");
+      const panel = document.querySelector("#time-travel-panel");
       return {
-        menu: rect("#gev-time-travel"),
+        menu: rect("#time-travel-panel"),
         toggle: rect("#gev-time-travel-toggle"),
         body: rect("#gev-time-travel-body"),
         hist: rect(".gev-hist"),
         wayback: rect("#gev-wayback"),
+        aerial: rect("#naip-slider, #gev-naip-slider"),
+        floatingNaip: document.querySelector("body > #gev-naip-slider, #cesiumContainer #gev-naip-slider") !== null,
         expanded: document.querySelector("#gev-time-travel-toggle")?.getAttribute("aria-expanded"),
         histInMenu: Boolean(panel?.querySelector(".gev-hist")),
         wbInMenu: Boolean(panel?.querySelector("#gev-wayback")),
+        aerialInMenu: Boolean(panel?.querySelector('[data-section="aerial"] #gev-naip-slider')),
+        headings: [...(panel?.querySelectorAll(".gev-tt-section:not([hidden]) .gev-tt-heading") ?? [])].map((h) => h.textContent),
         vw: innerWidth,
         vh: innerHeight,
       };
     });
   const c = await probe();
+  const r = await rects();
   console.log(label, "collapsed", JSON.stringify(c));
-  check(`${label}: collapsed by default`, c.expanded === "false" && !c.body?.visible);
+  console.log(label, "rects", JSON.stringify(r));
+  check(`${label}: no floating #gev-time-travel box`, !r.floating);
+  check(`${label}: collapsed by default`, r.collapsed === true && !c.body?.visible);
   check(`${label}: nothing history at bottom-left`, !c.hist?.visible);
-  check(`${label}: toggle on right half`, c.toggle && c.toggle.x > c.vw / 2);
+  const phone = label === "narrow"; // sheet layout: full-width cards, Context is open
+  check(`${label}: card visible`, r.tt?.visible);
+  check(`${label}: collapsed card is 50px tall`, Math.abs(r.tt.h - 50) < 0.6, `${r.tt.h}`);
+  if (!phone) check(`${label}: card right-aligned in viewport`, r.tt.right > r.vw - 120 && r.tt.right <= r.vw, `${r.tt.right}`);
+  if (r.ctx?.visible) {
+    check(`${label}: same width as collapsed CONTEXT`, Math.abs(r.tt.w - r.ctx.w) < 0.6, `${r.tt.w} vs ${r.ctx.w}`);
+    if (!phone) check(`${label}: same height as collapsed CONTEXT`, Math.abs(r.tt.h - r.ctx.h) < 0.6, `${r.tt.h} vs ${r.ctx.h}`);
+    check(`${label}: right-aligned with CONTEXT`, Math.abs(r.tt.right - r.ctx.right) < 0.6, `${r.tt.right} vs ${r.ctx.right}`);
+    check(`${label}: same inner radius`, r.ttInner?.radius === r.ctxInner?.radius, `${r.ttInner?.radius} vs ${r.ctxInner?.radius}`);
+    check(`${label}: same title font`, r.ttTitle?.font === r.ctxTitle?.font, `${r.ttTitle?.font} vs ${r.ctxTitle?.font}`);
+    const gap = r.ctx.y - r.tt.bottom;
+    check(`${label}: 8px gap to CONTEXT`, Math.abs(gap - 8) < 0.6, `${gap}`);
+  } else console.log("  (CONTEXT card not visible at this size)");
   await page.screenshot({ path: path.join(outDir, `${tag}-${label}-collapsed.png`) });
   await page.click("#gev-time-travel-toggle");
   await sleep(800);
+  // The NAIP year slider as the real Byrd-IT Open stack would mount it
+  await page.evaluate(async () => {
+    const { createNaipMenuSlider } = await import("/src/byrdit/basemap/naipSlider.js");
+    const state = { ticks: [2012, 2016, 2020, 2024], year: 2024, yearB: 2016, enabled: true, compare: false, label: "2024: NAIP 2024", labelB: "" };
+    window.__qaNaip = createNaipMenuSlider({
+      container: document.body, state, onYear() {}, onYearB() {}, onEnabled() {}, onCompare() {},
+    });
+    window.__qaNaip.setVisible(true);
+  });
+  await sleep(500);
   const o = await probe();
   console.log(label, "open", JSON.stringify(o));
   check(`${label}: opens on click`, o.expanded === "true" && o.body?.visible);
   check(`${label}: history inside menu`, o.histInMenu && o.hist?.visible);
-  check(`${label}: imagery inside menu`, o.wbInMenu && o.wayback?.visible);
+  if (waybackFlag === "1") check(`${label}: imagery inside menu`, o.wbInMenu && o.wayback?.visible);
+  check(`${label}: aerial inside menu`, o.aerialInMenu && o.aerial?.visible);
+  check(`${label}: no floating NAIP bar`, !o.floatingNaip);
+  console.log(label, "headings", JSON.stringify(o.headings));
   check(`${label}: menu within viewport`, o.menu.x >= 0 && o.menu.x + o.menu.w <= o.vw + 1 && o.menu.y + o.menu.h <= o.vh + 1);
   await page.screenshot({ path: path.join(outDir, `${tag}-${label}-open.png`) });
+  await page.evaluate(() => window.__qaNaip.setVisible(false));
+  await sleep(200);
+  const g = await probe();
+  check(`${label}: Aerial hides when NAIP is not on screen`, !g.headings.includes("Aerial (NAIP)"));
   await page.close();
+  await context.close();
 }
 
 try {
   await run("desktop", { width: 1440, height: 900 });
+  await run("narrow-desktop", { width: 800, height: 900 });
   await run("narrow", { width: 390, height: 844, isMobile: true, hasTouch: true });
 } finally {
   await browser.close();

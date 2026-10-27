@@ -2840,8 +2840,6 @@
   "Another imagery tool is using the map": "另一个影像工具正在使用地图",
   "Esri imagery is unavailable right now": "Esri 影像暂时不可用",
   "Time travel": "时光穿梭",
-  "Expand Time travel": "展开时光穿梭",
-  "Collapse Time travel": "收起时光穿梭",
   "Esri Wayback imagery": "Esri Wayback 影像",
   "Older imagery": "更早的影像",
   "Imagery date": "影像日期",
@@ -2892,5 +2890,11 @@
   "{count} placemarks": {
     "other": "{count} 个地标"
   },
-  "S2 Underground publishes these KMZ products to GitHub. New uploads are detected within seconds and replace the previous edition automatically. Click a marker for its report.": "S2 Underground 在 GitHub 发布这些 KMZ 产品。新上传的内容会在数秒内被检测到，并自动替换旧版本。点击标记查看报告。"
+  "S2 Underground publishes these KMZ products to GitHub. New uploads are detected within seconds and replace the previous edition automatically. Click a marker for its report.": "S2 Underground 在 GitHub 发布这些 KMZ 产品。新上传的内容会在数秒内被检测到，并自动替换旧版本。点击标记查看报告。",
+  "TIME TRAVEL": "时光穿梭",
+  "Aerial (NAIP)": "航拍影像 (NAIP)",
+  "Aerial": "航拍",
+  "Compare": "对比",
+  "Aerial imagery year": "航拍影像年份",
+  "Compare with year (right side)": "与年份对比（右侧）"
 }

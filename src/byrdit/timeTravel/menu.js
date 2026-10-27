@@ -1,29 +1,32 @@
 /**
- * The Time travel menu: ONE collapsible panel on the right of the map that
- * hosts the History controls (timeline, play, feed chips, LIVE badge) and the
- * Esri Wayback imagery slider, so both ways of "going back in time" live in
- * one place. It is a fork module (DESIGN.md 4.1): the two hosts, History and
- * Wayback, each ask this file for a slot and mount their own DOM in it.
+ * The Time travel menu: ONE right-rail card (#time-travel-panel in
+ * #right-context-rail, a sibling of DISPLAY, CCTV, STREET LEVEL and CONTEXT)
+ * that hosts the History controls (timeline, play, feed chips, LIVE badge),
+ * the Esri Wayback imagery slider and the NAIP aerial year slider, so every
+ * way of "going back in time" lives in one place. It is a fork module
+ * (DESIGN.md 4.1): the hosts each ask this file for a slot and mount their own
+ * DOM in it.
  *
  *   const menu = ensureTimeTravelMenu(document);
  *   const slot = menu.claim('history');   // shows the section, returns its host
  *   ... mount into slot ...
  *   menu.release('history');              // hides the section again
  *
- * Collapsed until the owner clicks the header (it is NOT remembered between
- * loads: the map always starts uncluttered). A section is shown only while a
- * host has claimed it, so with the Wayback flag off there is no Imagery
- * section, and the whole menu stays hidden until something is claimed.
+ * The card's markup is static (src/ui/templates/context.html) so the standard
+ * panel chrome, rail layout, themes and mobile sheets treat it like any other
+ * rail card; this module ADOPTS that element. Only when a document has no such
+ * element (unit-test fake DOMs, embeds) is a card built and appended to the
+ * rail (or the body). Collapse/expand is the panel chrome's
+ * (.panel-collapse-btn[data-collapse-target]); setOpen()/isOpen() drive and
+ * read the same `collapsed` class.
  *
- * Placement: it is its own fixed panel, not a child of #right-context-rail,
- * because the rail's layout, mobile sheets and cockpit rules all enumerate
- * their own panels. Cockpit, scene playback and recording hide it (as they
- * hide the rail and its Display panel); clean view fades it with the other
- * fork controls (cleanView.css).
+ * A section is shown only while a host has claimed it, so with the Wayback
+ * flag off there is no Imagery section, with no NAIP offer no Aerial section,
+ * and the whole card stays `hidden` until something is claimed.
  */
 import { msg, t } from '../../i18n/index.js';
 
-export const TIME_TRAVEL_ID = 'gev-time-travel';
+export const TIME_TRAVEL_ID = 'time-travel-panel';
 export const TIME_TRAVEL_TOGGLE_ID = 'gev-time-travel-toggle';
 export const TIME_TRAVEL_BODY_ID = 'gev-time-travel-body';
 export const TIME_TRAVEL_STYLE_ID = 'gev-time-travel-style';
@@ -32,86 +35,27 @@ export const TIME_TRAVEL_STYLE_ID = 'gev-time-travel-style';
 export const SECTIONS = Object.freeze([
   Object.freeze({ name: 'history', title: msg('History') }),
   Object.freeze({ name: 'imagery', title: msg('Imagery') }),
+  Object.freeze({ name: 'aerial', title: msg('Aerial (NAIP)') }),
 ]);
 
 export const TIME_TRAVEL_CSS = `
-.gev-tt {
-  position: fixed;
-  /* right column like the DISPLAY rail, above the HUD readout and the
-     bottom-right navigation control, clear of the bottom-centre dock */
-  right: var(--right-rail-x, 52px);
-  bottom: 200px;
-  z-index: 112;
-  box-sizing: border-box;
-  width: var(--right-collapsed-width, 132px);
-  max-width: calc(100vw - 16px);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  border: 1px solid var(--glass-border, rgba(255,255,255,0.14));
-  border-radius: var(--panel-radius, 14px);
-  background: var(--glass-bg, rgba(10,14,20,0.72));
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  color: var(--text-secondary, #c8d0da);
-  font: 500 11px/1.35 var(--font-mono, ui-monospace, monospace);
-}
-.gev-tt[hidden] { display: none; }
-.gev-tt[data-expanded='true'] { width: min(400px, calc(100vw - 16px)); }
-.gev-tt-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 42px;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 10px 8px 14px;
-  border: 0;
-  border-radius: inherit;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.gev-tt[data-expanded='true'] .gev-tt-toggle { min-height: 32px; border-radius: var(--panel-radius, 14px) var(--panel-radius, 14px) 0 0; }
-.gev-tt-title {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 8px;
-  letter-spacing: 1.4px;
-  color: var(--text-dim, #8a94a0);
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-.gev-tt-glyph {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border: 1px solid var(--glass-border, rgba(255,255,255,0.14));
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-secondary, #c8d0da);
-  font-size: 12px;
-  line-height: 1;
-}
-.gev-tt-toggle:hover .gev-tt-glyph { border-color: var(--glass-border-hover, rgba(255,255,255,0.3)); color: var(--accent, #7fd3ff); }
-.gev-tt-toggle:focus-visible { outline: 2px solid var(--text-primary, #eef3f8); outline-offset: -3px; }
+/* The card itself (position, width, glass, header) is rail CSS:
+   layers.css and time-travel.css. Only the sections are styled here. */
 .gev-tt-body {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 8px 10px 10px;
-  border-top: 1px solid var(--glass-border, rgba(255,255,255,0.14));
-  max-height: min(520px, calc(100vh - 280px));
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  min-width: 0;
+  color: var(--text-secondary, #c8d0da);
+  font: 500 11px/1.35 var(--font-mono, ui-monospace, monospace);
 }
 .gev-tt-body[hidden], .gev-tt-section[hidden] { display: none; }
 .gev-tt-section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.gev-tt-section + .gev-tt-section:not([hidden]) {
+  padding-top: 8px;
+  border-top: 1px solid var(--glass-border, rgba(255,255,255,0.14));
+}
 .gev-tt-heading {
   margin: 0;
   font: 600 9px/1.2 var(--font-mono, ui-monospace, monospace);
@@ -120,17 +64,7 @@ export const TIME_TRAVEL_CSS = `
   color: var(--text-dim, #8a94a0);
 }
 .gev-tt-slot { min-width: 0; }
-@media (max-width: 900px) {
-  /* Phones and narrow windows: a launcher on the right edge in the free band
-     under the top rails; open, a full-width sheet from the right that stops
-     well above the bottom navigation control and the tab bar. */
-  .gev-tt { top: 150px; bottom: auto; right: 8px; z-index: 120; }
-  .gev-tt[data-expanded='true'] { left: 8px; width: auto; }
-  .gev-tt-body { max-height: max(200px, calc(100dvh - 150px - 280px)); }
-  .gev-tt-toggle { min-height: 44px; }
-}
-body:is(.cockpit-mode, .scene-playback-mode, .recording-mode) .gev-tt { display: none !important; }
-@media (prefers-reduced-motion: reduce) { .gev-tt * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { #time-travel-panel * { transition: none !important; } }
 `;
 
 const menus = new WeakMap();
@@ -151,8 +85,62 @@ function ensureStyle(doc) {
   (doc.head ?? doc.body).append(style);
 }
 
+const RAIL_ID = 'right-context-rail';
+const CONTEXT_PANEL_ID = 'global-context-panel';
+
+function hasClass(node, name) {
+  return (node.getAttribute('class') ?? '').split(/\s+/).includes(name);
+}
+
+function setClass(node, name, on) {
+  const names = (node.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+  const next = names.filter((n) => n !== name);
+  if (on) next.push(name);
+  node.setAttribute('class', next.join(' '));
+}
+
+/** The card for a document that has no static one (tests, embeds). */
+function buildCard(doc) {
+  const root = el(doc, 'div', {
+    cls: 'panel-collapsible collapsed',
+    attrs: { id: TIME_TRAVEL_ID, 'data-panel-id': TIME_TRAVEL_ID },
+  });
+  const inner = el(doc, 'div', {
+    cls: 'time-travel-panel-inner',
+    attrs: { 'data-rail-scroller': '' },
+  });
+  const header = el(doc, 'div', { cls: 'panel-header' });
+  header.append(
+    el(doc, 'span', { cls: 'panel-title', text: t('TIME TRAVEL') }),
+    el(doc, 'span', { cls: 'panel-divider' }),
+  );
+  const toggle = el(doc, 'button', {
+    cls: 'panel-collapse-btn',
+    attrs: {
+      id: TIME_TRAVEL_TOGGLE_ID,
+      type: 'button',
+      'data-collapse-target': TIME_TRAVEL_ID,
+      title: t('Expand panel'),
+    },
+    text: '◀',
+  });
+  header.append(toggle);
+  const body = el(doc, 'div', {
+    cls: 'gev-tt-body',
+    attrs: { id: TIME_TRAVEL_BODY_ID, role: 'group', 'aria-label': t('Time travel') },
+  });
+  inner.append(header, body);
+  root.append(inner);
+  root.hidden = true;
+  const rail = doc.getElementById?.(RAIL_ID);
+  const before = rail ? doc.getElementById?.(CONTEXT_PANEL_ID) : null;
+  if (rail && before?.parentNode === rail && rail.insertBefore) rail.insertBefore(root, before);
+  else (rail ?? doc.body).append(root);
+  return { root, toggle, body };
+}
+
 /**
- * Get (or build) the one Time travel menu of a document.
+ * Get (or adopt/build) the one Time travel menu of a document.
  * @param {Document} doc
  * @returns {{root: object, toggle: object, body: object,
  *   claim: (name: string) => object, release: (name: string) => void,
@@ -166,37 +154,26 @@ export function ensureTimeTravelMenu(doc = globalThis.document) {
   if (existing && !existing.destroyed) return existing;
 
   ensureStyle(doc);
-  const root = el(doc, 'aside', {
-    cls: 'gev-tt',
-    attrs: {
-      id: TIME_TRAVEL_ID,
-      'data-expanded': 'false',
-      'aria-label': t('Time travel'),
-    },
-  });
-  root.hidden = true; // until a host claims a section
-  const toggle = el(doc, 'button', {
-    cls: 'gev-tt-toggle',
-    attrs: {
-      id: TIME_TRAVEL_TOGGLE_ID,
-      type: 'button',
-      'aria-expanded': 'false',
-      'aria-controls': TIME_TRAVEL_BODY_ID,
-      title: t('Expand Time travel'),
-    },
-  });
-  const title = el(doc, 'span', { cls: 'gev-tt-title', text: t('Time travel') });
-  const glyph = el(doc, 'span', {
-    cls: 'gev-tt-glyph',
-    attrs: { 'aria-hidden': 'true' },
-    text: '◀',
-  });
-  toggle.append(title, glyph);
-  const body = el(doc, 'div', {
-    cls: 'gev-tt-body',
-    attrs: { id: TIME_TRAVEL_BODY_ID, role: 'group', 'aria-label': t('Time travel') },
-  });
-  body.hidden = true;
+  let root = doc.getElementById?.(TIME_TRAVEL_ID) ?? null;
+  const adopted = Boolean(root);
+  let toggle;
+  let body;
+  if (adopted) {
+    toggle =
+      doc.getElementById?.(TIME_TRAVEL_TOGGLE_ID) ??
+      root.querySelector?.('.panel-collapse-btn') ??
+      null;
+    body = doc.getElementById?.(TIME_TRAVEL_BODY_ID) ?? null;
+    if (!toggle || !body) {
+      // a card without the expected parts: treat it as absent
+      root = null;
+    }
+  }
+  const built = root ? null : buildCard(doc);
+  if (built) ({ root, toggle, body } = built);
+  const created = Boolean(built);
+  body.replaceChildren?.();
+  toggle.setAttribute('aria-controls', TIME_TRAVEL_BODY_ID);
 
   const sections = new Map();
   for (const { name, title: heading } of SECTIONS) {
@@ -214,26 +191,31 @@ export function ensureTimeTravelMenu(doc = globalThis.document) {
     body.append(section);
     sections.set(name, { section, slot, claimed: false });
   }
-  root.append(toggle, body);
-  doc.body.append(root);
 
-  let open = false;
+  const isOpen = () => !hasClass(root, 'collapsed');
+  /** What the panel chrome does on a state change, for when it is not there. */
+  const syncControls = () => {
+    const open = isOpen();
+    toggle.textContent = open ? '▶' : '◀';
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('title', open ? t('Collapse panel') : t('Expand panel'));
+  };
   const menu = {
     root,
     toggle,
     body,
     destroyed: false,
-    isOpen: () => open,
+    isOpen,
     setOpen(next) {
-      open = Boolean(next);
-      root.setAttribute('data-expanded', String(open));
-      toggle.setAttribute('aria-expanded', String(open));
-      toggle.setAttribute(
-        'title',
-        open ? t('Collapse Time travel') : t('Expand Time travel'),
-      );
-      glyph.textContent = open ? '▶' : '◀';
-      body.hidden = !open;
+      const want = Boolean(next);
+      if (want === isOpen()) return;
+      // Let the panel chrome do it (persistence, rail accordion, ARIA) ...
+      if (!created) toggle.click?.();
+      // ... and do it here when the chrome is not bound (fake DOMs, embeds).
+      if (want !== isOpen()) {
+        setClass(root, 'collapsed', !want);
+        syncControls();
+      }
     },
     /** The host element of a section, whether claimed or not. */
     slot(name) {
@@ -259,21 +241,28 @@ export function ensureTimeTravelMenu(doc = globalThis.document) {
     destroy() {
       if (menu.destroyed) return;
       menu.destroyed = true;
-      toggle.removeEventListener('click', onToggle);
+      if (created) toggle.removeEventListener('click', onToggle);
       root.removeEventListener('keydown', onKey);
-      root.remove();
+      if (created) root.remove();
+      else {
+        // the static card stays; it just empties and hides again
+        for (const { section } of sections.values()) section.remove();
+        root.hidden = true;
+      }
       if (menus.get(doc) === menu) menus.delete(doc);
     },
   };
-  const onToggle = () => menu.setOpen(!open);
-  // Escape closes the menu and gives the focus back to its header
+  // without the panel chrome the header button has no handler of its own
+  const onToggle = () => menu.setOpen(!isOpen());
+  // Escape closes the card and gives the focus back to its header button
   const onKey = (event) => {
-    if (event?.key !== 'Escape' || !open) return;
+    if (event?.key !== 'Escape' || !isOpen()) return;
     menu.setOpen(false);
     toggle.focus?.();
   };
-  toggle.addEventListener('click', onToggle);
+  if (created) toggle.addEventListener('click', onToggle);
   root.addEventListener('keydown', onKey);
+  syncControls();
   menus.set(doc, menu);
   return menu;
 }

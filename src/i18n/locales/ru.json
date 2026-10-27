@@ -3075,8 +3075,6 @@
   "Another imagery tool is using the map": "Карту сейчас использует другой инструмент снимков",
   "Esri imagery is unavailable right now": "Снимки Esri сейчас недоступны",
   "Time travel": "Путешествие во времени",
-  "Expand Time travel": "Развернуть «Путешествие во времени»",
-  "Collapse Time travel": "Свернуть «Путешествие во времени»",
   "Esri Wayback imagery": "Снимки Esri Wayback",
   "Older imagery": "Более старые снимки",
   "Imagery date": "Дата снимков",
@@ -3099,5 +3097,11 @@
   "Your choice applies now, but could not be saved.": "Ваш выбор применён, но сохранить его не удалось.",
   "Voice replies appear here.": "Здесь появляются голосовые ответы.",
   "Preview is off.": "Предпросмотр отключён.",
-  "Automatic stop is unavailable for this voice connection.": "Автоматическая остановка недоступна для этого голосового подключения."
+  "Automatic stop is unavailable for this voice connection.": "Автоматическая остановка недоступна для этого голосового подключения.",
+  "TIME TRAVEL": "ПУТЕШЕСТВИЕ ВО ВРЕМЕНИ",
+  "Aerial (NAIP)": "Аэрофотосъёмка (NAIP)",
+  "Aerial": "Аэрофото",
+  "Compare": "Сравнить",
+  "Aerial imagery year": "Год аэрофотоснимков",
+  "Compare with year (right side)": "Сравнить с годом (правая сторона)"
 }

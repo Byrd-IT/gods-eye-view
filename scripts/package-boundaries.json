@@ -959,7 +959,8 @@
       "src/ui/styles/first-run.css",
       "src/ui/styles/provider-settings.css",
       "src/ui/styles/weather.css",
-      "src/ui/styles/recent-imagery.css"
+      "src/ui/styles/recent-imagery.css",
+      "src/ui/styles/time-travel.css"
     ],
     "external": []
   },

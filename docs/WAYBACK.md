@@ -4,6 +4,14 @@ A "Time travel" control that takes the Esri World Imagery layer back through
 the ~197 Wayback releases (2014 to now), worldwide. It is separate from the
 NAIP year slider (Texas, `GEV_BASEMAP_NAIP`) and does not change it.
 
+Where it lives: the "Time travel" card (`#time-travel-panel`) is a real
+right-rail card next to DISPLAY, CCTV, STREET LEVEL and CONTEXT. It stays hidden
+until a section is claimed (`src/byrdit/timeTravel/menu.js`): History, Imagery
+(this control, flag on) and Aerial (NAIP) (the NAIP year slider, while Byrd-IT
+Open imagery with a NAIP offer is on screen; without the card it floats at the
+bottom as before). Open/closed state is the standard rail one (remembered like
+other rail cards); on phones it is in the Context sheet.
+
 Off unless `GEV_BYRDIT_WAYBACK=1`. With the flag off no route exists (404), no
 meta tag is rendered and the browser makes no request.
 

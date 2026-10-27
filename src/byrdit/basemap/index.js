@@ -16,7 +16,7 @@ import {
   ensureByrditOpen,
   flyToImageryBounds,
 } from './imageryVoice.js';
-import { createNaipSlider, createNaipSplit } from './naipSlider.js';
+import { createNaipMenuSlider, createNaipSplit } from './naipSlider.js';
 import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
 
 /**
@@ -174,7 +174,7 @@ export async function openBasemap({
               controller,
               session,
               naip: config.naip,
-              createSlider: createNaipSlider,
+              createSlider: createNaipMenuSlider,
               createSplit: createNaipSplit,
             })
           : null;
