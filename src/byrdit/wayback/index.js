@@ -277,8 +277,24 @@ export async function attachWayback({
     if (OWN_STACKS_THAT_COVER.has(controller.getActiveId?.())) disable();
   }
 
+  let startWait = null;
+
   async function enable() {
-    if (destroyed || state.on) return false;
+    if (destroyed) return false;
+    // A second call while the lease is still coming up waits for that
+    // start instead of returning false and letting the voice settle early.
+    if (startWait) return startWait;
+    if (state.on) return false;
+    const run = startEnable();
+    startWait = run;
+    try {
+      return await run;
+    } finally {
+      if (startWait === run) startWait = null;
+    }
+  }
+
+  async function startEnable() {
     if (releasing) await releasing;
     if (destroyed || state.on) return false;
     const mine = ++enabling;
@@ -430,8 +446,10 @@ export async function attachWayback({
   if (hookWindow) hookWindow.__gevWayback = waybackSlot;
   // Wayback can be on when the Open basemap flag is off. Install a voice
   // then; the basemap attach replaces it with one that also knows NAIP.
+  // If that basemap later detaches, restoreVoice puts this voice back.
+  // detach below removes whatever voice this slot still owns.
   let imagerySlot = null;
-  if (hookWindow && !hookWindow.__gevImagery) {
+  function mountWaybackVoice() {
     imagerySlot = {
       voice: createImageryVoice({
         getNaip: () => null,
@@ -443,6 +461,12 @@ export async function attachWayback({
     };
     hookWindow.__gevImagery = imagerySlot;
   }
+  waybackSlot.restoreVoice = () => {
+    if (destroyed || !hookWindow || hookWindow.__gevImagery) return false;
+    mountWaybackVoice();
+    return true;
+  };
+  if (hookWindow && !hookWindow.__gevImagery) mountWaybackVoice();
 
   const detach = () => {
     if (destroyed) return;

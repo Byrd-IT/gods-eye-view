@@ -881,3 +881,23 @@ test('detach removes the panel, layers and listeners', async () => {
   assert.equal(viewer.imageryLayers.length, 1);
   assert.equal(controller.getActiveId(), 'photoreal');
 });
+
+test('a second enable while the first is still starting waits for that start', async () => {
+  const { detach } = await setup({
+    controller: fakeController('photoreal'),
+  });
+  const first = detach.enable();
+  assert.equal(detach.state().on, true);
+  assert.equal(detach.state().ready, false);
+  const second = detach.enable();
+  let secondSettled = false;
+  second.then(() => {
+    secondSettled = true;
+  });
+  await Promise.resolve();
+  assert.equal(secondSettled, false);
+  assert.equal(await first, true);
+  assert.equal(await second, true);
+  assert.equal(detach.state().ready, true);
+  assert.equal(detach.state().on, true);
+});

@@ -212,7 +212,8 @@ export function createImageryVoice({
     const year = st.year ?? null;
     const plan = year === null || !block ? null : planYear(block, year);
     const layers = Array.isArray(st.layers) ? st.layers : null;
-    const compare = st.compare === true;
+    // naip.js wanted() splits only when compare is on and yearB is set.
+    const compare = st.compare === true && st.yearB !== null;
     return {
       year,
       enabled: Boolean(st.enabled),
@@ -299,17 +300,23 @@ export function createImageryVoice({
         try {
           await archive.disable?.();
         } catch {
-          /* waybackOff reports whether it actually turned off */
+          /* waybackStillOn reports that Wayback is still covering the layer */
         }
       }
       handle.setEnabled?.(true);
       handle.setYear(year);
       const flew = framed ? await frame(framed.bounds) : false;
+      const shot = snapshot(handle, block);
+      const stillOn = wasOn && archive?.state?.().on === true;
       return {
         ok: true,
-        ...snapshot(handle, block),
+        ...shot,
+        // A thrown disable leaves Wayback on. Do not claim the aerial layer
+        // is visible while that basemap is still covering it.
+        drawn: stillOn ? false : shot.drawn,
+        ...(stillOn ? { waybackStillOn: true } : {}),
         switched: opened.switched,
-        waybackOff: wasOn && archive?.state?.().on !== true,
+        waybackOff: wasOn && !stillOn,
         framed: framed ? { id: framed.id, name: framed.name, flew } : null,
       };
     },
@@ -338,14 +345,31 @@ export function createImageryVoice({
       );
       if (index < 0) return fail('Wayback is not available right now');
       handle.setIndex?.(index);
-      if (!handle.state?.().on) {
+      const before = handle.state?.() ?? {};
+      // enable() sets on true before the lease is ready. Settling then
+      // reports a release that is not on the map yet.
+      const starting = before.on === true && before.ready === false;
+      if (!before.on || starting) {
         let enabled = false;
         try {
           enabled = await handle.enable();
         } catch {
           enabled = false;
         }
-        if (!enabled) return fail('Wayback could not be turned on', { years });
+        if (!enabled) {
+          const after = handle.state?.() ?? {};
+          if (after.on === true && after.ready === false) {
+            return {
+              ok: true,
+              starting: true,
+              date: match.date,
+              release: match.release,
+              on: false,
+              years,
+            };
+          }
+          return fail('Wayback could not be turned on', { years });
+        }
       } else {
         try {
           handle.settleNow?.();
@@ -391,7 +415,11 @@ export function createImageryVoice({
         try {
           await handle.disable?.();
         } catch {
-          return fail('Wayback could not be turned off');
+          // Aerial may already be off. Keep that on the failure.
+          return fail('Wayback could not be turned off', {
+            target: which,
+            ...(Object.hasOwn(out, 'aerial') ? { aerial: out.aerial } : {}),
+          });
         }
         out.wayback = false;
       }

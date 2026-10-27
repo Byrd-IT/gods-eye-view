@@ -75,3 +75,35 @@ test('basemap attach installs the imagery hook and tears down only its own', asy
   assert.equal(globalThis.__gevImagery, undefined);
   result.destroy();
 });
+
+test('basemap detach restores the wayback voice when Wayback stays', async () => {
+  const hook = {};
+  const result = await openBasemap({
+    Cesium: { UrlTemplateImageryProvider: class {} },
+    viewer: {
+      scene: { primitives: { add() {}, remove() {} } },
+      container: { ownerDocument: { defaultView: hook } },
+    },
+    doc: { querySelector: () => ({ getAttribute: () => '1' }) },
+    fetchImpl: async (url) => {
+      if (url === '/basemap/config.json') return json(SERVED);
+      return json({ state: 'ok', warnings: [] });
+    },
+    createHealthMonitor: () => ({ start() {}, stop() {}, onChange: null }),
+  });
+  const detach = result.attach(controller());
+  const basemapVoice = hook.__gevImagery.voice;
+  let restored = 0;
+  hook.__gevWayback = {
+    restoreVoice() {
+      restored += 1;
+      hook.__gevImagery = { voice: { restored: true } };
+      return true;
+    },
+  };
+  detach();
+  assert.equal(restored, 1);
+  assert.equal(hook.__gevImagery.voice.restored, true);
+  assert.notEqual(hook.__gevImagery.voice, basemapVoice);
+  result.destroy();
+});

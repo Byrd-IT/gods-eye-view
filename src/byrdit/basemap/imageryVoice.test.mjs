@@ -403,6 +403,99 @@ test('year result says when compare hides the change and when the layer is not d
   assert.equal(Object.hasOwn(visible, 'yearB'), false);
 });
 
+test('compare is on only when yearB is also set', async () => {
+  const split = fakeNaip();
+  split.state = () => ({
+    year: 2018,
+    enabled: true,
+    compare: true,
+    yearB: null,
+    layers: [{ key: 'both:hires-2018', show: true }],
+  });
+  const result = await voice({ naip: split }).api.year({ year: 2018 });
+  assert.equal(result.ok, true);
+  assert.equal(result.compare, false);
+  assert.equal(Object.hasOwn(result, 'yearB'), false);
+});
+
+test('year does not claim the layer is drawn when Wayback disable throws', async () => {
+  const wb = fakeWayback([{ release: 20, date: '2018-06-15' }]);
+  await wb.enable();
+  wb.disable = async () => {
+    wb.calls.push(['disable']);
+    throw new Error(SECRET);
+  };
+  const covered = fakeNaip();
+  covered.state = () => ({
+    year: 2018,
+    enabled: true,
+    compare: false,
+    layers: [{ key: 'both:hires-2018', show: true }],
+  });
+  const { api } = voice({ naip: covered, getWayback: () => wb });
+  const result = await api.year({ year: 2018 });
+  assert.equal(wb.state().on, true);
+  assert.equal(result.ok === true && result.drawn === true, false);
+  assert.equal(result.drawn, false);
+  assert.equal(result.waybackStillOn, true);
+  assert.equal(result.waybackOff, false);
+  assert.equal(JSON.stringify(result).includes('sk-synth'), false);
+  assert.equal(JSON.stringify(result).includes('Bearer'), false);
+});
+
+test('off both keeps aerial false when Wayback disable throws', async () => {
+  const wb = fakeWayback([{ release: 20, date: '2018-06-15' }]);
+  wb.disable = async () => {
+    wb.calls.push(['disable']);
+    throw new Error(SECRET);
+  };
+  const { api, naip } = voice({ getWayback: () => wb });
+  const result = await api.off({ target: 'both' });
+  assert.equal(result.ok, false);
+  assert.equal(result.aerial, false);
+  assert.equal(result.error, 'Wayback could not be turned off');
+  assert.deepEqual(naip.calls.at(-1), ['setEnabled', false]);
+  assert.equal(JSON.stringify(result).includes('sk-synth'), false);
+});
+
+test('wayback does not settle while enable is still starting', async () => {
+  const rows = [{ release: 20, date: '2018-06-15' }];
+  const wb = fakeWayback(rows);
+  let on = true;
+  let ready = false;
+  wb.state = () => ({
+    on,
+    ready,
+    date: rows[0].date,
+    index: 0,
+  });
+  let finish;
+  wb.enable = () =>
+    new Promise((resolve) => {
+      wb.calls.push(['enable']);
+      finish = () => {
+        ready = true;
+        resolve(true);
+      };
+    });
+  const { api } = voice({ getWayback: () => wb });
+  const pending = api.wayback({ date: '2018' });
+  await Promise.resolve();
+  assert.equal(
+    wb.calls.some((call) => call[0] === 'settleNow'),
+    false,
+  );
+  finish();
+  const result = await pending;
+  assert.equal(result.ok, true);
+  assert.equal(result.on, true);
+  assert.equal(result.starting, undefined);
+  assert.equal(
+    wb.calls.some((call) => call[0] === 'settleNow'),
+    false,
+  );
+});
+
 test('status reports the catalog years and wayback availability', async () => {
   const wb = fakeWayback([{ release: 20, date: '2018-06-15' }]);
   const { api } = voice({ getWayback: () => wb });

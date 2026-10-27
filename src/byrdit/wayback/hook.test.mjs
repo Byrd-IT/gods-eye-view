@@ -95,3 +95,20 @@ test('wayback installs a wayback-only voice and removes only that voice', async 
   assert.equal(hook.__gevWayback, undefined);
   assert.equal(hook.__gevImagery, other);
 });
+
+test('basemap detach can restore the wayback-only voice, and wayback detach removes it', async () => {
+  const hook = { __gevImagery: { voice: { basemap: true } } };
+  const detach = await attach(docWith(hook));
+  assert.equal(hook.__gevImagery.voice.basemap, true);
+  assert.equal(hook.__gevWayback.restoreVoice(), false);
+  delete hook.__gevImagery;
+  assert.equal(hook.__gevWayback.restoreVoice(), true);
+  assert.equal(typeof hook.__gevImagery.voice.off, 'function');
+  assert.equal(hook.__gevImagery.voice.basemap, undefined);
+  const year = await hook.__gevImagery.voice.year({ year: 2018 });
+  assert.equal(year.ok, false);
+  detach();
+  assert.equal(hook.__gevWayback, undefined);
+  assert.equal(hook.__gevImagery, undefined);
+  assert.equal(globalThis.__gevImagery, undefined);
+});

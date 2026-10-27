@@ -188,8 +188,16 @@ export async function openBasemap({
       });
       if (hookWindow) hookWindow.__gevImagery = { voice: imageryVoice };
       const detach = () => {
-        if (hookWindow?.__gevImagery?.voice === imageryVoice)
+        if (hookWindow?.__gevImagery?.voice === imageryVoice) {
           delete hookWindow.__gevImagery;
+          // Wayback may still be mounted. Put its voice back; its own
+          // detach removes that voice, so it does not stay after Wayback leaves.
+          try {
+            hookWindow.__gevWayback?.restoreVoice?.();
+          } catch {
+            /* a failed restore leaves the voice off, which is the old result */
+          }
+        }
         if (health) health.onChange = null;
         naip?.();
         buildings?.();

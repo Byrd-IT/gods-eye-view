@@ -356,8 +356,9 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // + 159 characters: the routing sentence keeps map ISS questions on track_entity.
   // + 2026 characters: the control_imagery tool and its routing sentence.
   // + 302 characters: drawn, compare, and waybackOff speaking rule.
+  // + 230 characters: waybackStillOn and starting speaking rule (instructions + tool).
   assert.ok(
-    size <= 52000 + 297 + 89 + 2113 + 1812 + 159 + 2026 + 302,
+    size <= 52000 + 297 + 89 + 2113 + 1812 + 159 + 2026 + 302 + 230,
     `prompt size ${size}`,
   );
 });

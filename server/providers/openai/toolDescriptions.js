@@ -706,7 +706,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_imagery: {
     description:
-      'Aerial imagery by year: NAIP and the historic or colour county sets (show 2018 aerial, NAIP 2024, Titus 1940). year uses the live catalog; an unknown year returns the valid years. county is optional and frames that county. wayback is only for Esri Wayback (wayback 2014), not for NAIP. latest or recent satellite imagery stays the recent-imagery layer. Switching the basemap stack stays set_map_stack. Say the resulting year and sets, not the request. If drawn is false, do not claim the imagery is visible. If compare is true, only the left side changed. If waybackOff is true, say Wayback turned off.',
+      'Aerial imagery by year: NAIP and the historic or colour county sets (show 2018 aerial, NAIP 2024, Titus 1940). year uses the live catalog; an unknown year returns the valid years. county is optional and frames that county. wayback is only for Esri Wayback (wayback 2014), not for NAIP. latest or recent satellite imagery stays the recent-imagery layer. Switching the basemap stack stays set_map_stack. Say the resulting year and sets, not the request. If drawn is false, do not claim the imagery is visible. If compare is true, only the left side changed. If waybackOff is true, say Wayback turned off. If waybackStillOn is true, Wayback is still covering the aerial layer. If starting is true, Wayback is not on yet.',
     $position: 1,
     parameters: {
       properties: {
