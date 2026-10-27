@@ -1064,11 +1064,12 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // drawn/compare/waybackOff speaking rule adds 151 characters (36468 -> 36619).
   // waybackStillOn and starting speaking rule adds 115 characters (36619 -> 36734).
   assert.equal(block.length, 36734, 'serialized tool schema length drifted');
-  // Description-only edits of tool text are allowed. Re-pin this hash when they land.
+  // Description-only edits of tool text are allowed. Re-pin both the length
+  // (with a changelog line above) and this hash when they land.
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
     '1d1c8e4110e038e60f4c25a8d3e69dadf183b45e3d49aea59ff7a82aaa273dae',
-    'the first-run missions must ride EXISTING tools: description-only edits are allowed and must re-pin this hash; no cache bust',
+    'the first-run missions must ride EXISTING tools: no schema-shape edits; description-only edits are allowed but must re-pin this hash and the length above',
   );
   const instructions = fs.readFileSync(
     new URL('../server/providers/openai/instructions.js', import.meta.url),
