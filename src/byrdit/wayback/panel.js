@@ -74,10 +74,11 @@ export function createWaybackPanel({
           minWidth: '0',
           padding: '0',
           color: 'inherit',
-          font: '13px/1.4 system-ui, sans-serif',
+          // Same look as the Aerial rows beside it: the card's own font.
+          font: 'inherit',
           display: 'flex',
           flexDirection: 'column',
-          gap: '6px',
+          gap: '4px',
           pointerEvents: 'auto',
         }
       : {
@@ -117,8 +118,10 @@ export function createWaybackPanel({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      gap: '12px',
-      minHeight: '44px',
+      gap: embedded ? '4px 8px' : '12px',
+      // The floating panel keeps a 44 px touch row; in the menu the label
+      // is the click target and the row matches the Aerial rows.
+      minHeight: embedded ? '0' : '44px',
     },
   });
   const head = el(doc, 'label', top, {
@@ -126,7 +129,7 @@ export function createWaybackPanel({
       display: 'flex',
       alignItems: 'center',
       gap: '8px',
-      minHeight: '44px',
+      minHeight: embedded ? '0' : '44px',
       cursor: 'pointer',
     },
   });
@@ -135,14 +138,19 @@ export function createWaybackPanel({
   const title = embedded ? t('Esri Wayback imagery') : t('Time travel');
   const toggle = el(doc, 'input', head, {
     attrs: { type: 'checkbox', 'aria-label': title },
-    style: { width: '22px', height: '22px', margin: '0' },
+    // In the menu: the browser's default box, like Aerial and Compare.
+    style: embedded ? {} : { width: '22px', height: '22px', margin: '0' },
   });
   el(doc, 'span', head, { text: title });
   toggle.addEventListener('change', () => onToggle(Boolean(toggle.checked)));
 
   const label = el(doc, 'output', top, {
     attrs: { 'aria-live': 'polite', class: 'gev-wayback-date' },
-    style: { fontWeight: '600', fontSize: '16px', whiteSpace: 'nowrap' },
+    style: {
+      fontWeight: '600',
+      fontSize: embedded ? 'inherit' : '16px',
+      whiteSpace: 'nowrap',
+    },
   });
   const body = el(doc, 'div', panel, {
     style: {

@@ -872,6 +872,44 @@ test('panel: strings go through t() (Spanish catalog applies)', async () => {
   }
 });
 
+test('panel: in the Time travel menu the checkbox, row and font match the Aerial rows; floating keeps the 22 px touch box', () => {
+  const build = (embedded) => {
+    const doc = fakeDoc();
+    const container = doc.createElement('div');
+    const panel = createWaybackPanel({
+      container,
+      count: 3,
+      onToggle() {},
+      onIndex() {},
+      onStep() {},
+      onLatest() {},
+      embedded,
+      doc,
+    });
+    const all = [...panel.element.walk()];
+    return {
+      panel,
+      box: all.find((e) => e.attributes.type === 'checkbox'),
+      date: all.find((e) => e.tagName === 'OUTPUT'),
+      label: all.find((e) => e.tagName === 'LABEL'),
+    };
+  };
+  const menu = build(true);
+  // The browser's default box, exactly like the Aerial and Compare boxes.
+  assert.equal(menu.box.style.width, undefined);
+  assert.equal(menu.box.style.height, undefined);
+  assert.equal(menu.box.style.margin, undefined);
+  // The card's own font, no forced 13 px / 16 px sans-serif.
+  assert.equal(menu.panel.element.style.font, 'inherit');
+  assert.equal(menu.date.style.fontSize, 'inherit');
+  // No 44 px row; the label is the click target.
+  assert.equal(menu.label.style.minHeight, '0');
+  const floating = build(false);
+  assert.equal(floating.box.style.width, '22px');
+  assert.equal(floating.box.style.height, '22px');
+  assert.equal(floating.label.style.minHeight, '44px');
+});
+
 test('detach removes the panel, layers and listeners', async () => {
   const { detach, viewer, controller } = await setup({
     controller: fakeController('photoreal'),
