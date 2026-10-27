@@ -901,3 +901,20 @@ test('a second enable while the first is still starting waits for that start', a
   assert.equal(detach.state().ready, true);
   assert.equal(detach.state().on, true);
 });
+
+test('enable after disable during start begins again', async () => {
+  const { detach } = await setup({
+    controller: fakeController('photoreal'),
+  });
+  const first = detach.enable();
+  assert.equal(detach.state().on, true);
+  assert.equal(detach.state().ready, false);
+  const stopping = detach.disable();
+  assert.equal(detach.state().on, false);
+  const again = detach.enable();
+  assert.equal(await first, false);
+  assert.equal(await stopping, undefined);
+  assert.equal(await again, true);
+  assert.equal(detach.state().on, true);
+  assert.equal(detach.state().ready, true);
+});

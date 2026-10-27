@@ -283,7 +283,8 @@ export async function attachWayback({
     if (destroyed) return false;
     // A second call while the lease is still coming up waits for that
     // start instead of returning false and letting the voice settle early.
-    if (startWait) return startWait;
+    // After disable, that start is cancelled: do not hand it back.
+    if (startWait && state.on) return startWait;
     if (state.on) return false;
     const run = startEnable();
     startWait = run;
@@ -338,6 +339,8 @@ export async function attachWayback({
   }
 
   function disable() {
+    // The in-flight start is cancelled. A later enable must start fresh.
+    startWait = null;
     if (!state.on && !lease) return releasing ?? Promise.resolve();
     enabling += 1;
     state.on = false;

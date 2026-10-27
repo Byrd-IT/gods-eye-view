@@ -496,6 +496,32 @@ test('wayback does not settle while enable is still starting', async () => {
   );
 });
 
+test('wayback reports starting when enable stays unready', async () => {
+  const rows = [{ release: 20, date: '2018-06-15' }];
+  const wb = fakeWayback(rows);
+  wb.state = () => ({
+    on: true,
+    ready: false,
+    date: rows[0].date,
+    index: 0,
+  });
+  wb.enable = async () => {
+    wb.calls.push(['enable']);
+    return false;
+  };
+  const { api } = voice({ getWayback: () => wb });
+  const result = await api.wayback({ date: '2018' });
+  assert.equal(result.ok, true);
+  assert.equal(result.starting, true);
+  assert.equal(result.on, false);
+  assert.equal(result.date, '2018-06-15');
+  assert.equal(
+    wb.calls.some((call) => call[0] === 'settleNow'),
+    false,
+  );
+  assert.equal(JSON.stringify(result).includes('sk-synth'), false);
+});
+
 test('status reports the catalog years and wayback availability', async () => {
   const wb = fakeWayback([{ release: 20, date: '2018-06-15' }]);
   const { api } = voice({ getWayback: () => wb });
