@@ -510,3 +510,410 @@ test('a preset that did not move the clock is not reported as done', async () =>
   assert.equal(r.ok, false);
   assert.match(r.error, /newer time change/);
 });
+
+test('a History-owned preset reports the clamped clock, not a newer change', async () => {
+  const requested = Date.parse('2026-10-26T23:41:00Z');
+  const clamped = Date.parse('2024-01-01T00:00:00Z');
+  const h = voiceFor({
+    provider: 'history',
+    presetResult: { ok: true, timeMs: requested },
+  });
+  h.sky.applyPreset = async (id) => {
+    h.calls.push(['preset', id]);
+    h.state.timeMs = clamped;
+    return h.state.presetResult;
+  };
+  h.state.active = true;
+  const r = await h.voice.preset('sunset');
+  assert.equal(r.ok, true);
+  assert.equal(r.historyMoved, true);
+  assert.equal(r.time, '2024-01-01T00:00:00.000Z');
+  assert.equal(r.timeMode, 'history');
+  assert.equal(r.error, undefined);
+});
+
+test('look returns unavailable if Sky is destroyed while satellites load', async () => {
+  const h = voiceFor({
+    satStatus: 'loading',
+    satelliteWaitMs: 200,
+    search: () => [hit('ISS (ZARYA)', 'satellite')],
+  });
+  h.state.active = true;
+  const pending = h.voice.look('the ISS');
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  h.state.destroyed = true;
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'lookAt'),
+    false,
+  );
+});
+
+test('look returns unavailable if Sky is destroyed while star data loads', async () => {
+  const h = voiceFor({
+    satelliteWaitMs: 0,
+    search: () => [hit('Jupiter', 'planet')],
+  });
+  h.state.active = true;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  h.sky.content.ensureData = async () => {
+    h.calls.push(['ensureData']);
+    await gate;
+  };
+  const pending = h.voice.look('Jupiter');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  h.state.destroyed = true;
+  release();
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'search'),
+    false,
+  );
+  assert.equal(
+    h.calls.some((c) => c[0] === 'lookAt'),
+    false,
+  );
+});
+
+test('look returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor({
+    search: () => [hit('Jupiter', 'planet')],
+  });
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  h.sky.openHere = async () => {
+    h.calls.push(['openHere']);
+    await gate;
+    h.state.active = true;
+    return { ok: true };
+  };
+  const pending = h.voice.look('Jupiter');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  h.state.destroyed = true;
+  release();
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'ensureData' || c[0] === 'search'),
+    false,
+  );
+});
+
+async function destroyDuringOpen(h, run) {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  h.sky.openHere = async () => {
+    h.calls.push(['openHere']);
+    await gate;
+    h.state.active = true;
+    return { ok: true };
+  };
+  const pending = run();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  h.state.destroyed = true;
+  release();
+  return pending;
+}
+
+test('time returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor();
+  const r = await destroyDuringOpen(h, () =>
+    h.voice.time({ time: '2026-10-26T03:00:00Z' }),
+  );
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'setTime'),
+    false,
+  );
+});
+
+test('lines returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor();
+  const r = await destroyDuringOpen(h, () => h.voice.lines(false));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'setFlags'),
+    false,
+  );
+});
+
+test('preset returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor();
+  const r = await destroyDuringOpen(h, () => h.voice.preset('sunset'));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(
+    h.calls.some((c) => c[0] === 'preset'),
+    false,
+  );
+});
+
+test('a History-owned preset whose clock already matches still reports the move', async () => {
+  const matched = Date.parse('2026-10-26T23:41:00Z');
+  const h = voiceFor({
+    provider: 'history',
+    timeMs: matched,
+    presetResult: { ok: true, timeMs: matched },
+  });
+  h.state.active = true;
+  const r = await h.voice.preset('sunset');
+  assert.equal(r.ok, true);
+  assert.equal(r.historyMoved, true);
+  assert.equal(r.time, '2026-10-26T23:41:00.000Z');
+  assert.equal(r.timeMode, 'history');
+  assert.equal(r.error, undefined);
+});
+
+test('preset returns unavailable if Sky is destroyed during applyPreset', async () => {
+  const h = voiceFor();
+  h.state.active = true;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  h.sky.applyPreset = async (id) => {
+    h.calls.push(['preset', id]);
+    await gate;
+    if (
+      h.state.presetResult?.ok &&
+      Number.isFinite(h.state.presetResult.timeMs)
+    )
+      h.state.timeMs = h.state.presetResult.timeMs;
+    return h.state.presetResult;
+  };
+  const pending = h.voice.preset('sunset');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  h.state.destroyed = true;
+  release();
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.preset, undefined);
+  assert.equal(r.time, undefined);
+});
+
+function replaceableVoice() {
+  const opened = fakeSky();
+  const replacement = fakeSky();
+  let mounted = opened.sky;
+  const voice = createSkyVoice({
+    getHandle: () => mounted,
+    satelliteWaitMs: 0,
+  });
+  return {
+    opened,
+    replacement,
+    voice,
+    replace() {
+      mounted = replacement.sky;
+    },
+  };
+}
+
+async function replaceDuringOpen(pair, run) {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  pair.opened.sky.openHere = async () => {
+    pair.opened.calls.push(['openHere']);
+    await gate;
+    pair.opened.state.active = true;
+    return { ok: true };
+  };
+  const pending = run();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  pair.replace();
+  release();
+  return pending;
+}
+
+test('time returns unavailable if a different Sky is mounted while opening', async () => {
+  const pair = replaceableVoice();
+  const r = await replaceDuringOpen(pair, () =>
+    pair.voice.time({ time: '2026-10-26T03:00:00Z' }),
+  );
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.opened, undefined);
+  assert.equal(
+    pair.replacement.calls.some((c) => c[0] === 'setTime'),
+    false,
+  );
+});
+
+test('lines returns unavailable if a different Sky is mounted while opening', async () => {
+  const pair = replaceableVoice();
+  const r = await replaceDuringOpen(pair, () => pair.voice.lines(false));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.opened, undefined);
+  assert.equal(
+    pair.replacement.calls.some((c) => c[0] === 'setFlags'),
+    false,
+  );
+});
+
+test('preset returns unavailable if a different Sky is mounted while opening', async () => {
+  const pair = replaceableVoice();
+  const r = await replaceDuringOpen(pair, () => pair.voice.preset('sunset'));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.opened, undefined);
+  assert.equal(
+    pair.replacement.calls.some((c) => c[0] === 'preset'),
+    false,
+  );
+});
+
+test('preset returns unavailable if a different Sky is mounted during applyPreset', async () => {
+  const pair = replaceableVoice();
+  pair.opened.state.active = true;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  pair.opened.sky.applyPreset = async (id) => {
+    pair.opened.calls.push(['preset', id]);
+    await gate;
+    if (
+      pair.opened.state.presetResult?.ok &&
+      Number.isFinite(pair.opened.state.presetResult.timeMs)
+    )
+      pair.opened.state.timeMs = pair.opened.state.presetResult.timeMs;
+    return pair.opened.state.presetResult;
+  };
+  const pending = pair.voice.preset('sunset');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  pair.replace();
+  release();
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.preset, undefined);
+  assert.equal(r.time, undefined);
+  assert.equal(
+    pair.replacement.calls.some((c) => c[0] === 'preset'),
+    false,
+  );
+});
+
+test('look returns unavailable if a different Sky is mounted while opening', async () => {
+  const pair = replaceableVoice();
+  pair.replacement.state.search = () => [hit('Jupiter', 'planet')];
+  const r = await replaceDuringOpen(pair, () => pair.voice.look('Jupiter'));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.opened, undefined);
+  assert.equal(
+    pair.replacement.calls.some(
+      (c) => c[0] === 'search' || c[0] === 'ensureData',
+    ),
+    false,
+  );
+});
+
+test('look returns unavailable if a different Sky is mounted while star data loads', async () => {
+  const pair = replaceableVoice();
+  pair.opened.state.active = true;
+  pair.replacement.state.search = () => [hit('Jupiter', 'planet')];
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  pair.opened.sky.content.ensureData = async () => {
+    pair.opened.calls.push(['ensureData']);
+    await gate;
+  };
+  const pending = pair.voice.look('Jupiter');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  pair.replace();
+  release();
+  const r = await pending;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.target, undefined);
+  assert.equal(
+    pair.replacement.calls.some((c) => c[0] === 'search' || c[0] === 'lookAt'),
+    false,
+  );
+});
+
+test('look returns unavailable if a different Sky is mounted while satellites load', async () => {
+  const opened = fakeSky({ satStatus: 'loading' });
+  const replacement = fakeSky({
+    satStatus: 'ready',
+    search: () => [hit('ISS (ZARYA)', 'satellite')],
+  });
+  opened.state.active = true;
+  let mounted = opened.sky;
+  const voice = createSkyVoice({
+    getHandle: () => mounted,
+    satelliteWaitMs: 800,
+  });
+  const started = Date.now();
+  const pending = voice.look('the ISS');
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  mounted = replacement.sky;
+  const r = await pending;
+  const elapsed = Date.now() - started;
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.target, undefined);
+  assert.ok(elapsed < 250, `waited ${elapsed}ms`);
+  assert.equal(
+    replacement.calls.some((c) => c[0] === 'search' || c[0] === 'lookAt'),
+    false,
+  );
+});
+
+test('open returns unavailable if Sky is destroyed while opening', async () => {
+  const h = voiceFor();
+  const r = await destroyDuringOpen(h, () => h.voice.open());
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.opened, undefined);
+  assert.equal(r.open, undefined);
+});
+
+test('open returns unavailable if a different Sky is mounted while opening', async () => {
+  const pair = replaceableVoice();
+  const r = await replaceDuringOpen(pair, () => pair.voice.open());
+  assert.equal(r.ok, false);
+  assert.match(r.error, /not available/);
+  assert.equal(r.opened, undefined);
+  assert.equal(r.open, undefined);
+  assert.equal(
+    pair.replacement.calls.some((c) => c[0] === 'openHere'),
+    false,
+  );
+});
+
+test('preset returns a fail reply if applyPreset rejects, and does not throw', async () => {
+  const h = voiceFor();
+  h.state.active = true;
+  h.sky.applyPreset = async () => {
+    throw new Error('preset boom SECRETKEY123');
+  };
+  const r = await h.voice.preset('sunset');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /could not be applied/);
+  assert.equal(r.preset, undefined);
+  assert.equal(r.time, undefined);
+  assert.equal(JSON.stringify(r).includes('SECRETKEY123'), false);
+  assert.equal(JSON.stringify(r).includes('sunset'), false);
+});
