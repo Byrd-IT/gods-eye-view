@@ -419,3 +419,92 @@ test('the layer enabled while history is on asks the archive', async (t) => {
     ['at-file', 'cip', B, C2],
   ]);
 });
+
+test('the live path does not echo a fetch error (catalog and file)', async (t) => {
+  const secret =
+    'https://user:pw-synth-4471@host.example/x?api_key=synth-key-8812';
+  const { layer } = setup(t, {
+    getCatalog: async () => {
+      throw new Error(`catalog ${secret}`);
+    },
+  });
+  const logs = [];
+  t.mock.method(console, 'warn', (...args) =>
+    logs.push(
+      args.map((a) => (a instanceof Error ? a.stack : String(a))).join(' '),
+    ),
+  );
+  await layer.update({});
+  assert.equal(layer.getStats().error, 'GhostMaps catalog unavailable');
+  const file = setup(t, {
+    getFile: async () => {
+      const error = new Error(`file ${secret}`);
+      error.template = `template ${secret}`;
+      throw error;
+    },
+  });
+  t.mock.method(console, 'warn', (...args) =>
+    logs.push(
+      args.map((a) => (a instanceof Error ? a.stack : String(a))).join(' '),
+    ),
+  );
+  await file.layer.update({});
+  assert.equal(file.layer.getStats().error, 'GhostMaps file could not be read');
+  const haystack = [
+    ...logs,
+    JSON.stringify(layer.getStats()),
+    JSON.stringify(file.layer.getStats()),
+    JSON.stringify(file.layer.getRowControls()),
+  ].join('\n');
+  for (const needle of [
+    'pw-synth-4471',
+    'synth-key-8812',
+    'user:pw',
+    'api_key',
+  ])
+    assert.equal(haystack.includes(needle), false, needle);
+  assert.ok(logs.length >= 2, 'both paths logged a fixed line');
+});
+
+test('LIVE during the first archive request refreshes a live push that was ignored', async (t) => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const { layer, calls, push } = setup(t, {
+    getCatalogAt: async () => {
+      await gate;
+      return { history: true, position: 'before', commit: null, products: [] };
+    },
+  });
+  await layer.update({}); // the live edition is drawn
+  calls.length = 0;
+  const pending = layer.setHistoryTime(T1); // first archive request runs
+  push({
+    commit: 'f'.repeat(40),
+    products: [{ id: 'cip', version: 'd'.repeat(40), defaultOn: true }],
+  });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(calls, [], 'the push is ignored while history is on');
+  await layer.setHistoryTime(null);
+  assert.equal(calls[0]?.[0], 'live-catalog', 'the ignored push is refreshed');
+  release();
+  await pending;
+  assert.equal(layer.getHistoryState(), null);
+});
+
+test('LIVE with no ignored push does not fetch the live edition again', async (t) => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const { layer, calls } = setup(t, {
+    getCatalogAt: async () => {
+      await gate;
+      return { history: true, position: 'before', commit: null, products: [] };
+    },
+  });
+  await layer.update({});
+  calls.length = 0;
+  const pending = layer.setHistoryTime(T1);
+  await layer.setHistoryTime(null);
+  assert.deepEqual(calls, []);
+  release();
+  await pending;
+});

@@ -263,15 +263,41 @@ test('mountHistoryForShell wires router + chips + driver: a seek refreshes the s
     if (id === 'military') await win.fetch('/api/military');
     return true;
   };
+  // G1: a GhostMaps layer module the shell's GhostMaps driver can find
+  const ghostTimes = [];
+  const ghostLayer = {
+    setHistoryTime: async (t) => {
+      ghostTimes.push(t);
+    },
+    getHistoryState: () => ({
+      status: 'published',
+      commit: 'a'.repeat(40),
+      committedAt: Date.now() - 86_400_000,
+    }),
+    setHistoryListener() {},
+  };
+  dm.layers = new Map([['s2-ghostmaps', { module: ghostLayer }]]);
   const removers = new Set();
   const shell = { _dataManager: dm, _lifetime: { removers } };
   const handle = mountHistoryForShell(shell, { window: win, document: doc });
   try {
     assert.equal(removers.size, 1);
     assert.ok(handle.router && handle.driver);
+    assert.ok(handle.ghostMaps, 'the GhostMaps driver is on the handle');
+    assert.equal(typeof handle.ghostMaps.onHistory, 'function');
     handle.seek(Date.now() - 2 * 3_600_000);
     await new Promise((r) => setTimeout(r, 400));
     await handle.driver.settle();
+    // the snap after a seek re-sends the time, so the debounce can restart
+    for (let i = 0; i < 40 && ghostTimes.length === 0; i++)
+      await new Promise((r) => setTimeout(r, 50));
+    assert.equal(ghostTimes.length, 1, 'a seek reaches the GhostMaps layer');
+    assert.ok(Number.isFinite(ghostTimes[0]));
+    assert.equal(
+      handle.ghostMaps.historyLayers()[0]?.state,
+      'published',
+      'the GhostMaps chip state reaches the strip',
+    );
     assert.ok(asked.includes('/api/history/slice'));
     assert.ok(handle.router.isSwapped('military'));
     const chip = handle.root.find(
@@ -281,6 +307,7 @@ test('mountHistoryForShell wires router + chips + driver: a seek refreshes the s
     asked.length = 0;
     handle.leave();
     await handle.driver.settle();
+    assert.deepEqual(ghostTimes.slice(1), [null], 'LIVE clears GhostMaps');
     assert.ok(asked.includes('/api/military'), 'LIVE refresh asks live');
     assert.equal(asked.includes('/api/history/slice'), false);
   } finally {

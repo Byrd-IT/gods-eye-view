@@ -132,13 +132,27 @@ test('playing is throttled and reads the moving history time', () => {
   assert.ok(layer.times.every((t, i) => i === 0 || t > layer.times[i - 1]));
 });
 
-test('the time is capped at now (history never runs ahead of the clock)', () => {
+test('a playing time is capped at now (history never runs ahead of the clock)', () => {
   const { clock, layer, driver } = setup();
   const start = clock.now();
-  driver.onHistory({ active: true, timeMs: start + 3_600_000 });
+  driver.onHistory({ active: true, timeMs: start + 3_600_000, playing: true });
   clock.advance(400);
-  // applied when the 300 ms debounce fired, capped at that wall time
-  assert.equal(layer.times[0], start + 300);
+  assert.ok(layer.times[0] <= clock.now());
+  assert.ok(layer.times[0] < start + 3_600_000);
+});
+
+test('a paused future time is sent as given and stays stable across the heartbeat', () => {
+  const { clock, layer, driver } = setup();
+  const future = clock.now() + 3_600_000;
+  driver.onHistory({ active: true, timeMs: future });
+  clock.advance(400);
+  assert.deepEqual(layer.times, [future]);
+  for (let i = 0; i < 5; i++) {
+    clock.advance(2_000);
+    driver.onHistory({ active: true, timeMs: future });
+  }
+  clock.advance(400);
+  assert.deepEqual(layer.times, [future], 'no re-apply');
 });
 
 test('repeated identical paused resends apply once', () => {
@@ -160,8 +174,103 @@ test('a settled unavailable answer is retried on the next resend', async () => {
   await new Promise((r) => setImmediate(r));
   layer.history = { status: 'unavailable', t: T };
   layer.times.length = 0;
+  // inside the backoff the heartbeat does not retry
+  clock.advance(10_000);
   driver.onHistory({ active: true, timeMs: T });
   clock.advance(400);
+  assert.deepEqual(layer.times, [], 'no retry inside 30 s');
+  clock.advance(20_000);
+  driver.onHistory({ active: true, timeMs: T });
+  clock.advance(400);
+  assert.deepEqual(layer.times, [T]);
+});
+
+test('a down archive is asked at most once per 30 s while the heartbeat repeats', async () => {
+  const { clock, layer, driver } = setup();
+  driver.onHistory({ active: true, timeMs: T });
+  clock.advance(400);
+  await new Promise((r) => setImmediate(r));
+  layer.history = { status: 'unavailable', t: T };
+  layer.times.length = 0;
+  for (let i = 0; i < 14; i++) {
+    clock.advance(2_000);
+    driver.onHistory({ active: true, timeMs: T });
+  }
+  clock.advance(400);
+  assert.deepEqual(layer.times, [], '28 s of heartbeats: no retry');
+  clock.advance(2_000);
+  driver.onHistory({ active: true, timeMs: T });
+  clock.advance(400);
+  assert.deepEqual(layer.times, [T], 'one retry after 30 s');
+});
+
+test('playing on while the archive is down is not retried every 2 s, a seek still is', async () => {
+  const { clock, layer, driver } = setup();
+  const start = T;
+  driver.onHistory({ active: true, timeMs: start, playing: true, rate: 60 });
+  clock.advance(400);
+  await new Promise((r) => setImmediate(r));
+  layer.history = { status: 'unavailable', t: start };
+  layer.times.length = 0;
+  const base = clock.now();
+  for (let i = 1; i <= 5; i++) {
+    clock.advance(2_000);
+    driver.onHistory({
+      active: true,
+      timeMs: start + 60 * (clock.now() - base) + 60 * 400,
+      playing: true,
+      rate: 60,
+    });
+  }
+  clock.advance(400);
+  assert.deepEqual(layer.times, [], 'natural advance: no retry');
+  clock.advance(1_000);
+  driver.onHistory({
+    active: true,
+    timeMs: start - 5 * 86_400_000,
+    playing: true,
+    rate: 60,
+  });
+  clock.advance(2_400);
+  assert.equal(layer.times.length, 1, 'a seek is applied');
+});
+
+test('a pending setHistoryTime plus an unavailable answer: the heartbeat does not call again and the slow answer lands', async () => {
+  const clock = fakeTimers();
+  const layer = fakeLayer();
+  let release;
+  layer.setHistoryTime = (t) => {
+    layer.times.push(t);
+    return new Promise((resolve) => {
+      release = () => {
+        layer.history = { status: 'published', t, commit: 'b'.repeat(40) };
+        resolve();
+      };
+    });
+  };
+  const dm = {
+    layers: new Map([[GHOSTMAPS_HISTORY_LAYER_ID, { module: layer }]]),
+    subscribe: () => () => {},
+  };
+  const driver = createGhostMapsHistory({
+    getDataManager: () => dm,
+    timers: clock,
+    now: clock.now,
+  });
+  driver.onHistory({ active: true, timeMs: T });
+  clock.advance(400);
+  assert.deepEqual(layer.times, [T]);
+  // the last answer said unavailable, and the new call is still running
+  layer.history = { status: 'unavailable', t: T };
+  for (let i = 0; i < 20; i++) {
+    clock.advance(2_000);
+    driver.onHistory({ active: true, timeMs: T });
+  }
+  clock.advance(400);
+  assert.deepEqual(layer.times, [T], 'heartbeats do not call again');
+  release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(driver.historyLayers()[0].status, 'published');
   assert.deepEqual(layer.times, [T]);
 });
 

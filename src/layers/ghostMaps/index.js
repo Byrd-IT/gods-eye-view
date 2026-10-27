@@ -150,6 +150,8 @@ export function createGhostMapsLayer({
   let _historyT = null;
   let _historyState = null;
   let _historySeq = 0;
+  // A live push arrived while history was on and was dropped.
+  let _liveMissed = false;
   let _historyListener = null;
   let _unsubscribe = null;
   let _stream = 'closed';
@@ -369,15 +371,11 @@ export function createGhostMapsLayer({
           // The new edition is on the globe before the old one leaves.
           unload(product.id);
           _loaded.set(product.id, next);
-        } catch (error) {
+        } catch {
           if (signal.aborted) return;
-          console.warn(`[Data:GhostMaps] ${product.id}:`, error);
-          _failed.set(
-            product.id,
-            error?.template ||
-              error?.message ||
-              msg('GhostMaps file could not be read'),
-          );
+          // A fetch error can carry a URL: log and show a fixed reason only.
+          console.warn(`[Data:GhostMaps] ${product.id} load failed`);
+          _failed.set(product.id, msg('GhostMaps file could not be read'));
         } finally {
           _loading.delete(product.id);
           notifyRow();
@@ -654,7 +652,9 @@ export function createGhostMapsLayer({
         _unsubscribe = source.subscribe(
           (catalog) => {
             // History shows the archive; a live push waits for LIVE.
-            if (_enabled && _historyT === null) void applyCatalog(catalog);
+            if (!_enabled) return;
+            if (_historyT === null) void applyCatalog(catalog);
+            else _liveMissed = true;
           },
           (state) => {
             if (_stream === state) return;
@@ -689,10 +689,10 @@ export function createGhostMapsLayer({
         if (!_enabled) return false;
         await applyCatalog(catalog);
         return true;
-      } catch (error) {
+      } catch {
         if (signal?.aborted || !_enabled) return false;
-        console.warn('[Data:GhostMaps] catalog error:', error);
-        _lastError = error?.message || msg('GhostMaps catalog unavailable');
+        console.warn('[Data:GhostMaps] catalog error');
+        _lastError = msg('GhostMaps catalog unavailable');
         notifyRow();
         // Keep the layer on; the event stream or the next interval recovers.
         return true;
@@ -722,11 +722,13 @@ export function createGhostMapsLayer({
         const hadHistoryCatalog = Boolean(_catalog?.history);
         _historyT = null;
         _historyState = null;
+        const missed = _liveMissed;
+        _liveMissed = false;
         notifyHistory();
         // Only a history catalog is unloaded. After an archive failure the
         // live edition is already drawn; fetching it again would only reload it.
         await dropHistoryDraw();
-        if (_enabled && (hadHistoryCatalog || _loaded.size === 0))
+        if (_enabled && (hadHistoryCatalog || missed || _loaded.size === 0))
           await refreshLive(_lifetime.signal);
         return;
       }

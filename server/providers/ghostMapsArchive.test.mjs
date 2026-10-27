@@ -289,3 +289,47 @@ test('hostile query values and a failing mirror echo nothing back or to the log'
   assert.ok(!haystack.includes(mirrorPath), 'mirror path leaked');
   assert.ok(seen.length >= 32);
 });
+
+test('an oversized blob is not found without reading it, and the git cap holds at 4', async (t) => {
+  const m = buildMirror(t);
+  const real = readOnlyGit(m.bare);
+  const calls = [];
+  let running = 0;
+  let peak = 0;
+  let oversize = false;
+  const runGit = async (args, options) => {
+    running += 1;
+    peak = Math.max(peak, running);
+    calls.push(args.join(' '));
+    try {
+      await new Promise((r) => setTimeout(r, 3));
+      if (oversize && args[0] === 'cat-file' && args[1] === '-s')
+        return Buffer.from('999999999\n');
+      return await real(args, options);
+    } finally {
+      running -= 1;
+    }
+  };
+  const archive = createGhostMapsArchive({ repoDir: m.bare, runGit });
+  const mid = await archive.catalogAt(at('2026-10-17T00:00:00Z'));
+  const kin = mid.products.find((p) => p.id === 'kinetic-30d');
+  // normal size passes
+  assert.ok(await archive.fileAt(mid.commit, 'kinetic-30d', kin.version));
+  // the cap: many concurrent reads never run more than four git calls
+  await Promise.all(
+    Array.from({ length: 20 }, () =>
+      archive.fileAt(mid.commit, 'kinetic-30d', kin.version),
+    ),
+  );
+  assert.ok(peak <= 4, `peak ${peak}`);
+  oversize = true;
+  calls.length = 0;
+  assert.equal(
+    await archive.fileAt(mid.commit, 'kinetic-30d', kin.version),
+    null,
+  );
+  assert.equal(
+    calls.some((c) => c.startsWith('cat-file blob')),
+    false,
+  );
+});

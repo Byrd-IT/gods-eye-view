@@ -27,6 +27,9 @@
 export const GHOSTMAPS_HISTORY_LAYER_ID = 's2-ghostmaps';
 export const GHOSTMAPS_RELEASE_DEBOUNCE_MS = 300;
 export const GHOSTMAPS_PLAY_MIN_INTERVAL_MS = 2_000;
+/** After an unavailable answer, the archive (and the live catalog fallback)
+ * is asked again at most this often by the History heartbeat. */
+export const GHOSTMAPS_UNAVAILABLE_RETRY_MS = 30_000;
 
 /** Chip text (constants: no lowercase literal in a textContent=). */
 export const GHOSTMAPS_PUBLISHED_PREFIX = 'As published ';
@@ -64,6 +67,7 @@ export function createGhostMapsHistory({
   now = () => Date.now(),
   releaseDebounceMs = GHOSTMAPS_RELEASE_DEBOUNCE_MS,
   playMinIntervalMs = GHOSTMAPS_PLAY_MIN_INTERVAL_MS,
+  unavailableRetryMs = GHOSTMAPS_UNAVAILABLE_RETRY_MS,
 } = {}) {
   let state = { active: false, timeMs: null, playing: false, rate: 1 };
   let stateAt = 0;
@@ -106,10 +110,15 @@ export function createGhostMapsHistory({
     }
   }
 
-  /** The history time now: frozen while paused, rate x wall while playing. */
+  /**
+   * The history time now: a paused time is sent as the control gave it (no
+   * now() cap, so a future paused time is stable across the 2 s heartbeat);
+   * while playing it is rate x wall, capped at the present.
+   */
   function historyNow() {
     if (!state.active || !Number.isFinite(state.timeMs)) return NaN;
-    const run = state.playing ? state.rate * Math.max(0, now() - stateAt) : 0;
+    if (!state.playing) return state.timeMs;
+    const run = state.rate * Math.max(0, now() - stateAt);
     return Math.min(state.timeMs + run, now());
   }
 
@@ -220,15 +229,30 @@ export function createGhostMapsHistory({
         return;
       }
       const t = historyNow();
+      const sameMode = state.playing === wasPlaying && state.rate === wasRate;
       // Heartbeat (and any other identical resend): do not restart the
       // debounce or call setHistoryTime again. Retry only after a settled
-      // unavailable answer, so a slow archive call can still land.
+      // unavailable answer, so a slow archive call can still land, and then
+      // at most once per unavailableRetryMs.
+      const unavailable = !inFlight && appliedStatus() === 'unavailable';
       if (
         was &&
         t === lastRequested &&
-        state.playing === wasPlaying &&
-        state.rate === wasRate &&
-        (inFlight || appliedStatus() !== 'unavailable')
+        sameMode &&
+        (inFlight || !unavailable || now() - lastApplied < unavailableRetryMs)
+      ) {
+        return;
+      }
+      // Playing on while the archive is down: the time moves by itself, so
+      // "same time" never matches. A jump (seek) still goes through at once.
+      if (
+        was &&
+        unavailable &&
+        sameMode &&
+        state.playing &&
+        now() - lastApplied < unavailableRetryMs &&
+        Math.abs(t - (lastRequested + state.rate * (now() - lastApplied))) <
+          playMinIntervalMs * 2 * state.rate
       ) {
         return;
       }

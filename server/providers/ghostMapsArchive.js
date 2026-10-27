@@ -101,14 +101,17 @@ export function createGhostMapsArchive({
   const waiting = [];
 
   async function limited(fn) {
+    // A freed slot goes straight to the next waiter (active stays put), so a
+    // new caller cannot slip in between and push the count past the cap.
     if (active >= MAX_CONCURRENT_GIT)
       await new Promise((resolve) => waiting.push(resolve));
-    active += 1;
+    else active += 1;
     try {
       return await fn();
     } finally {
-      active -= 1;
-      waiting.shift()?.();
+      const next = waiting.shift();
+      if (next) next();
+      else active -= 1;
     }
   }
 
@@ -236,6 +239,9 @@ export function createGhostMapsArchive({
     async catalogAt(tMs) {
       const { commits } = await commitList();
       const { position, commit } = pickCommitAt(commits, tMs);
+      let firstTs = null;
+      for (const c of commits)
+        if (firstTs === null || c.ts < firstTs) firstTs = c.ts;
       const base = {
         history: true,
         asOf: new Date(tMs).toISOString(),
@@ -248,9 +254,7 @@ export function createGhostMapsArchive({
         error: null,
         // the first recorded commit, so "before" can say what the archive
         // starts at
-        firstCommittedAt: commits.length
-          ? Math.min(...commits.map((c) => c.ts)) * 1000
-          : null,
+        firstCommittedAt: firstTs === null ? null : firstTs * 1000,
       };
       if (!commit)
         return {
@@ -285,6 +289,13 @@ export function createGhostMapsArchive({
         (p) => p.id === id && p.version === version,
       );
       if (!product) return null;
+      // Size first: an oversized file is "not found", not a maxBuffer 503.
+      const size = Number.parseInt(
+        String(await git(['cat-file', '-s', product.version])).trim(),
+        10,
+      );
+      if (!Number.isFinite(size) || size > GHOSTMAPS_MAX_FILE_BYTES)
+        return null;
       const bytes = await git(['cat-file', 'blob', product.version], {
         timeoutMs: BLOB_TIMEOUT_MS,
         maxBuffer: GHOSTMAPS_MAX_FILE_BYTES + 1,
