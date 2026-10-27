@@ -152,6 +152,10 @@ export function createGhostMapsLayer({
   let _historySeq = 0;
   // A live push arrived while history was on and was dropped.
   let _liveMissed = false;
+  // The last LIVE catalog applied (never a history one): reused when the
+  // archive is down, so a failure does not call the live endpoint, which
+  // starts the GitHub watcher.
+  let _lastLive = null;
   let _historyListener = null;
   let _unsubscribe = null;
   let _stream = 'closed';
@@ -422,18 +426,37 @@ export function createGhostMapsLayer({
       _historyState = { status: 'unavailable', t: at };
       notifyHistory();
       await dropHistoryDraw();
-      await refreshLive(signal);
+      // Reuse the last live catalog while no live push was missed; ask the
+      // live source only when there is none or it is known to be stale.
+      if (_lastLive && !_liveMissed && _enabled && !signal?.aborted) {
+        await applyCatalog(_lastLive);
+      } else {
+        await refreshLive(signal);
+      }
       return false;
     }
   }
 
   async function refreshLive(signal) {
+    // Live is about to be drawn, so a push dropped during history is
+    // answered by this fetch. A push that lands meanwhile, or a failed or
+    // dropped fetch, keeps the flag.
+    const missed = _liveMissed;
+    _liveMissed = false;
     try {
       const catalog = await source.getCatalog({ signal });
-      if (!_enabled || signal?.aborted) return;
-      if (_historyT !== null && _historyState?.status !== 'unavailable') return;
+      if (!_enabled || signal?.aborted) {
+        _liveMissed = _liveMissed || missed;
+        return;
+      }
+      if (_historyT !== null && _historyState?.status !== 'unavailable') {
+        _liveMissed = _liveMissed || missed;
+        return;
+      }
+      _lastLive = catalog;
       await applyCatalog(catalog);
     } catch {
+      _liveMissed = _liveMissed || missed;
       if (signal?.aborted || !_enabled) return;
       console.warn('[Data:GhostMaps] catalog error');
       _lastError = msg('GhostMaps catalog unavailable');
@@ -653,8 +676,10 @@ export function createGhostMapsLayer({
           (catalog) => {
             // History shows the archive; a live push waits for LIVE.
             if (!_enabled) return;
-            if (_historyT === null) void applyCatalog(catalog);
-            else _liveMissed = true;
+            if (_historyT === null) {
+              _lastLive = catalog;
+              void applyCatalog(catalog);
+            } else _liveMissed = true;
           },
           (state) => {
             if (_stream === state) return;
@@ -666,6 +691,9 @@ export function createGhostMapsLayer({
 
     disable() {
       _enabled = false;
+      // Nothing is drawn after this, so nothing is owed to LIVE.
+      _liveMissed = false;
+      _lastLive = null;
       _lifetime.abort();
       _unsubscribe?.();
       _unsubscribe = null;
@@ -687,6 +715,7 @@ export function createGhostMapsLayer({
       try {
         const catalog = await source.getCatalog({ signal });
         if (!_enabled) return false;
+        _lastLive = catalog;
         await applyCatalog(catalog);
         return true;
       } catch {

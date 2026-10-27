@@ -235,6 +235,49 @@ test('playing on while the archive is down is not retried every 2 s, a seek stil
   assert.equal(layer.times.length, 1, 'a seek is applied');
 });
 
+test('a short seek at 60x while the archive is down is applied, not waited out', async () => {
+  const { clock, layer, driver } = setup();
+  const start = T;
+  driver.onHistory({ active: true, timeMs: start, playing: true, rate: 60 });
+  clock.advance(400);
+  await new Promise((r) => setImmediate(r));
+  layer.history = { status: 'unavailable', t: start };
+  layer.times.length = 0;
+  clock.advance(2_000);
+  // 2 minutes of the timeline away from where playing would be: inside the old rate-scaled slack (4 s x 60), but a real jump.
+  driver.onHistory({
+    active: true,
+    timeMs: start + 60 * 2_400 + 2 * 60_000,
+    playing: true,
+    rate: 60,
+  });
+  clock.advance(2_400);
+  assert.equal(layer.times.length, 1, 'the short seek is applied');
+});
+
+test('playing into the present while the archive is down is not retried every 2 s', async () => {
+  const { clock, layer, driver } = setup();
+  const start = clock.now() - 5 * 60_000; // five minutes behind the present
+  driver.onHistory({ active: true, timeMs: start, playing: true, rate: 60 });
+  clock.advance(400);
+  await new Promise((r) => setImmediate(r));
+  layer.history = { status: 'unavailable', t: start };
+  layer.times.length = 0;
+  const base = clock.now();
+  for (let i = 1; i <= 7; i++) {
+    clock.advance(2_000);
+    // The control stops at the present; the time sent is capped there.
+    driver.onHistory({
+      active: true,
+      timeMs: Math.min(start + 60 * (clock.now() - base) + 60 * 400, clock.now()),
+      playing: true,
+      rate: 60,
+    });
+  }
+  clock.advance(400);
+  assert.deepEqual(layer.times, [], 'reached the present: no retry');
+});
+
 test('a pending setHistoryTime plus an unavailable answer: the heartbeat does not call again and the slow answer lands', async () => {
   const clock = fakeTimers();
   const layer = fakeLayer();

@@ -245,16 +245,21 @@ export function createGhostMapsHistory({
       }
       // Playing on while the archive is down: the time moves by itself, so
       // "same time" never matches. A jump (seek) still goes through at once.
+      // The expected time is capped at the present (playing runs into it and
+      // stops there), and the tolerance is a fixed wall-clock slack: it does
+      // not grow with the rate, so a short seek at 60x is not swallowed.
       if (
         was &&
         unavailable &&
         sameMode &&
         state.playing &&
-        now() - lastApplied < unavailableRetryMs &&
-        Math.abs(t - (lastRequested + state.rate * (now() - lastApplied))) <
-          playMinIntervalMs * 2 * state.rate
+        now() - lastApplied < unavailableRetryMs
       ) {
-        return;
+        const expected = Math.min(
+          lastRequested + state.rate * (now() - lastApplied),
+          now(),
+        );
+        if (Math.abs(t - expected) < playMinIntervalMs * 2) return;
       }
       schedule(state.playing && was);
     },

@@ -508,3 +508,87 @@ test('LIVE with no ignored push does not fetch the live edition again', async (t
   release();
   await pending;
 });
+
+test('an archive failure reuses the last live catalog and does not call the live endpoint', async (t) => {
+  const { layer, calls, mounted } = setup(t, {
+    getCatalogAt: async () => {
+      throw new Error('archive down');
+    },
+  });
+  await layer.update({});
+  const liveCalls = calls.filter(([k]) => k === 'live-catalog').length;
+  assert.equal(liveCalls, 1);
+  assert.equal(mounted.size, 1);
+  calls.length = 0;
+  await layer.setHistoryTime(T1);
+  assert.equal(layer.getHistoryState().status, 'unavailable');
+  assert.equal(
+    calls.some(([k]) => k === 'live-catalog'),
+    false,
+    'the live endpoint (which starts the GitHub watcher) is not called',
+  );
+  assert.equal(mounted.size, 1, 'live stays drawn');
+  // a second failure at another time, and LIVE, still make no live call
+  await layer.setHistoryTime(T2);
+  await layer.setHistoryTime(null);
+  assert.equal(
+    calls.some(([k]) => k === 'live-catalog'),
+    false,
+  );
+  assert.equal(mounted.size, 1);
+});
+
+test('with no live catalog yet, an archive failure still asks for live', async (t) => {
+  const { layer, calls, mounted } = setup(t, {
+    getCatalogAt: async () => {
+      throw new Error('archive down');
+    },
+  });
+  await layer.setHistoryTime(T1);
+  assert.equal(layer.getHistoryState().status, 'unavailable');
+  assert.equal(calls.filter(([k]) => k === 'live-catalog').length, 1);
+  assert.equal(mounted.size, 1);
+});
+
+test('a live push missed in history is answered by the live redraw after an archive failure', async (t) => {
+  const { layer, calls, push } = setup(t, {
+    getCatalogAt: async () => {
+      throw new Error('archive down');
+    },
+  });
+  await layer.update({});
+  await layer.setHistoryTime(T1); // unavailable: live from the cache
+  push({
+    commit: 'e'.repeat(40),
+    products: [{ id: 'cip', version: 'd'.repeat(40), defaultOn: true }],
+  });
+  calls.length = 0;
+  // The next failure sees the cache is stale and fetches live once ...
+  await layer.setHistoryTime(T2);
+  assert.equal(calls.filter(([k]) => k === 'live-catalog').length, 1);
+  calls.length = 0;
+  // ... and that fetch answered the push: LIVE does not fetch again.
+  await layer.setHistoryTime(null);
+  assert.equal(calls.filter(([k]) => k === 'live-catalog').length, 0);
+});
+
+test('disabling the layer forgets a missed live push and the cached live catalog', async (t) => {
+  const { layer, calls, push } = setup(t, {
+    getCatalogAt: async () => {
+      throw new Error('archive down');
+    },
+  });
+  await layer.update({});
+  await layer.setHistoryTime(T1);
+  push({ commit: 'e'.repeat(40), products: [] });
+  layer.disable();
+  layer.enable();
+  calls.length = 0;
+  // Nothing cached after disable: this failure must ask for live, once,
+  // and the old missed flag must not cause a second fetch on LIVE.
+  await layer.setHistoryTime(T2);
+  assert.equal(calls.filter(([k]) => k === 'live-catalog').length, 1);
+  calls.length = 0;
+  await layer.setHistoryTime(null);
+  assert.equal(calls.filter(([k]) => k === 'live-catalog').length, 0);
+});

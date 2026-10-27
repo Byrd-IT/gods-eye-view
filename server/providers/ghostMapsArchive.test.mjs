@@ -324,12 +324,86 @@ test('an oversized blob is not found without reading it, and the git cap holds a
   assert.ok(peak <= 4, `peak ${peak}`);
   oversize = true;
   calls.length = 0;
+  // A fresh archive: the first one remembers this blob's size.
+  const fresh = createGhostMapsArchive({ repoDir: m.bare, runGit });
   assert.equal(
-    await archive.fileAt(mid.commit, 'kinetic-30d', kin.version),
+    await fresh.fileAt(mid.commit, 'kinetic-30d', kin.version),
     null,
   );
   assert.equal(
     calls.some((c) => c.startsWith('cat-file blob')),
     false,
   );
+});
+
+test('the git cap holds when a new call starts just after a finish while others wait', async (t) => {
+  const m = buildMirror(t);
+  const real = readOnlyGit(m.bare);
+  // The window is a few microtasks wide (after a call is counted out, before
+  // the first waiter's wake-up runs), so a new read is started `delay`
+  // microtask hops after the release, for every delay up to 20.
+  for (let delay = 0; delay <= 20; delay += 1) {
+    const gates = [];
+    let running = 0;
+    let peak = 0;
+    let hold = false;
+    const runGit = async (args, options) => {
+      if (!hold) return real(args, options);
+      running += 1;
+      peak = Math.max(peak, running);
+      try {
+        if (args[0] === 'cat-file' && args[1] === '-s') {
+          await new Promise((r) => gates.push(r));
+          return Buffer.from('10\n');
+        }
+        await new Promise((r) => setImmediate(r));
+        return Buffer.from('x');
+      } finally {
+        running -= 1;
+      }
+    };
+    const archive = createGhostMapsArchive({
+      repoDir: m.bare,
+      runGit,
+      listTtlMs: 60_000,
+    });
+    const mid = await archive.catalogAt(at('2026-10-17T00:00:00Z'));
+    const kin = mid.products.find((p) => p.id === 'kinetic-30d');
+    const read = () => archive.fileAt(mid.commit, 'kinetic-30d', kin.version);
+    hold = true;
+    // Six reads: four size calls run, two wait.
+    const reads = Array.from({ length: 6 }, read);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(gates.length, 4);
+    gates.shift()();
+    const hop = (n) =>
+      n <= 0 ? reads.push(read()) : queueMicrotask(() => hop(n - 1));
+    hop(delay);
+    await new Promise((r) => setImmediate(r));
+    while (gates.length || running) {
+      gates.shift()?.();
+      await new Promise((r) => setImmediate(r));
+    }
+    await Promise.all(reads);
+    assert.ok(peak <= 4, `delay ${delay}: peak ${peak}`);
+  }
+});
+
+test('the blob size is read once per sha', async (t) => {
+  const m = buildMirror(t);
+  const real = readOnlyGit(m.bare);
+  const calls = [];
+  const archive = createGhostMapsArchive({
+    repoDir: m.bare,
+    runGit: async (args, options) => {
+      calls.push(args.join(' '));
+      return real(args, options);
+    },
+  });
+  const mid = await archive.catalogAt(at('2026-10-17T00:00:00Z'));
+  const kin = mid.products.find((p) => p.id === 'kinetic-30d');
+  assert.ok(await archive.fileAt(mid.commit, 'kinetic-30d', kin.version));
+  assert.ok(await archive.fileAt(mid.commit, 'kinetic-30d', kin.version));
+  assert.equal(calls.filter((c) => c.startsWith('cat-file -s')).length, 1);
+  assert.equal(calls.filter((c) => c.startsWith('cat-file blob')).length, 2);
 });

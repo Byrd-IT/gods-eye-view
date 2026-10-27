@@ -33,6 +33,7 @@ const MAX_LOG_BYTES = 16 * 1024 * 1024;
 const MAX_TREE_BYTES = 16 * 1024 * 1024;
 const MAX_CONCURRENT_GIT = 4;
 const CATALOG_CACHE_MAX = 16;
+const BLOB_SIZE_CACHE_MAX = 256;
 const COMMIT_RE = /^[0-9a-f]{40}$/;
 
 /** The mirror location: GHOSTMAPS_ARCHIVE, else the timer's default path. */
@@ -97,6 +98,7 @@ export function createGhostMapsArchive({
   let list = null; // {at, commits, set, signature}
   let listing = null;
   const catalogs = new Map(); // commit sha -> products
+  const blobSizes = new Map(); // blob sha -> bytes (immutable per sha)
   let active = 0;
   const waiting = [];
 
@@ -290,10 +292,20 @@ export function createGhostMapsArchive({
       );
       if (!product) return null;
       // Size first: an oversized file is "not found", not a maxBuffer 503.
-      const size = Number.parseInt(
-        String(await git(['cat-file', '-s', product.version])).trim(),
-        10,
-      );
+      // A blob sha names fixed content, so its size is remembered and the
+      // second read of the same file skips the cat-file -s call.
+      let size = blobSizes.get(product.version);
+      if (size === undefined) {
+        size = Number.parseInt(
+          String(await git(['cat-file', '-s', product.version])).trim(),
+          10,
+        );
+        if (Number.isFinite(size)) {
+          blobSizes.set(product.version, size);
+          while (blobSizes.size > BLOB_SIZE_CACHE_MAX)
+            blobSizes.delete(blobSizes.keys().next().value);
+        }
+      }
       if (!Number.isFinite(size) || size > GHOSTMAPS_MAX_FILE_BYTES)
         return null;
       const bytes = await git(['cat-file', 'blob', product.version], {
