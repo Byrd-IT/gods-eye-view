@@ -6,6 +6,7 @@ import {
 } from '../basemap/imageryVoice.js';
 import { createWaybackImageryProvider } from './layer.js';
 import { createWaybackPanel } from './panel.js';
+import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
 import {
   INFO_MS,
   INFO_URL,
@@ -85,6 +86,7 @@ function viewOfViewer(viewer, Cesium) {
  *   Cesium: object, viewer: object, controller: object, doc?: object,
  *   fetchImpl?: typeof fetch, timers?: object,
  *   createProvider?: Function, createPanel?: Function|null,
+ *   timeTravel?: {claim: Function, release: Function}|null,
  *   viewOf?: () => ({lat: number, lon: number, z: number}|null),
  *   settleMs?: number, infoMs?: number, swapMs?: number,
  * }} options
@@ -100,6 +102,7 @@ export async function attachWayback({
   createProvider = (release, credit) =>
     createWaybackImageryProvider(Cesium, release, { credit }),
   createPanel = createWaybackPanel,
+  timeTravel = undefined,
   viewOf = () => viewOfViewer(viewer, Cesium),
   settleMs = SETTLE_MS,
   infoMs = INFO_MS,
@@ -412,9 +415,19 @@ export async function attachWayback({
     }),
   };
 
+  // The panel lives in the right-hand Time travel menu (Imagery section)
+  // unless a test passes its own panel factory or no menu.
+  const menu =
+    timeTravel !== undefined
+      ? timeTravel
+      : createPanel === createWaybackPanel
+        ? ensureTimeTravelMenu(doc)
+        : null;
+  const imageryHost = createPanel ? (menu?.claim('imagery') ?? null) : null;
   const panel = createPanel
     ? createPanel({
-        container: viewer.container,
+        container: imageryHost ?? viewer.container,
+        embedded: Boolean(imageryHost),
         count: releases.length,
         onToggle: (on) => (on ? enable() : disable()),
         onIndex: (i) => setIndex(i),
@@ -481,6 +494,7 @@ export async function attachWayback({
     disable();
     for (const remove of removers) remove?.();
     panel?.destroy?.();
+    if (imageryHost) menu.release('imagery');
   };
   return Object.assign(detach, api, { panel });
 }

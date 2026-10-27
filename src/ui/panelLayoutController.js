@@ -117,6 +117,7 @@ export class PanelLayoutController {
     this._weatherPanel = document.getElementById('weather-panel');
     this._recentImageryPanel = document.getElementById('recent-imagery-panel');
     this._streetLevelPanel = document.getElementById('street-level-panel');
+    this._timeTravelPanel = document.getElementById('time-travel-panel');
     this._sliderPanel = document.getElementById('param-slider-panel');
     this._detectionBtn = document.getElementById('detection-toggle');
   }
@@ -272,6 +273,7 @@ export class PanelLayoutController {
       this._weatherPanel,
       this._recentImageryPanel,
       this._streetLevelPanel,
+      this._timeTravelPanel,
     ]) {
       if (!panel) continue;
       stack.insertBefore(panel, globalContextPanel);
@@ -298,6 +300,7 @@ export class PanelLayoutController {
         this._weatherPanel,
         this._recentImageryPanel,
         this._streetLevelPanel,
+        this._timeTravelPanel,
         globalContextPanel,
         document.getElementById('radio-panel'),
       ]) {

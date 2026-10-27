@@ -1,4 +1,6 @@
 import { createImagerySplit } from '../../ui/imagerySplit.js';
+import { t } from '../../i18n/index.js';
+import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
 
 /**
  * The NAIP year slider panel (BASEMAP N6): a small bar at the bottom centre
@@ -20,6 +22,12 @@ import { createImagerySplit } from '../../ui/imagerySplit.js';
  * 824 px panel on a 412 px phone grew the mobile layout viewport to 618 px).
  * Sky view hides the panel (skyView.css, body.gev-sky-active).
  *
+ * Embedded mode (`embedded: true`): the slider is mounted in the Time travel
+ * card's Aerial section (createNaipMenuSlider below) instead of floating over
+ * the globe: no absolute positioning or own background, full card width, the
+ * theme's colours and font. Floating stays the fallback when no card can host
+ * it.
+ *
  * Plain DOM with inline styles (no stylesheet), text via textContent only.
  */
 
@@ -31,6 +39,23 @@ const KEYS = Object.freeze({
 });
 
 export const NAIP_SLIDER_ID = 'gev-naip-slider';
+
+/** In the Time travel card: flows in its section and takes the card's look. */
+const EMBEDDED_STYLE = Object.freeze({
+  position: 'static',
+  boxSizing: 'border-box',
+  width: '100%',
+  maxWidth: '100%',
+  padding: '0',
+  background: 'transparent',
+  color: 'inherit',
+  font: 'inherit',
+  borderRadius: '0',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '4px',
+  pointerEvents: 'auto',
+});
 
 /** A panel row: wraps (label above the range) when the screen is narrow. */
 const ROW_STYLE = Object.freeze({
@@ -150,6 +175,7 @@ export function createNaipSlider({
   onYearB,
   onEnabled,
   onCompare,
+  embedded = false,
   doc = container?.ownerDocument ?? globalThis.document,
 }) {
   if (!doc?.createElement || !container) return null;
@@ -158,9 +184,10 @@ export function createNaipSlider({
     attrs: {
       id: NAIP_SLIDER_ID,
       role: 'group',
-      'aria-label': 'Aerial imagery year',
+      'aria-label': t('Aerial imagery year'),
+      ...(embedded ? { 'data-embedded': 'true' } : {}),
     },
-    style: {
+    style: embedded ? EMBEDDED_STYLE : {
       position: 'absolute',
       left: '50%',
       bottom: '118px',
@@ -183,26 +210,26 @@ export function createNaipSlider({
   const top = el(doc, 'div', panel, {
     style: ROW_STYLE,
   });
-  const toggleLabel = el(doc, 'label', top, { text: ' Aerial' });
+  const toggleLabel = el(doc, 'label', top, { text: ` ${t('Aerial')}` });
   const toggle = el(doc, 'input', null, { attrs: { type: 'checkbox' } });
   toggleLabel.prepend(toggle);
   toggle.addEventListener('change', () => onEnabled(Boolean(toggle.checked)));
   const a = yearRange(doc, top, {
     ticks,
-    label: 'Aerial imagery year',
+    label: t('Aerial imagery year'),
     onYear,
     showTicks: true,
   });
   const bottom = el(doc, 'div', panel, {
     style: ROW_STYLE,
   });
-  const compareLabel = el(doc, 'label', bottom, { text: ' Compare' });
+  const compareLabel = el(doc, 'label', bottom, { text: ` ${t('Compare')}` });
   const compare = el(doc, 'input', null, { attrs: { type: 'checkbox' } });
   compareLabel.prepend(compare);
   compare.addEventListener('change', () => onCompare(Boolean(compare.checked)));
   const b = yearRange(doc, bottom, {
     ticks,
-    label: 'Compare with year (right side)',
+    label: t('Compare with year (right side)'),
     onYear: onYearB,
   });
   container.append(panel);
@@ -261,4 +288,45 @@ export function createNaipSplit(options, create = createImagerySplit) {
       textShadow: '0 0 3px #000',
     });
   return split;
+}
+
+/**
+ * createSlider for attachNaip(): host the slider in the Time travel card's
+ * Aerial section when the document has the card, else float it as before.
+ * The section is claimed only while the slider is visible (setVisible(true)),
+ * so the card shows Aerial only when NAIP is offered and on screen, and a
+ * card with nothing claimed stays hidden.
+ */
+export function createNaipMenuSlider(
+  options,
+  { ensureMenu = ensureTimeTravelMenu, create = createNaipSlider } = {},
+) {
+  const doc =
+    options.doc ?? options.container?.ownerDocument ?? globalThis.document;
+  const menu = ensureMenu(doc);
+  const host = menu?.slot('aerial') ?? null;
+  if (!host) return create(options);
+  const slider = create({ ...options, container: host, embedded: true, doc });
+  if (!slider) return null;
+  let claimed = false;
+  const release = () => {
+    if (!claimed) return;
+    claimed = false;
+    menu.release('aerial');
+  };
+  return {
+    element: slider.element,
+    update: (next) => slider.update(next),
+    setVisible(visible) {
+      slider.setVisible(visible);
+      if (visible && !claimed) {
+        claimed = true;
+        menu.claim('aerial');
+      } else if (!visible) release();
+    },
+    destroy() {
+      release();
+      slider.destroy();
+    },
+  };
 }

@@ -1164,3 +1164,34 @@ html:not([lang='en']) .data-row-list-text {
 .sdr-feed-status[hidden] {
   display: none;
 }
+
+/* Combined rows (USGS Water): each category chip carries its layer colour. */
+.data-toggle-row--combined .data-toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.data-toggle-row--combined .data-toggle-chip::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chip-color, currentColor);
+  opacity: 0.45;
+  flex: none;
+}
+
+.data-toggle-row--combined .data-toggle-chip.active {
+  color: var(--chip-color, var(--accent));
+  border-color: var(--chip-color, var(--accent));
+  background: color-mix(
+    in srgb,
+    var(--chip-color, var(--accent)) 14%,
+    transparent
+  );
+}
+
+.data-toggle-row--combined .data-toggle-chip.active::before {
+  opacity: 1;
+}

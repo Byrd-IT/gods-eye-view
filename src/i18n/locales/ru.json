@@ -2960,6 +2960,12 @@
   "USGS Groundwater Wells": "USGS: скважины подземных вод",
   "USGS Lakes & Reservoirs": "USGS: озёра и водохранилища",
   "USGS Springs": "USGS: родники",
+  "USGS Water": "Вода USGS",
+  "Rivers & Streams": "Реки и ручьи",
+  "Groundwater Wells": "Скважины подземных вод",
+  "Lakes & Reservoirs": "Озёра и водохранилища",
+  "Springs": "Родники",
+  "Imagery": "Снимки",
   "Clean view: hide the controls": "Чистый вид: скрыть элементы управления",
   "Exit clean view: show the controls": "Выйти из чистого вида: показать элементы управления",
   "Clean view: hide the controls (V)": "Чистый вид: скрыть элементы управления (V)",
@@ -3069,6 +3075,7 @@
   "Another imagery tool is using the map": "Карту сейчас использует другой инструмент снимков",
   "Esri imagery is unavailable right now": "Снимки Esri сейчас недоступны",
   "Time travel": "Путешествие во времени",
+  "Esri Wayback imagery": "Снимки Esri Wayback",
   "Older imagery": "Более старые снимки",
   "Imagery date": "Дата снимков",
   "Newer imagery": "Более новые снимки",
@@ -3090,5 +3097,11 @@
   "Your choice applies now, but could not be saved.": "Ваш выбор применён, но сохранить его не удалось.",
   "Voice replies appear here.": "Здесь появляются голосовые ответы.",
   "Preview is off.": "Предпросмотр отключён.",
-  "Automatic stop is unavailable for this voice connection.": "Автоматическая остановка недоступна для этого голосового подключения."
+  "Automatic stop is unavailable for this voice connection.": "Автоматическая остановка недоступна для этого голосового подключения.",
+  "TIME TRAVEL": "ПУТЕШЕСТВИЕ ВО ВРЕМЕНИ",
+  "Aerial (NAIP)": "Аэрофотосъёмка (NAIP)",
+  "Aerial": "Аэрофото",
+  "Compare": "Сравнить",
+  "Aerial imagery year": "Год аэрофотоснимков",
+  "Compare with year (right side)": "Сравнить с годом (правая сторона)"
 }

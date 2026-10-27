@@ -50,6 +50,13 @@ export class FakeElement {
       this.children.push(n);
     }
   }
+  prepend(...nodes) {
+    for (const n of nodes) {
+      n.parentNode?.children.splice(n.parentNode.children.indexOf(n), 1);
+      n.parentNode = this;
+    }
+    this.children.unshift(...nodes);
+  }
   replaceChildren(...nodes) {
     for (const c of this.children) c.parentNode = null;
     this.children = [];

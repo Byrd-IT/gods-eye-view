@@ -284,6 +284,8 @@ async function setup({
     ...(rest.createPanel === undefined
       ? {}
       : { createPanel: rest.createPanel }),
+    // the floating panel on the globe, unless a test hosts it in a menu
+    timeTravel: rest.timeTravel === undefined ? null : rest.timeTravel,
   });
   return {
     detach,
@@ -870,6 +872,44 @@ test('panel: strings go through t() (Spanish catalog applies)', async () => {
   }
 });
 
+test('panel: in the Time travel menu the checkbox, row and font match the Aerial rows; floating keeps the 22 px touch box', () => {
+  const build = (embedded) => {
+    const doc = fakeDoc();
+    const container = doc.createElement('div');
+    const panel = createWaybackPanel({
+      container,
+      count: 3,
+      onToggle() {},
+      onIndex() {},
+      onStep() {},
+      onLatest() {},
+      embedded,
+      doc,
+    });
+    const all = [...panel.element.walk()];
+    return {
+      panel,
+      box: all.find((e) => e.attributes.type === 'checkbox'),
+      date: all.find((e) => e.tagName === 'OUTPUT'),
+      label: all.find((e) => e.tagName === 'LABEL'),
+    };
+  };
+  const menu = build(true);
+  // The browser's default box, exactly like the Aerial and Compare boxes.
+  assert.equal(menu.box.style.width, undefined);
+  assert.equal(menu.box.style.height, undefined);
+  assert.equal(menu.box.style.margin, undefined);
+  // The card's own font, no forced 13 px / 16 px sans-serif.
+  assert.equal(menu.panel.element.style.font, 'inherit');
+  assert.equal(menu.date.style.fontSize, 'inherit');
+  // No 44 px row; the label is the click target.
+  assert.equal(menu.label.style.minHeight, '0');
+  const floating = build(false);
+  assert.equal(floating.box.style.width, '22px');
+  assert.equal(floating.box.style.height, '22px');
+  assert.equal(floating.label.style.minHeight, '44px');
+});
+
 test('detach removes the panel, layers and listeners', async () => {
   const { detach, viewer, controller } = await setup({
     controller: fakeController('photoreal'),
@@ -917,4 +957,38 @@ test('enable after disable during start begins again', async () => {
   assert.equal(await again, true);
   assert.equal(detach.state().on, true);
   assert.equal(detach.state().ready, true);
+});
+
+// ------------------------------------------- hosted in the Time travel menu
+
+test('hosted in the Time travel menu: Imagery section, flow layout, released on detach', async () => {
+  const doc = fakeDoc();
+  const slot = doc.createElement('div');
+  const calls = [];
+  const timeTravel = {
+    claim: (name) => (calls.push(['claim', name]), slot),
+    release: (name) => calls.push(['release', name]),
+  };
+  const { detach, viewer } = await setup({ doc, timeTravel });
+  assert.deepEqual(calls, [['claim', 'imagery']]);
+  assert.equal(viewer.container.children.length, 0, 'not on the globe');
+  const panel = slot.children[0];
+  assert.equal(panel.id, 'gev-wayback');
+  assert.equal(panel.style.position, 'static');
+  assert.equal(panel.style.left, undefined);
+  assert.equal(panel.style.transform, undefined);
+  assert.equal(panel.attributes['aria-label'], 'Esri Wayback imagery');
+  detach();
+  assert.deepEqual(calls.at(-1), ['release', 'imagery']);
+  assert.equal(slot.children.length, 0);
+});
+
+test('flag off: nothing is claimed and no panel is made', async () => {
+  const calls = [];
+  const { viewer } = await setup({
+    doc: fakeDoc({ flag: false }),
+    timeTravel: { claim: (n) => calls.push(n), release() {} },
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(viewer.container.children.length, 0);
 });

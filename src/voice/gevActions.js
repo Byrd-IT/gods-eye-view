@@ -3271,9 +3271,14 @@ function normalizeCockpitAction(value) {
 }
 
 function focusDataLayerRow(layerId) {
-  const row = document.querySelector(
-    `#data-toggles [data-layer-id="${CSS.escape(layerId)}"]`,
-  );
+  // A layer shown inside a combined row (USGS Water) focuses that row.
+  const row =
+    document.querySelector(
+      `#data-toggles [data-layer-id="${CSS.escape(layerId)}"]`,
+    ) ||
+    document.querySelector(
+      `#data-toggles [data-combined-members~="${CSS.escape(layerId)}"]`,
+    );
   if (!row) return null;
   row.scrollIntoView({ block: 'center', behavior: 'smooth' });
   row.classList.remove('gev-voice-focus');

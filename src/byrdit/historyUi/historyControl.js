@@ -255,6 +255,9 @@ const pct = (x) => `${(Math.min(1, Math.max(0, x)) * 100).toFixed(3)}%`;
  * @param {object} options
  *   document, window      DOM (window: fetch, events, location, history)
  *   parent                container, default document.body
+ *   embedded              true when `parent` is a host that owns placement
+ *                         (the Time travel menu): the control drops its fixed
+ *                         bottom-left position and flows inside the host
  *   client                history client (default: /api/history over fetch)
  *   chips                 feed chips (default: createFeedChips on window)
  *   tileOutlines          optional {show(tiles), clear(), destroy()}
@@ -265,6 +268,7 @@ export function mountHistoryControl({
   document: doc = globalThis.document,
   window: win = globalThis.window,
   parent,
+  embedded = false,
   client,
   chips,
   tileOutlines = null,
@@ -280,6 +284,7 @@ export function mountHistoryControl({
 
   ensureStyle(doc);
   const dom = build(doc);
+  if (embedded) dom.root.setAttribute('data-embedded', 'true');
   host.append(dom.root);
   const api =
     client ??
