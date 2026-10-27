@@ -1046,7 +1046,7 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // consolidation (shorter analyst, annotate_map and ISS wording), plus the
   // referent-only track_entity alternative (kept out of the model-facing
   // schema, which may not carry top-level anyOf), and Contacts requested-radius
-  // list descriptions; the missions still ride existing tools.
+  // list descriptions; the missions still change no tool shapes.
   // Street Level and GNSS extend the manifest; broadcast caveats describe tracked and analyst aircraft.
   // Air quality (ECCC AQHI) extends the manifest.
   // Byrd-IT fork: + the four USGS water layers in src/voice/layerManifest.js
