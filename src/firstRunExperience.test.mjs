@@ -1028,7 +1028,7 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
     'minimal',
     'cyber',
   ]);
-  // Cyber deliberately adds one layout; first-run missions still change no tools.
+  // Cyber deliberately adds one layout; first-run missions still change no tool shapes.
   hudLayout.enum = hudLayout.enum.filter((layout) => layout !== 'cyber');
   const cameraMotion = legacyTools.find((tool) => tool.name === 'move_camera')
     .parameters.properties.motion;
