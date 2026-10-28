@@ -315,9 +315,13 @@ test('vector provider: url substitution, no request below minzoom, 204/error = b
   assert.deepEqual(urls, ['/basemap/overlay/lake-depth/15/7678/13134.mvt']);
   assert.equal(ok.blank, true);
   mode = '204';
-  await provider.requestImage(1, 1, 12);
+  const none = await provider.requestImage(1, 1, 12);
+  assert.equal(none.blank, true);
+  assert.equal(urls.at(-1), '/basemap/overlay/lake-depth/12/1/1.mvt');
   mode = 'throw';
-  assert.equal((await provider.requestImage(1, 1, 12)).blank, true);
+  const failed = await provider.requestImage(1, 1, 12);
+  assert.equal(failed.blank, true);
+  assert.equal(failed, none, 'one shared blank canvas');
 });
 
 // ------------------------------------------------------------------- panel

@@ -27,9 +27,13 @@ export { normalizeOverlays } from './overlaysConfig.js';
  * removes the layers (the user's toggles and opacities are kept).
  */
 
-/** Raster first, then vector; manifest order inside each group. */
 const CREDIT_ZOOM_SLACK = 2;
 
+/**
+ * Raster first, then vector; manifest order inside each group. Newly enabled
+ * layers are raised to the top of the imagery stack, so overlays sit above
+ * every other imagery layer (by design: they are the user's explicit choice).
+ */
 export function stackOrder(overlays) {
   const layers = overlays?.layers ?? [];
   return [

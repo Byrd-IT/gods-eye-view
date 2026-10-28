@@ -185,7 +185,8 @@ export function createVectorOverlayProvider(
     makeCanvas = canvasTile,
   } = {},
 ) {
-  const blank = () => makeCanvas();
+  let empty = null;
+  const blank = () => (empty ??= makeCanvas());
   class VectorOverlayProvider extends Cesium.UrlTemplateImageryProvider {
     requestImage(x, y, level) {
       if (level < entry.minzoom || !fetchImpl) return Promise.resolve(blank());
