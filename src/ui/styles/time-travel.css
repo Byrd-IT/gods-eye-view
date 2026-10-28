@@ -43,3 +43,71 @@
 #time-travel-panel.collapsed .gev-tt-body {
   display: none !important;
 }
+
+/* Map overlays section (src/byrdit/basemap/overlaysPanel.js). An author
+   display rule beats the UA [hidden] rule, so hidden is restated here. */
+.gev-ov-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  color: inherit;
+  font: inherit;
+}
+.gev-ov-panel[hidden] {
+  display: none;
+}
+.gev-ov-float {
+  position: absolute;
+  left: var(--left-stack-x);
+  bottom: var(--left-stack-gap);
+  width: auto;
+  max-width: calc(100% - 2 * var(--left-stack-x));
+  padding: 8px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  z-index: 20;
+}
+.gev-ov-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.gev-ov-head,
+.gev-ov-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.gev-ov-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gev-ov-moves {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+.gev-ov-moves .data-toggle-chip {
+  min-width: 28px;
+  padding: 2px 6px;
+  line-height: 1.4;
+}
+.gev-ov-moves .data-toggle-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+.gev-ov-line .gev-quantitative-slider {
+  flex: 1 1 auto;
+}
+.gev-ov-line .gev-slider-value {
+  min-width: 3em;
+}

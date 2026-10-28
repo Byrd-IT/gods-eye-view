@@ -92,3 +92,31 @@ for (const [name, envExtra, marker] of LOADERS) {
     assertClean(result);
   });
 }
+
+test("handler catch-all log carries no URL credentials", async () => {
+  const logs = [];
+  const handler = createBasemapHandler(
+    basemapSettingsFromEnv({ GEV_BASEMAP: "1" }),
+    {
+      fetchImpl: failingFetch,
+      // Anything that throws outside the loaders lands in the handler catch.
+      now: () => {
+        throw new TypeError(`clock failed for ${base("clock.invalid")}`);
+      },
+      log: (...a) => logs.push(a.map(String).join(" ")),
+    },
+  );
+  const s = await listen((req, res) => handler(req, res, () => res.end("next")));
+  try {
+    const r = await fetch(`${s.url}/basemap/config.json`);
+    assert.equal(r.status, 500);
+    const bodies = [await r.text()];
+    assert.ok(
+      logs.some((l) => l.includes("handler error")),
+      `handler error was logged (got: ${logs.join(" | ")})`,
+    );
+    assertClean({ logs, bodies });
+  } finally {
+    await s.close();
+  }
+});

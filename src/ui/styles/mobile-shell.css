@@ -196,6 +196,15 @@ body.mobile-shell[data-mobile-sheet='more'] #right-context-rail > #pp-toggles {
   transform: none;
 }
 
+/* The sheet is a scrolling column; an open Time travel card must keep its
+   content height (the rail's flex-shrink 1 squashed it and the next card
+   painted over its Map overlays section). */
+body.mobile-shell[data-mobile-sheet='context']
+  #right-context-rail
+  > #time-travel-panel:not([hidden]) {
+  flex: 0 0 auto;
+}
+
 /* ── Dock: voice floats above the tab bar; search and presets are sheets ─ */
 body.mobile-shell #command-dock {
   /* The dock's tray rules size voice by this basis; a column makes it a height. */

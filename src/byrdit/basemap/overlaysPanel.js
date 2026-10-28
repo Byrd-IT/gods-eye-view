@@ -1,52 +1,26 @@
 import { t } from '../../i18n/index.js';
 import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
+import { syncChipGroup } from '../../ui/chipGroup.js';
+import { createSlider } from '../../ui/slider.js';
 
 /**
  * Map overlays panel (BASEMAP M2 follow-up): one row per overlay with a
  * checkbox, an opacity range and raise/lower buttons; rows are listed top of
  * the stack first. Hosted in the Time travel card's "Map
  * overlays" section; floats bottom-left when no card can host it.
- * Plain DOM with inline styles, text via textContent only.
+ * Plain DOM, text via textContent only.
  */
 
 export const OVERLAYS_PANEL_ID = 'gev-overlays-panel';
 
-const EMBEDDED_STYLE = Object.freeze({
-  position: 'static',
-  boxSizing: 'border-box',
-  width: '100%',
-  maxWidth: '100%',
-  padding: '0',
-  background: 'transparent',
-  color: 'inherit',
-  font: 'inherit',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '6px',
-  pointerEvents: 'auto',
-});
-const FLOAT_STYLE = Object.freeze({
-  position: 'absolute',
-  left: '8px',
-  bottom: '118px',
-  boxSizing: 'border-box',
-  maxWidth: 'calc(100% - 16px)',
-  padding: '6px 10px',
-  background: 'rgba(12, 16, 22, 0.85)',
-  color: '#e6edf3',
-  font: '12px/1.4 system-ui, sans-serif',
-  borderRadius: '6px',
-  zIndex: '20',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '6px',
-  pointerEvents: 'auto',
-});
+// All look and layout is CSS (src/ui/styles/time-travel.css, .gev-ov-*) on the
+// shared tokens; raise/lower are the shared .data-toggle-chip (chipGroup.js)
+// and the opacity range is the shared .gev-quantitative-slider (ui/slider.js).
 
-function el(doc, tag, parent, { text, style, attrs } = {}) {
+function el(doc, tag, parent, { text, cls, attrs } = {}) {
   const node = doc.createElement(tag);
   if (text != null) node.textContent = text;
-  if (style) Object.assign(node.style, style);
+  if (cls) node.className = cls;
   for (const [k, v] of Object.entries(attrs ?? {})) node.setAttribute(k, v);
   parent?.append(node);
   return node;
@@ -73,69 +47,56 @@ export function createOverlaysPanel({
       'aria-label': t('Map overlays'),
       ...(embedded ? { 'data-embedded': 'true' } : {}),
     },
-    style: embedded ? EMBEDDED_STYLE : FLOAT_STYLE,
+    cls: embedded ? 'gev-ov-panel' : 'gev-ov-panel gev-ov-float',
   });
   const rows = new Map();
   for (const layer of state.layers) {
     const row = el(doc, 'div', panel, {
+      cls: 'gev-ov-row',
       attrs: { 'data-overlay': layer.id },
-      style: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2px',
-        minWidth: '0',
-      },
     });
-    const head = el(doc, 'div', row, {
-      style: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '4px',
-        minWidth: '0',
-      },
-    });
+    const head = el(doc, 'div', row, { cls: 'gev-ov-head' });
     const label = el(doc, 'label', head, {
       text: ` ${layer.name}`,
-      style: { flex: '1 1 auto', minWidth: '0' },
+      cls: 'gev-ov-name',
     });
     const box = el(doc, 'input', null, {
       attrs: { type: 'checkbox', 'aria-label': layer.name },
     });
     label.prepend(box);
-    const moveButton = (direction, glyph, text) =>
-      el(doc, 'button', head, {
-        text: glyph,
-        attrs: {
-          type: 'button',
-          'data-move': direction,
-          'aria-label': `${text}: ${layer.name}`,
-          title: text,
-        },
-        style: { padding: '0 6px', minWidth: '28px', lineHeight: '1.4' },
-      });
-    const up = moveButton('up', '\u25B2', t('Raise layer'));
-    const down = moveButton('down', '\u25BC', t('Lower layer'));
-    up.addEventListener('click', () => onMove(layer.id, 'up'));
-    down.addEventListener('click', () => onMove(layer.id, 'down'));
-    const line = el(doc, 'div', row, {
-      style: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        minWidth: '0',
-      },
+    const moves = el(doc, 'span', head, { cls: 'gev-ov-moves' });
+    const moveSpecs = [
+      ['up', '\u25B2', t('Raise layer')],
+      ['down', '\u25BC', t('Lower layer')],
+    ];
+    syncChipGroup(
+      moves,
+      moveSpecs.map(([direction, glyph, text]) => ({
+        id: direction,
+        label: glyph,
+        title: text,
+      })),
+    );
+    const [up, down] = [...moves.children];
+    moveSpecs.forEach(([direction, , text], i) => {
+      const button = [up, down][i];
+      button.setAttribute('data-move', direction);
+      button.setAttribute('aria-label', `${text}: ${layer.name}`);
+      // Actions, not toggles: drop the pressed/busy state chips carry.
+      button.removeAttribute?.('aria-pressed');
+      button.removeAttribute?.('aria-busy');
+      button.addEventListener('click', () => onMove(layer.id, direction));
     });
-    const range = el(doc, 'input', line, {
-      attrs: {
-        type: 'range',
-        min: '0',
-        max: '100',
-        step: '5',
-        'aria-label': `${layer.name}: ${t('Opacity')}`,
-      },
-      style: { flex: '1 1 auto', minWidth: '0', margin: '0' },
+    const line = el(doc, 'div', row, { cls: 'gev-ov-line' });
+    const range = createSlider({
+      documentRef: doc,
+      min: '0',
+      max: '100',
+      step: '5',
+      ariaLabel: `${layer.name}: ${t('Opacity')}`,
     });
-    const out = el(doc, 'output', line, { style: { minWidth: '3em' } });
+    line.append(range);
+    const out = el(doc, 'output', line, { cls: 'gev-slider-value' });
     box.addEventListener('change', () =>
       onEnabled(layer.id, Boolean(box.checked)),
     );
@@ -175,8 +136,7 @@ export function createOverlaysPanel({
       });
     },
     setVisible(visible) {
-      panel.hidden = !visible;
-      panel.style.display = visible ? 'flex' : 'none';
+      panel.hidden = !visible; // .gev-ov-panel[hidden] in time-travel.css
     },
     destroy() {
       panel.remove();

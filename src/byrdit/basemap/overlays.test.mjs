@@ -373,7 +373,18 @@ class Node {
     this.textContent = '';
     this.checked = false;
     this.value = '';
+    this.dataset = {};
+    this.className = '';
   }
+  set type(v) { this.attrs.type = v; }
+  get type() { return this.attrs.type; }
+  getAttribute(k) { return this.attrs[k] ?? null; }
+  removeAttribute(k) { delete this.attrs[k]; }
+  insertBefore(n, ref) {
+    const at = ref ? this.children.indexOf(ref) : -1;
+    this.children.splice(at < 0 ? this.children.length : at, 0, n);
+  }
+  get ownerDocument() { return fakeDoc(); }
   append(...n) { this.children.push(...n); }
   prepend(n) { this.children.unshift(n); }
   remove() { this.removed = true; }
@@ -385,7 +396,7 @@ class Node {
     return out;
   }
 }
-const fakeDoc = () => ({ createElement: (tag) => new Node(tag) });
+function fakeDoc() { return { createElement: (tag) => new Node(tag) }; }
 
 test('panel: a toggle and an opacity range per overlay; events call back; text via textContent', () => {
   const doc = fakeDoc();
@@ -437,6 +448,35 @@ test('panel: raise/lower buttons call back; ends disabled; rows reorder on updat
   assert.equal(btn('a', 'up').disabled, false);
   const order = panel.element.children.map((r) => r.attrs['data-overlay']);
   assert.deepEqual(order.slice(-3), ['b', 'a', 'c']);
+});
+
+test('panel: styled by shared classes (chips, slider, value), no inline style, not toggles', () => {
+  const panel = createOverlaysPanel({
+    container: new Node('div'), doc: fakeDoc(),
+    state: { layers: [{ id: 'a', name: 'A', enabled: false, opacity: 0.5 }] },
+    onEnabled() {}, onOpacity() {},
+  });
+  const root = panel.element;
+  assert.match(root.className, /\bgev-ov-panel\b/);
+  assert.deepEqual(root.style, {}, 'no inline style on the panel');
+  const all = root.find(() => true);
+  assert.ok(all.every((n) => Object.keys(n.style).length === 0), 'no inline styles anywhere');
+  const chips = root.find((n) => n.attrs['data-move']);
+  assert.equal(chips.length, 2);
+  assert.ok(chips.every((c) => /\bdata-toggle-chip\b/.test(c.className)));
+  assert.ok(chips.every((c) => !('aria-pressed' in c.attrs) && !('aria-busy' in c.attrs)));
+  assert.match(root.find((n) => n.attrs.type === 'range')[0].className, /\bgev-quantitative-slider\b/);
+  assert.equal(root.find((n) => n.tag === 'output')[0].className, 'gev-slider-value');
+  panel.setVisible(false);
+  assert.equal(root.hidden, true);
+  assert.equal(root.style.display, undefined, 'visibility is the hidden attribute only');
+  panel.setVisible(true);
+  assert.equal(root.hidden, false);
+  const floated = createOverlaysPanel({
+    container: new Node('div'), doc: fakeDoc(), state: { layers: [] },
+    onEnabled() {}, onOpacity() {},
+  });
+  assert.match(floated.element.className, /\bgev-ov-float\b/);
 });
 
 test('panel: hosted in the menu slot when there is one, claimed only while visible', () => {

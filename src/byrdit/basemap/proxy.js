@@ -721,14 +721,50 @@ export function createBasemapHandler(
     return none;
   }
 
+  /**
+   * Per-block cache: a block that loaded is kept 60 s, one that did not 10 s,
+   * so a flaky block is retried on its own and does not re-fetch (or re-log)
+   * the healthy ones. Concurrent misses share one load.
+   */
+  function cachedBlock(load) {
+    let entry = null;
+    let inflight = null;
+    return (deadline) => {
+      if (entry && now() < entry.until) return Promise.resolve(entry.value);
+      inflight ??= load(deadline)
+        .then((value) => {
+          entry = {
+            value,
+            until:
+              now() +
+              ((value?.available ?? value?.browser?.available) === true
+                ? 60_000
+                : 10_000),
+          };
+          return value;
+        })
+        .finally(() => {
+          inflight = null;
+        });
+      return inflight;
+    };
+  }
+  const blocks = {
+    terrain: cachedBlock(terrainConfig),
+    imagery: cachedBlock(imageryConfig),
+    buildings: cachedBlock(buildingsConfig),
+    naip: cachedBlock(naipConfig),
+    overlays: cachedBlock(overlaysConfig),
+  };
+
   async function compose() {
     const deadline = AbortSignal.timeout(budgetMs);
     const [terrain, imagery, buildings, naip, overlays] = await Promise.all([
-      terrainConfig(deadline),
-      imageryConfig(deadline),
-      buildingsConfig(deadline),
-      naipOn ? naipConfig(deadline) : null,
-      overlaysOn ? overlaysConfig(deadline) : null,
+      blocks.terrain(deadline),
+      blocks.imagery(deadline),
+      blocks.buildings(deadline),
+      naipOn ? blocks.naip(deadline) : null,
+      overlaysOn ? blocks.overlays(deadline) : null,
     ]);
     const value = {
       schema: 1,

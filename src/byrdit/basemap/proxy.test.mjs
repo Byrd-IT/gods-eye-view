@@ -306,6 +306,55 @@ test('GET /basemap/config.json: composed, cacheable 60 s, no credentials, browse
   }
 });
 
+test('config blocks are cached one by one: a failing block retries alone', async () => {
+  const up = await upstreams();
+  let clock = 1_000_000;
+  const reads = { imagery: 0, overlays: 0 };
+  const front = await gev(
+    {
+      terrainUrls: [up.edge.url],
+      imageryUrls: [up.tiles.url],
+      imageryConfig: ['/fake/imagery-config.json'],
+      overlays: true,
+      hiresUrls: [up.edge.url],
+      overlaysConfig: ['/fake/overlays.json'],
+    },
+    {
+      now: () => clock,
+      readFileImpl: async (source) => {
+        if (source.includes('overlays')) {
+          reads.overlays += 1;
+          throw new Error('overlays manifest missing');
+        }
+        reads.imagery += 1;
+        return JSON.stringify(IMAGERY_PUBLISH);
+      },
+    },
+  );
+  const terrainFetches = () =>
+    up.seen.filter((s) => s.who === 'edge' && s.url === '/config.json').length;
+  const get = async () => (await fetch(`${front.url}/basemap/config.json`)).json();
+  try {
+    let body = await get();
+    assert.equal(body.terrain.available, true);
+    assert.equal(body.overlays.available, false);
+    assert.deepEqual([terrainFetches(), reads.imagery, reads.overlays], [1, 1, 1]);
+    clock += 5_000; // inside every cache: nothing is fetched again
+    await get();
+    assert.deepEqual([terrainFetches(), reads.imagery, reads.overlays], [1, 1, 1]);
+    clock += 6_000; // whole config and the failed block expired, healthy blocks did not
+    body = await get();
+    assert.equal(body.terrain.available, true);
+    assert.deepEqual([terrainFetches(), reads.imagery, reads.overlays], [1, 1, 2]);
+    clock += 60_000; // healthy blocks expire too
+    await get();
+    assert.deepEqual([terrainFetches(), reads.imagery, reads.overlays], [2, 2, 3]);
+  } finally {
+    await front.close();
+    await up.close();
+  }
+});
+
 test('config with the service down: 200 + available:false (the browser takes the Esri path)', async () => {
   const front = await gev({
     terrainUrls: ['http://127.0.0.1:9'],

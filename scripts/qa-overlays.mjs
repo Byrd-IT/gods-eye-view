@@ -67,6 +67,63 @@ async function run(label, viewport) {
   check(`${label}: panel is in the Time travel card, heading "Map overlays"`, info.inMenu && info.heading === "Map overlays");
   check(`${label}: 6 overlays, all off, opacity disabled while off`, info.rows.length === 6 && info.rows.every((r) => !r.checked && r.rangeDisabled));
   check(`${label}: no horizontal page overflow`, !info.overflow);
+  // Styling by computed style (not by ids): the section is the card chrome's
+  // child, and its controls are the shared chip / slider / value surfaces.
+  const look = await page.evaluate(() => {
+    const panel = document.querySelector("#gev-overlays-panel");
+    const cs = (n, ...props) => Object.fromEntries(props.map((p) => [p, getComputedStyle(n)[p]]));
+    const card = panel.closest("#right-context-rail > .panel-collapsible");
+    const chip = panel.querySelector("[data-move]");
+    const range = panel.querySelector('input[type="range"]');
+    const out = panel.querySelector("output");
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+    const probe = document.createElement("span");
+    probe.style.color = accent;
+    document.body.append(probe);
+    const accentRgb = getComputedStyle(probe).color;
+    probe.remove();
+    const clone = panel.cloneNode(false);
+    clone.id = "";
+    clone.hidden = true;
+    panel.parentNode.append(clone);
+    const hiddenDisplay = getComputedStyle(clone).display;
+    clone.remove();
+    const pr = panel.getBoundingClientRect();
+    const cr = card.getBoundingClientRect();
+    return {
+      inRailCard: Boolean(card?.querySelector(":scope > * > .panel-header .panel-collapse-btn")),
+      inlineStyle: panel.hasAttribute("style") || Boolean(panel.querySelector("[style]")),
+      panel: cs(panel, "position", "display"),
+      chip: cs(chip, "fontFamily", "fontSize", "borderTopLeftRadius", "backgroundColor", "cursor"),
+      chipClass: chip.className,
+      range: { ...cs(range, "appearance", "height"), cls: range.className },
+      out: cs(out, "color", "fontFamily"),
+      accentRgb,
+      hiddenDisplay,
+      insideCard: pr.left >= cr.left - 0.5 && pr.right <= cr.right + 0.5,
+    };
+  });
+  console.log(label, "look", JSON.stringify(look));
+  check(`${label}: section sits in a right-rail card with the standard header chrome`, look.inRailCard);
+  check(`${label}: no inline styles in the section`, !look.inlineStyle);
+  check(`${label}: panel is in-flow and inside the card`, look.panel.position === "static" && look.insideCard, JSON.stringify(look.panel));
+  check(`${label}: raise/lower use the shared chip look`, /data-toggle-chip/.test(look.chipClass) && /mono|JetBrains/i.test(look.chip.fontFamily) && look.chip.borderTopLeftRadius === "3px" && look.chip.backgroundColor !== "rgb(239, 239, 239)", JSON.stringify(look.chip));
+  check(`${label}: opacity is the shared themed slider`, /gev-quantitative-slider/.test(look.range.cls) && look.range.appearance === "none" && look.range.height === "18px", JSON.stringify(look.range));
+  check(`${label}: opacity value uses the accent token`, look.out.color === look.accentRgb, `${look.out.color} vs ${look.accentRgb}`);
+  check(`${label}: [hidden] hides the section`, look.hiddenDisplay === "none", look.hiddenDisplay);
+  // Rail siblings must not paint over the open card (phone sheet bug: the
+  // card was squashed to 208 px and CONTEXT covered the overlays section).
+  const overlap = await page.evaluate(() => {
+    const card = document.querySelector("#time-travel-panel");
+    const cr = card.getBoundingClientRect();
+    const content = card.querySelector(".gev-tt-body").getBoundingClientRect();
+    return [...document.querySelectorAll("#right-context-rail > .panel-collapsible")]
+      .filter((n) => n !== card && getComputedStyle(n).display !== "none")
+      .map((n) => ({ id: n.id, r: n.getBoundingClientRect() }))
+      .filter(({ r }) => r.height > 0 && r.top < Math.max(cr.bottom, content.bottom) - 0.5 && r.bottom > cr.top + 0.5 && r.left < cr.right && r.right > cr.left)
+      .map(({ id }) => id);
+  });
+  check(`${label}: no other rail card paints over the open Time travel card`, overlap.length === 0, overlap.join());
   await page.screenshot({ path: path.join(outDir, `${label}-panel.png`) });
 
   // Fly to Wood County, then switch overlays on.
