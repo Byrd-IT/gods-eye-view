@@ -82,6 +82,54 @@ export function modeOptions(mode) {
 }
 
 /**
+ * An orbit recommendation runs a full planFlight(), and the panel asks for it
+ * on every slider input. The result depends only on the aircraft, the mode and
+ * the orbit radius (everything else comes from MODE_BASE), so keep the last
+ * results per preset object. Keyed by the preset object itself, not its id, so
+ * an edited copy never reads a stale entry. Callers get fresh copies: they may
+ * mutate what recommend() returns.
+ */
+const orbitCache = new WeakMap();
+const ORBIT_CACHE_MAX_PER_PRESET = 32;
+let orbitPlanRuns = 0;
+
+/** How many full orbit plans recommend() has run (for tests). */
+export function orbitPlanRunCount() {
+  return orbitPlanRuns;
+}
+
+function orbitLimits(preset, mode, base, radius) {
+  let perPreset = orbitCache.get(preset);
+  if (!perPreset) {
+    perPreset = new Map();
+    orbitCache.set(preset, perPreset);
+  }
+  const key = `${mode}|${radius}`;
+  let hit = perPreset.get(key);
+  if (!hit) {
+    orbitPlanRuns += 1;
+    const half = 0.0005;
+    const plan = planFlight(
+      { west: 0 - half, east: half, south: 30 - half, north: 30 + half },
+      {
+        presetId: preset.id,
+        pattern: 'orbit',
+        orbitRadiusM: radius,
+        orbitHeightsM: base.orbitHeightsM,
+        frontOverlap: base.frontOverlap,
+        shutterDenominator: base.shutterDenominator,
+      },
+    );
+    hit = { limits: plan.speedLimits, gsdCm: plan.gsdCm };
+    if (perPreset.size >= ORBIT_CACHE_MAX_PER_PRESET) {
+      perPreset.delete(perPreset.keys().next().value);
+    }
+    perPreset.set(key, hit);
+  }
+  return { limits: { ...hit.limits }, gsdCm: hit.gsdCm };
+}
+
+/**
  * The recommended settings for `preset` in `mode`.
  * @param {object} preset
  * @param {string} mode One of MODES.
@@ -98,20 +146,7 @@ export function recommend(preset, mode, context = {}) {
     // The orbit's photo spacing and ground detail come from the planner's own
     // ring maths, so the recommendation can never disagree with the plan.
     const radius = context.orbitRadiusM ?? REFERENCE_ORBIT_RADIUS_M;
-    const half = 0.0005;
-    const plan = planFlight(
-      { west: 0 - half, east: half, south: 30 - half, north: 30 + half },
-      {
-        presetId: preset.id,
-        pattern: 'orbit',
-        orbitRadiusM: radius,
-        orbitHeightsM: base.orbitHeightsM,
-        frontOverlap: base.frontOverlap,
-        shutterDenominator: base.shutterDenominator,
-      },
-    );
-    limits = plan.speedLimits;
-    gsdCm = plan.gsdCm;
+    ({ limits, gsdCm } = orbitLimits(preset, mode, base, radius));
   } else {
     const fp = footprint(preset, agl, 0);
     gsdCm = fp.gsdCm;

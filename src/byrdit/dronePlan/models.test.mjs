@@ -7,7 +7,13 @@ import {
   kmzStatus,
   listPresets,
 } from './presets.js';
-import { MODES, modeFor, recommend, recommendedOptions } from './recommend.js';
+import {
+  MODES,
+  modeFor,
+  orbitPlanRunCount,
+  recommend,
+  recommendedOptions,
+} from './recommend.js';
 import {
   floorTo,
   minShutterDenominator,
@@ -226,4 +232,38 @@ test('orbit mode ignores side overlap in the recommended options', () => {
   assert.equal('sideOverlap' in recommendedOptions(rec), false);
   assert.equal(rec.gimbalPitchDeg, null);
   assert.deepEqual(rec.orbitHeightsM, [40, 80]);
+});
+
+test('orbit recommend() memoises the planner run by aircraft, mode and radius', () => {
+  const p = getPreset('dji-air-3s');
+  const first = recommend(p, 'splat-orbit', { orbitRadiusM: 33.5 });
+  const runs = orbitPlanRunCount();
+  for (let i = 0; i < 20; i++) {
+    assert.deepEqual(
+      recommend(p, 'splat-orbit', { orbitRadiusM: 33.5 }),
+      first,
+    );
+  }
+  assert.equal(orbitPlanRunCount(), runs, 'no new planFlight for same inputs');
+  recommend(p, 'splat-orbit', { orbitRadiusM: 34.5 });
+  assert.equal(orbitPlanRunCount(), runs + 1, 'new radius computes once');
+  recommend(getPreset('dji-mavic-3'), 'splat-orbit', { orbitRadiusM: 33.5 });
+  assert.equal(orbitPlanRunCount(), runs + 2, 'new aircraft computes once');
+  // Grid modes never run an orbit plan.
+  recommend(p, 'mapping-grid');
+  recommend(p, 'fast-survey');
+  assert.equal(orbitPlanRunCount(), runs + 2);
+});
+
+test('memoised orbit recommendation is not corrupted by caller mutation', () => {
+  const p = getPreset('dji-air-3');
+  const a = recommend(p, 'splat-orbit', { orbitRadiusM: 41.25 });
+  const snapshot = JSON.stringify(a);
+  a.limits.limitMs = -1;
+  a.orbitHeightsM.push(999);
+  a.camera.isoRange.push(1);
+  assert.equal(
+    JSON.stringify(recommend(p, 'splat-orbit', { orbitRadiusM: 41.25 })),
+    snapshot,
+  );
 });
