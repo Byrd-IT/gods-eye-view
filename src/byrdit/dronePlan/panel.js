@@ -33,7 +33,11 @@ import {
   listPresets,
 } from './presets.js';
 import { MODES, modeFor, recommend, recommendedOptions } from './recommend.js';
-import { SHUTTER_DENOMINATORS } from './speed.js';
+import {
+  DEFAULT_SHUTTER_DENOMINATOR,
+  MIN_PLAN_SPEED_MS,
+  SHUTTER_DENOMINATORS,
+} from './speed.js';
 import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
 import {
   distanceText,
@@ -90,6 +94,7 @@ export function initDronePlan({
       tiltPitchDeg: -60,
       speedMs: getPreset(DEFAULT_PRESET_ID).defaultSpeedMs,
       photoMode: 'waypoint',
+      shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
       batteryMin: 25,
       orbitRadiusM: null,
       orbitHeightsM: null,
@@ -390,7 +395,7 @@ export function initDronePlan({
       t('Photos'),
     );
     ({ row: ui.photoRow } = field(t('Photos'), ui.photoMode, { value: false }));
-    ui.speed = slider(t('Speed'), 0.5, 15, 0.1);
+    ui.speed = slider(t('Speed'), MIN_PLAN_SPEED_MS, 15, 0.1);
     ({ out: ui.speedOut } = field(t('Speed'), ui.speed));
     ui.shutter = select(
       SHUTTER_DENOMINATORS.map((n) => [String(n), `1/${n} s`]),

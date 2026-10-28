@@ -751,3 +751,9 @@ test('P3: a plan whose camera limit is below the minimum planned speed cannot be
   assert.equal(w.downloads.length, 0);
   w.handle.destroy();
 });
+
+test('P3: the shutter control shows a real option before any interaction', () => {
+  const w = setup();
+  assert.equal(w.control('Shutter speed').value, '1000');
+  w.handle.destroy();
+});
