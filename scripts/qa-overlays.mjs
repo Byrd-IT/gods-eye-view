@@ -99,6 +99,22 @@ async function run(label, viewport) {
   for (const id of wide ? ["hillshade", "contours", "lake-depth"] : ["lake-depth"])
     check(`${label}: ${id} tiles requested, none failed`, byLayer(id).length > 0 && byLayer(id).every((t) => t.status === 200 || t.status === 204));
   await page.screenshot({ path: path.join(outDir, `${label}-on.png`) });
+  // Stacking order: rows list the top first; raise hillshade with its button.
+  const rowIds = () => page.evaluate(() => [...document.querySelectorAll("#gev-overlays-panel [data-overlay]")].map((r) => r.getAttribute("data-overlay")));
+  const before = await rowIds();
+  check(`${label}: rows list the top of the stack first (vector above raster)`, before.join() === "lake-depth,contours,terrain-rgb,relief,hillshade,ustopo", before.join());
+  for (let i = 0; i < 4; i++)
+    await page.evaluate(() => document.querySelector('#gev-overlays-panel [data-overlay="hillshade"] button[data-move="up"]').click());
+  await sleep(500);
+  const moved = await rowIds();
+  const stack = await page.evaluate(() => window.__gevOverlays?.state().stack);
+  check(`${label}: raise button moves the row and the stack`, moved[0] === "hillshade" && stack?.at(-1) === "hillshade", `${moved.join()} | ${stack?.join()}`);
+  const ends = await page.evaluate(() => ({
+    topUp: document.querySelector('#gev-overlays-panel [data-overlay="hillshade"] button[data-move="up"]').disabled,
+    bottomDown: document.querySelector('#gev-overlays-panel [data-overlay="ustopo"] button[data-move="down"]').disabled,
+  }));
+  check(`${label}: top row cannot go up, bottom row cannot go down`, ends.topUp && ends.bottomDown, JSON.stringify(ends));
+  await page.screenshot({ path: path.join(outDir, `${label}-reordered.png`) });
   await page.evaluate(() => document.querySelector('#gev-overlays-panel [data-overlay="hillshade"] input[type="checkbox"]').click());
   await sleep(500);
   const off = await page.evaluate(() => window.__gevOverlays?.state().active);

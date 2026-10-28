@@ -3104,5 +3104,7 @@
   "Aerial": "Аэрофото",
   "Compare": "Сравнить",
   "Aerial imagery year": "Год аэрофотоснимков",
-  "Compare with year (right side)": "Сравнить с годом (правая сторона)"
+  "Compare with year (right side)": "Сравнить с годом (правая сторона)",
+  "Raise layer": "Поднять слой",
+  "Lower layer": "Опустить слой"
 }

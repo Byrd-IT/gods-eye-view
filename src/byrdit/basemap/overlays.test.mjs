@@ -142,9 +142,12 @@ const ids = (viewer) =>
 
 test('overlays: all offered, all OFF until toggled; fixed raster -> vector order', () => {
   const { viewer, detach } = setup();
-  assert.deepEqual(detach.state().layers.map((l) => l.id), [
+  assert.deepEqual(detach.state().stack, [
     'ustopo', 'hillshade', 'relief', 'terrain-rgb', 'contours', 'lake-depth',
   ]);
+  assert.deepEqual(detach.state().layers.map((l) => l.id), [
+    'lake-depth', 'contours', 'terrain-rgb', 'relief', 'hillshade', 'ustopo',
+  ], 'panel lists the top of the stack first');
   assert.deepEqual(ids(viewer), ['sentinel']);
   detach.setEnabled('lake-depth', true);
   detach.setEnabled('hillshade', true);
@@ -175,6 +178,40 @@ test('overlays: per-layer opacity (default from manifest, clamped), toggle off r
   assert.equal(hill.isDestroyed(), true);
   detach.setEnabled('hillshade', true);
   assert.equal(viewer.imageryLayers.items[1].alpha, 0.0, 'opacity kept across toggles');
+});
+
+test('overlays: raise/lower changes the draw order, keeps toggles, ends return false', () => {
+  const { viewer, detach } = setup();
+  detach.setEnabled('hillshade', true);
+  detach.setEnabled('contours', true);
+  detach.setEnabled('lake-depth', true);
+  assert.deepEqual(ids(viewer), ['sentinel', 'hillshade', 'contours', 'lake-depth']);
+  // vector over raster by default; push hillshade above them all, one step at a time
+  assert.equal(detach.moveLayer('hillshade', 'up'), true);
+  assert.deepEqual(detach.state().stack.slice(0, 3), ['ustopo', 'relief', 'hillshade']);
+  assert.deepEqual(ids(viewer), ['sentinel', 'hillshade', 'contours', 'lake-depth']);
+  detach.moveLayer('hillshade', 'up');
+  detach.moveLayer('hillshade', 'up');
+  assert.deepEqual(ids(viewer), ['sentinel', 'contours', 'hillshade', 'lake-depth']);
+  detach.moveLayer('hillshade', 'up');
+  assert.deepEqual(ids(viewer), ['sentinel', 'contours', 'lake-depth', 'hillshade']);
+  assert.equal(detach.moveLayer('hillshade', 'up'), false, 'already on top');
+  assert.equal(detach.state().layers[0].id, 'hillshade');
+  assert.equal(detach.moveLayer('hillshade', 'sideways'), false);
+  assert.equal(detach.moveLayer('nope', 'up'), false);
+  detach.moveLayer('lake-depth', 'down');
+  assert.deepEqual(ids(viewer), ['sentinel', 'lake-depth', 'contours', 'hillshade']);
+  // toggling a layer off and on keeps the chosen position
+  detach.setEnabled('hillshade', false);
+  detach.setEnabled('hillshade', true);
+  assert.deepEqual(ids(viewer), ['sentinel', 'lake-depth', 'contours', 'hillshade']);
+  // a newly enabled layer lands at its chosen slot, not on top
+  detach.setEnabled('relief', true);
+  assert.deepEqual(ids(viewer), ['sentinel', 'relief', 'lake-depth', 'contours', 'hillshade']);
+  // bottom end
+  for (let i = 0; i < 10; i++) detach.moveLayer('ustopo', 'down');
+  assert.equal(detach.moveLayer('ustopo', 'down'), false);
+  assert.equal(detach.state().stack[0], 'ustopo');
 });
 
 test('overlays: removed with another stack or Google 3D, user choices kept', () => {
@@ -375,6 +412,31 @@ test('panel: a toggle and an opacity range per overlay; events call back; text v
   assert.equal(ranges[1].value, '35');
   panel.destroy();
   assert.equal(panel.element.removed, true);
+});
+
+test('panel: raise/lower buttons call back; ends disabled; rows reorder on update', () => {
+  const doc = fakeDoc();
+  const container = new Node('div');
+  const calls = [];
+  const layers = ['a', 'b', 'c'].map((id) => ({ id, name: id.toUpperCase(), enabled: false, opacity: 0.5 }));
+  const panel = createOverlaysPanel({
+    container, doc, state: { layers },
+    onEnabled() {}, onOpacity() {},
+    onMove: (id, d) => calls.push([id, d]),
+  });
+  const btn = (id, d) => panel.element.find((n) => n.attrs['data-move'] === d && n.attrs['aria-label'].endsWith(`: ${id.toUpperCase()}`))[0];
+  assert.equal(btn('a', 'up').disabled, true, 'top row cannot go up');
+  assert.equal(btn('c', 'down').disabled, true, 'bottom row cannot go down');
+  assert.equal(btn('b', 'up').disabled, false);
+  btn('b', 'up').listeners.click();
+  btn('b', 'down').listeners.click();
+  assert.deepEqual(calls, [['b', 'up'], ['b', 'down']]);
+  assert.equal(btn('b', 'up').textContent, '\u25B2');
+  panel.update({ layers: [layers[1], layers[0], layers[2]] });
+  assert.equal(btn('b', 'up').disabled, true);
+  assert.equal(btn('a', 'up').disabled, false);
+  const order = panel.element.children.map((r) => r.attrs['data-overlay']);
+  assert.deepEqual(order.slice(-3), ['b', 'a', 'c']);
 });
 
 test('panel: hosted in the menu slot when there is one, claimed only while visible', () => {

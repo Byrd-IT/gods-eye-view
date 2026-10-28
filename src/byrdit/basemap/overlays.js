@@ -19,8 +19,9 @@ export { normalizeOverlays } from './overlaysConfig.js';
  *
  * Every overlay is OFF until the user turns it on and is drawn only inside
  * its own bounds (the lake corridors): the imagery rectangle clips the layer
- * and tiles outside are transparent. Stacking is fixed: rasters in manifest
- * order, vectors above them, all above the NAIP imagery.
+ * and tiles outside are transparent. Stacking starts as rasters in manifest
+ * order, vectors above them, all above the NAIP imagery; the user can raise
+ * or lower any overlay (moveLayer) and the choice is kept for the session.
  *
  * Visibility follows the NAIP layers (naip.js): only while the controller
  * shows Byrd-IT Open and the Google 3D tileset is not drawn. Any other stack
@@ -65,7 +66,10 @@ export function attachOverlays({
 }) {
   const scene = viewer.scene;
   const collection = viewer.imageryLayers;
-  const order = stackOrder(overlays);
+  const defaultOrder = stackOrder(overlays);
+  /** Entries bottom -> top. The user's raise/lower choices live here. */
+  const order = [...defaultOrder];
+  let orderChanged = false;
   /** id -> {enabled, opacity} for every offered overlay. */
   const state = new Map(
     order.map((entry) => [
@@ -119,12 +123,14 @@ export function attachOverlays({
       if (layer.alpha !== s.opacity) layer.alpha = s.opacity;
       if (layer.show !== true) layer.show = true;
     }
-    // New layers land on top; restore the fixed raster -> vector order.
-    if (added)
+    // New layers land on top; restore the chosen bottom -> top order.
+    if (added || orderChanged) {
+      orderChanged = false;
       for (const entry of order) {
         const layer = layers.get(entry.id);
         if (layer) collection.raiseToTop?.(layer);
       }
+    }
   }
 
   function setCredits(texts) {
@@ -153,8 +159,9 @@ export function attachOverlays({
     }
   }
 
+  // Panel rows are listed top of the stack first.
   const uiState = () => ({
-    layers: order.map((entry) => ({
+    layers: [...order].reverse().map((entry) => ({
       id: entry.id,
       name: entry.name,
       kind: entry.kind,
@@ -211,6 +218,16 @@ export function attachOverlays({
       evaluate();
       return true;
     },
+    /** direction 'up' = toward the top of the stack. false at the ends. */
+    moveLayer(id, direction) {
+      const i = order.findIndex((entry) => entry.id === id);
+      const j = direction === 'up' ? i + 1 : direction === 'down' ? i - 1 : -1;
+      if (i < 0 || j < 0 || j >= order.length) return false;
+      [order[i], order[j]] = [order[j], order[i]];
+      orderChanged = true;
+      evaluate();
+      return true;
+    },
   };
 
   if (createPanel)
@@ -219,6 +236,7 @@ export function attachOverlays({
       state: uiState(),
       onEnabled: (id, on) => api.setEnabled(id, on),
       onOpacity: (id, value) => api.setOpacity(id, value),
+      onMove: (id, direction) => api.moveLayer(id, direction),
     });
 
   removers.push(controller.subscribe?.(() => evaluate()));
@@ -250,6 +268,7 @@ export function attachOverlays({
     state: () => ({
       ...uiState(),
       active: [...layers.keys()],
+      stack: order.map((entry) => entry.id),
       credits: [...credits.keys()],
       created,
       destroyed,

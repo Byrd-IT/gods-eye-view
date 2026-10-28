@@ -3,7 +3,8 @@ import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
 
 /**
  * Map overlays panel (BASEMAP M2 follow-up): one row per overlay with a
- * checkbox and an opacity range. Hosted in the Time travel card's "Map
+ * checkbox, an opacity range and raise/lower buttons; rows are listed top of
+ * the stack first. Hosted in the Time travel card's "Map
  * overlays" section; floats bottom-left when no card can host it.
  * Plain DOM with inline styles, text via textContent only.
  */
@@ -60,6 +61,7 @@ export function createOverlaysPanel({
   state,
   onEnabled,
   onOpacity,
+  onMove = () => {},
   embedded = false,
   doc = container?.ownerDocument ?? globalThis.document,
 }) {
@@ -84,11 +86,37 @@ export function createOverlaysPanel({
         minWidth: '0',
       },
     });
-    const label = el(doc, 'label', row, { text: ` ${layer.name}` });
+    const head = el(doc, 'div', row, {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+        minWidth: '0',
+      },
+    });
+    const label = el(doc, 'label', head, {
+      text: ` ${layer.name}`,
+      style: { flex: '1 1 auto', minWidth: '0' },
+    });
     const box = el(doc, 'input', null, {
       attrs: { type: 'checkbox', 'aria-label': layer.name },
     });
     label.prepend(box);
+    const moveButton = (direction, glyph, text) =>
+      el(doc, 'button', head, {
+        text: glyph,
+        attrs: {
+          type: 'button',
+          'data-move': direction,
+          'aria-label': `${text}: ${layer.name}`,
+          title: text,
+        },
+        style: { padding: '0 6px', minWidth: '28px', lineHeight: '1.4' },
+      });
+    const up = moveButton('up', '\u25B2', t('Raise layer'));
+    const down = moveButton('down', '\u25BC', t('Lower layer'));
+    up.addEventListener('click', () => onMove(layer.id, 'up'));
+    down.addEventListener('click', () => onMove(layer.id, 'down'));
     const line = el(doc, 'div', row, {
       style: {
         display: 'flex',
@@ -114,22 +142,37 @@ export function createOverlaysPanel({
     range.addEventListener('input', () =>
       onOpacity(layer.id, Number(range.value) / 100),
     );
-    rows.set(layer.id, { box, range, out });
+    rows.set(layer.id, { row, box, range, out, up, down });
   }
   container.append(panel);
+  let shownOrder = state.layers.map((layer) => layer.id).join();
   const api = {
     element: panel,
     update(next) {
-      for (const layer of next.layers) {
+      const nextOrder = next.layers.map((layer) => layer.id);
+      // Reorder rows only for a full, changed ordering (append moves a node).
+      if (
+        nextOrder.length === rows.size &&
+        nextOrder.every((id) => rows.has(id)) &&
+        nextOrder.join() !== shownOrder
+      ) {
+        shownOrder = nextOrder.join();
+        for (const id of nextOrder) panel.append(rows.get(id).row);
+      }
+      next.layers.forEach((layer, index) => {
         const row = rows.get(layer.id);
-        if (!row) continue;
+        if (!row) return;
         const pct = Math.round(layer.opacity * 100);
         row.box.checked = Boolean(layer.enabled);
         row.range.value = String(pct);
         row.range.disabled = !layer.enabled;
         row.range.setAttribute('aria-valuetext', `${pct}%`);
         row.out.textContent = `${pct}%`;
-      }
+        if (nextOrder.length === rows.size) {
+          row.up.disabled = index === 0;
+          row.down.disabled = index === nextOrder.length - 1;
+        }
+      });
     },
     setVisible(visible) {
       panel.hidden = !visible;

@@ -2897,5 +2897,7 @@
   "Aerial": "航拍",
   "Compare": "对比",
   "Aerial imagery year": "航拍影像年份",
-  "Compare with year (right side)": "与年份对比（右侧）"
+  "Compare with year (right side)": "与年份对比（右侧）",
+  "Raise layer": "上移图层",
+  "Lower layer": "下移图层"
 }

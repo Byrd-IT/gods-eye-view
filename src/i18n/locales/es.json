@@ -3035,5 +3035,7 @@
   "Aerial": "Aérea",
   "Compare": "Comparar",
   "Aerial imagery year": "Año de las imágenes aéreas",
-  "Compare with year (right side)": "Comparar con el año (lado derecho)"
+  "Compare with year (right side)": "Comparar con el año (lado derecho)",
+  "Raise layer": "Subir capa",
+  "Lower layer": "Bajar capa"
 }
