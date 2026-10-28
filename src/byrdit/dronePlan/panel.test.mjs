@@ -569,3 +569,138 @@ test('drawing a new box (or setBox) drops the takeoff point picked for the old o
   assert.equal(w.handle.getState().takeoff, null);
   w.handle.destroy();
 });
+
+// ------------------------------------------------------- aircraft picker --
+const pick = (w, label, value) => {
+  const c = w.control(label);
+  c.value = value;
+  c.dispatch('change');
+};
+const rowOf = (control) => control.parentNode.parentNode;
+
+test('every aircraft can be picked; the summary, recommended block and KMZ gate follow it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const info = () =>
+    w.find((n) => n.attributes.get('data-role') === 'preset-info')[0]
+      .textContent;
+  for (const [id, name, kmz] of [
+    ['dji-mini-5-pro', 'Mini 5 Pro', true],
+    ['dji-mini-4-pro', 'Mini 4 Pro', true],
+    ['dji-air-3', 'Air 3', false],
+    ['dji-air-3s', 'Air 3S', false],
+    ['dji-mavic-3', 'Mavic 3', false],
+    ['dji-phantom-4', 'Phantom 4', false],
+  ]) {
+    pick(w, 'Aircraft', id);
+    await w.handle.replan();
+    assert.match(info(), /shutter/);
+    assert.ok(
+      w.find((n) => n.attributes.get('data-role') === 'recommended')[0].children
+        .length > 0,
+      `${name} recommendation shown`,
+    );
+    assert.equal(
+      w.buttons('data-mission').every((b) => !b.disabled),
+      kmz,
+      `${name} KMZ buttons`,
+    );
+    assert.equal(w.buttons('data-download')[0].disabled, !kmz);
+  }
+  w.handle.destroy();
+});
+
+test('the Phantom 4 shows the reason, its preview stays, and no file can be made', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Aircraft', 'dji-phantom-4');
+  await w.handle.replan();
+  const why = w.find(
+    (n) => n.attributes.get('data-code') === 'kmz-unavailable',
+  );
+  assert.equal(why.length, 1);
+  assert.match(why[0].textContent, /DJI GO 4/);
+  assert.ok(w.handle.getResult().missions.length > 0, 'path still planned');
+  w.handle.downloadMission(0);
+  w.handle.downloadAll();
+  assert.equal(w.downloads.length, 0);
+  // an aircraft code typed in cannot unlock it
+  const field = w.control('DJI aircraft code in the mission file');
+  field.value = '68';
+  field.dispatch('change');
+  w.handle.downloadMission(0);
+  assert.equal(w.downloads.length, 0);
+  w.handle.destroy();
+});
+
+test('an aircraft without a known code stays locked until a code is typed in', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Aircraft', 'dji-air-3');
+  await w.handle.replan();
+  w.handle.downloadMission(0);
+  assert.equal(w.downloads.length, 0);
+  assert.equal(
+    w.find((n) => n.attributes.get('data-code') === 'kmz-unavailable').length,
+    1,
+  );
+  const field = w.control('DJI aircraft code in the mission file');
+  field.value = '77';
+  field.dispatch('change');
+  await w.handle.replan();
+  w.handle.downloadMission(0);
+  assert.equal(w.downloads.length, 1);
+  w.handle.destroy();
+});
+
+test('USE RECOMMENDED applies the aircraft and mode values and the plan honours them', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 300));
+  pick(w, 'Aircraft', 'dji-mavic-3');
+  pick(w, 'Mode', 'fast-survey');
+  const use = w.buttons('data-action')[0];
+  use.click();
+  await w.handle.replan();
+  const r = w.handle.getResult();
+  assert.equal(r.plan.options.photoMode, 'interval');
+  assert.equal(r.plan.options.aglM, 120);
+  assert.equal(r.plan.options.presetId, 'dji-mavic-3');
+  assert.equal(r.plan.speedLimitedBy, null);
+  pick(w, 'Mode', 'splat-orbit');
+  w.buttons('data-action')[0].click();
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.options.pattern, 'orbit');
+  w.handle.destroy();
+});
+
+test('P3: the photo-mode row is hidden for an orbit and back for a grid', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const photos = w.control('Photos');
+  assert.equal(rowOf(photos).hidden, false);
+  pick(w, 'Mode', 'splat-orbit');
+  assert.equal(rowOf(photos).hidden, true);
+  pick(w, 'Mode', 'mapping-grid');
+  assert.equal(rowOf(photos).hidden, false);
+  w.handle.destroy();
+});
+
+test('the shutter control feeds the blur limit', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Aircraft', 'dji-mavic-3');
+  const speed = w.control('Speed');
+  speed.value = '15';
+  speed.dispatch('input');
+  pick(w, 'Shutter speed', '250');
+  await w.handle.replan();
+  const r = w.handle.getResult();
+  assert.equal(r.plan.options.shutterDenominator, 250);
+  assert.equal(r.plan.speedLimitedBy, 'blur');
+  assert.ok(
+    w.find((n) => n.attributes.get('data-code') === 'speed-blur-limited')
+      .length === 1,
+  );
+  w.handle.destroy();
+});

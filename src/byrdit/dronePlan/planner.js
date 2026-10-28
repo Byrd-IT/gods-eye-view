@@ -10,6 +10,13 @@
  */
 import { DEFAULT_PRESET_ID, getPreset } from './presets.js';
 import {
+  DEFAULT_SHUTTER_DENOMINATOR,
+  MIN_PLAN_SPEED_MS,
+  floorTo,
+  shutterDenominatorOrDefault,
+  speedLimits,
+} from './speed.js';
+import {
   bearingDeg,
   groundDistanceM,
   makeFrame,
@@ -59,6 +66,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
   tiltPitchDeg: -60,
   speedMs: 5,
   photoMode: 'waypoint',
+  shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
   batteryMin: 25,
   maxWaypoints: MAX_WAYPOINTS_PER_MISSION,
   orbitRadiusM: null,
@@ -155,9 +163,10 @@ export function normalizeOptions(raw = {}, box = null) {
   o.tiltPitchDeg = clamp(num(o.tiltPitchDeg, -60), -80, -45);
   o.speedMs = clamp(
     num(o.speedMs, preset.defaultSpeedMs),
-    1,
+    MIN_PLAN_SPEED_MS,
     preset.maxSpeedMs,
   );
+  o.shutterDenominator = shutterDenominatorOrDefault(o.shutterDenominator);
   o.batteryMin = clamp(num(o.batteryMin, 25), 5, 60);
   o.maxWaypoints = Math.floor(
     clamp(
@@ -506,22 +515,41 @@ export function planFlight(box, rawOptions = {}) {
     return { error: 'empty', message: 'Box is too small to plan a flight' };
   }
 
-  // Speed: the shutter needs time between frames, so photo spacing and the
-  // camera's minimum interval cap the speed whatever the user asked for.
+  // Speed: the camera needs time between frames (photo spacing / minimum
+  // interval) and the picture must not smear while the shutter is open (blur
+  // limit from the shutter type and speed), whatever speed the user asked for.
+  // The result is rounded DOWN and never raised to a floor: a floor above the
+  // camera's limit would fly faster than the camera can keep up with.
+  const limits = speedLimits({
+    preset,
+    photoSpacingM,
+    gsdCm: fpInfo.gsdCm,
+    shutterDenominator: options.shutterDenominator,
+  });
   let speedMs = options.speedMs;
   let speedLimitedBy = null;
-  if (photoSpacingM > 0) {
-    const cameraCap = photoSpacingM / preset.minPhotoIntervalS;
-    if (cameraCap < speedMs) {
-      speedMs = cameraCap;
-      speedLimitedBy = 'camera';
-    }
+  if (limits.limitMs < speedMs) {
+    speedMs = limits.limitMs;
+    speedLimitedBy = limits.limitedBy === 'blur' ? 'blur' : 'camera';
   }
-  speedMs = Math.max(0.5, round(speedMs, 2));
+  speedMs = Math.max(MIN_PLAN_SPEED_MS, floorTo(speedMs, 0.01));
   if (speedLimitedBy) {
+    const code =
+      speedLimitedBy === 'blur' ? 'speed-blur-limited' : 'speed-camera-limited';
     notes.push({
-      code: 'speed-camera-limited',
-      params: { requested: options.speedMs, limited: speedMs },
+      code,
+      params: {
+        requested: options.speedMs,
+        limited: speedMs,
+        shutter: options.shutterDenominator,
+      },
+    });
+  }
+  if (limits.limitMs < MIN_PLAN_SPEED_MS) {
+    // Even the slowest planned speed is faster than the camera allows.
+    notes.push({
+      code: 'speed-below-minimum',
+      params: { limitMs: round(limits.limitMs, 3), minMs: MIN_PLAN_SPEED_MS },
     });
   }
 
@@ -548,6 +576,7 @@ export function planFlight(box, rawOptions = {}) {
     passCount,
     speedMs,
     speedLimitedBy,
+    speedLimits: limits,
     gsdCm: fpInfo.gsdCm,
     notes,
   };
