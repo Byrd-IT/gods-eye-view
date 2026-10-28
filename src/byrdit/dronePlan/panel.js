@@ -26,7 +26,18 @@ import {
   planFlight,
   takeoffDistanceFromBoxM,
 } from './planner.js';
-import { DEFAULT_PRESET_ID, getPreset, listPresets } from './presets.js';
+import {
+  DEFAULT_PRESET_ID,
+  getPreset,
+  kmzStatus,
+  listPresets,
+} from './presets.js';
+import { MODES, modeFor, recommend, recommendedOptions } from './recommend.js';
+import {
+  DEFAULT_SHUTTER_DENOMINATOR,
+  MIN_PLAN_SPEED_MS,
+  SHUTTER_DENOMINATORS,
+} from './speed.js';
 import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
 import {
   distanceText,
@@ -83,6 +94,7 @@ export function initDronePlan({
       tiltPitchDeg: -60,
       speedMs: getPreset(DEFAULT_PRESET_ID).defaultSpeedMs,
       photoMode: 'waypoint',
+      shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
       batteryMin: 25,
       orbitRadiusM: null,
       orbitHeightsM: null,
@@ -298,6 +310,30 @@ export function initDronePlan({
       t('Aircraft'),
     );
     field(t('Aircraft'), ui.preset, { value: false });
+    ui.presetInfo = el(doc, 'p', body, {
+      cls: 'gev-dp-note gev-dp-preset-info',
+      attrs: { 'data-role': 'preset-info' },
+    });
+    ui.mode = select(
+      MODES.map((m) => [m, modeLabel(m)]),
+      t('Mode'),
+    );
+    field(t('Mode'), ui.mode, { value: false });
+    ui.useRecommended = el(doc, 'button', body, {
+      cls: 'data-toggle-chip gev-dp-recommend',
+      text: t('USE RECOMMENDED'),
+      attrs: {
+        type: 'button',
+        'data-action': 'use-recommended',
+        title: t(
+          'Set speed, height, overlap and shutter to the recommended values for this aircraft and mode',
+        ),
+      },
+    });
+    ui.recommended = el(doc, 'dl', body, {
+      cls: 'gev-dp-stats gev-dp-recommended',
+      attrs: { 'data-role': 'recommended' },
+    });
 
     ui.agl = slider(t('Height above ground'), MIN_AGL_M, AGL_CAP_M, 5);
     ({ row: ui.aglRow, out: ui.aglOut } = field(
@@ -358,9 +394,14 @@ export function initDronePlan({
       ],
       t('Photos'),
     );
-    field(t('Photos'), ui.photoMode, { value: false });
-    ui.speed = slider(t('Speed'), 1, 15, 0.5);
+    ({ row: ui.photoRow } = field(t('Photos'), ui.photoMode, { value: false }));
+    ui.speed = slider(t('Speed'), MIN_PLAN_SPEED_MS, 15, 0.1);
     ({ out: ui.speedOut } = field(t('Speed'), ui.speed));
+    ui.shutter = select(
+      SHUTTER_DENOMINATORS.map((n) => [String(n), `1/${n} s`]),
+      t('Shutter speed'),
+    );
+    field(t('Shutter speed'), ui.shutter, { value: false });
     ui.battery = el(doc, 'input', null, {
       cls: 'pp-text-input gev-dp-text',
       attrs: {
@@ -450,6 +491,35 @@ export function initDronePlan({
       syncControls();
       schedule();
     });
+    ui.mode.addEventListener('change', () => {
+      // Picking a mode only selects the pattern and photo mode; the values
+      // change when the person presses USE RECOMMENDED.
+      // A pattern that already belongs to the chosen mode (for example
+      // `double` in Mapping grid) is kept.
+      if (modeFor(o) !== ui.mode.value) {
+        const next = recommend(getPreset(o.presetId), ui.mode.value);
+        o.pattern = next.pattern;
+        o.photoMode = next.photoMode;
+      }
+      syncControls();
+      schedule();
+    });
+    ui.shutter.addEventListener('change', () => {
+      o.shutterDenominator = Number(ui.shutter.value);
+      syncControls();
+      schedule();
+    });
+    ui.useRecommended.addEventListener('click', () => {
+      const rec = recommend(getPreset(o.presetId), ui.mode.value, {
+        orbitRadiusM:
+          o.orbitRadiusM ??
+          state.result?.plan?.options?.orbitRadiusM ??
+          undefined,
+      });
+      Object.assign(o, recommendedOptions(rec));
+      syncControls();
+      schedule();
+    });
     onInput(ui.agl, () => (o.aglM = Number(ui.agl.value)));
     onInput(ui.front, () => (o.frontOverlap = Number(ui.front.value)));
     onInput(ui.side, () => (o.sideOverlap = Number(ui.side.value)));
@@ -489,7 +559,9 @@ export function initDronePlan({
       const v = raw === '' ? null : Number(raw);
       state.wpml.droneEnumValue =
         Number.isInteger(v) && v >= 0 && v <= 999 ? v : null;
-      syncControls();
+      // The KMZ buttons and the reason text depend on the code: redraw them.
+      if (state.result) render();
+      else syncControls();
     });
     ui.drawButton.addEventListener('click', () => drawBox());
     ui.closeButton.addEventListener('click', () => close());
@@ -505,10 +577,78 @@ export function initDronePlan({
     });
   }
 
+  function modeLabel(mode) {
+    switch (mode) {
+      case 'splat-orbit':
+        return t('Splat orbit');
+      case 'fast-survey':
+        return t('Fast survey');
+      default:
+        return t('Mapping grid');
+    }
+  }
+
+  function presetSummary(preset) {
+    const facts = [
+      preset.sensorText,
+      t('{shutter} shutter', { shutter: preset.shutterType }),
+      t('photo every {s} s at best', { s: num(preset.minPhotoIntervalS) }),
+      t('up to {v} m/s', { v: num(preset.maxSpeedMs) }),
+      t('app: {app}', { app: preset.app }),
+      t('data: {v}', { v: preset.verified }),
+    ];
+    return facts.join(' · ');
+  }
+
+  function renderRecommended(preset, mode) {
+    const rec = recommend(preset, mode, {
+      orbitRadiusM:
+        state.options.orbitRadiusM ??
+        state.result?.plan?.options?.orbitRadiusM ??
+        undefined,
+    });
+    ui.recommended.replaceChildren();
+    const row = (label, value) => {
+      el(doc, 'dt', ui.recommended, { text: label });
+      el(doc, 'dd', ui.recommended, { text: value });
+    };
+    row(t('Speed'), `${num(rec.speedMs, 1)} m/s`);
+    if (rec.pattern !== 'orbit') row(t('Height'), heightText(rec.aglM));
+    else row(t('Orbit heights (m)'), rec.orbitHeightsM.join(', '));
+    row(
+      t('Overlap'),
+      rec.sideOverlap === null
+        ? `${num(rec.frontOverlap)}%`
+        : `${num(rec.frontOverlap)}% / ${num(rec.sideOverlap)}%`,
+    );
+    row(
+      t('Gimbal'),
+      rec.gimbalPitchDeg === null
+        ? t('on the centre')
+        : `${num(rec.gimbalPitchDeg)}°`,
+    );
+    row(
+      t('Camera'),
+      t(
+        '1/{n} s or faster, ISO {lo}-{hi}, locked white balance and focus, {format}',
+        {
+          n: num(rec.camera.minShutterDenominator),
+          lo: num(rec.camera.isoRange[0]),
+          hi: num(rec.camera.isoRange[1]),
+          format: rec.camera.format,
+        },
+      ),
+    );
+  }
+
   function syncControls() {
     const o = state.options;
     const preset = getPreset(o.presetId);
     ui.preset.value = o.presetId;
+    ui.mode.value = modeFor(o);
+    ui.shutter.value = String(o.shutterDenominator);
+    ui.presetInfo.textContent = presetSummary(preset);
+    renderRecommended(preset, modeFor(o));
     ui.agl.value = String(o.aglM);
     ui.aglOut.textContent = heightText(Math.min(o.aglM, AGL_CAP_M));
     ui.aglRow.title = t('Hard cap {m} m / {ft} ft above ground', {
@@ -533,10 +673,13 @@ export function initDronePlan({
     ui.speedOut.textContent = `${num(o.speedMs, 1)} m/s`;
     ui.battery.value = String(o.batteryMin);
     ui.enum.value = String(
-      state.wpml.droneEnumValue ?? preset.wpml.droneEnumValue,
+      state.wpml.droneEnumValue ?? preset.wpml?.droneEnumValue ?? '',
     );
     const orbit = o.pattern === 'orbit';
     ui.directionRow.hidden = orbit;
+    // An orbit shoots by the ring's own spacing: the photo-mode choice only
+    // applies to the grid patterns.
+    ui.photoRow.hidden = orbit;
     ui.tiltRow.hidden = o.pattern !== 'double';
     ui.radiusRow.hidden = !orbit;
     ui.ringsRow.hidden = !orbit;
@@ -580,7 +723,7 @@ export function initDronePlan({
     stat(t('Flight time'), durationText(totals.durationS));
     stat(t('Missions'), num(totals.missionCount));
     stat(t('Waypoints'), missions.map((m) => num(m.waypointCount)).join(' / '));
-    if (plan.speedLimitedBy) stat(t('Speed'), `${num(plan.speedMs, 1)} m/s`);
+    stat(t('Speed'), `${num(plan.speedMs, 1)} m/s`);
     stat(
       t('Terrain range'),
       result.ground.known ? `${num(totals.terrainRangeM)} m` : t('unknown'),
@@ -589,6 +732,13 @@ export function initDronePlan({
       const text = warningText(w);
       if (text)
         el(doc, 'li', ui.warnings, { text, attrs: { 'data-code': w.code } });
+    }
+    const kmz = kmzOk();
+    if (!kmz.ok) {
+      el(doc, 'li', ui.warnings, {
+        text: kmzReasonText(kmz.reason),
+        attrs: { 'data-code': 'kmz-unavailable' },
+      });
     }
     const list = ui.missions;
     const when = new Date();
@@ -658,6 +808,19 @@ export function initDronePlan({
       status(t('Too many missions to download safely'), 'warn');
   }
 
+  const kmzOk = () =>
+    kmzStatus(getPreset(state.options.presetId), state.wpml.droneEnumValue);
+
+  function kmzReasonText(reason) {
+    return reason === 'no-fly-waypoints'
+      ? t(
+          'No KMZ for this aircraft: DJI GO 4 has no waypoint-file import (it records a flown path), so use a third-party app such as Litchi or Map Pilot Pro with the preview and settings shown here',
+        )
+      : t(
+          'No DJI Fly aircraft code is known for this aircraft yet. Enter one in the "Aircraft code" field under "DJI model code" to enable the KMZ',
+        );
+  }
+
   const wpmlOverride = () => ({
     droneEnumValue: state.wpml.droneEnumValue ?? undefined,
   });
@@ -666,12 +829,15 @@ export function initDronePlan({
   function downloadsAllowed() {
     const result = state.result;
     if (!result || state.busy || state.dirty) return false;
+    if (!kmzOk().ok) return false;
     // A mission over the battery time, or a plan cut off at the mission cap,
     // is never offered: a warning alone is too easy to miss.
     if (
       result.warnings.some(
         (w) =>
-          w.code === 'mission-over-budget' || w.code === 'too-many-missions',
+          w.code === 'mission-over-budget' ||
+          w.code === 'too-many-missions' ||
+          w.code === 'speed-below-minimum',
       )
     ) {
       return false;

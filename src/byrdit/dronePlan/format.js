@@ -49,6 +49,20 @@ export function warningText(warning) {
         'Speed lowered from {requested} to {limited} m/s so the camera can keep up with the photo spacing',
         { requested: fixed(p.requested, 1), limited: fixed(p.limited, 1) },
       );
+    case 'speed-blur-limited':
+      return t(
+        'Speed lowered from {requested} to {limited} m/s so photos stay sharp at a 1/{shutter} s shutter',
+        {
+          requested: fixed(p.requested, 1),
+          limited: fixed(p.limited, 1),
+          shutter: fixed(p.shutter),
+        },
+      );
+    case 'speed-below-minimum':
+      return t(
+        'This camera cannot keep up even at {min} m/s with these settings (limit {limit} m/s): lower the overlap or fly higher',
+        { min: fixed(p.minMs, 1), limit: fixed(p.limitMs, 2) },
+      );
     case 'vlos':
       return t(
         'The furthest waypoint is {distance} m from takeoff: keep the aircraft in sight',

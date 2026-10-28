@@ -31,8 +31,16 @@ const one = (n) => Number(n).toFixed(1);
 const pitchText = (n) => (Number.isInteger(n) ? String(n) : one(n));
 
 function missionConfig(preset, plan, wpml) {
-  const enumValue = wpml?.droneEnumValue ?? preset.wpml.droneEnumValue;
-  const subEnum = wpml?.droneSubEnumValue ?? preset.wpml.droneSubEnumValue;
+  if (preset.kmz?.supported === false) {
+    throw new Error(`${preset.name} cannot load a DJI Fly waypoint KMZ`);
+  }
+  const enumValue = wpml?.droneEnumValue ?? preset.wpml?.droneEnumValue;
+  const subEnum =
+    wpml?.droneSubEnumValue ?? preset.wpml?.droneSubEnumValue ?? 0;
+  // Number(null) is 0: a missing code must stop the file, not become aircraft 0.
+  if (!Number.isInteger(enumValue)) {
+    throw new Error(`No DJI Fly aircraft code known for ${preset.name}`);
+  }
   return `    <wpml:missionConfig>
       <wpml:flyToWaylineMode>safely</wpml:flyToWaylineMode>
       <wpml:finishAction>goHome</wpml:finishAction>
