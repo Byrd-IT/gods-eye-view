@@ -201,6 +201,8 @@ export async function openBasemap({
         flyTo: (bounds) => flyToImageryBounds(viewer, Cesium, bounds),
       });
       if (hookWindow) hookWindow.__gevImagery = { voice: imageryVoice };
+      // Read/drive handle for the overlay layers (QA and the console).
+      if (hookWindow && overlays) hookWindow.__gevOverlays = overlays;
       const detach = () => {
         if (hookWindow?.__gevImagery?.voice === imageryVoice) {
           delete hookWindow.__gevImagery;
@@ -213,6 +215,8 @@ export async function openBasemap({
           }
         }
         if (health) health.onChange = null;
+        if (hookWindow?.__gevOverlays === overlays)
+          delete hookWindow.__gevOverlays;
         overlays?.();
         naip?.();
         buildings?.();

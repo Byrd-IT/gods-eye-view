@@ -28,6 +28,8 @@ export { normalizeOverlays } from './overlaysConfig.js';
  */
 
 /** Raster first, then vector; manifest order inside each group. */
+const CREDIT_ZOOM_SLACK = 2;
+
 export function stackOrder(overlays) {
   const layers = overlays?.layers ?? [];
   return [
@@ -173,7 +175,15 @@ export function attachOverlays({
     const { viewBounds, lat } = viewOf();
     const zoom = zoomForHeight(heightOf(), lat);
     for (const entry of order)
-      if (layers.has(entry.id) && layerOnScreen(entry, { viewBounds, zoom }))
+      // zoomForHeight is only an estimate of the level Cesium draws; credit a
+      // little early rather than draw tiles with no attribution.
+      if (
+        layers.has(entry.id) &&
+        layerOnScreen(
+          { ...entry, minzoom: entry.minzoom - CREDIT_ZOOM_SLACK },
+          { viewBounds, zoom },
+        )
+      )
         texts.add(entry.credit);
     setCredits(texts);
     panel?.setVisible?.(true);
