@@ -542,7 +542,7 @@ export function createBasemapHandler(
         },
       });
     } catch (error) {
-      log('[basemap] terrain config unavailable:', error?.message || error);
+      log('[basemap] terrain config unavailable:', safeErrorText(error));
       return { available: false };
     }
   }
@@ -570,7 +570,7 @@ export function createBasemapHandler(
         if (imagery.available) return imagery;
         throw new Error('invalid imagery config');
       } catch (error) {
-        log('[basemap] imagery config unavailable:', error?.message || error);
+        log('[basemap] imagery config unavailable:', safeErrorText(error));
       }
     }
     return { available: false };
@@ -599,7 +599,7 @@ export function createBasemapHandler(
         },
       });
     } catch (error) {
-      log('[basemap] health unavailable:', error?.message || error);
+      log('[basemap] health unavailable:', safeErrorText(error));
       return { ...UNKNOWN_HEALTH_REPORT, warnings: [] };
     }
   }
@@ -637,7 +637,7 @@ export function createBasemapHandler(
         },
       });
     } catch (error) {
-      log('[basemap] buildings config unavailable:', error?.message || error);
+      log('[basemap] buildings config unavailable:', safeErrorText(error));
       return { available: false };
     }
   }
@@ -680,7 +680,7 @@ export function createBasemapHandler(
         if (naip.browser.available) return naip;
         throw new Error('invalid naip config');
       } catch (error) {
-        log('[basemap] naip config unavailable:', error?.message || error);
+        log('[basemap] naip config unavailable:', safeErrorText(error));
       }
     }
     return none;
@@ -949,7 +949,7 @@ export function createBasemapHandler(
         req.method === 'HEAD',
       );
     } catch (error) {
-      log('[basemap] handler error:', error?.message || error);
+      log('[basemap] handler error:', safeErrorText(error));
       if (!res.headersSent)
         send(
           res,
