@@ -321,7 +321,7 @@ export function initDronePlan({
         type: 'button',
         'data-action': 'use-recommended',
         title: t(
-          'Set speed, height, overlap and gimbal to the recommended values for this aircraft and mode',
+          'Set speed, height, overlap and shutter to the recommended values for this aircraft and mode',
         ),
       },
     });
@@ -489,9 +489,13 @@ export function initDronePlan({
     ui.mode.addEventListener('change', () => {
       // Picking a mode only selects the pattern and photo mode; the values
       // change when the person presses USE RECOMMENDED.
-      const next = recommend(getPreset(o.presetId), ui.mode.value);
-      o.pattern = next.pattern;
-      o.photoMode = next.photoMode;
+      // A pattern that already belongs to the chosen mode (for example
+      // `double` in Mapping grid) is kept.
+      if (modeFor(o) !== ui.mode.value) {
+        const next = recommend(getPreset(o.presetId), ui.mode.value);
+        o.pattern = next.pattern;
+        o.photoMode = next.photoMode;
+      }
       syncControls();
       schedule();
     });
@@ -550,7 +554,9 @@ export function initDronePlan({
       const v = raw === '' ? null : Number(raw);
       state.wpml.droneEnumValue =
         Number.isInteger(v) && v >= 0 && v <= 999 ? v : null;
-      syncControls();
+      // The KMZ buttons and the reason text depend on the code: redraw them.
+      if (state.result) render();
+      else syncControls();
     });
     ui.drawButton.addEventListener('click', () => drawBox());
     ui.closeButton.addEventListener('click', () => close());
@@ -806,7 +812,7 @@ export function initDronePlan({
           'No KMZ for this aircraft: DJI GO 4 has no waypoint-file import (it records a flown path), so use a third-party app such as Litchi or Map Pilot Pro with the preview and settings shown here',
         )
       : t(
-          'No DJI Fly aircraft code is known for this aircraft yet. Enter one under "DJI model code" to enable the KMZ',
+          'No DJI Fly aircraft code is known for this aircraft yet. Enter one in the "Aircraft code" field under "DJI model code" to enable the KMZ',
         );
   }
 
@@ -824,7 +830,9 @@ export function initDronePlan({
     if (
       result.warnings.some(
         (w) =>
-          w.code === 'mission-over-budget' || w.code === 'too-many-missions',
+          w.code === 'mission-over-budget' ||
+          w.code === 'too-many-missions' ||
+          w.code === 'speed-below-minimum',
       )
     ) {
       return false;

@@ -88,7 +88,8 @@ const KMZ_NEEDS_CODE = { supported: true, reason: 'no-code' };
  * pixel. DJI's 84 deg diagonal FOV belongs to the 3:2 frame, so applying it to
  * the 4:3 still would overstate the footprint by about 8 %.
  * Max speed is a CONFLICT in the sources (15 vs 19 m/s): 15 is used.
- * DERIVED, not read from an EXIF dump: verify against a real photo.
+ * UNVERIFIED: derived from the sensor size, not read from an EXIF dump, so
+ * verify against a real photo.
  */
 const MINI_5_PRO = {
   id: 'dji-mini-5-pro',

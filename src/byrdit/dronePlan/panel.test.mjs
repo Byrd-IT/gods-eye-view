@@ -648,9 +648,23 @@ test('an aircraft without a known code stays locked until a code is typed in', a
   const field = w.control('DJI aircraft code in the mission file');
   field.value = '77';
   field.dispatch('change');
-  await w.handle.replan();
+  // no replan: the buttons and the reason follow the code at once
+  assert.equal(
+    w.buttons('data-mission').every((b) => !b.disabled),
+    true,
+  );
+  assert.equal(
+    w.find((n) => n.attributes.get('data-code') === 'kmz-unavailable').length,
+    0,
+  );
   w.handle.downloadMission(0);
   assert.equal(w.downloads.length, 1);
+  field.value = '';
+  field.dispatch('change');
+  assert.equal(
+    w.buttons('data-mission').every((b) => b.disabled),
+    true,
+  );
   w.handle.destroy();
 });
 
@@ -702,5 +716,38 @@ test('the shutter control feeds the blur limit', async () => {
     w.find((n) => n.attributes.get('data-code') === 'speed-blur-limited')
       .length === 1,
   );
+  w.handle.destroy();
+});
+
+test('picking Mapping grid keeps a double-grid pattern; another mode changes it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Pattern', 'double');
+  pick(w, 'Mode', 'mapping-grid');
+  assert.equal(w.control('Pattern').value, 'double');
+  pick(w, 'Mode', 'splat-orbit');
+  assert.equal(w.control('Pattern').value, 'orbit');
+  w.handle.destroy();
+});
+
+test('P3: a plan whose camera limit is below the minimum planned speed cannot be downloaded', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(60, 60));
+  // 1/60 s is not on the shutter list, but the planner accepts it: at 10 m the
+  // blur limit then falls under the 0.1 m/s floor.
+  Object.assign(w.handle.getState().options, {
+    aglM: 10,
+    shutterDenominator: 60,
+  });
+  await w.handle.replan();
+  const codes = w.handle.getResult().warnings.map((x) => x.code);
+  assert.ok(codes.includes('speed-below-minimum'), codes.join());
+  assert.ok(!codes.includes('too-many-missions'), codes.join());
+  assert.equal(
+    w.buttons('data-mission').every((b) => b.disabled),
+    true,
+  );
+  w.handle.downloadMission(0);
+  assert.equal(w.downloads.length, 0);
   w.handle.destroy();
 });
