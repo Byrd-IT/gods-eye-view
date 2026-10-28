@@ -1910,6 +1910,8 @@
       "src/byrdit/dronePlan/pointTool.js",
       "src/byrdit/dronePlan/presets.js",
       "src/byrdit/dronePlan/preview.js",
+      "src/byrdit/dronePlan/recommend.js",
+      "src/byrdit/dronePlan/speed.js",
       "src/byrdit/dronePlan/terrain.js",
       "src/byrdit/dronePlan/wpml.js",
       "src/byrdit/dronePlan/zip.js",
