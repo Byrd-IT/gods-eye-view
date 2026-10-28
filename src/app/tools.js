@@ -3,6 +3,7 @@ import { initAnnotations } from '../annotations/index.js';
 import { initDrawTool } from '../annotations/drawTool.js';
 import { initGeoFileImport } from '../ui/geoFileImport.js';
 import { initImageryBoxTool } from '../ui/imageryBoxTool.js';
+import { initDronePlan } from '../byrdit/dronePlan/panel.js';
 import { createRecentImageryPanel } from '../ui/recentImagery.js';
 import { initGevVoiceCommands } from '../voice/gevRealtime.js';
 import { installViews, isEmbeddedInline } from './embed.js';
@@ -68,6 +69,17 @@ export function createApplicationTools({
     subscribeMapSource: (listener) => mapStackController?.subscribe?.(listener),
   });
   defer(() => geoFileImport?.destroy());
+  // DISPLAY ▸ Drone Flight Plan: draw a box, plan DJI Fly KMZ missions. Its
+  // box and takeoff tools claim the pointer like Draw, so its teardown belongs
+  // to the application lifetime too.
+  const dronePlan = initDronePlan({ viewer });
+  if (dronePlan) {
+    window.__gevDronePlan = dronePlan;
+    defer(() => {
+      if (window.__gevDronePlan === dronePlan) delete window.__gevDronePlan;
+      dronePlan.destroy();
+    });
+  }
   // DATA ▸ Recent Imagery: the box tool claims the pointer like Draw and the
   // panel lives on the right rail, so both belong to the application
   // lifetime. The tileset lets the layer drape while the globe is hidden.

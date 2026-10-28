@@ -152,3 +152,42 @@ test('destroy mid-drag restores the camera, releases the claim and detaches the 
   assert.equal(f.tool.start(), false);
   assert.equal(initImageryBoxTool({ viewer: null, onBox() {} }), null);
 });
+
+test('a second tool can reuse the drag under its own claim, preview, cursor class and box limits', async () => {
+  const limits = [];
+  const f = fixture({
+    owner: 'drone-plan-box',
+    previewName: 'gev-drone-plan-box-preview',
+    bodyClass: 'gev-drone-box',
+    validate: (box) => {
+      limits.push(box);
+      return { ok: true, box };
+    },
+  });
+  assert.equal(f.tool.start(), true);
+  assert.equal(pointerOwner(), 'drone-plan-box');
+  assert.ok(f.documentRef.classes.has('gev-drone-box'));
+  assert.equal(f.documentRef.classes.has('gev-imagery-box'), false);
+  f.fire('LEFT_DOWN', { position: { x: 250, y: 125 } });
+  f.fire('LEFT_UP', { position: { x: 500, y: 250 } });
+  assert.equal(limits.length, 1, 'its own validator decided');
+  assert.equal(f.boxes.length, 1);
+  assert.equal(f.documentRef.classes.has('gev-drone-box'), false);
+  assert.equal(pointerOwner(), null);
+  await f.tool.destroy();
+});
+
+test('a second tool keeps its own refusal text for a box that is too small', async () => {
+  const f = fixture({
+    validate: () => ({
+      ok: false,
+      reason: 'degenerate',
+      message: 'at least 20 m a side',
+    }),
+  });
+  f.tool.start();
+  f.fire('LEFT_DOWN', { position: { x: 250, y: 125 } });
+  f.fire('LEFT_UP', { position: { x: 251, y: 126 } });
+  assert.deepEqual(f.cancels.at(-1), ['degenerate', 'at least 20 m a side']);
+  await f.tool.destroy();
+});

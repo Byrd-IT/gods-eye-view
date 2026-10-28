@@ -20,9 +20,13 @@ export const IMAGERY_BOX_POINTER_OWNER = 'recent-imagery-box';
 
 /**
  * Wire the box tool.
- * @param {{ viewer: object, onBox: (box: object) => void, onCancel?: (reason: string, message?: string, box?: object) => void, onActive?: (active: boolean) => void, onEscape?: () => boolean, cesium?: object, pickWorld?: Function, documentRef?: object }} deps
+ * @param {{ viewer: object, onBox: (box: object) => void, onCancel?: (reason: string, message?: string, box?: object) => void, onActive?: (active: boolean) => void, onEscape?: () => boolean, cesium?: object, pickWorld?: Function, documentRef?: object, owner?: string, previewName?: string, bodyClass?: string, validate?: Function }} deps
  *   `onEscape` runs before the tool cancels on Escape; returning `true` claims
  *   the key (it is still consumed) and leaves the tool armed.
+ *   `owner`, `previewName`, `bodyClass` and `validate` let a second tool (the
+ *   Drone Flight Plan box) reuse this drag without sharing Recent Imagery's
+ *   pointer claim, preview layer, cursor class or box limits; each defaults
+ *   to the Recent Imagery value.
  * @returns {{ start: () => boolean, cancel: (reason?: string) => void, isActive: () => boolean, destroy: () => Promise<void> } | null}
  */
 export function initImageryBoxTool({
@@ -34,6 +38,10 @@ export function initImageryBoxTool({
   cesium = Cesium,
   pickWorld = pickWorldFromScreen,
   documentRef = globalThis.document,
+  owner = IMAGERY_BOX_POINTER_OWNER,
+  previewName = 'gev-recent-imagery-box-preview',
+  bodyClass = 'gev-imagery-box',
+  validate = validateBox,
 } = {}) {
   if (!viewer?.scene || typeof onBox !== 'function') return null;
 
@@ -56,9 +64,7 @@ export function initImageryBoxTool({
       north: Math.max(anchor.lat, corner.lat),
     };
 
-  const dataSource = new cesium.CustomDataSource(
-    'gev-recent-imagery-box-preview',
-  );
+  const dataSource = new cesium.CustomDataSource(previewName);
   let attaching = Promise.resolve(viewer.dataSources.add(dataSource)).catch(
     () => null,
   );
@@ -169,8 +175,9 @@ export function initImageryBoxTool({
     if (!anchor || destroyed) return;
     corner = worldAt(event.position) || corner;
     const box = dragBox();
-    const result = validateBox(box);
-    if (result.reason === 'degenerate')
+    const result = validate(box);
+    // Recent Imagery's own refusal text; another tool's validator keeps its own.
+    if (result.reason === 'degenerate' && validate === validateBox)
       result.message = msg('Drag to size the box');
     endDrag();
     setActive(false);
@@ -206,7 +213,7 @@ export function initImageryBoxTool({
       stock.removeInputAction(cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
     }
     documentRef?.addEventListener?.('keydown', onKey, true);
-    documentRef?.body?.classList?.add?.('gev-imagery-box');
+    documentRef?.body?.classList?.add?.(bodyClass);
   }
 
   function releaseScene() {
@@ -230,13 +237,13 @@ export function initImageryBoxTool({
     savedSingleClick = null;
     savedDoubleClick = null;
     documentRef?.removeEventListener?.('keydown', onKey, true);
-    documentRef?.body?.classList?.remove?.('gev-imagery-box');
+    documentRef?.body?.classList?.remove?.(bodyClass);
   }
 
   function setActive(next) {
     if (next === active) return active;
     if (next) {
-      lease = claimPointer(IMAGERY_BOX_POINTER_OWNER);
+      lease = claimPointer(owner);
       if (!lease) {
         onCancel?.(
           'pointer-busy',
