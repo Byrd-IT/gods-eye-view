@@ -111,19 +111,27 @@ async function run(label, viewport) {
   check(`${label}: opacity is the shared themed slider`, /gev-quantitative-slider/.test(look.range.cls) && look.range.appearance === "none" && look.range.height === "18px", JSON.stringify(look.range));
   check(`${label}: opacity value uses the accent token`, look.out.color === look.accentRgb, `${look.out.color} vs ${look.accentRgb}`);
   check(`${label}: [hidden] hides the section`, look.hiddenDisplay === "none", look.hiddenDisplay);
-  // Rail siblings must not paint over the open card (phone sheet bug: the
-  // card was squashed to 208 px and CONTEXT covered the overlays section).
-  const overlap = await page.evaluate(() => {
+  // Rail siblings must not paint over the open card, and on the phone sheet
+  // (one scrolling column) the card keeps its content height: it used to be
+  // squashed to 208 px with its own nested scrollbar.
+  const fit = await page.evaluate(() => {
     const card = document.querySelector("#time-travel-panel");
     const cr = card.getBoundingClientRect();
-    const content = card.querySelector(".gev-tt-body").getBoundingClientRect();
-    return [...document.querySelectorAll("#right-context-rail > .panel-collapsible")]
+    const scroller = card.querySelector(":scope > [data-rail-scroller]");
+    const ids = [...document.querySelectorAll("#right-context-rail > .panel-collapsible")]
       .filter((n) => n !== card && getComputedStyle(n).display !== "none")
       .map((n) => ({ id: n.id, r: n.getBoundingClientRect() }))
-      .filter(({ r }) => r.height > 0 && r.top < Math.max(cr.bottom, content.bottom) - 0.5 && r.bottom > cr.top + 0.5 && r.left < cr.right && r.right > cr.left)
+      .filter(({ r }) => r.height > 0 && r.top < cr.bottom - 0.5 && r.bottom > cr.top + 0.5 && r.left < cr.right && r.right > cr.left)
       .map(({ id }) => id);
+    return {
+      ids,
+      sheet: document.body.classList.contains("mobile-shell"),
+      clipped: scroller.scrollHeight - scroller.clientHeight,
+    };
   });
-  check(`${label}: no other rail card paints over the open Time travel card`, overlap.length === 0, overlap.join());
+  console.log(label, "fit", JSON.stringify(fit));
+  check(`${label}: no other rail card paints over the open Time travel card`, fit.ids.length === 0, fit.ids.join());
+  check(`${label}: on the phone sheet the open card shows all its content (no nested scroll)`, !fit.sheet || fit.clipped <= 1, `clipped ${fit.clipped}px`);
   await page.screenshot({ path: path.join(outDir, `${label}-panel.png`) });
 
   // Fly to Wood County, then switch overlays on.
