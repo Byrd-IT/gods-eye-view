@@ -17,6 +17,8 @@ import {
   flyToImageryBounds,
 } from './imageryVoice.js';
 import { createNaipMenuSlider, createNaipSplit } from './naipSlider.js';
+import { attachOverlays } from './overlays.js';
+import { createOverlaysMenuPanel } from './overlaysPanel.js';
 import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
 
 /**
@@ -178,6 +180,18 @@ export async function openBasemap({
               createSplit: createNaipSplit,
             })
           : null;
+      // M2: overlay layers (only when the server offers an overlays block).
+      const overlays =
+        config.available && config.overlays?.available
+          ? attachOverlays({
+              Cesium,
+              viewer,
+              controller,
+              session,
+              overlays: config.overlays,
+              createPanel: createOverlaysMenuPanel,
+            })
+          : null;
       const hookWindow = viewer?.container?.ownerDocument?.defaultView ?? null;
       const imageryVoice = createImageryVoice({
         getNaip: () => naip,
@@ -199,6 +213,7 @@ export async function openBasemap({
           }
         }
         if (health) health.onChange = null;
+        overlays?.();
         naip?.();
         buildings?.();
         detachSwitch();
@@ -206,6 +221,7 @@ export async function openBasemap({
       detach.evaluate = detachSwitch.evaluate;
       detach.buildings = buildings;
       detach.naip = naip;
+      detach.overlays = overlays;
       return detach;
     },
     destroy() {

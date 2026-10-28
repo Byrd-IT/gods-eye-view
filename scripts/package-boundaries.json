@@ -108,7 +108,9 @@
       "src/byrdit/basemap/proxy.js",
       "src/byrdit/basemap/config.js",
       "src/byrdit/basemap/naipConfig.js",
-      "src/byrdit/basemap/naipProxy.js"
+      "src/byrdit/basemap/naipProxy.js",
+      "src/byrdit/basemap/overlaysConfig.js",
+      "src/byrdit/basemap/overlaysProxy.js"
     ],
     "external": []
   },
@@ -2789,6 +2791,10 @@
       "src/byrdit/basemap/imageryVoice.js",
       "src/byrdit/basemap/naipConfig.js",
       "src/byrdit/basemap/naipSlider.js",
+      "src/byrdit/basemap/overlays.js",
+      "src/byrdit/basemap/overlaysConfig.js",
+      "src/byrdit/basemap/overlaysPanel.js",
+      "src/byrdit/basemap/overlaysVector.js",
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",

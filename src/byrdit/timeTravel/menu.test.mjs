@@ -98,7 +98,7 @@ test('sections: History, Imagery and Aerial are claimed separately; absent unles
   );
   assert.deepEqual(
     menu.body.findAll('section').map((n) => n.getAttribute('data-section')),
-    ['history', 'imagery', 'aerial'],
+    ['history', 'imagery', 'aerial', 'overlays'],
     'sections keep their order',
   );
   menu.release('aerial');

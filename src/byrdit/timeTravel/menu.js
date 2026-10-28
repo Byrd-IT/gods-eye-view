@@ -36,6 +36,7 @@ export const SECTIONS = Object.freeze([
   Object.freeze({ name: 'history', title: msg('History') }),
   Object.freeze({ name: 'imagery', title: msg('Imagery') }),
   Object.freeze({ name: 'aerial', title: msg('Aerial (NAIP)') }),
+  Object.freeze({ name: 'overlays', title: msg('Map overlays') }),
 ]);
 
 export const TIME_TRAVEL_CSS = `
@@ -127,14 +128,19 @@ function buildCard(doc) {
   header.append(toggle);
   const body = el(doc, 'div', {
     cls: 'gev-tt-body',
-    attrs: { id: TIME_TRAVEL_BODY_ID, role: 'group', 'aria-label': t('Time travel') },
+    attrs: {
+      id: TIME_TRAVEL_BODY_ID,
+      role: 'group',
+      'aria-label': t('Time travel'),
+    },
   });
   inner.append(header, body);
   root.append(inner);
   root.hidden = true;
   const rail = doc.getElementById?.(RAIL_ID);
   const before = rail ? doc.getElementById?.(CONTEXT_PANEL_ID) : null;
-  if (rail && before?.parentNode === rail && rail.insertBefore) rail.insertBefore(root, before);
+  if (rail && before?.parentNode === rail && rail.insertBefore)
+    rail.insertBefore(root, before);
   else (rail ?? doc.body).append(root);
   return { root, toggle, body };
 }
@@ -198,7 +204,10 @@ export function ensureTimeTravelMenu(doc = globalThis.document) {
     const open = isOpen();
     toggle.textContent = open ? '▶' : '◀';
     toggle.setAttribute('aria-expanded', String(open));
-    toggle.setAttribute('title', open ? t('Collapse panel') : t('Expand panel'));
+    toggle.setAttribute(
+      'title',
+      open ? t('Collapse panel') : t('Expand panel'),
+    );
   };
   const menu = {
     root,

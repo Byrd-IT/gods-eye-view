@@ -13,6 +13,7 @@
  */
 
 import { normalizeNaip } from './naipConfig.js';
+import { normalizeOverlays } from './overlaysConfig.js';
 
 export const BASEMAP_META_NAME = 'gev-basemap';
 export const BASEMAP_CONFIG_URL = '/basemap/config.json';
@@ -158,6 +159,8 @@ export function normalizeBasemapConfig(raw) {
   const buildings = normalizeBuildings(raw?.buildings);
   // N6: the NAIP year slider block; absent (flag off) = not offered.
   const naip = normalizeNaip(raw?.naip);
+  // M2: map overlay layers; absent (flag off) = not offered.
+  const overlays = normalizeOverlays(raw?.overlays);
   const reasons = [];
   if (!terrain.available) reasons.push('terrain');
   if (!imagery.available) reasons.push('imagery');
@@ -170,6 +173,7 @@ export function normalizeBasemapConfig(raw) {
     imagery,
     buildings,
     naip,
+    overlays,
     switch: sw,
   };
 }

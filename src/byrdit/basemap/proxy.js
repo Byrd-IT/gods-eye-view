@@ -1,5 +1,11 @@
 import { CONFIG_BUDGET, DEFAULT_BUILDINGS, DEFAULT_SWITCH } from './config.js';
 import { composeNaip, naipEnabled, resolveNaipTile } from './naipProxy.js';
+import {
+  composeOverlays,
+  overlaysEnabled,
+  resolveOverlayTile,
+  safeErrorText,
+} from './overlaysProxy.js';
 
 /**
  * Same-origin /basemap/* for the Byrd-IT Open map (BASEMAP.md 3.2, 4.2, 4.5).
@@ -136,6 +142,11 @@ export function basemapSettingsFromEnv(env = process.env) {
     healthUrls: urlList(env.GEV_BASEMAP_HEALTH_URLS),
     naip: naipEnabled(env),
     naipConfig: String(env.GEV_BASEMAP_NAIP_CONFIG ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    overlays: overlaysEnabled(env),
+    overlaysConfig: String(env.GEV_BASEMAP_OVERLAYS_CONFIG ?? '')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
@@ -675,13 +686,49 @@ export function createBasemapHandler(
     return none;
   }
 
+  const overlaysOn = settings.overlays === true;
+  /** Routes of the overlays block the browser was last given. */
+  let overlayRoutes = null;
+
+  /** overlays.json (M2 manifest) -> {browser, routes}; any failure = unavailable. */
+  async function overlaysConfig(deadline) {
+    const none = { browser: { available: false }, routes: null };
+    if (!hiresUrls.length) return none;
+    for (const source of settings.overlaysConfig ?? []) {
+      if (deadline.aborted) break;
+      try {
+        let raw;
+        if (/^https?:\/\//i.test(source)) {
+          raw = await upstream([source], '', {
+            timeoutMs: configAttemptMs,
+            deadline,
+            read: readJson,
+          });
+        } else {
+          if (!source.startsWith('/'))
+            throw new Error('config path must be absolute');
+          raw = JSON.parse(
+            await beforeDeadline(readFileImpl(source, 'utf8'), deadline),
+          );
+        }
+        const overlays = composeOverlays(raw);
+        if (overlays.browser.available) return overlays;
+        throw new Error('invalid overlays config');
+      } catch (error) {
+        log('[basemap] overlays config unavailable:', safeErrorText(error));
+      }
+    }
+    return none;
+  }
+
   async function compose() {
     const deadline = AbortSignal.timeout(budgetMs);
-    const [terrain, imagery, buildings, naip] = await Promise.all([
+    const [terrain, imagery, buildings, naip, overlays] = await Promise.all([
       terrainConfig(deadline),
       imageryConfig(deadline),
       buildingsConfig(deadline),
       naipOn ? naipConfig(deadline) : null,
+      overlaysOn ? overlaysConfig(deadline) : null,
     ]);
     const value = {
       schema: 1,
@@ -696,6 +743,11 @@ export function createBasemapHandler(
       value.naip = naip.browser;
       naipRoutes = naip.routes;
     }
+    // Overlays flag off: no overlays key at all.
+    if (overlays) {
+      value.overlays = overlays.browser;
+      overlayRoutes = overlays.routes;
+    }
     return value;
   }
 
@@ -708,7 +760,8 @@ export function createBasemapHandler(
           value.terrain.available &&
           value.imagery.available &&
           (value.buildings.available || !buildingsUrls.length) &&
-          (!naipOn || value.naip?.available === true);
+          (!naipOn || value.naip?.available === true) &&
+          (!overlaysOn || value.overlays?.available === true);
         cached = { value, until: now() + (ok ? 60_000 : 10_000) };
         return value;
       })
@@ -755,7 +808,7 @@ export function createBasemapHandler(
         },
       });
     } catch (error) {
-      log(`[basemap] ${kind} upstream failed:`, error?.message || error);
+      log(`[basemap] ${kind} upstream failed:`, safeErrorText(error));
       send(
         res,
         502,
@@ -864,6 +917,16 @@ export function createBasemapHandler(
         });
         if (tile) {
           await relay(req, res, tile.bases, tile.path, { kind: 'naip' });
+          return;
+        }
+      }
+      if (overlaysOn && url.pathname.startsWith('/basemap/overlay/')) {
+        await config();
+        const tile = resolveOverlayTile(url.pathname, overlayRoutes, {
+          hiresUrls,
+        });
+        if (tile) {
+          await relay(req, res, tile.bases, tile.path, { kind: 'overlay' });
           return;
         }
       }
