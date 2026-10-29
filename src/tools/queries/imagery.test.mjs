@@ -82,7 +82,32 @@ test('overview fallback, empty results and invalid areas are reported', async ()
   );
   await assert.rejects(
     none.call('get_recent_imagery', { area: { bbox: [170, 0, -170, 5] } }),
-    /antimeridian/,
+    /too large for imagery/,
+  );
+  const crossing = imagery({
+    candidate: {
+      product: 'S30',
+      day: '2026-10-01',
+      cloud: { min: 1, max: 2 },
+      coverage: 'full',
+    },
+    reason: 'clear',
+    errors: [],
+  });
+  const wrapped = composeCatalog({
+    tools: coreTools,
+    services: { imagery: crossing },
+  });
+  await wrapped.call('get_recent_imagery', {
+    area: { bbox: [179, 0, -179, 1] },
+  });
+  assert.equal(crossing.snapshots[0].box.west, 179);
+  assert.equal(crossing.snapshots[0].box.east, -179);
+  assert.equal(crossing.snapshots[0].width, 1024);
+  assert.equal(
+    crossing.snapshots[0].height,
+    512,
+    'aspect uses the 2° short arc, not the 358° long way',
   );
   await assert.rejects(
     none.call('get_recent_imagery', { area: { bbox: [0, 85.5, 1, 86] } }),

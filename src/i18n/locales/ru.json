@@ -2529,7 +2529,6 @@
   "That point cannot anchor a box": "От этой точки нельзя построить область",
   "Box edges must be finite": "Некорректные координаты области",
   "Longitudes must be within ±180°": "Долгота должна быть в пределах ±180°",
-  "Select one side of the dateline": "Не пересекайте линию перемены дат",
   "Box must enclose an area": "Область должна иметь площадь",
   "Imagery stops at ±{limit}° latitude": "Снимки есть только до ±{limit}° широты",
   "{owner} is using the pointer — close it first": "Указатель занят: «{owner}». Закройте его",

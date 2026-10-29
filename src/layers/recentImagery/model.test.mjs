@@ -51,11 +51,20 @@ function hls(product, day, clouds, extra = {}) {
   return { ...groupGranulesByDay(granules)[0], ...extra };
 }
 
-test('validateBox refuses dateline, polar, degenerate, invalid and oversized boxes', () => {
+test('validateBox refuses polar, degenerate, invalid and oversized boxes, and accepts a short dateline arc', () => {
   const reason = (box) => validateBox(box).reason;
+  const dateline = validateBox({ west: 179, south: 0, east: -179, north: 1 });
+  assert.equal(dateline.ok, true);
+  assert.equal(dateline.box.west, 179);
+  assert.equal(dateline.box.east, -179);
   assert.equal(
-    reason({ west: 179, south: 0, east: -179, north: 1 }),
-    'dateline',
+    reason({ west: 170, south: 0, east: -170, north: 1 }),
+    'too-large',
+    'a 20° dateline arc is still over the 1,000 km cap',
+  );
+  assert.equal(
+    reason({ west: 180, south: 0, east: -180, north: 1 }),
+    'degenerate',
   );
   assert.equal(
     reason({ west: 0, south: 84, east: 0.5, north: 85.05111 }),
@@ -69,10 +78,6 @@ test('validateBox refuses dateline, polar, degenerate, invalid and oversized box
   assert.equal(
     validateBox({ west: 0, south: 84, east: 0.5, north: 85.05111 }).message,
     'Imagery stops at ±85.05° latitude',
-  );
-  assert.equal(
-    validateBox({ west: 179, south: 0, east: -179, north: 1 }).message,
-    'Select one side of the dateline',
   );
   assert.equal(
     validateBox({ west: 0, south: 84.9, east: 0.05, north: 85 }).ok,
@@ -137,10 +142,14 @@ test('ZOOM IN: the height whose top-down view is 400 km wide, clamped to 5–400
     lon: 10,
     lat: 5,
   });
+  assert.deepEqual(boxCentre({ west: 179, south: 0, east: -179, north: 2 }), {
+    lon: 180,
+    lat: 1,
+  });
   assert.equal(boxCentre(null), null);
 });
 
-test('box width is the longitude span at the mid-latitude, never the shortest arc', () => {
+test('box width is the longitude span at the mid-latitude; a dateline box uses the short arc', () => {
   const equator = boxSideKm({ west: 0, south: -0.5, east: 1, north: 0.5 });
   assert.ok(Math.abs(equator.width - 111.32) < 1e-6);
   assert.ok(Math.abs(equator.height - 111.32) < 1e-6);
@@ -149,6 +158,13 @@ test('box width is the longitude span at the mid-latitude, never the shortest ar
   const nearlyGlobal = { west: -179.9, south: 30, east: 179.9, north: 30.1 };
   assert.ok(boxSideKm(nearlyGlobal).width > 30000);
   assert.equal(validateBox(nearlyGlobal).reason, 'too-large');
+  const crossing = boxSideKm({
+    west: 179,
+    south: -0.5,
+    east: -179,
+    north: 0.5,
+  });
+  assert.ok(Math.abs(crossing.width - 222.64) < 0.01, String(crossing.width));
 });
 
 test('boxFromPin builds a 10 km square within 2% at any latitude and refuses what cannot validate', () => {

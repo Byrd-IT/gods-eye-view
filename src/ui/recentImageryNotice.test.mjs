@@ -37,8 +37,15 @@ const SHOWN_EN = new Map([
 
 test('en: refusals stay English', () => {
   setLocale('en');
-  for (const text of REFUSALS)
-    assert.equal(localizeNotice(text), SHOWN_EN.get(text) ?? text);
+  for (const text of REFUSALS) {
+    const shown = localizeNotice(text);
+    // A wide dateline drag is a size refusal. The quantity formatter inserts
+    // a non-breaking space before the unit; the words stay English.
+    const expected = / km wide/.test(text)
+      ? text.replaceAll(' km', '\u00a0km')
+      : (SHOWN_EN.get(text) ?? text);
+    assert.equal(shown, expected);
+  }
   assert.ok(REFUSALS.includes('Imagery stops at ±85.05° latitude'));
 });
 

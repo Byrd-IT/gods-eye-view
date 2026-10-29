@@ -2488,7 +2488,6 @@
   "That point cannot anchor a box": "Ese punto no puede anclar un recuadro",
   "Box edges must be finite": "Coordenadas del recuadro no válidas",
   "Longitudes must be within ±180°": "Las longitudes deben estar dentro de ±180°",
-  "Select one side of the dateline": "No cruces la línea de cambio de fecha",
   "Box must enclose an area": "El recuadro debe abarcar un área",
   "Imagery stops at ±{limit}° latitude": "Las imágenes llegan hasta ±{limit}° de latitud",
   "{owner} is using the pointer — close it first": "Puntero en uso: {owner}. Ciérralo primero",

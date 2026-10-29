@@ -1079,6 +1079,13 @@ test('opacity drives both images; EXPORT downloads the pin or the preview and EX
   await settle();
   assert.equal(await f.readout.exportImage('a'), true);
   assert.match(f.fetches.at(-1), /WIDTH=1024&HEIGHT=512/);
+  // A 2° box across the dateline keeps the short arc, not a ~360° sliver.
+  f.layer.setBox({ west: 179, south: 0, east: -179, north: 1 });
+  f.catalog.resolveLast();
+  await settle();
+  assert.equal(await f.readout.exportImage('a'), true);
+  assert.match(f.fetches.at(-1), /BBOX=0,179,1,-179/);
+  assert.match(f.fetches.at(-1), /WIDTH=2048&HEIGHT=1024/);
   f.layer.setMode('ab');
   assert.deepEqual(
     [

@@ -964,7 +964,6 @@
   "Daily overview": "每日概览",
   "Box edges must be finite": "框选边界必须是有限值",
   "Longitudes must be within ±180°": "经度必须在 ±180° 以内",
-  "Select one side of the dateline": "请只选择日界线的一侧",
   "Box must enclose an area": "框选必须包含一定面积",
   "Add the full Starlink broadband shell (thousands of extra points)": "添加完整的 Starlink 宽带星座（数千个额外点位）",
   "Loading the Starlink shell…": "正在加载 Starlink 星座…",

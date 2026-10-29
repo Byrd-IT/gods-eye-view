@@ -31,11 +31,6 @@ export const getRecentImagery = defineTool({
   requires: ['imagery'],
   async run(args, { services, signal }) {
     const area = await resolveArea(args.area, { services, signal });
-    if (area.west > area.east)
-      throw new ToolError(
-        'invalid_arguments',
-        'The area must not cross the antimeridian',
-      );
     if (
       Math.abs(area.south) > MAX_LATITUDE ||
       Math.abs(area.north) > MAX_LATITUDE
@@ -69,13 +64,13 @@ export const getRecentImagery = defineTool({
         summary: `No recent satellite image covers ${area.label}.`,
         data: { area: area.label, image: null },
       };
+    const spanLon =
+      box.east >= box.west ? box.east - box.west : box.east + 360 - box.west;
     const height = Math.max(
       64,
       Math.min(
         1024,
-        Math.round(
-          (IMAGE_WIDTH * (box.north - box.south)) / (box.east - box.west),
-        ),
+        Math.round((IMAGE_WIDTH * (box.north - box.south)) / (spanLon || 1)),
       ),
     );
     const image = await services.imagery.getSnapshot({

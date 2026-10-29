@@ -29,7 +29,8 @@ export const IMAGERY_BOX_POINTER_OWNER = 'recent-imagery-box';
  *   to the Recent Imagery value.
  *   `shorterArc` (default false) keeps a drag whose corners are more than 180
  *   degrees apart on the short arc, returned with west > east. Recent Imagery
- *   leaves it off, so a dateline drag there is still the long min/max box.
+ *   sets it. Other callers leave it off until their own box math accepts a
+ *   west > east box.
  * @returns {{ start: () => boolean, cancel: (reason?: string) => void, isActive: () => boolean, destroy: () => Promise<void> } | null}
  */
 export function initImageryBoxTool({

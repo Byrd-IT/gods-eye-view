@@ -96,6 +96,9 @@ export function createApplicationTools({
       // The tool takes Escape in a capture listener, so the panel's order
       // (clear a preview before cancelling the tool) is applied here.
       onEscape: () => recentImagery.clearPreview(),
+      // The shared tool's default stays off. Recent Imagery opts in because
+      // its box math accepts a short-arc west > east box.
+      shorterArc: true,
     });
     // The readout mounts in its rail body through the layer panel, like the
     // weather readout.

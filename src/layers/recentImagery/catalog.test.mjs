@@ -239,16 +239,52 @@ test('an invalid box or clock is refused before any request', async () => {
   };
   await assert.rejects(
     searchHls({
-      box: { west: 179, south: 0, east: -179, north: 1 },
+      box: { west: -181, south: 0, east: -179, north: 1 },
       fetchImpl,
     }),
-    /dateline/,
+    /±180/,
   );
   await assert.rejects(
     searchHls({ box: BOX, now: 'never', fetchImpl }),
     /clock/,
   );
   assert.equal(called, false);
+});
+
+test('a dateline box searches each side of ±180 and dedupes granules', async () => {
+  const calls = [];
+  const result = await searchHls({
+    box: { west: 179, south: 0, east: -179, north: 1 },
+    days: 2,
+    now: '2026-09-21T00:00:00Z',
+    fetchImpl: async (url) => {
+      calls.push(url);
+      return response({
+        json: {
+          hits: 1,
+          items: [ummItem({ conceptId: 'G-both-sides' })],
+        },
+      });
+    },
+  });
+  assert.equal(calls.length, 4, 'S30 and L30, each side');
+  assert.ok(calls.some((url) => url.includes('bounding_box=179,0,180,1')));
+  assert.ok(calls.some((url) => url.includes('bounding_box=-180,0,-179,1')));
+  assert.equal(
+    result.candidates.filter((c) => c.product === 'S30').length,
+    1,
+    'the granule returned by both sides is counted once',
+  );
+  assert.throws(
+    () =>
+      cmrSearchUrl({
+        product: 'S30',
+        box: { west: 179, south: 0, east: -179, north: 1 },
+        startIso: 'a',
+        endIso: 'b',
+      }),
+    /cannot cross the dateline/,
+  );
 });
 
 test('CMR pages follow the CMR-Search-After cursor up to 2,000 records and truncation stays honest', async () => {

@@ -8,6 +8,7 @@ import {
   coverageFor,
   groupGranulesByDay,
   mergeCandidates,
+  nonCrossingBoxes,
   utcDay,
   validateBox,
   viirsCandidates,
@@ -162,6 +163,10 @@ export function cmrSearchUrl({ product, box, startIso, endIso }) {
   const result = validateBox(box);
   if (!result.ok) throw new TypeError(result.message);
   const { west, south, east, north } = result.box;
+  if (west > east)
+    throw new TypeError(
+      'CMR bounding_box cannot cross the dateline; search each side',
+    );
   return (
     `${CMR_ENDPOINT}/granules.umm_json` +
     `?collection_concept_id=${spec.cmrCollection}` +
@@ -194,26 +199,43 @@ export async function searchHls({
   const endIso = new Date(nowMs).toISOString();
   const startIso = `${utcDay(new Date(nowMs - (days - 1) * DAY_MS))}T00:00:00Z`;
   const products = ['S30', 'L30'];
+  // CMR bounding_box requires west <= east. A dateline box is two searches,
+  // one on each side of ±180, merged and deduped by granule id.
+  const halves = nonCrossingBoxes(validated.box);
+  const jobs = products.flatMap((product) =>
+    halves.map((half) => ({ product, half })),
+  );
   const settled = await Promise.allSettled(
-    products.map((product) =>
+    jobs.map(({ product, half }) =>
       fetchCmrPages({
         product,
-        url: cmrSearchUrl({ product, box: validated.box, startIso, endIso }),
+        url: cmrSearchUrl({ product, box: half, startIso, endIso }),
         fetchImpl,
         signal,
       }),
     ),
   );
   const granules = [];
+  const seen = new Set();
+  const failed = new Set();
   const errors = [];
   let truncated = false;
   settled.forEach((result, index) => {
+    const product = jobs[index].product;
     if (result.status === 'fulfilled') {
-      granules.push(...result.value.granules);
+      for (const granule of result.value.granules) {
+        if (granule.id) {
+          const key = `${product}:${granule.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+        }
+        granules.push(granule);
+      }
       truncated ||= result.value.truncated;
-    } else {
+    } else if (!failed.has(product)) {
+      failed.add(product);
       errors.push({
-        product: products[index],
+        product,
         message: String(result.reason?.message || result.reason),
       });
     }
