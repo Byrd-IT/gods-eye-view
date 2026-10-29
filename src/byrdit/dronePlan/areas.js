@@ -4,8 +4,10 @@
  * A single rectangle still goes through planFlight, so that plan does not
  * change. A polygon is clipped to its edge, expanded by half the photo
  * footprint so the edge is still covered. Overlapping areas are unioned and
- * flown once. Areas that do not touch stay separate flight blocks. Orbit is
- * planned around the centre of each area and is not merged.
+ * flown once. Each area still keeps its own processing job: a line in the
+ * overlap is given to the first area that contains it. Areas that do not
+ * touch stay separate flight blocks. Orbit is planned around the centre of
+ * each area and is not merged.
  */
 
 import { deltaLon, makeFrame, wrapLon } from './geo.js';
@@ -16,6 +18,8 @@ import {
   footprint,
   INTERVAL_WAYPOINT_STEP_M,
   MAX_MISSIONS,
+  MAX_TAKEOFF_FROM_BOX_M,
+  MAX_WAYPOINTS_TOTAL,
   normalizeOptions,
   planFlight,
   takeoffDistanceFromBoxM,
@@ -47,8 +51,16 @@ export function jobSlug(name) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^\w.-]+/g, '-')
     .replace(/^-+|-+$/g, '')
+    .replace(/^\.+/, '')
+    .replace(/^-+|-+$/g, '')
     .slice(0, 40);
-  return slug || 'area';
+  return slug && !/^\.+$/.test(slug) ? slug : 'area';
+}
+
+/** `job-1-North-field`. The job number keeps two similar names apart. */
+export function jobFolder(job) {
+  const n = String(job?.id ?? '').match(/(\d+)/)?.[1] ?? '1';
+  return `job-${n}-${jobSlug(job?.name)}`;
 }
 
 function areaRing(area) {
@@ -275,17 +287,96 @@ function renumber(legs) {
   });
 }
 
-function jobFor(members, grouping, whole) {
-  if (grouping === 'whole') return whole;
-  const name =
-    members.length === 1
-      ? members[0].name
-      : members.map((area) => area.name).join(' + ');
+function jobForArea(area, index) {
   return {
-    id: '',
-    name,
-    areaIds: members.map((area) => area.id),
-    areaNames: members.map((area) => area.name),
+    id: `job-${index + 1}`,
+    name: area.name,
+    areaIds: [area.id],
+    areaNames: [area.name],
+  };
+}
+
+/** Which area in this cluster owns a clipped leg. Overlap goes to the first. */
+function legOwner(leg, members, frame) {
+  if (!leg.waypoints.length) return 0;
+  const a = leg.waypoints[0];
+  const b = leg.waypoints[leg.waypoints.length - 1];
+  const pa = frame.toXY(a.lon, a.lat);
+  const pb = frame.toXY(b.lon, b.lat);
+  const p = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+  for (let i = 0; i < members.length; i += 1) {
+    if (pointInRing(p, ringXY(areaRing(members[i]), frame))) return i;
+  }
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < members.length; i += 1) {
+    const ring = ringXY(areaRing(members[i]), frame);
+    let d = Infinity;
+    for (let k = 0; k < ring.length; k += 1) {
+      d = Math.min(
+        d,
+        distanceToSegment(p, ring[k], ring[(k + 1) % ring.length]),
+      );
+    }
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/**
+ * One takeoff for the whole plan. A point near any area is kept, even if
+ * another area is farther than the single-box limit. planFlight must not
+ * see that point, or a far cluster would replace it with its own centre.
+ */
+function decideTakeoff(list, rawOptions) {
+  const home = unwrapCenter(areaRing(list[0]));
+  const requested = rawOptions.takeoff;
+  const custom =
+    requested &&
+    Number.isFinite(requested.lon) &&
+    Number.isFinite(requested.lat);
+  const without = { ...rawOptions };
+  delete without.takeoff;
+  if (!custom) {
+    const spread = list.some(
+      (area) => distanceToAreasM([area], home) > MAX_TAKEOFF_FROM_BOX_M,
+    );
+    return {
+      takeoff: { lon: home.lon, lat: home.lat, custom: false },
+      notes: spread
+        ? [{ code: 'areas-spread', params: { limitM: MAX_TAKEOFF_FROM_BOX_M } }]
+        : [],
+      options: without,
+    };
+  }
+  const nearest = distanceToAreasM(list, requested);
+  if (nearest == null || nearest > MAX_TAKEOFF_FROM_BOX_M) {
+    return {
+      takeoff: { lon: home.lon, lat: home.lat, custom: false },
+      notes: [
+        {
+          code: 'takeoff-too-far',
+          params: {
+            distanceM: Math.round(nearest ?? 0),
+            limitM: MAX_TAKEOFF_FROM_BOX_M,
+          },
+        },
+      ],
+      options: without,
+    };
+  }
+  const spread = list.some(
+    (area) => distanceToAreasM([area], requested) > MAX_TAKEOFF_FROM_BOX_M,
+  );
+  return {
+    takeoff: { lon: requested.lon, lat: requested.lat, custom: true },
+    notes: spread
+      ? [{ code: 'areas-spread', params: { limitM: MAX_TAKEOFF_FROM_BOX_M } }]
+      : [],
+    options: without,
   };
 }
 
@@ -315,7 +406,8 @@ export function planAreas(areas, rawOptions = {}) {
     return withJob(plan, list, grouping);
   }
 
-  const { options } = normalizeOptions(rawOptions, list[0].box);
+  const decided = decideTakeoff(list, rawOptions);
+  const { options } = normalizeOptions(decided.options, list[0].box);
   const clusters =
     options.pattern === 'orbit'
       ? list.map((_, i) => [i])
@@ -326,45 +418,69 @@ export function planAreas(areas, rawOptions = {}) {
     areaIds: list.map((area) => area.id),
     areaNames: list.map((area) => area.name),
   };
+  const perArea = list.map((area, index) => jobForArea(area, index));
   const jobs = [];
   const blocks = [];
   const legs = [];
-  const notes = [];
+  const notes = [...decided.notes];
   let first = null;
+  const pushLegs = (planned, job, areaIds) => {
+    const blockId = `block-${blocks.length + 1}`;
+    blocks.push({ id: blockId, jobId: job.id, areaIds });
+    tagLegs(planned, job, blockId);
+    legs.push(...planned.legs);
+    if (!jobs.some((item) => item.id === job.id)) jobs.push(job);
+  };
   for (const indices of clusters) {
     const members = indices.map((i) => list[i]);
-    const planned = planCluster(members, rawOptions);
+    const planned = planCluster(members, decided.options);
     if (planned.error) return planned;
     first ??= planned;
-    const job = jobFor(members, grouping, whole);
-    if (grouping === 'per-area') {
-      job.id = `job-${jobs.length + 1}`;
-      jobs.push(job);
+    if (grouping === 'whole' || members.length === 1) {
+      const job =
+        grouping === 'whole'
+          ? whole
+          : perArea[list.indexOf(members[0])];
+      pushLegs(
+        planned,
+        job,
+        grouping === 'whole' ? whole.areaIds : [members[0].id],
+      );
+    } else {
+      const buckets = members.map(() => []);
+      for (const leg of planned.legs) {
+        buckets[legOwner(leg, members, frame)].push(leg);
+      }
+      members.forEach((area, i) => {
+        if (!buckets[i].length) return;
+        pushLegs(
+          { legs: buckets[i] },
+          perArea[list.indexOf(area)],
+          [area.id],
+        );
+      });
     }
-    const blockId = `block-${blocks.length + 1}`;
-    blocks.push({
-      id: blockId,
-      jobId: grouping === 'whole' ? whole.id : job.id,
-      areaIds: members.map((area) => area.id),
-    });
-    tagLegs(planned, grouping === 'whole' ? whole : job, blockId);
-    legs.push(...planned.legs);
     for (const note of planned.notes ?? []) {
       if (!notes.some((n) => n.code === note.code)) notes.push(note);
     }
   }
-  const usedJobs = grouping === 'whole' ? [whole] : jobs;
   const numbered = renumber(legs);
   const waypointCount = numbered.reduce(
     (sum, leg) => sum + leg.waypoints.length,
     0,
   );
-  const home = unwrapCenter(list.flatMap((area) => areaRing(area)));
+  if (waypointCount > MAX_WAYPOINTS_TOTAL) {
+    return {
+      error: 'too-large',
+      message: 'Plan needs too many waypoints',
+    };
+  }
+  const usedJobs = (grouping === 'whole' ? [whole] : jobs).filter((job) =>
+    numbered.some((leg) => leg.jobId === job.id),
+  );
   return {
     ...first,
-    takeoff: first.takeoff?.custom
-      ? first.takeoff
-      : { lon: home.lon, lat: home.lat, custom: false },
+    takeoff: decided.takeoff,
     box: bboxOfPoints(list.flatMap((area) => areaRing(area))),
     legs: numbered,
     waypointCount,
@@ -431,14 +547,18 @@ function splitByJob(mission, plan) {
 function areaStatRows(plan, missions) {
   return (plan.areas ?? []).map((area) => {
     const job = (plan.jobs ?? []).find((item) => item.areaIds.includes(area.id));
-    const mine = missions.filter((mission) => mission.jobId === job?.id);
+    const sole = (job?.areaIds ?? []).length === 1;
+    const mine = sole
+      ? missions.filter((mission) => mission.jobId === job.id)
+      : [];
     return {
       areaId: area.id,
       name: area.name,
       kind: area.kind,
       jobId: job?.id ?? null,
       jobName: job?.name ?? '',
-      mergedWith: (job?.areaNames ?? []).filter((name) => name !== area.name),
+      shared: !sole,
+      mergedWith: [],
       missions: mine.length,
       photoCount: mine.reduce((sum, mission) => sum + mission.photoCount, 0),
       distanceM: mine.reduce((sum, mission) => sum + mission.distanceM, 0),

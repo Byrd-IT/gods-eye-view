@@ -110,6 +110,11 @@ export function warningText(warning) {
         'That takeoff point is {distance} m from the box; keep it within {limit} m. The box centre is used instead',
         { distance: fixed(p.distanceM), limit: fixed(p.limitM) },
       );
+    case 'areas-spread':
+      return t(
+        'Some areas are more than {limit} m from the takeoff point, so those flights are a longer transit',
+        { limit: fixed(p.limitM) },
+      );
     default:
       // An unknown code is never echoed back into the page.
       return '';

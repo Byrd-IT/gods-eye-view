@@ -181,19 +181,17 @@ export function initDronePlan({
   }
 
   function addRect(box, { replace = false, clearTakeoff = replace } = {}) {
+    const id = replace ? 'area-1' : areaId();
     const area = {
-      id: areaId(),
-      name: `Area ${state.areas.length + (replace ? 1 : 1)}`,
+      id,
+      name: replace ? 'Area 1' : `Area ${id.slice('area-'.length)}`,
       kind: 'rect',
       box,
     };
     if (replace) {
       state.nextArea = 2;
-      area.id = 'area-1';
-      area.name = 'Area 1';
       state.areas = [area];
     } else {
-      area.name = `Area ${state.areas.length + 1}`;
       state.areas.push(area);
     }
     state.box = box;
@@ -219,9 +217,10 @@ export function initDronePlan({
       status(probe.message || planErrorText(probe.error), 'warn');
       return false;
     }
+    const id = areaId();
     state.areas.push({
-      id: areaId(),
-      name: `Area ${state.areas.length + 1}`,
+      id,
+      name: `Area ${id.slice('area-'.length)}`,
       kind: 'polygon',
       ring,
       box: probe.box,
@@ -907,6 +906,7 @@ export function initDronePlan({
     stat(t('Missions'), num(totals.missionCount));
     if (result.areaStats?.length > 1) {
       for (const area of result.areaStats) {
+        if (area.shared) continue;
         stat(
           area.name,
           t('{photos} photos, {time}', {
@@ -1047,12 +1047,13 @@ export function initDronePlan({
       wpml: wpmlOverride(),
       name: `GEV Drone Flight Plan ${index + 1}/${result.missions.length}`,
     });
+    const named = (result.jobs ?? []).length > 1;
     downloadFile(
       kmzFileName(
         index,
         result.missions.length,
         when,
-        result.missions[index].jobName,
+        named ? result.missions[index].jobName : '',
       ),
       bytes,
       'application/vnd.google-earth.kmz',

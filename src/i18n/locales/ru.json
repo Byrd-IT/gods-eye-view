@@ -3135,6 +3135,7 @@
   "Orbit stays on the centre of each area. It is not merged with other areas.": "Орбита остаётся вокруг центра каждой области. Она не объединяется с другими областями.",
   "Overlapping areas are flown once. All flights are one processing job.": "Перекрывающиеся области облетаются один раз. Все полёты — одна задача обработки.",
   "Overlapping areas are flown once. Each area is its own processing job.": "Перекрывающиеся области облетаются один раз. Каждая область — своя задача обработки.",
+  "Some areas are more than {limit} m from the takeoff point, so those flights are a longer transit": "Некоторые области дальше {limit} м от точки взлёта, поэтому перелёт к ним длиннее",
   "Areas": "Области",
   "Area name": "Имя области",
   "Polygon": "Многоугольник",

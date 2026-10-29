@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assembleAreaPlan, distanceToAreasM, planAreas } from './areas.js';
+import { assembleAreaPlan, distanceToAreasM, jobSlug, planAreas } from './areas.js';
 import { makeFrame, metersPerDegree } from './geo.js';
 import { assembleMissions, planFlight } from './planner.js';
 
@@ -116,7 +116,7 @@ test('an L polygon is not flown over its missing corner', () => {
   assert.equal(plan.jobs[0].name, 'L field');
 });
 
-test('overlapping rectangles are flown once and share one job', () => {
+test('overlapping rectangles are flown once and keep a job each', () => {
   const a = boxAround(-94.5, 32.7, 160, 160);
   const b = boxAround(-94.5 + 0.0008, 32.7 + 0.0008, 160, 160);
   const plan = planAreas(
@@ -127,17 +127,24 @@ test('overlapping rectangles are flown once and share one job', () => {
     opts,
   );
   assert.equal(plan.error, undefined, plan.message);
-  assert.equal(plan.jobs.length, 1);
-  assert.equal(plan.jobs[0].name, 'North + South');
+  assert.equal(plan.jobs.length, 2);
+  assert.deepEqual(
+    plan.jobs.map((job) => job.name),
+    ['North', 'South'],
+  );
   const alone = planFlight(a, opts);
   assert.ok(
     plan.waypointCount < alone.waypointCount * 2,
     `union ${plan.waypointCount} should be well under twice one box (${alone.waypointCount})`,
   );
   const built = assembleAreaPlan(plan, flatGround(plan));
-  assert.ok(built.missions.every((m) => m.jobId === 'job-1'));
-  assert.equal(built.areaStats.length, 2);
-  assert.deepEqual(built.areaStats[0].mergedWith, ['South']);
+  assert.deepEqual(
+    built.missions.map((m) => m.jobId).filter((id, i, all) => all.indexOf(id) === i),
+    ['job-1', 'job-2'],
+  );
+  const photos = built.areaStats.reduce((sum, row) => sum + row.photoCount, 0);
+  assert.equal(photos, built.totals.photoCount);
+  assert.equal(built.areaStats[0].shared, false);
 });
 
 test('disjoint rectangles stay separate flight blocks', () => {
@@ -258,11 +265,11 @@ test('the download zip puts each job in its own folder and the README names them
   const names = [...files.keys()];
   assert.ok(names.includes('README.txt'));
   assert.ok(
-    names.some((name) => name.startsWith('North-field/') && name.endsWith('.kmz')),
+    names.some((name) => name.startsWith('job-1-North-field/') && name.endsWith('.kmz')),
     names.join(', '),
   );
   assert.ok(
-    names.some((name) => name.startsWith('South-field/') && name.endsWith('.kmz')),
+    names.some((name) => name.startsWith('job-2-South-field/') && name.endsWith('.kmz')),
     names.join(', '),
   );
   const readme = new TextDecoder().decode(files.get('README.txt'));
@@ -283,9 +290,99 @@ test('the download zip puts each job in its own folder and the README names them
   );
   const wholeNames = [...readZip(buildBundleZip(whole, { when })).keys()];
   assert.ok(
-    wholeNames.every(
-      (name) => name === 'README.txt' || name.startsWith('Whole-plan/'),
-    ),
+    wholeNames.every((name) => name === 'README.txt' || !name.includes('/')),
     wholeNames.join(', '),
   );
+  assert.ok(wholeNames.some((name) => name.endsWith('.kmz')));
 });
+
+test('two jobs with the same name do not share a folder or a photo count', async () => {
+  const { buildBundleZip, readmeText } = await import('./wpml.js');
+  const { readZip } = await import('./zip.js');
+  const a = boxAround(-94.5, 32.7, 140, 100);
+  const b = boxAround(-94.48, 32.7, 140, 100);
+  const plan = planAreas(
+    [
+      { id: 'a', name: 'North field', kind: 'rect', box: a },
+      { id: 'b', name: 'North field', kind: 'rect', box: b },
+    ],
+    { ...opts, presetId: 'dji-mini-5-pro' },
+  );
+  const built = assembleAreaPlan(plan, flatGround(plan));
+  const when = new Date('2026-10-29T15:04:00Z');
+  const names = [...readZip(buildBundleZip(built, { when })).keys()];
+  const folders = names
+    .filter((name) => name.includes('/'))
+    .map((name) => name.split('/')[0]);
+  assert.equal(new Set(folders).size, 2, names.join(', '));
+  assert.equal(new Set(names).size, names.length, 'duplicate zip paths');
+  const readme = readmeText(built, when);
+  const photos = [...readme.matchAll(/Photos: (\d+)/g)].map((m) => Number(m[1]));
+  assert.equal(photos.length, 3);
+  assert.equal(photos[1] + photos[2], photos[0]);
+});
+
+test('a dotted area name cannot become a parent folder', () => {
+  assert.equal(jobSlug('..'), 'area');
+  assert.equal(jobSlug('../secret'), 'secret');
+  assert.equal(jobSlug('North field'), 'North-field');
+});
+
+test('a takeoff near one area is kept when another area is far', () => {
+  const a = boxAround(-94.5, 32.7, 140, 100);
+  const b = boxAround(-94.45, 32.7, 140, 100);
+  const takeoff = { lon: -94.5, lat: 32.7 };
+  const plan = planAreas(
+    [
+      { id: 'a', name: 'Near', kind: 'rect', box: a },
+      { id: 'b', name: 'Far', kind: 'rect', box: b },
+    ],
+    { ...opts, takeoff },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.takeoff.custom, true);
+  near(plan.takeoff.lon, takeoff.lon, 1e-6, 'takeoff lon');
+  assert.equal(
+    plan.notes.some((n) => n.code === 'takeoff-too-far'),
+    false,
+  );
+  assert.equal(
+    plan.notes.some((n) => n.code === 'areas-spread'),
+    true,
+  );
+});
+
+test('orbit stays a separate job on each area', () => {
+  const a = boxAround(-94.5, 32.7, 80, 80);
+  const b = boxAround(-94.48, 32.7, 80, 80);
+  const plan = planAreas(
+    [
+      { id: 'a', name: 'West', kind: 'rect', box: a },
+      { id: 'b', name: 'East', kind: 'rect', box: b },
+    ],
+    { ...opts, pattern: 'orbit' },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.jobs.length, 2);
+  assert.ok(plan.legs.every((leg) => leg.kind === 'orbit'));
+});
+
+test('a double-grid polygon plans without using the bounding box as the flown area', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const ring = [
+    { x: 0, y: 0 },
+    { x: 150, y: 0 },
+    { x: 150, y: 200 },
+    { x: 400, y: 200 },
+    { x: 400, y: 400 },
+    { x: 0, y: 400 },
+  ].map((p) => frame.toLonLat(p.x, p.y));
+  const plan = planAreas(
+    [{ id: 'L', name: 'L field', kind: 'polygon', ring }],
+    { ...opts, pattern: 'double' },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.ok(plan.legs.length > 1);
+  assert.equal(plan.jobs.length, 1);
+});
+

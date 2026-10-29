@@ -2928,6 +2928,7 @@
   "Orbit stays on the centre of each area. It is not merged with other areas.": "环绕只绕每个区域的中心，不会与其他区域合并。",
   "Overlapping areas are flown once. All flights are one processing job.": "重叠区域只飞一次。所有航线属于同一个处理作业。",
   "Overlapping areas are flown once. Each area is its own processing job.": "重叠区域只飞一次。每个区域是自己的处理作业。",
+  "Some areas are more than {limit} m from the takeoff point, so those flights are a longer transit": "有些区域距起飞点超过 {limit} 米，飞到那里的航程更长",
   "Areas": "区域",
   "Area name": "区域名称",
   "Polygon": "多边形",

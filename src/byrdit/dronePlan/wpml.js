@@ -14,7 +14,7 @@
  * itself wrote for this aircraft before trusting it in the air. The namespace
  * and drone enum are constants below so a mismatch is a one-line change.
  */
-import { jobSlug } from './areas.js';
+import { jobFolder, jobSlug } from './areas.js';
 import { TRANSIT_SPEED_MS } from './planner.js';
 import { makeZip } from './zip.js';
 
@@ -298,12 +298,10 @@ export function readmeText(result, when = new Date()) {
       'Process the images from one job together (ODM). Do not mix jobs.',
     );
     for (const job of jobs) {
-      const mine = missions.filter(
-        (mission) => mission.jobId === job.id || mission.jobName === job.name,
-      );
+      const mine = missions.filter((mission) => mission.jobId === job.id);
       const photos = mine.reduce((sum, mission) => sum + mission.photoCount, 0);
       lines.push(
-        `Job: ${job.name}`,
+        `Job: ${job.name} (${job.id})`,
         `  Areas: ${(job.areaNames ?? [job.name]).join(', ')}`,
         `  Missions: ${mine.length}`,
         `  Photos: ${photos}`,
@@ -317,19 +315,21 @@ export function readmeText(result, when = new Date()) {
 /** Every mission plus a README, as one ZIP. Jobs get a folder each. */
 export function buildBundleZip(result, opts = {}) {
   const when = opts.when ? new Date(opts.when) : new Date();
-  const grouped = (result.missions ?? []).some((mission) => mission.jobName);
+  const jobs = result.jobs ?? [];
+  const multi = jobs.length > 1;
   const entries = result.missions.map((mission, i) => {
-    const same = grouped
-      ? result.missions.filter((item) => item.jobName === mission.jobName)
+    const same = multi
+      ? result.missions.filter((item) => item.jobId === mission.jobId)
       : result.missions;
     const index = same.indexOf(mission);
+    const job = jobs.find((item) => item.id === mission.jobId);
     const file = kmzFileName(
       index,
       same.length,
       when,
-      grouped ? mission.jobName : '',
+      multi ? mission.jobName : '',
     );
-    const folder = grouped ? `${jobSlug(mission.jobName)}/` : '';
+    const folder = multi ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/` : '';
     return {
       name: `${folder}${file}`,
       data: buildKmz(mission, result.plan, { ...opts, when }),
