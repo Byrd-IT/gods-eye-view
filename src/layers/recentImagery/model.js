@@ -480,15 +480,32 @@ export function coverageFor(candidate, box) {
   if (!normalized || !footprints.length) return 'unknown';
   const { west, south, east, north } = normalized;
   const centre = boxCentre(normalized);
+  // A dateline box is one continuous range starting at its west edge. A
+  // longitude on the east side (at or past ±180) shifts by 360. One just
+  // outside the west corner stays put: shifting every value below west would
+  // send that corner the long way round and miss a footprint that covers it.
+  const crossing = west > east;
+  const project = (lon) => {
+    if (!crossing) return lon;
+    if (lon >= west) return lon;
+    if (lon <= east) return lon + 360;
+    return west - lon <= lon - east ? lon : lon + 360;
+  };
   const samples = [
-    [west, south],
-    [east, south],
-    [east, north],
-    [west, north],
-    [centre.lon, centre.lat],
+    [project(west), south],
+    [project(east), south],
+    [project(east), north],
+    [project(west), north],
+    [project(centre.lon), centre.lat],
   ];
   return samples.every(([lon, lat]) =>
-    footprints.some((ring) => pointInPolygon(lon, lat, ring)),
+    footprints.some((ring) =>
+      pointInPolygon(
+        lon,
+        lat,
+        crossing ? ring.map(([x, y]) => [project(x), y]) : ring,
+      ),
+    ),
   )
     ? 'full'
     : 'partial';
@@ -637,6 +654,10 @@ export function wvsSnapshotUrl({
   const normalized = normalizeBox(box);
   if (!spec) throw new TypeError(`Unknown imagery product: ${product}`);
   if (!normalized) throw new TypeError('A finite box is required');
+  // Worldview Snapshots rejects a BBOX whose west is greater than its east
+  // (HTTP 200, XML "Invalid value for BBOX"). Callers split or refuse.
+  if (normalized.west > normalized.east)
+    throw new TypeError('A snapshot cannot cross the dateline');
   const bbox = [
     normalized.south,
     normalized.west,

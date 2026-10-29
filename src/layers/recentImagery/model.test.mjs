@@ -314,6 +314,34 @@ test('coverage samples the box corners and centre against the union of footprint
   assert.equal(coverageFor(withRings(null), BOX), 'unknown');
 });
 
+test('coverage of a dateline box uses the short arc, not the long way', () => {
+  const box = { west: 179, south: 0, east: -179, north: 1 };
+  const ring = (west, east, south = -0.1, north = 1.1) => [
+    [west, south],
+    [east, south],
+    [east, north],
+    [west, north],
+  ];
+  const withRings = (...rings) => ({
+    granules: rings.map((footprint) => granule({ footprint })),
+  });
+  assert.equal(
+    coverageFor(withRings(ring(178.5, -178.5)), box),
+    'full',
+    'one footprint that crosses ±180',
+  );
+  assert.equal(
+    coverageFor(withRings(ring(178.9, 180.1), ring(-180.1, -178.9)), box),
+    'full',
+    'a pair split at ±180',
+  );
+  assert.equal(
+    coverageFor(withRings(ring(179, 180)), box),
+    'partial',
+    'one side does not cover the other',
+  );
+});
+
 test('START HERE is the newest all-clear HLS day; unknown cloud is never clear', () => {
   const candidates = [
     hls('S30', '2026-09-20', [10, null]),
@@ -444,6 +472,17 @@ test('GIBS templates put y before x; Worldview snapshots take south,west,north,e
   assert.throws(
     () => wvsSnapshotUrl({ product: 'S30', day: 'x', box: null }),
     TypeError,
+  );
+  assert.throws(
+    () =>
+      wvsSnapshotUrl({
+        product: 'S30',
+        day: '2026-09-18',
+        box: { west: 179, south: 0, east: -179, north: 1 },
+        width: 64,
+        height: 64,
+      }),
+    /snapshot cannot cross the dateline/,
   );
 });
 

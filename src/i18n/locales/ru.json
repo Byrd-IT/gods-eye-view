@@ -1620,6 +1620,7 @@
   "No days to show for this box": "Для этой области нечего показать",
   "Drag the divider · SWAP trades sides": "Тяните разделитель · «ПОМЕНЯТЬ» — смена сторон",
   "Export failed · {error}": "Ошибка экспорта · {error}",
+  "A snapshot cannot cross the dateline": "Снимок не может пересекать линию перемены даты",
   "← → preview · A or B pins the focused day": "← → просмотр · A или B закрепляет выбранный день",
   "← → preview the other side · A or B pins it": "← → просмотр другой стороны · A или B закрепляет её",
   "LOAD": "ЗАГРУЗИТЬ",

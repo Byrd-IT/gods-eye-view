@@ -287,6 +287,31 @@ test('a dateline box searches each side of ±180 and dedupes granules', async ()
   );
 });
 
+test('a failed dateline half is an error, not a silent full result', async () => {
+  const result = await searchHls({
+    box: { west: 179, south: 0, east: -179, north: 1 },
+    days: 2,
+    now: '2026-09-21T00:00:00Z',
+    fetchImpl: async (url) => {
+      if (
+        url.includes('bounding_box=179,0,180,1') &&
+        url.includes('C2021957295')
+      )
+        return response({ ok: false, status: 503 });
+      return response({
+        json: { hits: 1, items: [ummItem({ conceptId: 'G-east' })] },
+      });
+    },
+  });
+  // A failed half is reported. It is not truncation: truncation means CMR
+  // had more hits than were read. The successful half is kept.
+  assert.equal(result.truncated, false);
+  assert.deepEqual(result.errors, [
+    { product: 'S30', message: 'HTTP 503 from CMR' },
+  ]);
+  assert.ok(result.candidates.some((candidate) => candidate.product === 'S30'));
+});
+
 test('CMR pages follow the CMR-Search-After cursor up to 2,000 records and truncation stays honest', async () => {
   const items = (count) =>
     Array.from({ length: count }, (_, i) => ummItem({ conceptId: `G-${i}` }));

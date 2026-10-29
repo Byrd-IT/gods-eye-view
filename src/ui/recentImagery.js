@@ -450,7 +450,12 @@ export function createRecentImageryPanel({
 
   // ---- notice -----------------------------------------------------------
   function renderNotice() {
-    const warning = snapshot.boxError || snapshot.error || exportError;
+    const datelineSnapshot =
+      snapshot.box && snapshot.box.west > snapshot.box.east
+        ? t('A snapshot cannot cross the dateline')
+        : null;
+    const warning =
+      snapshot.boxError || snapshot.error || exportError || datelineSnapshot;
     const text = localizeNotice(
       warning || snapshot.notice || (snapshot.borrowedEsri ? ESRI_NOTE : ''),
     );
@@ -984,6 +989,15 @@ export function createRecentImageryPanel({
     exporting.add(slotId);
     exportError = null;
     preserveScroll(renderControls);
+    if (snapshot.box.west > snapshot.box.east) {
+      exportError = t('A snapshot cannot cross the dateline');
+      exporting.delete(slotId);
+      preserveScroll(() => {
+        renderControls();
+        renderNotice();
+      });
+      return false;
+    }
     // The snapshot is plate carrée: keep the box's degree aspect, with the
     // longer side at the size limit.
     const size = longerSideKm(snapshot.boxSizeKm) > 25 ? 2048 : 1024;

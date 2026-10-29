@@ -64,13 +64,18 @@ export const getRecentImagery = defineTool({
         summary: `No recent satellite image covers ${area.label}.`,
         data: { area: area.label, image: null },
       };
-    const spanLon =
-      box.east >= box.west ? box.east - box.west : box.east + 360 - box.west;
+    if (box.west > box.east)
+      throw new ToolError(
+        'invalid_arguments',
+        'A snapshot cannot cross the dateline',
+      );
     const height = Math.max(
       64,
       Math.min(
         1024,
-        Math.round((IMAGE_WIDTH * (box.north - box.south)) / (spanLon || 1)),
+        Math.round(
+          (IMAGE_WIDTH * (box.north - box.south)) / (box.east - box.west || 1),
+        ),
       ),
     );
     const image = await services.imagery.getSnapshot({

@@ -98,17 +98,13 @@ test('overview fallback, empty results and invalid areas are reported', async ()
     tools: coreTools,
     services: { imagery: crossing },
   });
-  await wrapped.call('get_recent_imagery', {
-    area: { bbox: [179, 0, -179, 1] },
-  });
-  assert.equal(crossing.snapshots[0].box.west, 179);
-  assert.equal(crossing.snapshots[0].box.east, -179);
-  assert.equal(crossing.snapshots[0].width, 1024);
-  assert.equal(
-    crossing.snapshots[0].height,
-    512,
-    'aspect uses the 2° short arc, not the 358° long way',
+  await assert.rejects(
+    wrapped.call('get_recent_imagery', {
+      area: { bbox: [179, 0, -179, 1] },
+    }),
+    /snapshot cannot cross the dateline/,
   );
+  assert.equal(crossing.snapshots.length, 0);
   await assert.rejects(
     none.call('get_recent_imagery', { area: { bbox: [0, 85.5, 1, 86] } }),
     /±85° latitude/,

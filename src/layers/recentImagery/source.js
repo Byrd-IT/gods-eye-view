@@ -18,6 +18,8 @@ export function createRecentImagerySource({
     searchHls: (query) => search({ ...query, fetchImpl }),
     async getThumbnail(candidate, box, { size = 256, signal } = {}) {
       signal?.throwIfAborted();
+      if (box?.west > box?.east)
+        throw new TypeError('A snapshot cannot cross the dateline');
       const response = await fetchImpl(
         thumbnailUrl({
           product: candidate.product,

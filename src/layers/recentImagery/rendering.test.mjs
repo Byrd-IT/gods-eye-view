@@ -255,5 +255,35 @@ test('a dateline box drapes one layer on each side of ±180 and removes both', (
   assert.equal(globe.layers.length, 2, 'the same box does not remount');
   renderer.hideSlot('a');
   assert.equal(globe.layers.length, 0);
-  assert.equal(globe.layers[0], undefined);
+});
+
+test('a dateline provider that fails on the second half adds no layer', () => {
+  let built = 0;
+  const base = fakeCesium();
+  const Provider = base.UrlTemplateImageryProvider;
+  base.UrlTemplateImageryProvider = class extends Provider {
+    constructor(options) {
+      built += 1;
+      if (built === 2) throw new Error('provider failed');
+      super(options);
+    }
+  };
+  const renderer = createRecentImageryRenderer({
+    cesium: base,
+    requestRender: () => {},
+  });
+  const globe = fakeCollection();
+  renderer.rebind({ collection: globe, kind: 'globe' });
+  assert.throws(
+    () =>
+      renderer.showSlot('a', S30, {
+        west: 179,
+        south: 0,
+        east: -179,
+        north: 1,
+      }),
+    /provider failed/,
+  );
+  assert.equal(globe.layers.length, 0);
+  assert.equal(renderer.ownedCount(), 0);
 });

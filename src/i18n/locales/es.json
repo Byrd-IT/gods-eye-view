@@ -1594,6 +1594,7 @@
   "No days to show for this box": "No hay días que mostrar para este recuadro",
   "Drag the divider · SWAP trades sides": "Arrastra el divisor · INVERTIR cambia los lados",
   "Export failed · {error}": "La exportación falló · {error}",
+  "A snapshot cannot cross the dateline": "Una instantánea no puede cruzar la línea de cambio de fecha",
   "← → preview · A or B pins the focused day": "← → vista previa · A o B fija el día enfocado",
   "← → preview the other side · A or B pins it": "← → vista previa del otro lado · A o B lo fija",
   "LOAD": "CARGAR",

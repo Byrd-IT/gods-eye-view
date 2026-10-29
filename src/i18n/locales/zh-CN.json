@@ -2002,6 +2002,7 @@
   "Recent imagery A and B divider": "近期影像 A / B 分割线",
   "{before} {left} percent, {after} {right} percent": "{before} {left}%，{after} {right}%",
   "Export failed · {error}": "导出失败 · {error}",
+  "A snapshot cannot cross the dateline": "快照不能跨越日期变更线",
   "Scene action failed": "场景操作失败",
   "New scene name": "新场景名称",
   "Delete scene \"{scene}\" and all shots?": "删除场景“{scene}”及其全部镜头？",

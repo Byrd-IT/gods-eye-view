@@ -149,9 +149,24 @@ export function createRecentImageryRenderer({
 
   function mount(slotId, { candidate, box, alpha, split }) {
     const rectangles = nonCrossingBoxes(box);
-    const layers = (rectangles.length ? rectangles : [box]).map((part) =>
-      host.collection.addImageryProvider(createProvider(candidate, part)),
-    );
+    const parts = rectangles.length ? rectangles : [box];
+    // Build every provider before adding any layer, so a throw on the second
+    // half of a dateline box cannot leave the first layer untracked.
+    const providers = parts.map((part) => createProvider(candidate, part));
+    const layers = [];
+    try {
+      for (const provider of providers)
+        layers.push(host.collection.addImageryProvider(provider));
+    } catch (error) {
+      for (const layer of layers) {
+        try {
+          host.collection.remove(layer, true);
+        } catch {
+          /* the collection is already gone */
+        }
+      }
+      throw error;
+    }
     owned[slotId] = {
       layers,
       collection: host.collection,
