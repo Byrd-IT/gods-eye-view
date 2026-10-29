@@ -1338,6 +1338,10 @@ export function initDronePlan({
     state.error = null;
     state.busy = false;
     state.dirty = false;
+    suiteToken += 1;
+    state.suite = null;
+    state.suiteBusy = false;
+    state.ack = false;
     terrainCache.clear();
     preview.clear();
     panel.hidden = true;

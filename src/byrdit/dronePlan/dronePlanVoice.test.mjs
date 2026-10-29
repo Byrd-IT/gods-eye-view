@@ -300,11 +300,11 @@ test('options reports the plan after replan, not the counts from before', async 
 
 test('status reports the panel plan error, not a field the plan never sets', async () => {
   const { handle, state } = fakeHandle();
-  state.error = 'takeoff-too-far';
+  state.error = 'too-large';
   state.result = null;
   const result = await createDronePlanVoice(handle).status();
   assert.equal(result.plan, null);
-  assert.equal(result.planError, 'takeoff-too-far');
+  assert.equal(result.planError, 'too-large');
 });
 
 test('draw does not toggle an active tool off', async () => {
@@ -338,6 +338,11 @@ test('suite replans a dirty area before the passes', async () => {
   const { handle, state, calls } = fakeHandle();
   state.areas = [{ id: 'area-1', kind: 'rect' }];
   state.dirty = true;
+  state.result = {
+    totals: { missionCount: 1, photoCount: 4, durationS: 10 },
+    terrainComplete: true,
+    warnings: [],
+  };
   const result = await createDronePlanVoice(handle).suite();
   assert.equal(result.ok, true);
   const names = calls.map((call) => call[0]);

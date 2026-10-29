@@ -336,7 +336,11 @@ export function createDronePlanVoice(handle) {
           return fail('A plan is already running');
         ensureOpen();
         if (handle.getState().dirty) await handle.replan();
+        const planned = handle.getState();
+        if (!planned.result || planned.error)
+          return fail('Plan the area first');
         await handle.planSuite();
+        if (!handle.getState().suite) return fail('Plan the area first');
         return summary();
       });
     },

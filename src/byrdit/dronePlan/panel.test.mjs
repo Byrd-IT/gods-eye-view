@@ -7,6 +7,7 @@ import {
 } from '../../data/inputOwnership.js';
 import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
 import { initDronePlan } from './panel.js';
+import { createDronePlanVoice } from './dronePlanVoice.js';
 import { metersPerDegree } from './geo.js';
 import { readZip } from './zip.js';
 
@@ -871,5 +872,22 @@ test("voice handle methods drive the same plan the buttons do", async () => {
   assert.equal(w.handle.useRecommended("mapping-grid"), true);
   assert.equal(typeof w.handle.downloadsAllowed(), "boolean");
   assert.equal(typeof w.handle.suiteAllowed(), "boolean");
+  w.handle.destroy();
+});
+
+test('close drops the all-passes plan so voice cannot download it', async () => {
+  const w = setup();
+  w.handle.open({ draw: false });
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await w.handle.planSuite();
+  assert.equal(w.handle.suiteAllowed(), true);
+  const voice = createDronePlanVoice(w.handle);
+  const closed = await voice.close();
+  assert.equal(closed.cleared, true);
+  assert.equal(w.handle.getState().suite, null);
+  assert.equal(w.handle.suiteAllowed(), false);
+  const result = await voice.download({ which: 'suite' });
+  assert.equal(result.ok, false);
   w.handle.destroy();
 });
