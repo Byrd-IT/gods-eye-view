@@ -205,3 +205,35 @@ test('a line through two overlapping squares is split, and the overlap stays wit
   nearPt(pieces[1].start, 100, 50);
   nearPt(pieces[1].end, 160, 50);
 });
+
+test('a sharp corner is bevelled so the offset stays within margin·√2 of the ring', () => {
+  const acute = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 98, y: 6 },
+  ];
+  const margin = 40;
+  const grown = offsetRing(acute, margin);
+  for (const p of grown) {
+    let best = Infinity;
+    for (let i = 0; i < acute.length; i += 1) {
+      const a = acute[i];
+      const b = acute[(i + 1) % acute.length];
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const len2 = abx * abx + aby * aby;
+      const t = Math.min(
+        1,
+        Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2),
+      );
+      best = Math.min(
+        best,
+        Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t)),
+      );
+    }
+    assert.ok(
+      best <= margin * Math.SQRT2 + 0.01,
+      `offset point ${best.toFixed(1)} m from the ring`,
+    );
+  }
+});

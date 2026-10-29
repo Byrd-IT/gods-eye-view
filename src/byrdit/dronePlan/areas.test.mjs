@@ -320,6 +320,7 @@ test('the download zip puts each job in its own folder and the README names them
   assert.match(readme, /Job: North field/);
   assert.match(readme, /Job: South field/);
   assert.match(readme, /processed together \(ODM\)/);
+  assert.match(readme, /only in the first job/);
   assert.match(readme, /Photos: /);
   const whole = assembleAreaPlan(
     planAreas(
@@ -427,5 +428,161 @@ test('a double-grid polygon plans without using the bounding box as the flown ar
   assert.equal(plan.error, undefined, plan.message);
   assert.ok(plan.legs.length > 1);
   assert.equal(plan.jobs.length, 1);
+});
+
+function distToRing(p, ring) {
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const len2 = abx * abx + aby * aby;
+    const t = Math.min(1, Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2));
+    best = Math.min(best, Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t)));
+  }
+  return best;
+}
+
+test('a sharp polygon does not fly a spike past the footprint margin', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const local = [
+    { x: 0, y: 0 },
+    { x: 250, y: 0 },
+    { x: 246, y: 43 },
+  ];
+  const plan = planAreas(
+    [{ id: 'thin', name: 'Thin', kind: 'polygon', ring: local.map((p) => frame.toLonLat(p.x, p.y)) }],
+    opts,
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  const margin = plan.footprintMarginM;
+  assert.ok(margin > 10, `margin ${margin}`);
+  assert.ok(plan.legs.length > 0);
+  for (const leg of plan.legs) {
+    for (const w of leg.waypoints) {
+      const dist = distToRing(frame.toXY(w.lon, w.lat), local);
+      assert.ok(
+        dist <= margin * Math.SQRT2 + 2,
+        `waypoint ${dist.toFixed(1)} m from the ring (margin ${margin.toFixed(1)})`,
+      );
+      assert.equal(w.headingDeg, leg.waypoints[0].headingDeg);
+    }
+  }
+});
+
+test('a notch narrower than the footprint margin is not flown as a bowtie', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const local = [
+    { x: 0, y: 0 },
+    { x: 300, y: 0 },
+    { x: 300, y: 100 },
+    { x: 180, y: 100 },
+    { x: 180, y: 120 },
+    { x: 300, y: 120 },
+    { x: 300, y: 250 },
+    { x: 0, y: 250 },
+  ];
+  const plan = planAreas(
+    [{ id: 'notch', name: 'Notch', kind: 'polygon', ring: local.map((p) => frame.toLonLat(p.x, p.y)) }],
+    opts,
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  const margin = plan.footprintMarginM;
+  assert.ok(margin > 20, 'the notch must be narrower than the margin');
+  assert.ok(20 < margin * 2);
+  let coveredEdge = false;
+  for (const leg of plan.legs) {
+    for (const w of leg.waypoints) {
+      const p = frame.toXY(w.lon, w.lat);
+      const dist = distToRing(p, local);
+      assert.ok(
+        dist <= margin * Math.SQRT2 + 2,
+        `waypoint ${dist.toFixed(1)} m from the ring`,
+      );
+      if (p.x > 300 && p.x < 300 + margin && p.y > 40 && p.y < 80) coveredEdge = true;
+    }
+  }
+  assert.equal(coveredEdge, true, 'the east edge still gets the footprint margin');
+});
+
+test('a rectangle overlapping a polygon is not flown past its own edges', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const poly = [
+    { x: 0, y: 0 },
+    { x: 160, y: 0 },
+    { x: 160, y: 160 },
+    { x: 0, y: 160 },
+  ];
+  const rect = {
+    west: frame.toLonLat(80, 20).lon,
+    east: frame.toLonLat(240, 140).lon,
+    south: frame.toLonLat(80, 20).lat,
+    north: frame.toLonLat(240, 140).lat,
+  };
+  const plan = planAreas(
+    [
+      { id: 'poly', name: 'Poly', kind: 'polygon', ring: poly.map((p) => frame.toLonLat(p.x, p.y)) },
+      { id: 'rect', name: 'Rect', kind: 'rect', box: rect },
+    ],
+    opts,
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.jobs.length, 2);
+  const margin = plan.footprintMarginM;
+  let onlyPoly = 0;
+  let onlyRect = 0;
+  for (const leg of plan.legs) {
+    for (const w of leg.waypoints) {
+      const p = frame.toXY(w.lon, w.lat);
+      const inRect = p.x >= 80 - 1 && p.x <= 240 + 1 && p.y >= 20 - 1 && p.y <= 140 + 1;
+      if (leg.jobId === 'job-2') {
+        assert.ok(inRect, `rectangle job flew ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`);
+        if (p.x > 160 + 1) onlyRect += 1;
+      }
+      if (leg.jobId === 'job-1') {
+        assert.ok(
+          distToRing(p, poly) <= margin * Math.SQRT2 + 2,
+          `polygon job flew ${distToRing(p, poly).toFixed(1)} m outside`,
+        );
+        if (p.x < 80 - 1) onlyPoly += 1;
+      }
+    }
+  }
+  assert.ok(onlyPoly > 0, 'the polygon-only ground must stay in the polygon job');
+  assert.ok(onlyRect > 0, 'the rectangle-only ground must stay in the rectangle job');
+});
+
+test('the line-of-sight note is measured from the shared takeoff', () => {
+  const a = boxAround(-94.5, 32.7, 80, 80);
+  const shift = 700 / metersPerDegree(32.7).lon;
+  const b = boxAround(-94.5 + shift, 32.7, 80, 80);
+  const plan = planAreas(
+    [
+      { id: 'near', name: 'Near', kind: 'rect', box: a },
+      { id: 'far', name: 'Far', kind: 'rect', box: b },
+    ],
+    { ...opts, takeoff: { lon: -94.5, lat: 32.7 } },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  const vlos = plan.notes.find((note) => note.code === 'vlos');
+  assert.ok(vlos, 'a far area must warn');
+  assert.ok(vlos.params.distanceM > 600, `distance ${vlos.params.distanceM}`);
+});
+
+test('a polygon whose footprint margin pushes the box past 3 km is refused', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const local = [
+    { x: 0, y: 0 },
+    { x: 2980, y: 0 },
+    { x: 2980, y: 40 },
+    { x: 0, y: 40 },
+  ];
+  const plan = planAreas(
+    [{ id: 'wide', name: 'Wide', kind: 'polygon', ring: local.map((p) => frame.toLonLat(p.x, p.y)) }],
+    opts,
+  );
+  assert.equal(plan.error, 'too-large', plan.message);
+  assert.match(plan.message, /3 km/);
 });
 

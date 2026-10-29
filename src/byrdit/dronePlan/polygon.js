@@ -117,6 +117,32 @@ export function selfIntersects(ring) {
   return false;
 }
 
+function distanceToSegment(p, a, b) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby;
+  if (len2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);
+  const t = Math.min(1, Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2));
+  return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
+}
+
+/**
+ * Inside the ring, or within `margin` metres of an edge. This is the footprint
+ * buffer when an offset ring would cross itself (a notch narrower than 2×margin).
+ */
+export function pointWithinMargin(p, ring, margin) {
+  const pts = normalizeRing(ring);
+  if (pts.length < 3) return false;
+  if (pointInRing(p, pts)) return true;
+  if (!(margin > 0)) return false;
+  for (let i = 0; i < pts.length; i += 1) {
+    if (distanceToSegment(p, pts[i], pts[(i + 1) % pts.length]) <= margin + 1e-4) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Boundary counts as inside, so a flight line ending on the edge is kept. */
 export function pointInRing(p, ring, eps = 1e-6) {
   const pts = normalizeRing(ring);
@@ -195,17 +221,104 @@ export function clipSegmentToRing(a, b, ring) {
   return pieces;
 }
 
+function ringSpec(ring) {
+  if (Array.isArray(ring)) return { ring: normalizeRing(ring), margin: 0 };
+  return {
+    ring: normalizeRing(ring?.ring ?? []),
+    margin: ring?.margin > 0 ? ring.margin : 0,
+  };
+}
+
+function specContains(spec, p) {
+  if (spec.margin > 0) return pointWithinMargin(p, spec.ring, spec.margin);
+  return pointInRing(p, spec.ring);
+}
+
+function marginCrossings(a, b, spec) {
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  const n = Math.max(1, Math.ceil(length / 1));
+  const hits = [];
+  let prev = specContains(spec, a);
+  for (let i = 1; i <= n; i += 1) {
+    const t = i / n;
+    const now = specContains(spec, at(a, b, t));
+    if (now === prev) continue;
+    let lo = (i - 1) / n;
+    let hi = t;
+    for (let k = 0; k < 20; k += 1) {
+      const mid = (lo + hi) / 2;
+      if (specContains(spec, at(a, b, mid)) === prev) lo = mid;
+      else hi = mid;
+    }
+    hits.push(hi);
+    prev = now;
+  }
+  return hits;
+}
+
+/**
+ * The parts of a→b that lie inside the ring, or within `margin` metres of it.
+ * Used when the offset ring would cross itself.
+ */
+export function clipSegmentToMargin(a, b, ring, margin) {
+  const spec = { ring: normalizeRing(ring), margin };
+  if (spec.ring.length < 3) return [];
+  const ts = [0, 1, ...marginCrossings(a, b, spec)];
+  ts.sort((p, q) => p - q);
+  const uniq = [];
+  for (const t of ts) {
+    if (!uniq.length || t - uniq[uniq.length - 1] > 1e-8) uniq.push(t);
+  }
+  const pieces = [];
+  for (let i = 0; i < uniq.length - 1; i += 1) {
+    const t0 = uniq[i];
+    const t1 = uniq[i + 1];
+    if (t1 - t0 < 1e-7) continue;
+    if (!specContains(spec, at(a, b, (t0 + t1) / 2))) continue;
+    pieces.push({ start: at(a, b, t0), end: at(a, b, t1) });
+  }
+  return pieces;
+}
+
+/**
+ * Clip a→b to a list of rings. A spec with margin > 0 uses the footprint
+ * buffer instead of an offset ring. An array ring is clipped exactly.
+ */
+export function clipSegmentCovered(a, b, rings) {
+  const pieces = [];
+  for (const raw of rings) {
+    const spec = ringSpec(raw);
+    if (spec.ring.length < 3) continue;
+    if (spec.margin > 0) pieces.push(...clipSegmentToMargin(a, b, spec.ring, spec.margin));
+    else pieces.push(...clipSegmentToRing(a, b, spec.ring));
+  }
+  return mergeCollinearSegments(pieces);
+}
+
 /**
  * Split a→b where it crosses any ring. Each piece is given to the first ring
  * that contains its midpoint, so an overlap is not given to two owners.
- * Pieces outside every ring are dropped.
+ * A `{ ring, margin }` entry contains points within that many metres of the
+ * ring, which is how a self-crossing offset is avoided. Pieces outside every
+ * ring are dropped.
  */
 export function assignSegmentToRings(a, b, rings) {
-  const ready = rings.map((ring) => normalizeRing(ring)).filter((pts) => pts.length >= 3);
+  const ready = rings
+    .map((ring) => ringSpec(ring))
+    .filter((spec) => spec.ring.length >= 3);
   const ts = [0, 1];
-  for (const pts of ready) {
-    for (let i = 0; i < pts.length; i += 1) {
-      for (const t of segmentEdgeHits(a, b, pts[i], pts[(i + 1) % pts.length])) {
+  for (const spec of ready) {
+    if (spec.margin > 0) {
+      ts.push(...marginCrossings(a, b, spec));
+      continue;
+    }
+    for (let i = 0; i < spec.ring.length; i += 1) {
+      for (const t of segmentEdgeHits(
+        a,
+        b,
+        spec.ring[i],
+        spec.ring[(i + 1) % spec.ring.length],
+      )) {
         ts.push(t);
       }
     }
@@ -223,7 +336,7 @@ export function assignSegmentToRings(a, b, rings) {
     const mid = at(a, b, (t0 + t1) / 2);
     let owner = -1;
     for (let r = 0; r < ready.length; r += 1) {
-      if (pointInRing(mid, ready[r])) {
+      if (specContains(ready[r], mid)) {
         owner = r;
         break;
       }
@@ -313,7 +426,9 @@ function lineHit(p, d, q, e) {
 
 /**
  * Offset a ring outward by `margin` metres (0 returns a copy). A square grows
- * by exactly `margin` on each side. The result is counter-clockwise.
+ * by exactly `margin` on each side. A corner sharper than a square is bevelled,
+ * so the new point stays within margin·√2 of the ring (no farther than a
+ * square corner). The result is counter-clockwise.
  */
 export function offsetRing(ring, margin) {
   const pts = normalizeRing(ring);
@@ -327,14 +442,30 @@ export function offsetRing(ring, margin) {
     if (len < 1e-9) continue;
     const ox = (d.y / len) * margin;
     const oy = (-d.x / len) * margin;
-    edges.push({ p: { x: a.x + ox, y: a.y + oy }, d });
+    edges.push({
+      p: { x: a.x + ox, y: a.y + oy },
+      d,
+      ox,
+      oy,
+      vertex: a,
+    });
   }
   if (edges.length < 3) return pts;
+  const limit = margin * Math.SQRT2;
   const out = [];
   for (let i = 0; i < edges.length; i += 1) {
     const prev = edges[(i + edges.length - 1) % edges.length];
     const cur = edges[i];
-    out.push(lineHit(prev.p, prev.d, cur.p, cur.d) ?? { ...cur.p });
+    const hit = lineHit(prev.p, prev.d, cur.p, cur.d);
+    const vertex = cur.vertex;
+    const spiked =
+      !hit || Math.hypot(hit.x - vertex.x, hit.y - vertex.y) > limit + 1e-4;
+    if (spiked) {
+      out.push({ x: vertex.x + prev.ox, y: vertex.y + prev.oy });
+      out.push({ x: vertex.x + cur.ox, y: vertex.y + cur.oy });
+    } else {
+      out.push(hit);
+    }
   }
   return normalizeRing(out);
 }

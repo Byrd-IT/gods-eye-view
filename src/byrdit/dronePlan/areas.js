@@ -10,7 +10,7 @@
  * each area and is not merged.
  */
 
-import { deltaLon, makeFrame, wrapLon } from './geo.js';
+import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
 import { validateDroneBox } from './limits.js';
 import {
   assembleMissions,
@@ -23,11 +23,12 @@ import {
   normalizeOptions,
   planFlight,
   takeoffDistanceFromBoxM,
+  VLOS_WARN_M,
 } from './planner.js';
 import { getPreset, DEFAULT_PRESET_ID } from './presets.js';
 import {
   assignSegmentToRings,
-  clipSegmentToRings,
+  clipSegmentCovered,
   offsetRing,
   pointInRing,
   ringsOverlap,
@@ -131,7 +132,10 @@ function checkArea(area, frame) {
 function clusterIndices(areas, frame, margin = 0) {
   const rings = areas.map((area) => {
     const local = ringXY(areaRing(area), frame);
-    return area.kind === 'polygon' && margin > 0 ? offsetRing(local, margin) : local;
+    if (area.kind !== 'polygon' || !(margin > 0)) return local;
+    const grown = offsetRing(local, margin);
+    // A crossed offset can reach far outside the area. Cluster on the real ring.
+    return selfIntersects(grown) ? local : grown;
   });
   const parent = areas.map((_, i) => i);
   const find = (i) => {
@@ -185,12 +189,39 @@ function marginM(preset, options, hasPolygon) {
   return Math.max(fp.acrossM, fp.alongM) / 2;
 }
 
-function clipShell(shell, lonLatRings, margin) {
-  const frame = shell.frame;
-  const xy = lonLatRings.map((ring) => {
-    const local = ring.map((p) => frame.toXY(p.lon, p.lat));
-    return offsetRing(local, margin);
-  });
+function clipSpec(area, frame, margin) {
+  const local = ringXY(areaRing(area), frame);
+  if (area.kind !== 'polygon' || !(margin > 0)) return local;
+  const grown = offsetRing(local, margin);
+  if (selfIntersects(grown)) return { ring: local, margin };
+  return grown;
+}
+
+function shellRing(area, frame, margin) {
+  const local = ringXY(areaRing(area), frame);
+  if (area.kind !== 'polygon' || !(margin > 0)) return local;
+  const grown = offsetRing(local, margin);
+  if (!selfIntersects(grown)) return grown;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of local) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  return [
+    { x: minX - margin, y: minY - margin },
+    { x: maxX + margin, y: minY - margin },
+    { x: maxX + margin, y: maxY + margin },
+    { x: minX - margin, y: maxY + margin },
+  ];
+}
+
+function clipShell(shell, members, frame, margin) {
+  const specs = members.map((area) => clipSpec(area, frame, margin));
   const out = [];
   for (const leg of shell.legs) {
     if (leg.kind === 'orbit' || leg.waypoints.length < 2) {
@@ -204,7 +235,7 @@ function clipShell(shell, lonLatRings, margin) {
     );
     const interval = leg.photoMode === 'interval';
     const step = interval ? INTERVAL_WAYPOINT_STEP_M : leg.photoSpacingM;
-    for (const piece of clipSegmentToRings(a, b, xy)) {
+    for (const piece of clipSegmentCovered(a, b, specs)) {
       const length = Math.hypot(piece.end.x - piece.start.x, piece.end.y - piece.start.y);
       if (length < MIN_PIECE_M) continue;
       const { points } = sampleSegment(piece.start, piece.end, step);
@@ -216,7 +247,7 @@ function clipShell(shell, lonLatRings, margin) {
           lat: Number(ll.lat.toFixed(8)),
           aglM: leg.waypoints[0].aglM,
           pitchDeg: leg.pitchDeg,
-          headingDeg: null,
+          headingDeg: leg.waypoints[0].headingDeg,
           photo: !interval,
         };
       });
@@ -255,14 +286,17 @@ function planCluster(members, rawOptions) {
     options,
     members.some((area) => area.kind === 'polygon'),
   );
-  const rings = members.map((area) => areaRing(area));
-  const expanded = rings.flatMap((ring) => {
-    const local = offsetRing(ringXY(ring, frame), margin);
-    return local.map((p) => frame.toLonLat(p.x, p.y));
-  });
-  const shell = planFlight(bboxOfPoints(expanded), rawOptions);
+  const expanded = members.flatMap((area) =>
+    shellRing(area, frame, margin).map((p) => frame.toLonLat(p.x, p.y)),
+  );
+  const shellBox = bboxOfPoints(expanded);
+  const expandedCheck = validateDroneBox(shellBox);
+  if (!expandedCheck.ok) {
+    return { error: expandedCheck.reason, message: expandedCheck.message };
+  }
+  const shell = planFlight(shellBox, rawOptions);
   if (shell.error) return shell;
-  const clipped = clipShell(shell, rings, margin);
+  const clipped = clipShell(shell, members, frame, margin);
   if (!clipped.legs.length) {
     return {
       error: 'too-narrow',
@@ -305,9 +339,7 @@ function jobForArea(area, index) {
  * area stays with that area. A piece in the overlap goes to the first area.
  */
 function splitLegsByArea(planned, members, frame, margin) {
-  const rings = members.map((area) =>
-    offsetRing(ringXY(areaRing(area), frame), margin),
-  );
+  const rings = members.map((area) => clipSpec(area, frame, margin));
   const buckets = members.map(() => []);
   for (const leg of planned.legs) {
     if (leg.waypoints.length < 2) {
@@ -514,13 +546,25 @@ export function planAreas(areas, rawOptions = {}) {
   const usedJobs = (grouping === 'whole' ? [whole] : jobs).filter((job) =>
     numbered.some((leg) => leg.jobId === job.id),
   );
+  const farthest = numbered.reduce(
+    (max, leg) =>
+      leg.waypoints.reduce(
+        (m, w) => Math.max(m, groundDistanceM(decided.takeoff, w)),
+        max,
+      ),
+    0,
+  );
+  const planNotes = notes.filter((note) => note.code !== 'vlos');
+  if (farthest > VLOS_WARN_M) {
+    planNotes.push({ code: 'vlos', params: { distanceM: Math.round(farthest) } });
+  }
   return {
     ...first,
     takeoff: decided.takeoff,
     box: bboxOfPoints(list.flatMap((area) => areaRing(area))),
     legs: numbered,
     waypointCount,
-    notes,
+    notes: planNotes,
     areas: list,
     jobs: usedJobs,
     jobGrouping: grouping,

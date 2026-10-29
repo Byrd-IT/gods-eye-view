@@ -3065,7 +3065,7 @@
   "Processing jobs": "Trabajos de procesado",
   "Orbit stays on the centre of each area. It is not merged with other areas.": "La órbita se queda en el centro de cada zona. No se une con otras zonas.",
   "Overlapping areas are flown once. All flights are one processing job.": "Las zonas que se solapan se vuelan una sola vez. Todos los vuelos son un trabajo de procesado.",
-  "Overlapping areas are flown once. Each area is its own processing job.": "Las zonas que se solapan se vuelan una sola vez. Cada zona es su propio trabajo de procesado.",
+  "Overlapping areas are flown once. Each area is its own processing job. Overlap photos stay in the first area only.": "Las zonas que se solapan se vuelan una sola vez. Cada zona es su propio trabajo de procesado. Las fotos del solape quedan solo en la primera zona.",
   "Some areas are more than {limit} m from the takeoff point, so those flights are a longer transit": "Algunas zonas están a más de {limit} m del punto de despegue, así que esos vuelos tienen un traslado más largo",
   "Areas": "Zonas",
   "Area name": "Nombre de la zona",

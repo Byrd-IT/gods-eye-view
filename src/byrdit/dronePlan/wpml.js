@@ -297,6 +297,12 @@ export function readmeText(result, when = new Date()) {
       'Processing jobs:',
       'Process the images from one job together (ODM). Do not mix jobs.',
     );
+    if ((result.plan?.jobGrouping ?? 'per-area') !== 'whole' && jobs.length > 1) {
+      lines.push(
+        'Where areas overlap, photos of that ground are only in the first job.',
+        'A later job has no photos there.',
+      );
+    }
     for (const job of jobs) {
       const mine = missions.filter((mission) => mission.jobId === job.id);
       const photos = mine.reduce((sum, mission) => sum + mission.photoCount, 0);

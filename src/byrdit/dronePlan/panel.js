@@ -827,7 +827,7 @@ export function initDronePlan({
             'Overlapping areas are flown once. All flights are one processing job.',
           )
         : t(
-            'Overlapping areas are flown once. Each area is its own processing job.',
+            'Overlapping areas are flown once. Each area is its own processing job. Overlap photos stay in the first area only.',
           );
     ui.jobNote.textContent = jobNote;
     renderAreas();
@@ -867,6 +867,13 @@ export function initDronePlan({
       remove.addEventListener('click', () => {
         state.areas = state.areas.filter((item) => item.id !== area.id);
         state.box = state.areas.at(-1)?.box ?? null;
+        if (
+          state.takeoff &&
+          (!state.areas.length ||
+            distanceToAreasM(state.areas, state.takeoff) > MAX_TAKEOFF_FROM_BOX_M)
+        ) {
+          state.takeoff = null;
+        }
         showCommitted();
         schedule(0);
       });
