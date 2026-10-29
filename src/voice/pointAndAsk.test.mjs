@@ -358,8 +358,9 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // + 302 characters: drawn, compare, and waybackOff speaking rule.
   // + 230 characters: waybackStillOn and starting speaking rule (instructions + tool).
   // + 4313 characters: the control_droneplan tool and its routing sentence.
+  // + 1 character: orbit height bounds match the planner cap.
   assert.ok(
-    size <= 52000 + 297 + 89 + 2113 + 1812 + 159 + 2026 + 302 + 230 + 4313,
+    size <= 52000 + 297 + 89 + 2113 + 1812 + 159 + 2026 + 302 + 230 + 4313 + 1,
     `prompt size ${size}`,
   );
 });
