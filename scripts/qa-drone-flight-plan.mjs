@@ -497,6 +497,86 @@ try {
     quality: 80,
   });
 
+  // Polygon plus an overlapping rectangle: one flown area, a folder per job.
+  await page.select('#drone-plan-panel select[aria-label="Pattern"]', 'grid');
+  await page.click('#drone-plan-panel .gev-dp-bar button:nth-child(2)');
+  await wait(300);
+  await page.click('#drone-plan-button');
+  await wait(300);
+  await page.keyboard.press('Escape');
+  await page.click(
+    '#drone-plan-panel .gev-dp-bar button[data-action="draw-polygon"]',
+  );
+  await wait(200);
+  for (const [x, y] of [
+    [430, 280],
+    [620, 280],
+    [700, 430],
+    [480, 500],
+  ]) {
+    await page.mouse.click(x, y);
+    await wait(80);
+  }
+  await page.mouse.click(430, 280);
+  await waitForPlan(page);
+  await page.click('#drone-plan-panel .gev-dp-bar button');
+  await wait(200);
+  await page.mouse.move(500, 340);
+  await page.mouse.down();
+  await page.mouse.move(760, 520, { steps: 6 });
+  await page.mouse.up();
+  await waitForPlan(page);
+  const merged = await page.evaluate(() => {
+    const r = window.__gevDronePlan.getResult();
+    const areas = window.__gevDronePlan.getState().areas;
+    return {
+      areas: areas.map((area) => area.kind),
+      jobs: (r.jobs ?? []).map((job) => job.name),
+      missions: r.missions.length,
+      photos: r.totals.photoCount,
+    };
+  });
+  console.log('merged:', JSON.stringify(merged));
+  check(
+    'a polygon and an overlapping rectangle are both on the plan',
+    merged.areas.includes('polygon') && merged.areas.includes('rect'),
+    JSON.stringify(merged),
+  );
+  check(
+    'the plan has a processing job for each area',
+    merged.jobs.length === 2,
+    JSON.stringify(merged),
+  );
+  const jobZip = await download(
+    page,
+    '#drone-plan-panel button[data-download="all"]',
+  );
+  if (jobZip) {
+    const jobFiles = readZip(new Uint8Array(fs.readFileSync(jobZip)));
+    const jobNames = [...jobFiles.keys()];
+    const folders = new Set(
+      jobNames
+        .filter((name) => name.includes('/'))
+        .map((name) => name.split('/')[0]),
+    );
+    check(
+      'the ZIP has a folder per processing job and a README',
+      folders.size === merged.jobs.length && jobNames.includes('README.txt'),
+      jobNames.join(', '),
+    );
+    const readme = new TextDecoder().decode(jobFiles.get('README.txt'));
+    check(
+      'the README says images from one job should be processed together',
+      /processed together \(ODM\)/.test(readme) && /Job: /.test(readme),
+      readme.slice(0, 400),
+    );
+  }
+  await page.screenshot({
+    path: path.join(SHOT_DIR, 'drone-plan-polygon.jpg'),
+    type: 'jpeg',
+    quality: 80,
+  });
+
   // Close clears the globe and the pointer.
   await page.click('#drone-plan-panel .gev-dp-bar button:nth-child(2)');
   await wait(400);

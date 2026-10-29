@@ -254,7 +254,7 @@ test('a drawn box becomes stats, a path on the globe and downloadable missions',
   assert.equal(w.downloads.length, 1);
   assert.match(
     w.downloads[0].name,
-    /^gev-drone-plan-\d{8}-\d{4}-m1of\d+\.kmz$/,
+    /^gev-drone-plan-\d{8}-\d{4}-Area-1-m1of\d+\.kmz$/,
   );
   const kmz = readZip(w.downloads[0].bytes);
   const waylines = new TextDecoder().decode(kmz.get('wpmz/waylines.wpml'));
@@ -673,7 +673,9 @@ test('USE RECOMMENDED applies the aircraft and mode values and the plan honours 
   w.handle.setBox(boxM(400, 300));
   pick(w, 'Aircraft', 'dji-mavic-3');
   pick(w, 'Mode', 'fast-survey');
-  const use = w.buttons('data-action')[0];
+  const use = w.buttons('data-action').find(
+    (b) => b.getAttribute('data-action') === 'use-recommended',
+  );
   use.click();
   await w.handle.replan();
   const r = w.handle.getResult();
@@ -682,7 +684,7 @@ test('USE RECOMMENDED applies the aircraft and mode values and the plan honours 
   assert.equal(r.plan.options.presetId, 'dji-mavic-3');
   assert.equal(r.plan.speedLimitedBy, null);
   pick(w, 'Mode', 'splat-orbit');
-  w.buttons('data-action')[0].click();
+  use.click();
   await w.handle.replan();
   assert.equal(w.handle.getResult().plan.options.pattern, 'orbit');
   w.handle.destroy();

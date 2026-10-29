@@ -13,6 +13,8 @@ import * as Cesium from 'cesium';
 import { formatNumber, t } from '../../i18n/index.js';
 import { initImageryBoxTool } from '../../ui/imageryBoxTool.js';
 import { createSlider } from '../../ui/slider.js';
+import { assembleAreaPlan, distanceToAreasM, planAreas } from './areas.js';
+import { initPolygonTool } from './polygonTool.js';
 import { validateDroneBox } from './limits.js';
 import { initPointTool } from './pointTool.js';
 import { createDronePlanPreview } from './preview.js';
@@ -22,8 +24,6 @@ import {
   FT_PER_M,
   MAX_TAKEOFF_FROM_BOX_M,
   MIN_AGL_M,
-  assembleMissions,
-  planFlight,
   takeoffDistanceFromBoxM,
 } from './planner.js';
 import {
@@ -83,6 +83,9 @@ export function initDronePlan({
 
   const state = {
     box: null,
+    areas: [],
+    jobGrouping: 'per-area',
+    nextArea: 1,
     takeoff: null,
     options: {
       presetId: DEFAULT_PRESET_ID,
@@ -131,11 +134,7 @@ export function initDronePlan({
     validate: validateDroneBox,
     shorterArc: true,
     onBox: (box) => {
-      state.box = box;
-      state.takeoff = null;
-      preview.showBox(box);
-      status('');
-      schedule(0);
+      addRect(box, { replace: false });
     },
     onCancel: (reason, message) => {
       if (message) status(message, 'warn');
@@ -163,6 +162,102 @@ export function initDronePlan({
     },
   });
 
+  function areaId() {
+    const id = `area-${state.nextArea}`;
+    state.nextArea += 1;
+    return id;
+  }
+
+  function showCommitted() {
+    const onlyRect =
+      state.areas.length === 1 && state.areas[0].kind === 'rect';
+    if (onlyRect) {
+      preview.showBox(state.areas[0].box);
+      preview.showAreas(null);
+    } else {
+      preview.showBox(null);
+      preview.showAreas(state.areas);
+    }
+  }
+
+  function addRect(box, { replace = false, clearTakeoff = replace } = {}) {
+    const area = {
+      id: areaId(),
+      name: `Area ${state.areas.length + (replace ? 1 : 1)}`,
+      kind: 'rect',
+      box,
+    };
+    if (replace) {
+      state.nextArea = 2;
+      area.id = 'area-1';
+      area.name = 'Area 1';
+      state.areas = [area];
+    } else {
+      area.name = `Area ${state.areas.length + 1}`;
+      state.areas.push(area);
+    }
+    state.box = box;
+    if (clearTakeoff) state.takeoff = null;
+    else if (
+      state.takeoff &&
+      distanceToAreasM(state.areas, state.takeoff) > MAX_TAKEOFF_FROM_BOX_M
+    ) {
+      state.takeoff = null;
+    }
+    showCommitted();
+    status('');
+    schedule(0);
+    return true;
+  }
+
+  function addPolygon(ring) {
+    const probe = planAreas(
+      [{ id: 'probe', name: 'probe', kind: 'polygon', ring }],
+      state.options,
+    );
+    if (probe.error) {
+      status(probe.message || planErrorText(probe.error), 'warn');
+      return false;
+    }
+    state.areas.push({
+      id: areaId(),
+      name: `Area ${state.areas.length + 1}`,
+      kind: 'polygon',
+      ring,
+      box: probe.box,
+    });
+    state.box = probe.box;
+    showCommitted();
+    status('');
+    schedule(0);
+    return true;
+  }
+
+  const polygonTool = initPolygonTool({
+    viewer,
+    cesium,
+    documentRef: doc,
+    onRing: (ring) => addPolygon(ring),
+    onCancel: (reason) => {
+      if (reason === 'escape') status(t('Polygon drawing cancelled'));
+      else if (reason === 'sky')
+        status(t('Click on the ground, not the sky'), 'warn');
+      else if (reason === 'pointer-busy')
+        status(t('Another tool is using the pointer. Close it first'), 'warn');
+    },
+    onActive: (active) => {
+      ui.polygonButton?.setAttribute('aria-pressed', String(active));
+      if (active) {
+        status(
+          t(
+            'Click corners on the ground. Double-click or click the first corner to close. Esc cancels. Backspace removes the last corner.',
+          ),
+          'info',
+        );
+      }
+    },
+  });
+
   // ------------------------------------------------------------- planning --
   function schedule(delay = REPLAN_DELAY_MS) {
     // The plan on screen is out of date from this moment: no file may come
@@ -175,9 +270,12 @@ export function initDronePlan({
 
   /** Take a picked takeoff point, or say why not (too far from the box). */
   function acceptTakeoff(point) {
-    if (state.box) {
-      const away = takeoffDistanceFromBoxM(state.box, point);
-      if (away > MAX_TAKEOFF_FROM_BOX_M) {
+    const away = state.areas.length
+      ? distanceToAreasM(state.areas, point)
+      : state.box
+        ? takeoffDistanceFromBoxM(state.box, point)
+        : 0;
+    if (away > MAX_TAKEOFF_FROM_BOX_M) {
         status(
           warningText({
             code: 'takeoff-too-far',
@@ -189,7 +287,6 @@ export function initDronePlan({
           'warn',
         );
         return false;
-      }
     }
     state.takeoff = point;
     status('');
@@ -201,7 +298,7 @@ export function initDronePlan({
     if (destroyed) return;
     const token = ++planToken;
     state.dirty = false;
-    if (!state.box) {
+    if (!state.areas.length) {
       state.result = null;
       state.error = null;
       state.busy = false;
@@ -213,8 +310,9 @@ export function initDronePlan({
     const options = {
       ...state.options,
       takeoff: state.takeoff,
+      jobGrouping: state.jobGrouping,
     };
-    const plan = planFlight(state.box, options);
+    const plan = planAreas(state.areas, options);
     if (plan.error) {
       state.result = null;
       state.error = plan.error;
@@ -248,7 +346,7 @@ export function initDronePlan({
     points.forEach((w, i) => {
       byId[w.id] = ground.wpM[i];
     });
-    state.result = assembleMissions(plan, { ...ground, wpM: byId });
+    state.result = assembleAreaPlan(plan, { ...ground, wpM: byId });
     state.error = null;
     state.busy = false;
     preview.showPlan(state.result);
@@ -275,13 +373,27 @@ export function initDronePlan({
       text: t('CLOSE'),
       attrs: {
         type: 'button',
+        'data-action': 'close',
         title: t('Close the Drone Flight Plan and clear it from the globe'),
+      },
+    });
+    ui.polygonButton = el(doc, 'button', bar, {
+      cls: 'data-toggle-chip',
+      text: t('DRAW POLYGON'),
+      attrs: {
+        type: 'button',
+        'data-action': 'draw-polygon',
+        'aria-pressed': 'false',
+        title: t(
+          'Click corners on the ground. Double-click or click the first corner to close. Esc cancels. Backspace removes the last corner.',
+        ),
       },
     });
     ui.status = el(doc, 'p', body, {
       cls: 'gev-dp-status',
       attrs: { role: 'status', 'aria-live': 'polite' },
     });
+    ui.areas = el(doc, 'div', body, { cls: 'gev-dp-areas' });
 
     const field = (label, control, { value } = {}) => {
       const row = el(doc, 'label', body, { cls: 'gev-dp-row' });
@@ -355,6 +467,15 @@ export function initDronePlan({
       t('Pattern'),
     );
     field(t('Pattern'), ui.pattern, { value: false });
+    ui.jobs = select(
+      [
+        ['per-area', t('One job per area')],
+        ['whole', t('One job for the whole plan')],
+      ],
+      t('Processing jobs'),
+    );
+    field(t('Processing jobs'), ui.jobs, { value: false });
+    ui.jobNote = el(doc, 'p', body, { cls: 'gev-dp-note gev-dp-job-note' });
     ui.direction = select(
       [
         ['auto', t('Along the long side')],
@@ -475,7 +596,7 @@ export function initDronePlan({
 
     // The answer comes first: stats, warnings and downloads sit right under
     // the status line, so they stay in view while the options scroll below.
-    ui.status.after(ui.stats, ui.warnings, ui.missions);
+    ui.status.after(ui.areas, ui.stats, ui.warnings, ui.missions);
 
     // ------------------------------------------------------ wiring --
     const o = state.options;
@@ -529,6 +650,10 @@ export function initDronePlan({
       syncControls();
       schedule();
     });
+    ui.jobs.addEventListener('change', () => {
+      state.jobGrouping = ui.jobs.value === 'whole' ? 'whole' : 'per-area';
+      schedule();
+    });
     ui.direction.addEventListener('change', () => {
       o.direction = ui.direction.value;
       schedule();
@@ -565,10 +690,13 @@ export function initDronePlan({
       else syncControls();
     });
     ui.drawButton.addEventListener('click', () => drawBox());
+    ui.polygonButton.addEventListener('click', () => drawPolygon());
     ui.closeButton.addEventListener('click', () => close());
     ui.takeoffButton.addEventListener('click', () => {
-      if (!state.box) return status(t('Draw a box on the globe first'), 'warn');
+      if (!state.areas.length)
+        return status(t('Draw a box on the globe first'), 'warn');
       boxTool?.cancel('switch');
+      polygonTool?.cancel('switch');
       if (takeoffTool?.isActive()) takeoffTool.cancel('cancel');
       else takeoffTool?.start();
     });
@@ -690,6 +818,60 @@ export function initDronePlan({
       ? `${num(t0.lat, 5)}, ${num(t0.lon, 5)}${where}`
       : '';
     ui.takeoffReset.disabled = !state.takeoff;
+    ui.jobs.value = state.jobGrouping;
+    const jobNote = orbit
+      ? t(
+          'Orbit stays on the centre of each area. It is not merged with other areas.',
+        )
+      : state.jobGrouping === 'whole'
+        ? t(
+            'Overlapping areas are flown once. All flights are one processing job.',
+          )
+        : t(
+            'Overlapping areas are flown once. Each area is its own processing job.',
+          );
+    ui.jobNote.textContent = jobNote;
+    renderAreas();
+  }
+
+  function renderAreas() {
+    ui.areas.replaceChildren();
+    if (!state.areas.length) return;
+    const heading = el(doc, 'p', ui.areas, { cls: 'gev-dp-areas-label' });
+    heading.textContent = t('Areas');
+    for (const area of state.areas) {
+      const row = el(doc, 'div', ui.areas, {
+        cls: 'gev-dp-area',
+        attrs: { 'data-area': area.id },
+      });
+      const name = el(doc, 'input', row, {
+        attrs: {
+          type: 'text',
+          value: area.name,
+          'aria-label': t('Area name'),
+          maxlength: '40',
+        },
+      });
+      name.addEventListener('change', () => {
+        const next = name.value.trim();
+        area.name = next || area.name;
+        name.value = area.name;
+        schedule();
+      });
+      const kind = el(doc, 'span', row, { cls: 'gev-dp-area-kind' });
+      kind.textContent = area.kind === 'polygon' ? t('Polygon') : t('Rectangle');
+      const remove = el(doc, 'button', row, {
+        cls: 'data-toggle-chip',
+        text: t('Remove'),
+        attrs: { type: 'button', 'data-remove-area': area.id },
+      });
+      remove.addEventListener('click', () => {
+        state.areas = state.areas.filter((item) => item.id !== area.id);
+        state.box = state.areas.at(-1)?.box ?? null;
+        showCommitted();
+        schedule(0);
+      });
+    }
   }
 
   const stat = (label, value) => {
@@ -708,7 +890,7 @@ export function initDronePlan({
     } else if (state.busy) {
       status(t('Reading terrain heights'), 'info');
       reading = true;
-    } else if (!state.box && !boxTool?.isActive()) {
+    } else if (!state.areas.length && !boxTool?.isActive() && !polygonTool?.isActive()) {
       status(t('Draw a box over the area to map'), 'info');
     } else if (reading) {
       // The "reading terrain" line must not outlive the reading.
@@ -723,6 +905,17 @@ export function initDronePlan({
     stat(t('Route'), distanceText(totals.distanceM));
     stat(t('Flight time'), durationText(totals.durationS));
     stat(t('Missions'), num(totals.missionCount));
+    if (result.areaStats?.length > 1) {
+      for (const area of result.areaStats) {
+        stat(
+          area.name,
+          t('{photos} photos, {time}', {
+            photos: num(area.photoCount),
+            time: durationText(area.durationS),
+          }),
+        );
+      }
+    }
     stat(t('Waypoints'), missions.map((m) => num(m.waypointCount)).join(' / '));
     stat(t('Speed'), `${num(plan.speedMs, 1)} m/s`);
     stat(
@@ -752,7 +945,7 @@ export function initDronePlan({
           wp: num(m.waypointCount),
           photos: num(m.photoCount),
           time: durationText(m.durationS),
-        }),
+        }) + (m.jobName && result.jobs?.length > 1 ? ` · ${m.jobName}` : ''),
       });
       const button = el(doc, 'button', row, {
         cls: 'data-toggle-chip',
@@ -855,7 +1048,12 @@ export function initDronePlan({
       name: `GEV Drone Flight Plan ${index + 1}/${result.missions.length}`,
     });
     downloadFile(
-      kmzFileName(index, result.missions.length, when),
+      kmzFileName(
+        index,
+        result.missions.length,
+        when,
+        result.missions[index].jobName,
+      ),
       bytes,
       'application/vnd.google-earth.kmz',
     );
@@ -885,11 +1083,24 @@ export function initDronePlan({
 
   function drawBox() {
     takeoffTool?.cancel('switch');
+    polygonTool?.cancel('switch');
     if (boxTool?.isActive()) {
       boxTool.cancel('cancel');
       return;
     }
     if (!boxTool?.start()) {
+      status(t('Another tool is using the pointer. Close it first'), 'warn');
+    }
+  }
+
+  function drawPolygon() {
+    takeoffTool?.cancel('switch');
+    boxTool?.cancel('switch');
+    if (polygonTool?.isActive()) {
+      polygonTool.cancel('cancel');
+      return;
+    }
+    if (!polygonTool?.start()) {
       status(t('Another tool is using the pointer. Close it first'), 'warn');
     }
   }
@@ -907,8 +1118,11 @@ export function initDronePlan({
     clearTimeout(timer);
     planToken += 1;
     boxTool?.cancel('close');
+    polygonTool?.cancel('close');
     takeoffTool?.cancel('close');
     state.box = null;
+    state.areas = [];
+    state.nextArea = 1;
     state.takeoff = null;
     state.result = null;
     state.error = null;
@@ -940,11 +1154,11 @@ export function initDronePlan({
         status(checked.message, 'warn');
         return false;
       }
-      state.box = checked.box;
-      state.takeoff = null;
-      preview.showBox(checked.box);
-      schedule(0);
+      addRect(checked.box, { replace: true, clearTakeoff: true });
       return true;
+    },
+    setPolygon(ring) {
+      return addPolygon(ring);
     },
     downloadMission,
     downloadAll,
@@ -956,6 +1170,7 @@ export function initDronePlan({
       clearTimeout(timer);
       entry?.removeEventListener('click', onEntry);
       boxTool?.destroy();
+      polygonTool?.destroy();
       takeoffTool?.destroy();
       preview.destroy();
       panel.hidden = true;

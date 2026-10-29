@@ -14,8 +14,9 @@
  * itself wrote for this aircraft before trusting it in the air. The namespace
  * and drone enum are constants below so a mismatch is a one-line change.
  */
-import { makeZip } from './zip.js';
+import { jobSlug } from './areas.js';
 import { TRANSIT_SPEED_MS } from './planner.js';
+import { makeZip } from './zip.js';
 
 /** Namespace used by DJI Fly's own consumer-drone missions. */
 export const WPML_NAMESPACE = 'http://www.uav.com/wpmz/1.0.2';
@@ -253,10 +254,11 @@ export function buildKmz(mission, plan, opts = {}) {
 
 const pad = (n) => String(n).padStart(2, '0');
 
-/** `gev-drone-plan-20261028-1530-m2of3.kmz` */
-export function kmzFileName(index, total, when = new Date()) {
+/** `gev-drone-plan-20261028-1530-m2of3.kmz`, or with a job name in the middle. */
+export function kmzFileName(index, total, when = new Date(), jobName = '') {
   const stamp = `${when.getFullYear()}${pad(when.getMonth() + 1)}${pad(when.getDate())}-${pad(when.getHours())}${pad(when.getMinutes())}`;
-  return `gev-drone-plan-${stamp}-m${index + 1}of${total}.kmz`;
+  const job = jobName ? `-${jobSlug(jobName)}` : '';
+  return `gev-drone-plan-${stamp}${job}-m${index + 1}of${total}.kmz`;
 }
 
 /** The text file that rides in the ZIP of all missions. */
@@ -288,17 +290,51 @@ export function readmeText(result, when = new Date()) {
     for (const w of warnings)
       lines.push(`  - ${w.code} ${JSON.stringify(w.params)}`);
   }
+  const jobs = result.jobs ?? [];
+  if (jobs.length) {
+    lines.push(
+      '',
+      'Processing jobs:',
+      'Process the images from one job together (ODM). Do not mix jobs.',
+    );
+    for (const job of jobs) {
+      const mine = missions.filter(
+        (mission) => mission.jobId === job.id || mission.jobName === job.name,
+      );
+      const photos = mine.reduce((sum, mission) => sum + mission.photoCount, 0);
+      lines.push(
+        `Job: ${job.name}`,
+        `  Areas: ${(job.areaNames ?? [job.name]).join(', ')}`,
+        `  Missions: ${mine.length}`,
+        `  Photos: ${photos}`,
+        '  Images from this job should be processed together (ODM).',
+      );
+    }
+  }
   return `${lines.join('\n')}\n`;
 }
 
-/** Every mission plus a README, as one ZIP. */
+/** Every mission plus a README, as one ZIP. Jobs get a folder each. */
 export function buildBundleZip(result, opts = {}) {
   const when = opts.when ? new Date(opts.when) : new Date();
-  const total = result.missions.length;
-  const entries = result.missions.map((mission, i) => ({
-    name: kmzFileName(i, total, when),
-    data: buildKmz(mission, result.plan, { ...opts, when }),
-  }));
+  const grouped = (result.missions ?? []).some((mission) => mission.jobName);
+  const entries = result.missions.map((mission, i) => {
+    const same = grouped
+      ? result.missions.filter((item) => item.jobName === mission.jobName)
+      : result.missions;
+    const index = same.indexOf(mission);
+    const file = kmzFileName(
+      index,
+      same.length,
+      when,
+      grouped ? mission.jobName : '',
+    );
+    const folder = grouped ? `${jobSlug(mission.jobName)}/` : '';
+    return {
+      name: `${folder}${file}`,
+      data: buildKmz(mission, result.plan, { ...opts, when }),
+    };
+  });
   entries.push({ name: 'README.txt', data: readmeText(result, when) });
   return makeZip(entries, when);
 }

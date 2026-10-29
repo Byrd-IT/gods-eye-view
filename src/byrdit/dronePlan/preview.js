@@ -38,6 +38,7 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
   };
 
   let boxEntities = [];
+  let areaEntities = [];
   let planEntities = [];
   const drop = (list) => {
     for (const entity of list) dataSource.entities.remove(entity);
@@ -73,6 +74,39 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
             },
           }),
         );
+      }
+      requestRender();
+    },
+    showAreas(areas) {
+      areaEntities = drop(areaEntities);
+      if (!destroyed && areas?.length) {
+        for (const area of areas) {
+          const ring =
+            area.kind === 'polygon' && area.ring?.length
+              ? area.ring
+              : [
+                  { lon: area.box.west, lat: area.box.south },
+                  { lon: area.box.east, lat: area.box.south },
+                  { lon: area.box.east, lat: area.box.north },
+                  { lon: area.box.west, lat: area.box.north },
+                ];
+          const closed = ring.flatMap((p) => [p.lon, p.lat]);
+          closed.push(ring[0].lon, ring[0].lat);
+          areaEntities.push(
+            dataSource.entities.add({
+              name: area.name || 'Area',
+              polyline: {
+                positions: cesium.Cartesian3.fromDegreesArray(closed),
+                width: 2,
+                ...ground,
+                material: new cesium.PolylineDashMaterialProperty({
+                  color: color('#ffb547', 0.95),
+                  dashLength: 12,
+                }),
+              },
+            }),
+          );
+        }
       }
       requestRender();
     },
@@ -139,6 +173,7 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
     },
     clear() {
       boxEntities = drop(boxEntities);
+      areaEntities = drop(areaEntities);
       planEntities = drop(planEntities);
       requestRender();
     },

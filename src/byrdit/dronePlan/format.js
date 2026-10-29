@@ -120,6 +120,11 @@ export function warningText(warning) {
 export function planErrorText(code) {
   if (code === 'too-large')
     return t('Too many waypoints: shrink the box or lower the overlap');
-  if (code === 'empty') return t('The box is too small to plan a flight');
+  if (code === 'empty' || code === 'too-narrow')
+    return t('The box is too small to plan a flight');
+  if (code === 'self-intersecting')
+    return t(
+      'That polygon crosses itself. Remove a corner or draw it again.',
+    );
   return t('Draw a box on the globe first');
 }

@@ -197,6 +197,36 @@
   cursor: not-allowed;
   opacity: 0.4;
 }
+.gev-dp-areas {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gev-dp-areas-label,
+.gev-dp-job-note {
+  margin: 0;
+  color: var(--text-dim, rgba(255, 255, 255, 0.72));
+  font-size: 12px;
+}
+.gev-dp-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gev-dp-area input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.gev-dp-area-kind {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.7;
+}
 body.gev-drone-box #cesium-container canvas,
 body.gev-drone-box .cesium-widget canvas {
   cursor: crosshair;
