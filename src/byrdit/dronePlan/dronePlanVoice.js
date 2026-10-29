@@ -31,8 +31,7 @@ const OUT_OF_RANGE = 'That option is outside the panel range';
 const SPEED_MAX_MS = 15;
 const ORBIT_RADIUS_MIN_M = 10;
 const ORBIT_RADIUS_MAX_M = 300;
-const ORBIT_HEIGHT_MAX_M = 500;
-const ORBIT_HEIGHT_MAX_COUNT = 8;
+const ORBIT_HEIGHT_MAX_COUNT = 6;
 
 function fold(value) {
   return String(value)
@@ -146,13 +145,12 @@ export function createDronePlanVoice(handle) {
             durationS: result.totals?.durationS ?? 0,
             terrainComplete: result.terrainComplete === true,
             warningCodes: codeList(result.warnings, (item) => item.code),
-            error:
-              typeof result.error === 'string' &&
-              /^[a-z0-9-]{1,40}$/.test(result.error)
-                ? result.error
-                : null,
           }
         : null,
+      planError:
+        typeof state.error === 'string' && /^[a-z0-9-]{1,40}$/.test(state.error)
+          ? state.error
+          : null,
       suite: state.suite
         ? {
             passes: (state.suite.passes ?? []).map((pass) => ({
@@ -198,7 +196,9 @@ export function createDronePlanVoice(handle) {
           return fail('kind must be box or polygon');
         ensureOpen();
         const started =
-          kind === 'polygon' ? handle.drawPolygon() : handle.drawBox();
+          kind === 'polygon'
+            ? handle.drawPolygon({ toggle: false })
+            : handle.drawBox({ toggle: false });
         return { ok: true, drawing: started === true, kind };
       });
     },
@@ -240,23 +240,28 @@ export function createDronePlanVoice(handle) {
       });
     },
     async recommend(mode) {
-      return guard(() => {
+      return guard(async () => {
         if (mode != null && !MODES.includes(mode))
           return fail('mode must be mapping-grid, splat-orbit, or fast-survey');
         ensureOpen();
-        handle.useRecommended(mode ?? undefined);
+        if (
+          handle.useRecommended(mode ?? undefined, { planNow: true }) !== true
+        )
+          return fail('mode must be mapping-grid, splat-orbit, or fast-survey');
+        await handle.replan();
         return summary();
       });
     },
     async options(patch) {
-      return guard(() => {
+      return guard(async () => {
         const next = readOptions(patch);
         if (!next.ok) return next;
         if (!Object.keys(next.patch).length)
           return fail('options needs a panel control to set');
         ensureOpen();
-        if (handle.applyOptions(next.patch) !== true)
+        if (handle.applyOptions(next.patch, { planNow: true }) !== true)
           return fail('No aircraft matched.');
+        await handle.replan();
         return summary();
       });
     },
@@ -271,8 +276,12 @@ export function createDronePlanVoice(handle) {
           return { ok: true, takeoff: null };
         }
         if (mode === 'pick') {
-          return { ok: true, picking: handle.startTakeoffPick() === true };
+          return {
+            ok: true,
+            picking: handle.startTakeoffPick({ toggle: false }) === true,
+          };
         }
+        if (!handle.getState().areas?.length) return fail('Draw an area first');
         if (!finite(args.lat, -90, 90) || !finite(args.lon, -180, 180))
           return fail('point needs lat and lon');
         if (handle.setTakeoff({ lat: args.lat, lon: args.lon }) !== true)
@@ -323,9 +332,10 @@ export function createDronePlanVoice(handle) {
       return guard(async () => {
         const state = handle.getState();
         if (!state.areas?.length) return fail('Draw an area first');
-        if (state.busy || state.dirty || state.suiteBusy)
+        if (state.busy || state.suiteBusy)
           return fail('A plan is already running');
         ensureOpen();
+        if (handle.getState().dirty) await handle.replan();
         await handle.planSuite();
         return summary();
       });
@@ -419,7 +429,7 @@ function readOptions(patch = {}) {
       !Array.isArray(patch.orbitHeightsM) ||
       patch.orbitHeightsM.length < 1 ||
       patch.orbitHeightsM.length > ORBIT_HEIGHT_MAX_COUNT ||
-      patch.orbitHeightsM.some((n) => !finite(n, 1, ORBIT_HEIGHT_MAX_M))
+      patch.orbitHeightsM.some((n) => !finite(n, MIN_AGL_M, AGL_CAP_M))
     )
       return { ok: false, error: OUT_OF_RANGE };
     next.orbitHeightsM = patch.orbitHeightsM.slice();

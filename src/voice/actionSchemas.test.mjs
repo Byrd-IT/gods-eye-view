@@ -53,7 +53,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Drone Flight Plan voice adds the control_droneplan tool (last).
     // drawn/compare/waybackOff speaking rule, description only.
     // waybackStillOn and starting speaking rule, description only.
-    '2977c15c980fadaea0adfdae79f1b9c7c1dde48374222421828bef2d54f1d74f',
+    'a9fed63f89f628c37fd7594f8db34c7d227d3ebbe7696218089bf840bb313fcf',
   );
 });
 

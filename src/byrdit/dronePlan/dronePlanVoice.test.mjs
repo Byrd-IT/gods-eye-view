@@ -45,8 +45,8 @@ function fakeHandle(over = {}) {
       state.areas = [];
       state.result = null;
     },
-    drawBox() {
-      calls.push(['drawBox']);
+    drawBox(opts) {
+      calls.push(['drawBox', opts]);
       return true;
     },
     drawPolygon() {
@@ -66,9 +66,10 @@ function fakeHandle(over = {}) {
     useRecommended(mode) {
       calls.push(['useRecommended', mode]);
       state.options.aglM = 45;
+      return true;
     },
-    applyOptions(patch) {
-      calls.push(['applyOptions', patch]);
+    applyOptions(patch, opts) {
+      calls.push(['applyOptions', patch, opts]);
       if (patch.presetId) state.options.presetId = patch.presetId;
       if (patch.aglM != null) state.options.aglM = patch.aglM;
       return true;
@@ -195,6 +196,7 @@ test('options sets a catalog aircraft and a height inside the slider range', asy
   assert.deepEqual(calls[1], [
     'applyOptions',
     { presetId: 'dji-phantom-4', aglM: 80 },
+    { planNow: true },
   ]);
 });
 
@@ -271,6 +273,75 @@ test('remove does not echo an area id that is not on the panel', async () => {
   assert.equal(result.error, 'No area matched.');
   assert.equal(JSON.stringify(result).includes(SECRET), false);
   assert.equal(state.areas.length, 1);
+});
+
+test('options reports the plan after replan, not the counts from before', async () => {
+  const { handle, state } = fakeHandle();
+  state.areas = [{ id: 'area-1', kind: 'rect' }];
+  state.result = {
+    totals: { missionCount: 1, photoCount: 10, durationS: 20 },
+    terrainComplete: true,
+    warnings: [],
+  };
+  handle.replan = async () => {
+    state.dirty = false;
+    state.result = {
+      totals: { missionCount: 2, photoCount: 40, durationS: 90 },
+      terrainComplete: true,
+      warnings: [],
+    };
+  };
+  const voice = createDronePlanVoice(handle);
+  const result = await voice.options({ aglM: 80 });
+  assert.equal(result.plan.photoCount, 40);
+  assert.equal(result.dirty, false);
+  assert.equal(result.plan.missionCount, 2);
+});
+
+test('status reports the panel plan error, not a field the plan never sets', async () => {
+  const { handle, state } = fakeHandle();
+  state.error = 'takeoff-too-far';
+  state.result = null;
+  const result = await createDronePlanVoice(handle).status();
+  assert.equal(result.plan, null);
+  assert.equal(result.planError, 'takeoff-too-far');
+});
+
+test('draw does not toggle an active tool off', async () => {
+  const { handle, calls } = fakeHandle();
+  const voice = createDronePlanVoice(handle);
+  await voice.draw('box');
+  assert.deepEqual(calls.at(-1), ['drawBox', { toggle: false }]);
+});
+
+test('a takeoff point needs an area', async () => {
+  const { handle, calls } = fakeHandle();
+  const result = await createDronePlanVoice(handle).takeoff({
+    takeoff: 'point',
+    lat: 32.7,
+    lon: -94.9,
+  });
+  assert.equal(result.error, 'Draw an area first');
+  assert.equal(calls.some((call) => call[0] === 'setTakeoff'), false);
+});
+
+test('an orbit height above the planner cap is refused', async () => {
+  const { handle } = fakeHandle();
+  const result = await createDronePlanVoice(handle).options({
+    orbitHeightsM: [200],
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'That option is outside the panel range');
+});
+
+test('suite replans a dirty area before the passes', async () => {
+  const { handle, state, calls } = fakeHandle();
+  state.areas = [{ id: 'area-1', kind: 'rect' }];
+  state.dirty = true;
+  const result = await createDronePlanVoice(handle).suite();
+  assert.equal(result.ok, true);
+  const names = calls.map((call) => call[0]);
+  assert.ok(names.indexOf('replan') < names.indexOf('planSuite'));
 });
 
 test('a missing panel does not throw', async () => {

@@ -1075,8 +1075,8 @@ const schemas = [
         orbitHeightsM: {
           type: 'array',
           minItems: 1,
-          maxItems: 8,
-          items: { type: 'number', minimum: 1, maximum: 500 },
+          maxItems: 6,
+          items: { type: 'number', minimum: 10, maximum: 120 },
         },
         speedMs: { type: 'number', minimum: 0.1, maximum: 15 },
         shutterDenominator: {

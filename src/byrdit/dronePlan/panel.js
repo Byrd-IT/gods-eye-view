@@ -302,6 +302,9 @@ export function initDronePlan({
 
   async function replan() {
     if (destroyed) return;
+    // A voice call waits for this plan. Drop the pending timer so it cannot
+    // start a second plan and discard the one the caller is waiting on.
+    clearTimeout(timer);
     const token = ++planToken;
     state.dirty = false;
     // Any change to the areas or settings makes the all-passes plan stale.
@@ -1282,10 +1285,11 @@ export function initDronePlan({
     }
   }
 
-  function drawBox() {
+  function drawBox({ toggle = true } = {}) {
     takeoffTool?.cancel('switch');
     polygonTool?.cancel('switch');
     if (boxTool?.isActive()) {
+      if (!toggle) return true;
       boxTool.cancel('cancel');
       return false;
     }
@@ -1296,10 +1300,11 @@ export function initDronePlan({
     return true;
   }
 
-  function drawPolygon() {
+  function drawPolygon({ toggle = true } = {}) {
     takeoffTool?.cancel('switch');
     boxTool?.cancel('switch');
     if (polygonTool?.isActive()) {
+      if (!toggle) return true;
       polygonTool.cancel('cancel');
       return false;
     }
@@ -1347,7 +1352,7 @@ export function initDronePlan({
   syncControls();
   panel.hidden = true;
 
-  function useRecommended(mode) {
+  function useRecommended(mode, { planNow = false } = {}) {
     const o = state.options;
     const selected =
       typeof mode === 'string' && MODES.includes(mode) ? mode : ui.mode.value;
@@ -1364,11 +1369,14 @@ export function initDronePlan({
     });
     Object.assign(o, recommendedOptions(rec));
     syncControls();
-    schedule();
+    if (planNow) {
+      state.dirty = true;
+      clearTimeout(timer);
+    } else schedule();
     return true;
   }
 
-  function applyOptions(patch = {}) {
+  function applyOptions(patch = {}, { planNow = false } = {}) {
     const o = state.options;
     let plan = false;
     if (Object.hasOwn(patch, 'presetId')) {
@@ -1445,7 +1453,10 @@ export function initDronePlan({
     else if (Object.hasOwn(patch, 'droneEnumValue'))
       state.wpml.droneEnumValue = patch.droneEnumValue;
     syncControls();
-    if (plan) schedule();
+    if (plan && planNow) {
+      state.dirty = true;
+      clearTimeout(timer);
+    } else if (plan) schedule();
     else if (
       state.result &&
       (patch.clearDroneCode === true || Object.hasOwn(patch, 'droneEnumValue'))
@@ -1460,7 +1471,7 @@ export function initDronePlan({
     return true;
   }
 
-  function startTakeoffPick() {
+  function startTakeoffPick({ toggle = true } = {}) {
     if (!state.areas.length) {
       status(t('Draw a box on the globe first'), 'warn');
       return false;
@@ -1468,6 +1479,7 @@ export function initDronePlan({
     boxTool?.cancel('switch');
     polygonTool?.cancel('switch');
     if (takeoffTool?.isActive()) {
+      if (!toggle) return true;
       takeoffTool.cancel('cancel');
       return false;
     }
