@@ -206,7 +206,7 @@ try {
         .getElementById('drone-plan-button')
         .getAttribute('aria-pressed'),
       drawArmed: document
-        .querySelector('#drone-plan-panel .gev-dp-bar button')
+        .querySelector('#drone-plan-panel .gev-dp-bar button[data-action="draw-box"]')
         ?.getAttribute('aria-pressed'),
     };
   });
@@ -229,7 +229,7 @@ try {
       () => !document.body.classList.contains('gev-drone-box'),
     ),
   );
-  await page.click('#drone-plan-panel .gev-dp-bar button');
+  await page.click('#drone-plan-panel .gev-dp-bar button[data-action="draw-box"]');
   await wait(250);
 
   const cyanBefore = await cyanPixels(page);
@@ -523,7 +523,7 @@ try {
   }
   await page.mouse.click(430, 280);
   await waitForPlan(page);
-  await page.click('#drone-plan-panel .gev-dp-bar button');
+  await page.click('#drone-plan-panel .gev-dp-bar button[data-action="draw-box"]');
   await wait(200);
   await page.mouse.move(500, 340);
   await page.mouse.down();

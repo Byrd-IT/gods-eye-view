@@ -719,6 +719,66 @@ test('a separate rectangle starts at the corner nearest the shared takeoff', () 
   );
 });
 
+test('a clipped polygon starts at the corner nearest the shared takeoff', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const ring = [
+    { x: 0, y: 0 },
+    { x: 200, y: 0 },
+    { x: 200, y: 80 },
+    { x: 0, y: 80 },
+  ].map((p) => frame.toLonLat(p.x, p.y));
+  // South-east of the ring. An unturned shell starts at the south-west.
+  const takeoff = frame.toLonLat(220, -20);
+  const plan = planAreas(
+    [{ id: 'p', name: 'Poly', kind: 'polygon', ring }],
+    { ...opts, takeoff },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.clippedToPolygon, true);
+  const start = plan.legs[0].waypoints[0];
+  const away = groundDistanceM(takeoff, start);
+  assert.ok(
+    away < 80,
+    `first waypoint is ${away.toFixed(1)} m from the shared takeoff; a clipped polygon should start at the near corner`,
+  );
+});
+
+test('areas planned together start at the corner nearest the shared takeoff', () => {
+  const m = metersPerDegree(32.7);
+  const west = boxAround(-94.5, 32.7, 160, 80);
+  const east = {
+    west: west.west + 40 / m.lon,
+    east: west.east + 40 / m.lon,
+    south: west.south,
+    north: west.north,
+  };
+  const takeoff = {
+    lon: east.east + 15 / m.lon,
+    lat: east.north + 15 / m.lat,
+  };
+  const areas = [
+    { id: 'a', name: 'West', kind: 'rect', box: west },
+    { id: 'b', name: 'East', kind: 'rect', box: east },
+  ];
+  const whole = planAreas(areas, { ...opts, takeoff, jobGrouping: 'whole' });
+  assert.equal(whole.error, undefined, whole.message);
+  assert.equal(whole.jobs.length, 1);
+  const wholeAway = groundDistanceM(takeoff, whole.legs[0].waypoints[0]);
+  assert.ok(
+    wholeAway < 80,
+    `merged group starts ${wholeAway.toFixed(1)} m from the shared takeoff`,
+  );
+  const split = planAreas(areas, { ...opts, takeoff });
+  assert.equal(split.error, undefined, split.message);
+  const nearJob = split.legs.filter((leg) => leg.jobId === 'job-2');
+  assert.ok(nearJob.length > 1, 'the eastern area should have several lines');
+  const splitAway = groundDistanceM(takeoff, nearJob[0].waypoints[0]);
+  assert.ok(
+    splitAway < 80,
+    `eastern job starts ${splitAway.toFixed(1)} m from the shared takeoff`,
+  );
+});
+
 test('a polygon after a separate rectangle still marks the whole plan clipped', () => {
   const rect = boxAround(-94.5, 32.7, 140, 100);
   const frame = makeFrame(-94.48, 32.7);

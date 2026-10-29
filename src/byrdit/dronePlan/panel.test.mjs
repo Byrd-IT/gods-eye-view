@@ -231,6 +231,16 @@ function setup({ sample = async (cartos) => flat(cartos) } = {}) {
 }
 
 // ------------------------------------------------------------------ tests --
+test('DRAW BOX has a data-action the QA script can click', () => {
+  const w = setup();
+  const draw = w.find(
+    (n) => n.tagName === 'BUTTON' && n.textContent === 'DRAW BOX',
+  );
+  assert.equal(draw.length, 1);
+  assert.equal(draw[0].getAttribute('data-action'), 'draw-box');
+  w.handle.destroy();
+});
+
 test('a drawn box becomes stats, a path on the globe and downloadable missions', async () => {
   const w = setup();
   assert.ok(w.handle);

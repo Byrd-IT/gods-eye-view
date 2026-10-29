@@ -363,6 +363,7 @@ export function initDronePlan({
       text: t('DRAW BOX'),
       attrs: {
         type: 'button',
+        'data-action': 'draw-box',
         'aria-pressed': 'false',
         title: t('Drag a box over the area to map'),
       },

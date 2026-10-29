@@ -384,9 +384,12 @@ function planCluster(members, rawOptions, sharedTakeoff) {
       message: 'Nothing to fly inside that area',
     };
   }
+  // A rectangle planned alone is turned above. A clipped polygon, or several
+  // areas in one group, would otherwise start at the shell's own corner.
+  const turned = orientLegsToward(clipped.legs, sharedTakeoff, lookAhead);
   return {
     ...shell,
-    legs: clipped.legs,
+    legs: turned,
     waypointCount: clipped.waypointCount,
     box: bboxOfPoints(points),
     clippedToPolygon: members.some((area) => area.kind === 'polygon'),
