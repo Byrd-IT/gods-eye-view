@@ -872,9 +872,12 @@ test('a clipped line keeps its pieces in travel order when the start turns towar
   );
 });
 
-test('a clipped corner can start farther than the outer-box corner, and the line is not flown backwards', () => {
+test('a clipped corner does not start farther than it does now, and a line does not double back', () => {
   const frame = makeFrame(-94.5, 32.7);
   // Right triangle. The empty corner of the outer box is (200, 200).
+  // The first flown point is about 153 m from the takeoff, past that
+  // clipped corner. The test only locks the upper bound, so a later
+  // closer start is not a failure.
   const ring = [
     [0, 0],
     [200, 0],
@@ -887,14 +890,8 @@ test('a clipped corner can start farther than the outer-box corner, and the line
     { ...opts, direction: 'ew', takeoff },
   );
   assert.equal(plan.error, undefined, plan.message);
-  const cornerAway = groundDistanceM(empty, takeoff);
-  near(cornerAway, 30, 1, 'empty corner');
+  near(groundDistanceM(empty, takeoff), 30, 1, 'empty corner');
   const startAway = groundDistanceM(takeoff, plan.legs[0].waypoints[0]);
-  assert.ok(
-    startAway > cornerAway + 50,
-    `first flown point ${startAway.toFixed(0)} m should be past the clipped corner`,
-  );
-  // Measured on this fixture: about 153 m. Must not get farther.
   assert.ok(
     startAway <= 155,
     `triangle starts ${startAway.toFixed(1)} m from takeoff`,
@@ -906,17 +903,21 @@ test('a clipped corner can start farther than the outer-box corner, and the line
     const mid = leg.waypoints[Math.floor(leg.waypoints.length / 2)];
     const m = frame.toXY(mid.lon, mid.lat);
     const along = (m.x - a.x) * (b.x - a.x) + (m.y - a.y) * (b.y - a.y);
-    assert.ok(along > 0, 'line points were reversed');
+    // A straight line still has its middle between the ends if it is
+    // flown the other way. This only catches a leg that doubles back.
+    assert.ok(along > 0, 'line doubles back on itself');
   }
 });
 
 test('a polygon with no custom takeoff turns toward the area centre', () => {
   const frame = makeFrame(-94.5, 32.7);
-  // The right angle is nearer the vertex centre than either far end.
+  // Right angle in the north-east, not on the default south-west start.
+  // Without the turn the first point is about 336 m from that corner.
+  // With the turn it is about 85 m away.
   const ring = [
-    [0, 0],
-    [300, 0],
+    [300, 300],
     [0, 300],
+    [300, 0],
   ].map(([x, y]) => frame.toLonLat(x, y));
   const plan = planAreas(
     [{ id: 'p', name: 'Poly', kind: 'polygon', ring }],
@@ -928,23 +929,12 @@ test('a polygon with no custom takeoff turns toward the area centre', () => {
   const meanLat = ring.reduce((sum, p) => sum + p.lat, 0) / ring.length;
   near(plan.takeoff.lon, meanLon, 1e-6, 'centre lon');
   near(plan.takeoff.lat, meanLat, 1e-6, 'centre lat');
+  const rightAngle = frame.toLonLat(300, 300);
   const start = plan.legs[0].waypoints[0];
-  const fromCentre = (p) => groundDistanceM(plan.takeoff, p);
-  const nearSide = ring.reduce((a, b) =>
-    fromCentre(a) < fromCentre(b) ? a : b,
-  );
-  const farSide = ring.reduce((a, b) =>
-    fromCentre(a) > fromCentre(b) ? a : b,
-  );
-  const toCentre = groundDistanceM(plan.takeoff, start);
-  const toFar = groundDistanceM(farSide, start);
+  const toCorner = groundDistanceM(rightAngle, start);
   assert.ok(
-    toCentre < toFar,
-    `start is ${toCentre.toFixed(0)} m from the centre and ${toFar.toFixed(0)} m from the far side`,
-  );
-  assert.ok(
-    groundDistanceM(nearSide, start) < groundDistanceM(farSide, start),
-    'the start is on the far side of the area centre',
+    toCorner < 120,
+    `start is ${toCorner.toFixed(0)} m from the corner nearest the centre`,
   );
 });
 
