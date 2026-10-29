@@ -606,9 +606,16 @@ try {
         .filter((name) => name.includes('/'))
         .map((name) => name.split('/')[0]),
     );
+    // One job is a flat zip: the KMZ sits beside the README. Two or more
+    // jobs get a folder each. buildBundleZip uses that split.
+    const oneJob = merged.jobs.length <= 1;
     check(
       'the ZIP has a folder per processing job and a README',
-      folders.size === merged.jobs.length && jobNames.includes('README.txt'),
+      jobNames.includes('README.txt') &&
+        (oneJob
+          ? folders.size === 0 &&
+            jobNames.some((name) => name.endsWith('.kmz'))
+          : folders.size === merged.jobs.length),
       jobNames.join(', '),
     );
     const readme = new TextDecoder().decode(jobFiles.get('README.txt'));
