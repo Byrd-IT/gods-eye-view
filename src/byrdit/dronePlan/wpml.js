@@ -318,23 +318,18 @@ export function readmeText(result, when = new Date()) {
   return `${lines.join('\n')}\n`;
 }
 
-/** Every mission plus a README, as one ZIP. Jobs get a folder each. */
-export function buildBundleZip(result, opts = {}) {
+/** The files of a bundle (every mission plus a README); jobs get a folder each. */
+export function bundleEntries(result, opts = {}) {
   const when = opts.when ? new Date(opts.when) : new Date();
   const jobs = result.jobs ?? [];
   const multi = jobs.length > 1;
-  const entries = result.missions.map((mission, i) => {
+  const entries = result.missions.map((mission) => {
     const same = multi
       ? result.missions.filter((item) => item.jobId === mission.jobId)
       : result.missions;
     const index = same.indexOf(mission);
     const job = jobs.find((item) => item.id === mission.jobId);
-    const file = kmzFileName(
-      index,
-      same.length,
-      when,
-      multi ? mission.jobName : '',
-    );
+    const file = kmzFileName(index, same.length, when, multi ? mission.jobName : '');
     const folder = multi ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/` : '';
     return {
       name: `${folder}${file}`,
@@ -342,5 +337,11 @@ export function buildBundleZip(result, opts = {}) {
     };
   });
   entries.push({ name: 'README.txt', data: readmeText(result, when) });
-  return makeZip(entries, when);
+  return entries;
+}
+
+/** Every mission plus a README, as one ZIP. Jobs get a folder each. */
+export function buildBundleZip(result, opts = {}) {
+  const when = opts.when ? new Date(opts.when) : new Date();
+  return makeZip(bundleEntries(result, { ...opts, when }), when);
 }

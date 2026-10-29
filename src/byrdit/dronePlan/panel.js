@@ -39,6 +39,7 @@ import {
   SHUTTER_DENOMINATORS,
 } from './speed.js';
 import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
+import { buildSuiteZip, suiteOptions } from './suite.js';
 import {
   distanceText,
   durationText,
@@ -104,6 +105,8 @@ export function initDronePlan({
     },
     wpml: { droneEnumValue: null, droneSubEnumValue: null },
     result: null,
+    suite: null,
+    suiteBusy: false,
     error: null,
     busy: false,
     open: false,
@@ -113,6 +116,7 @@ export function initDronePlan({
   const terrainCache = new Map();
   let cachedProvider = null;
   let planToken = 0;
+  let suiteToken = 0;
   // Bumps only when a new plan is committed, not when the panel is merely
   // ready. A fast replan can be ready again before the first poll, so the
   // QA script waits for this number instead of waiting for "ready" to leave.
@@ -301,6 +305,10 @@ export function initDronePlan({
     if (destroyed) return;
     const token = ++planToken;
     state.dirty = false;
+    // Any change to the areas or settings makes the all-passes plan stale.
+    suiteToken += 1;
+    state.suite = null;
+    state.suiteBusy = false;
     if (!state.areas.length) {
       state.result = null;
       state.error = null;
@@ -448,6 +456,22 @@ export function initDronePlan({
           'Set speed, height, overlap and shutter to the recommended values for this aircraft and mode',
         ),
       },
+    });
+    ui.suiteButton = el(doc, 'button', body, {
+      cls: 'data-toggle-chip gev-dp-suite-button',
+      text: t('PLAN ALL RECOMMENDED PASSES'),
+      attrs: {
+        type: 'button',
+        'data-action': 'plan-suite',
+        title: t(
+          'Plan every recommended capture pass for a Gaussian splat over your areas at once: nadir grid, two oblique grids and orbits',
+        ),
+      },
+    });
+    ui.suiteButton.disabled = true;
+    ui.suite = el(doc, 'div', body, {
+      cls: 'gev-dp-missions gev-dp-suite',
+      attrs: { 'data-role': 'suite' },
     });
     ui.recommended = el(doc, 'dl', body, {
       cls: 'gev-dp-stats gev-dp-recommended',
@@ -637,6 +661,7 @@ export function initDronePlan({
       syncControls();
       schedule();
     });
+    ui.suiteButton.addEventListener('click', () => planSuite());
     ui.useRecommended.addEventListener('click', () => {
       const rec = recommend(getPreset(o.presetId), ui.mode.value, {
         orbitRadiusM:
@@ -897,6 +922,7 @@ export function initDronePlan({
     ui.stats.replaceChildren();
     ui.warnings.replaceChildren();
     ui.missions.replaceChildren();
+    renderSuite();
     panel.dataset.state = state.busy ? 'busy' : state.result ? 'ready' : 'idle';
     if (state.error) {
       status(planErrorText(state.error), 'warn');
@@ -1014,6 +1040,145 @@ export function initDronePlan({
     }
     if (result.truncated)
       status(t('Too many missions to download safely'), 'warn');
+  }
+
+  async function planSuite() {
+    if (destroyed || !state.areas.length || state.suiteBusy) return;
+    const token = ++suiteToken;
+    state.suiteBusy = true;
+    state.suite = null;
+    render();
+    const provider =
+      viewer.terrainProvider ?? viewer.scene?.globe?.terrainProvider;
+    if (terrainCache.size > MAX_TERRAIN_CACHE || provider !== cachedProvider) {
+      terrainCache.clear();
+    }
+    cachedProvider = provider;
+    const passes = [];
+    for (const pass of suiteOptions(state.options)) {
+      const plan = planAreas(state.areas, {
+        ...pass.options,
+        takeoff: state.takeoff,
+        jobGrouping: state.jobGrouping,
+      });
+      if (plan.error) {
+        passes.push({ id: pass.id, label: pass.label, result: null, error: plan.error });
+        continue;
+      }
+      const points = plan.legs.flatMap((leg) => leg.waypoints);
+      const ground = await sampleGround({
+        viewer,
+        cesium,
+        points,
+        takeoff: plan.takeoff,
+        cache: terrainCache,
+      });
+      if (destroyed || token !== suiteToken) return;
+      const byId = [];
+      points.forEach((w, i) => {
+        byId[w.id] = ground.wpM[i];
+      });
+      passes.push({
+        id: pass.id,
+        label: pass.label,
+        result: assembleAreaPlan(plan, { ...ground, wpM: byId }),
+        error: null,
+      });
+    }
+    if (destroyed || token !== suiteToken) return;
+    state.suite = { passes, when: new Date() };
+    state.suiteBusy = false;
+    panel.dataset.suiteNonce = String((Number(panel.dataset.suiteNonce) || 0) + 1);
+    render();
+  }
+
+  function resultAllowed(result) {
+    if (!result || !kmzOk().ok) return false;
+    if (
+      result.warnings.some(
+        (w) =>
+          w.code === 'mission-over-budget' ||
+          w.code === 'too-many-missions' ||
+          w.code === 'speed-below-minimum',
+      )
+    ) {
+      return false;
+    }
+    return result.terrainComplete || state.ack;
+  }
+
+  function suiteAllowed() {
+    const passes = state.suite?.passes ?? [];
+    return (
+      !state.suiteBusy &&
+      !state.busy &&
+      !state.dirty &&
+      passes.length > 0 &&
+      passes.every((pass) => pass.result && resultAllowed(pass.result))
+    );
+  }
+
+  function renderSuite() {
+    ui.suite.replaceChildren();
+    ui.suiteButton.disabled = !state.areas.length || state.suiteBusy || state.busy;
+    if (state.suiteBusy) {
+      el(doc, 'p', ui.suite, {
+        cls: 'gev-dp-note',
+        text: t('Planning all passes and reading terrain heights'),
+      });
+      return;
+    }
+    const suite = state.suite;
+    if (!suite) return;
+    for (const pass of suite.passes) {
+      const row = el(doc, 'div', ui.suite, {
+        cls: 'gev-dp-mission',
+        attrs: { 'data-pass': pass.id },
+      });
+      let text;
+      if (!pass.result) {
+        text = `${pass.label}: ${t('not planned')} (${planErrorText(pass.error)})`;
+      } else {
+        const tot = pass.result.totals;
+        text = `${pass.label}: ${t('{missions} missions, {photos} photos, {time}', {
+          missions: num(tot.missionCount),
+          photos: num(tot.photoCount),
+          time: durationText(tot.durationS),
+        })}`;
+        const bad = pass.result.warnings
+          .map((w) => warningText(w))
+          .filter(Boolean);
+        if (bad.length) text += ` - ${bad.join('; ')}`;
+      }
+      el(doc, 'span', row, { cls: 'gev-dp-mission-label', text });
+    }
+    const all = el(doc, 'button', ui.suite, {
+      cls: 'data-toggle-chip gev-dp-all',
+      text: t('DOWNLOAD ALL PASSES (.ZIP)'),
+      attrs: {
+        type: 'button',
+        'data-download': 'suite',
+        title: t('Every pass in its own folder, plus a README, in one zip'),
+      },
+    });
+    all.disabled = !suiteAllowed();
+    all.addEventListener('click', () => downloadSuite());
+    if (!suiteAllowed() && suite.passes.some((p) => p.result && !p.result.terrainComplete) && !state.ack) {
+      el(doc, 'p', ui.suite, {
+        cls: 'gev-dp-note',
+        text: t('Terrain heights are incomplete: tick the box under the single plan, or read terrain again, to unlock downloads'),
+      });
+    }
+  }
+
+  function downloadSuite(when = new Date()) {
+    if (!suiteAllowed()) return;
+    const bytes = buildSuiteZip(state.suite.passes, {
+      when,
+      wpml: wpmlOverride(),
+    });
+    const stamp = kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
+    downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
   }
 
   const kmzOk = () =>
@@ -1181,6 +1346,8 @@ export function initDronePlan({
     },
     downloadMission,
     downloadAll,
+    planSuite,
+    downloadSuite,
     setTakeoff: acceptTakeoff,
     replan,
     destroy() {

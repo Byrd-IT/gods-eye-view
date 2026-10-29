@@ -820,3 +820,38 @@ test('P3: the shutter control shows a real option before any interaction', () =>
   assert.equal(w.control('Shutter speed').value, '1000');
   w.handle.destroy();
 });
+
+test('PLAN ALL RECOMMENDED PASSES plans every pass and zips them; a change makes it stale', async () => {
+  const w = setup();
+  const btn = () =>
+    w.buttons('data-action').find(
+      (b) => b.getAttribute('data-action') === 'plan-suite',
+    );
+  assert.equal(btn().disabled, true, 'off with no area');
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  assert.equal(btn().disabled, false);
+  await w.handle.planSuite();
+  const suite = w.handle.getState().suite;
+  assert.deepEqual(
+    suite.passes.map((p) => p.id),
+    ['nadir', 'oblique60', 'oblique45', 'orbit'],
+  );
+  assert.ok(suite.passes.every((p) => p.result?.missions.length >= 1));
+  const dl = w.buttons('data-download').find(
+    (b) => b.getAttribute('data-download') === 'suite',
+  );
+  assert.equal(dl.disabled, false);
+  w.handle.downloadSuite();
+  assert.equal(w.downloads.length, 1);
+  assert.match(w.downloads[0].name, /-all-passes\.zip$/);
+  const names = [...readZip(w.downloads[0].bytes).keys()];
+  assert.ok(names.includes('README.txt'));
+  for (const id of ['nadir', 'oblique60', 'oblique45', 'orbit']) {
+    assert.ok(names.some((n) => n.includes(`-${id}/`) && n.endsWith('.kmz')), id);
+  }
+  w.handle.getState().options.aglM = 60;
+  await w.handle.replan();
+  assert.equal(w.handle.getState().suite, null, 'a replan drops the stale suite');
+  w.handle.destroy();
+});

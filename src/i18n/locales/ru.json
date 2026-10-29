@@ -3223,5 +3223,13 @@
   "Camera": "Камера",
   "1/{n} s or faster, ISO {lo}-{hi}, locked white balance and focus, {format}": "1/{n} с или короче, ISO {lo}-{hi}, фиксированный баланс белого и фокус, {format}",
   "No KMZ for this aircraft: DJI GO 4 has no waypoint-file import (it records a flown path), so use a third-party app such as Litchi or Map Pilot Pro with the preview and settings shown here": "Для этого аппарата нет KMZ: в DJI GO 4 нет импорта файлов маршрута (он записывает пролетенный путь); используйте стороннее приложение, например Litchi или Map Pilot Pro, с показанным здесь предпросмотром и настройками",
-  "No DJI Fly aircraft code is known for this aircraft yet. Enter one in the \"Aircraft code\" field under \"DJI model code\" to enable the KMZ": "Код аппарата DJI Fly для этой модели пока неизвестен. Введите его в поле «Код дрона» в разделе «Код модели DJI», чтобы включить KMZ"
+  "No DJI Fly aircraft code is known for this aircraft yet. Enter one in the \"Aircraft code\" field under \"DJI model code\" to enable the KMZ": "Код аппарата DJI Fly для этой модели пока неизвестен. Введите его в поле «Код дрона» в разделе «Код модели DJI», чтобы включить KMZ",
+  "PLAN ALL RECOMMENDED PASSES": "ЗАПЛАНИРОВАТЬ ВСЕ РЕКОМЕНДУЕМЫЕ ПРОЛЁТЫ",
+  "Plan every recommended capture pass for a Gaussian splat over your areas at once: nadir grid, two oblique grids and orbits": "Сразу запланировать все рекомендуемые пролёты для Gaussian splat над вашими областями: надирная сетка, две наклонные сетки и орбиты",
+  "Planning all passes and reading terrain heights": "Планирование всех пролётов и чтение высот рельефа",
+  "not planned": "не запланирован",
+  "{missions} missions, {photos} photos, {time}": "миссий: {missions}, фото: {photos}, {time}",
+  "DOWNLOAD ALL PASSES (.ZIP)": "СКАЧАТЬ ВСЕ ПРОЛЁТЫ (.ZIP)",
+  "Every pass in its own folder, plus a README, in one zip": "Каждый пролёт в своей папке, плюс README, в одном zip",
+  "Terrain heights are incomplete: tick the box under the single plan, or read terrain again, to unlock downloads": "Высоты рельефа неполны: отметьте флажок под одиночным планом или перечитайте рельеф, чтобы разблокировать загрузку"
 }

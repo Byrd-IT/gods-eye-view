@@ -3016,5 +3016,13 @@
   "Camera": "相机",
   "1/{n} s or faster, ISO {lo}-{hi}, locked white balance and focus, {format}": "1/{n} 秒或更快，ISO {lo}-{hi}，白平衡和对焦锁定，{format}",
   "No KMZ for this aircraft: DJI GO 4 has no waypoint-file import (it records a flown path), so use a third-party app such as Litchi or Map Pilot Pro with the preview and settings shown here": "此机型无 KMZ：DJI GO 4 不支持导入航点文件（它记录实际飞行路径）；请使用 Litchi 或 Map Pilot Pro 等第三方应用，配合此处的预览和设置",
-  "No DJI Fly aircraft code is known for this aircraft yet. Enter one in the \"Aircraft code\" field under \"DJI model code\" to enable the KMZ": "尚不知道此机型在 DJI Fly 中的机型代码。请在“DJI 机型代码”下的“飞行器代码”栏中输入一个以启用 KMZ"
+  "No DJI Fly aircraft code is known for this aircraft yet. Enter one in the \"Aircraft code\" field under \"DJI model code\" to enable the KMZ": "尚不知道此机型在 DJI Fly 中的机型代码。请在“DJI 机型代码”下的“飞行器代码”栏中输入一个以启用 KMZ",
+  "PLAN ALL RECOMMENDED PASSES": "规划所有推荐航线",
+  "Plan every recommended capture pass for a Gaussian splat over your areas at once: nadir grid, two oblique grids and orbits": "一次性为您的区域规划高斯泼溅所需的全部推荐拍摄航线：垂直网格、两组倾斜网格和环绕",
+  "Planning all passes and reading terrain heights": "正在规划所有航线并读取地形高度",
+  "not planned": "未规划",
+  "{missions} missions, {photos} photos, {time}": "{missions} 个任务，{photos} 张照片，{time}",
+  "DOWNLOAD ALL PASSES (.ZIP)": "下载所有航线 (.ZIP)",
+  "Every pass in its own folder, plus a README, in one zip": "每条航线单独一个文件夹，外加 README，打包为一个 zip",
+  "Terrain heights are incomplete: tick the box under the single plan, or read terrain again, to unlock downloads": "地形高度不完整：请勾选单个计划下方的复选框，或重新读取地形，以解锁下载"
 }

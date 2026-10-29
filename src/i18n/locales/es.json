@@ -3154,5 +3154,13 @@
   "Camera": "Cámara",
   "1/{n} s or faster, ISO {lo}-{hi}, locked white balance and focus, {format}": "1/{n} s o más rápido, ISO {lo}-{hi}, balance de blancos y enfoque fijos, {format}",
   "No KMZ for this aircraft: DJI GO 4 has no waypoint-file import (it records a flown path), so use a third-party app such as Litchi or Map Pilot Pro with the preview and settings shown here": "Sin KMZ para esta aeronave: DJI GO 4 no importa archivos de waypoints (graba una trayectoria volada); usa una app de terceros como Litchi o Map Pilot Pro con la vista previa y los ajustes mostrados aquí",
-  "No DJI Fly aircraft code is known for this aircraft yet. Enter one in the \"Aircraft code\" field under \"DJI model code\" to enable the KMZ": "Aún no se conoce el código de aeronave de DJI Fly para esta aeronave. Introduce uno en el campo «Código de aeronave» de «Código de modelo DJI» para habilitar el KMZ"
+  "No DJI Fly aircraft code is known for this aircraft yet. Enter one in the \"Aircraft code\" field under \"DJI model code\" to enable the KMZ": "Aún no se conoce el código de aeronave de DJI Fly para esta aeronave. Introduce uno en el campo «Código de aeronave» de «Código de modelo DJI» para habilitar el KMZ",
+  "PLAN ALL RECOMMENDED PASSES": "PLANIFICAR TODAS LAS PASADAS RECOMENDADAS",
+  "Plan every recommended capture pass for a Gaussian splat over your areas at once: nadir grid, two oblique grids and orbits": "Planifica de una vez todas las pasadas de captura recomendadas para un Gaussian splat sobre tus áreas: cuadrícula nadir, dos cuadrículas oblicuas y órbitas",
+  "Planning all passes and reading terrain heights": "Planificando todas las pasadas y leyendo las alturas del terreno",
+  "not planned": "no planificada",
+  "{missions} missions, {photos} photos, {time}": "{missions} misiones, {photos} fotos, {time}",
+  "DOWNLOAD ALL PASSES (.ZIP)": "DESCARGAR TODAS LAS PASADAS (.ZIP)",
+  "Every pass in its own folder, plus a README, in one zip": "Cada pasada en su propia carpeta, más un README, en un zip",
+  "Terrain heights are incomplete: tick the box under the single plan, or read terrain again, to unlock downloads": "Las alturas del terreno están incompletas: marca la casilla bajo el plan individual, o vuelve a leer el terreno, para desbloquear las descargas"
 }
