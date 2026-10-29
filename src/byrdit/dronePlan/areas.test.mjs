@@ -854,8 +854,10 @@ test('a clipped line keeps its pieces in travel order when the start turns towar
   assertOrdered(turned, 'nadir');
   const turnedTransit = transitSum(turned);
   const calmTransit = transitSum(calmPlan);
+  // 150 m was only slack so the old backtrack would fail. On this fixture the
+  // turned plan is no longer than the unturned one.
   assert.ok(
-    turnedTransit <= calmTransit + 150,
+    turnedTransit <= calmTransit,
     `turned transit ${turnedTransit.toFixed(0)} m is worse than the unturned ${calmTransit.toFixed(0)} m`,
   );
 
@@ -865,8 +867,80 @@ test('a clipped line keeps its pieces in travel order when the start turns towar
   const tiltedTransit = transitSum(tilted);
   const tiltedCalmTransit = transitSum(tiltedCalm);
   assert.ok(
-    tiltedTransit <= tiltedCalmTransit + 150,
+    tiltedTransit <= tiltedCalmTransit,
     `tilted transit ${tiltedTransit.toFixed(0)} m is worse than the unturned ${tiltedCalmTransit.toFixed(0)} m`,
+  );
+});
+
+test('a clipped corner can start farther than the outer-box corner, and the line is not flown backwards', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  // Right triangle. The empty corner of the outer box is (200, 200).
+  const ring = [
+    [0, 0],
+    [200, 0],
+    [0, 200],
+  ].map(([x, y]) => frame.toLonLat(x, y));
+  const empty = frame.toLonLat(200, 200);
+  const takeoff = frame.toLonLat(200 + 21, 200 + 21);
+  const plan = planAreas(
+    [{ id: 'tri', name: 'Tri', kind: 'polygon', ring }],
+    { ...opts, direction: 'ew', takeoff },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  const cornerAway = groundDistanceM(empty, takeoff);
+  near(cornerAway, 30, 1, 'empty corner');
+  const startAway = groundDistanceM(takeoff, plan.legs[0].waypoints[0]);
+  assert.ok(
+    startAway > cornerAway + 50,
+    `first flown point ${startAway.toFixed(0)} m should be past the clipped corner`,
+  );
+  // Measured on this fixture: about 153 m. Must not get farther.
+  assert.ok(
+    startAway <= 155,
+    `triangle starts ${startAway.toFixed(1)} m from takeoff`,
+  );
+  for (const leg of plan.legs) {
+    if ((leg.waypoints?.length ?? 0) < 3) continue;
+    const a = frame.toXY(leg.waypoints[0].lon, leg.waypoints[0].lat);
+    const b = frame.toXY(leg.waypoints.at(-1).lon, leg.waypoints.at(-1).lat);
+    const mid = leg.waypoints[Math.floor(leg.waypoints.length / 2)];
+    const m = frame.toXY(mid.lon, mid.lat);
+    const along = (m.x - a.x) * (b.x - a.x) + (m.y - a.y) * (b.y - a.y);
+    assert.ok(along > 0, 'line points were reversed');
+  }
+});
+
+test('a polygon with no custom takeoff turns toward the area centre', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  // The right angle is nearer the vertex centre than either far end.
+  const ring = [
+    [0, 0],
+    [300, 0],
+    [0, 300],
+  ].map(([x, y]) => frame.toLonLat(x, y));
+  const plan = planAreas(
+    [{ id: 'p', name: 'Poly', kind: 'polygon', ring }],
+    { ...opts, direction: 'ew' },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.takeoff.custom, false);
+  const meanLon = ring.reduce((sum, p) => sum + p.lon, 0) / ring.length;
+  const meanLat = ring.reduce((sum, p) => sum + p.lat, 0) / ring.length;
+  near(plan.takeoff.lon, meanLon, 1e-6, 'centre lon');
+  near(plan.takeoff.lat, meanLat, 1e-6, 'centre lat');
+  const start = plan.legs[0].waypoints[0];
+  const fromCentre = (p) => groundDistanceM(plan.takeoff, p);
+  const nearSide = ring.reduce((a, b) => (fromCentre(a) < fromCentre(b) ? a : b));
+  const farSide = ring.reduce((a, b) => (fromCentre(a) > fromCentre(b) ? a : b));
+  const toCentre = groundDistanceM(plan.takeoff, start);
+  const toFar = groundDistanceM(farSide, start);
+  assert.ok(
+    toCentre < toFar,
+    `start is ${toCentre.toFixed(0)} m from the centre and ${toFar.toFixed(0)} m from the far side`,
+  );
+  assert.ok(
+    groundDistanceM(nearSide, start) < groundDistanceM(farSide, start),
+    'the start is on the far side of the area centre',
   );
 });
 

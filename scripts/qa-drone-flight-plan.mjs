@@ -499,13 +499,30 @@ try {
 
   // Polygon plus an overlapping rectangle: one flown area, a folder per job.
   await page.select('#drone-plan-panel select[aria-label="Pattern"]', 'grid');
+  // The change rebuilds the area list at once, then replans. dataset.state
+  // stays "ready" on the old plan until that replan starts, so wait for it
+  // to leave ready, then for the new plan, before clicking Remove.
+  await page
+    .waitForFunction(
+      () => document.getElementById('drone-plan-panel')?.dataset.state !== 'ready',
+      { timeout: 5_000 },
+    )
+    .catch(() => {});
+  await waitForPlan(page);
   // The earlier box is still on the plan. Remove it here. Do not click the
   // second bar button: that is CLOSE, and the rail entry is not clickable
   // again once the card is gone, so the polygon checks never ran.
   for (let n = 0; n < 8; n += 1) {
     const remove = await page.$('#drone-plan-panel button[data-remove-area]');
     if (!remove) break;
-    await remove.click();
+    try {
+      await remove.click();
+    } catch {
+      await waitForPlan(page);
+      const again = await page.$('#drone-plan-panel button[data-remove-area]');
+      if (!again) break;
+      await again.click();
+    }
     await wait(150);
   }
   await page.click(

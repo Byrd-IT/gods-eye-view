@@ -314,12 +314,14 @@ function reverseLegPoints(leg) {
 /**
  * planFlight starts a box at its own corner, ignoring the shared takeoff.
  * Turn whole survey lines so the first waypoint is the corner nearest that
- * takeoff. Call this on the shell legs before clipShell. A clipped line is
- * several pieces of one shell leg; turning those pieces on their own makes
- * the drone fly the line backwards between the pieces. A tilted line keeps
- * its direction: reversing its points would put the camera look-ahead on the
- * wrong end. Only the order of the lines, and of the points on a nadir line,
- * changes. Notes that depend on order are rebuilt by planAreas.
+ * takeoff. Call this on the shell legs before clipShell. The score uses that
+ * outer-box corner, not the first point left after the clip, so a clipped
+ * corner can leave the first flown point farther from the takeoff. The four
+ * turns are not scored again after the clip: that did not move the start, and
+ * turning the pieces after the clip flies the line backwards between them.
+ * A tilted line keeps its direction: reversing its points would put the camera
+ * look-ahead on the wrong end. Only the order of the lines, and of the points
+ * on a nadir line, changes. Notes that depend on order are rebuilt by planAreas.
  */
 function orientLegsToward(legs, takeoff, lookAhead) {
   if (!takeoff || !legs?.length) return legs;
@@ -382,6 +384,8 @@ function planCluster(members, rawOptions, sharedTakeoff) {
   // Turn the shell lines first. Clipping then keeps each line's pieces in
   // travel order. Turning the pieces afterwards can send the drone back
   // along the same line.
+  // No custom takeoff: sharedTakeoff is the first area's centre, so a polygon
+  // or group turns toward that point, the same as a single rectangle.
   const turned = orientLegsToward(shell.legs, sharedTakeoff, lookAhead);
   const clipped = clipShell({ ...shell, legs: turned }, members, frame, margin, lookAhead);
   if (!clipped.legs.length) {
