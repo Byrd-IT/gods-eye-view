@@ -1043,7 +1043,7 @@ export function initDronePlan({
   }
 
   async function planSuite() {
-    if (destroyed || !state.areas.length || state.suiteBusy) return;
+    if (destroyed || !state.areas.length || state.suiteBusy || state.busy || state.dirty) return;
     const token = ++suiteToken;
     state.suiteBusy = true;
     state.suite = null;
@@ -1055,35 +1055,45 @@ export function initDronePlan({
     }
     cachedProvider = provider;
     const passes = [];
-    for (const pass of suiteOptions(state.options)) {
-      const plan = planAreas(state.areas, {
-        ...pass.options,
-        takeoff: state.takeoff,
-        jobGrouping: state.jobGrouping,
-      });
-      if (plan.error) {
-        passes.push({ id: pass.id, label: pass.label, result: null, error: plan.error });
-        continue;
+    try {
+      for (const pass of suiteOptions(state.options)) {
+        const plan = planAreas(state.areas, {
+          ...pass.options,
+          takeoff: state.takeoff,
+          jobGrouping: state.jobGrouping,
+        });
+        if (plan.error) {
+          passes.push({ id: pass.id, label: pass.label, result: null, error: plan.error });
+          continue;
+        }
+        const points = plan.legs.flatMap((leg) => leg.waypoints);
+        const ground = await sampleGround({
+          viewer,
+          cesium,
+          points,
+          takeoff: plan.takeoff,
+          cache: terrainCache,
+        });
+        if (destroyed || token !== suiteToken) return;
+        const byId = [];
+        points.forEach((w, i) => {
+          byId[w.id] = ground.wpM[i];
+        });
+        passes.push({
+          id: pass.id,
+          label: pass.label,
+          result: assembleAreaPlan(plan, { ...ground, wpM: byId }),
+          error: null,
+        });
       }
-      const points = plan.legs.flatMap((leg) => leg.waypoints);
-      const ground = await sampleGround({
-        viewer,
-        cesium,
-        points,
-        takeoff: plan.takeoff,
-        cache: terrainCache,
-      });
-      if (destroyed || token !== suiteToken) return;
-      const byId = [];
-      points.forEach((w, i) => {
-        byId[w.id] = ground.wpM[i];
-      });
-      passes.push({
-        id: pass.id,
-        label: pass.label,
-        result: assembleAreaPlan(plan, { ...ground, wpM: byId }),
-        error: null,
-      });
+    } catch (err) {
+      if (token === suiteToken) {
+        state.suiteBusy = false;
+        state.suite = null;
+        status(t('Could not plan all passes'), 'warn');
+        render();
+      }
+      return;
     }
     if (destroyed || token !== suiteToken) return;
     state.suite = { passes, when: new Date() };
@@ -1163,10 +1173,18 @@ export function initDronePlan({
     });
     all.disabled = !suiteAllowed();
     all.addEventListener('click', () => downloadSuite());
-    if (!suiteAllowed() && suite.passes.some((p) => p.result && !p.result.terrainComplete) && !state.ack) {
-      el(doc, 'p', ui.suite, {
-        cls: 'gev-dp-note',
-        text: t('Terrain heights are incomplete: tick the box under the single plan, or read terrain again, to unlock downloads'),
+    if (suite.passes.some((p) => p.result && !p.result.terrainComplete)) {
+      const label = el(doc, 'label', ui.suite, { cls: 'gev-dp-ack' });
+      const box = el(doc, 'input', label, {
+        attrs: { type: 'checkbox', 'data-ack': 'suite-terrain' },
+      });
+      box.checked = state.ack;
+      el(doc, 'span', label, {
+        text: t('Download anyway: I will check the heights myself'),
+      });
+      box.addEventListener('change', () => {
+        state.ack = Boolean(box.checked);
+        render();
       });
     }
   }
