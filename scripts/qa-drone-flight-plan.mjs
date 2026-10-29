@@ -504,7 +504,8 @@ try {
   // to leave ready, then for the new plan, before clicking Remove.
   await page
     .waitForFunction(
-      () => document.getElementById('drone-plan-panel')?.dataset.state !== 'ready',
+      () =>
+        document.getElementById('drone-plan-panel')?.dataset.state !== 'ready',
       { timeout: 5_000 },
     )
     .catch(() => {});

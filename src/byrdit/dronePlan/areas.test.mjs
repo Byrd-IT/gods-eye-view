@@ -930,8 +930,12 @@ test('a polygon with no custom takeoff turns toward the area centre', () => {
   near(plan.takeoff.lat, meanLat, 1e-6, 'centre lat');
   const start = plan.legs[0].waypoints[0];
   const fromCentre = (p) => groundDistanceM(plan.takeoff, p);
-  const nearSide = ring.reduce((a, b) => (fromCentre(a) < fromCentre(b) ? a : b));
-  const farSide = ring.reduce((a, b) => (fromCentre(a) > fromCentre(b) ? a : b));
+  const nearSide = ring.reduce((a, b) =>
+    fromCentre(a) < fromCentre(b) ? a : b,
+  );
+  const farSide = ring.reduce((a, b) =>
+    fromCentre(a) > fromCentre(b) ? a : b,
+  );
   const toCentre = groundDistanceM(plan.takeoff, start);
   const toFar = groundDistanceM(farSide, start);
   assert.ok(
