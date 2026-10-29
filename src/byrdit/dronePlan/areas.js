@@ -27,6 +27,7 @@ import {
 } from './planner.js';
 import { getPreset, DEFAULT_PRESET_ID } from './presets.js';
 import {
+  areaIndexForPoint,
   assignSegmentToRings,
   clipSegmentCovered,
   offsetRing,
@@ -298,9 +299,61 @@ function clipShell(shell, members, frame, margin, lookAhead) {
   return { legs: out, waypointCount };
 }
 
-function planCluster(members, rawOptions) {
+function orderingTakeoff(box, takeoff) {
+  if (!takeoff || !Number.isFinite(takeoff.lon) || !Number.isFinite(takeoff.lat)) {
+    return null;
+  }
+  if (takeoffDistanceFromBoxM(box, takeoff) > MAX_TAKEOFF_FROM_BOX_M) return null;
+  return { lon: takeoff.lon, lat: takeoff.lat };
+}
+
+function reverseLegPoints(leg) {
+  return { ...leg, waypoints: [...leg.waypoints].reverse() };
+}
+
+/**
+ * planFlight starts a rectangle at the box's own corner, ignoring the shared
+ * takeoff. Turn the lawnmower so the first waypoint is the corner nearest
+ * that takeoff. A tilted line keeps its direction: reversing its points would
+ * put the camera look-ahead on the wrong end.
+ */
+function orientLegsToward(legs, takeoff, lookAhead) {
+  if (!takeoff || !legs?.length) return legs;
+  if (legs.some((leg) => leg.kind === 'orbit' || (leg.waypoints?.length ?? 0) < 2)) {
+    return legs;
+  }
+  const startOf = (list) => list[0].waypoints[0];
+  const away = (w) => groundDistanceM(takeoff, w);
+  const flipped = lookAhead > 0 ? null : legs.map(reverseLegPoints);
+  const candidates = [legs, flipped, [...legs].reverse(), flipped ? [...flipped].reverse() : null].filter(
+    Boolean,
+  );
+  let best = legs;
+  let bestD = away(startOf(legs));
+  for (const list of candidates) {
+    const d = away(startOf(list));
+    if (d + 0.5 < bestD) {
+      best = list;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+function planCluster(members, rawOptions, sharedTakeoff) {
   if (members.length === 1 && members[0].kind === 'rect') {
-    return planFlight(members[0].box, rawOptions);
+    const box = members[0].box;
+    const forOrder = orderingTakeoff(box, sharedTakeoff);
+    const planned = planFlight(box, forOrder ? { ...rawOptions, takeoff: forOrder } : rawOptions);
+    if (planned.error || !planned.legs?.length || planned.legs[0].kind === 'orbit') {
+      return planned;
+    }
+    planned.legs = orientLegsToward(
+      planned.legs,
+      sharedTakeoff,
+      lookAheadM(planned.options ?? rawOptions),
+    );
+    return planned;
   }
   const points = members.flatMap((area) => areaRing(area));
   const centre = unwrapCenter(points);
@@ -370,7 +423,14 @@ function splitLegsByArea(planned, members, frame, margin, lookAhead) {
   const buckets = members.map(() => []);
   for (const leg of planned.legs) {
     if (leg.waypoints.length < 2) {
-      buckets[0].push(leg);
+      // Orbit is planned per area and never reaches this split. A shorter
+      // leg is not given to area 0 unless that area actually contains it.
+      const w = leg.waypoints[0];
+      const owner =
+        w && Number.isFinite(w.lon) && Number.isFinite(w.lat)
+          ? areaIndexForPoint(frame.toXY(w.lon, w.lat), rings)
+          : -1;
+      if (owner >= 0) buckets[owner].push(leg);
       continue;
     }
     const a = frame.toXY(leg.waypoints[0].lon, leg.waypoints[0].lat);
@@ -528,7 +588,7 @@ export function planAreas(areas, rawOptions = {}) {
   };
   for (const indices of clusters) {
     const members = indices.map((i) => list[i]);
-    const planned = planCluster(members, decided.options);
+    const planned = planCluster(members, decided.options, decided.takeoff);
     if (planned.error) return planned;
     const clusterFrame = planned.clusterFrame;
     delete planned.clusterFrame;
@@ -595,6 +655,8 @@ export function planAreas(areas, rawOptions = {}) {
   if (farthest > VLOS_WARN_M) {
     planNotes.push({ code: 'vlos', params: { distanceM: Math.round(farthest) } });
   }
+  const anyPolygon = list.some((area) => area.kind === 'polygon');
+  const preset = getPreset(decided.options.presetId) ?? getPreset(DEFAULT_PRESET_ID);
   return {
     ...first,
     takeoff: decided.takeoff,
@@ -607,6 +669,10 @@ export function planAreas(areas, rawOptions = {}) {
     jobGrouping: grouping,
     blocks,
     orbitPerArea: options.pattern === 'orbit',
+    // A rectangle planned on its own does not carry these. Copy them from
+    // the whole list, not from whichever group happened to be first.
+    clippedToPolygon: anyPolygon,
+    footprintMarginM: marginM(preset, decided.options, anyPolygon),
   };
 }
 

@@ -499,11 +499,15 @@ try {
 
   // Polygon plus an overlapping rectangle: one flown area, a folder per job.
   await page.select('#drone-plan-panel select[aria-label="Pattern"]', 'grid');
-  await page.click('#drone-plan-panel .gev-dp-bar button:nth-child(2)');
-  await wait(300);
-  await page.click('#drone-plan-button');
-  await wait(300);
-  await page.keyboard.press('Escape');
+  // The earlier box is still on the plan. Remove it here. Do not click the
+  // second bar button: that is CLOSE, and the rail entry is not clickable
+  // again once the card is gone, so the polygon checks never ran.
+  for (let n = 0; n < 8; n += 1) {
+    const remove = await page.$('#drone-plan-panel button[data-remove-area]');
+    if (!remove) break;
+    await remove.click();
+    await wait(150);
+  }
   await page.click(
     '#drone-plan-panel .gev-dp-bar button[data-action="draw-polygon"]',
   );
@@ -578,7 +582,7 @@ try {
   });
 
   // Close clears the globe and the pointer.
-  await page.click('#drone-plan-panel .gev-dp-bar button:nth-child(2)');
+  await page.click('#drone-plan-panel .gev-dp-bar button[data-action="close"]');
   await wait(400);
   check(
     'CLOSE hides the card and clears the plan from the globe',

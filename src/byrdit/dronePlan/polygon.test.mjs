@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  areaIndexForPoint,
   assignSegmentToRings,
+  clipSegmentToMargin,
   clipSegmentToRing,
   clipSegmentToRings,
   offsetRing,
@@ -236,4 +238,42 @@ test('a sharp corner is bevelled so the offset stays within margin·√2 of the 
       `offset point ${best.toFixed(1)} m from the ring`,
     );
   }
+});
+
+test('a point in a later area is not given to the first area', () => {
+  const first = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 0, y: 100 },
+  ];
+  const second = [
+    { x: 200, y: 0 },
+    { x: 300, y: 0 },
+    { x: 300, y: 100 },
+    { x: 200, y: 100 },
+  ];
+  assert.equal(areaIndexForPoint({ x: 250, y: 40 }, [first, second]), 1);
+  assert.equal(areaIndexForPoint({ x: 40, y: 40 }, [first, second]), 0);
+  assert.equal(areaIndexForPoint({ x: 150, y: 40 }, [first, second]), -1);
+  assert.equal(
+    areaIndexForPoint({ x: 250, y: 40 }, [
+      first,
+      { ring: second, margin: 8 },
+    ]),
+    1,
+  );
+});
+
+test('a long line still clips a small margin exactly', () => {
+  const ring = [
+    { x: 2500, y: 0 },
+    { x: 2510, y: 0 },
+    { x: 2510, y: 10 },
+    { x: 2500, y: 10 },
+  ];
+  const pieces = clipSegmentToMargin({ x: 0, y: 5 }, { x: 4000, y: 5 }, ring, 8);
+  assert.equal(pieces.length, 1);
+  nearPt(pieces[0].start, 2492, 5, 0.05);
+  nearPt(pieces[0].end, 2518, 5, 0.05);
 });

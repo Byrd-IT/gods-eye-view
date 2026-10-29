@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { assembleAreaPlan, distanceToAreasM, jobSlug, planAreas } from './areas.js';
-import { makeFrame, metersPerDegree } from './geo.js';
+import { groundDistanceM, makeFrame, metersPerDegree } from './geo.js';
 import { pointInRing } from './polygon.js';
 import { assembleMissions, planFlight } from './planner.js';
 
@@ -691,5 +691,55 @@ test('a polygon whose footprint margin pushes the box past 3 km is refused', () 
   );
   assert.equal(plan.error, 'too-large', plan.message);
   assert.match(plan.message, /3 km/);
+});
+
+test('a separate rectangle starts at the corner nearest the shared takeoff', () => {
+  const a = boxAround(-94.5, 32.7, 200, 80);
+  const b = boxAround(-94.48, 32.7, 200, 80);
+  const m = metersPerDegree(32.7);
+  const takeoff = {
+    lon: a.east + 15 / m.lon,
+    lat: a.north + 15 / m.lat,
+  };
+  const plan = planAreas(
+    [
+      { id: 'a', name: 'Near', kind: 'rect', box: a },
+      { id: 'b', name: 'Far', kind: 'rect', box: b },
+    ],
+    { ...opts, takeoff },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  const near = plan.legs.filter((leg) => leg.jobId === 'job-1');
+  assert.ok(near.length > 1, 'the near box should have several lines');
+  const start = near[0].waypoints[0];
+  const away = groundDistanceM(takeoff, start);
+  assert.ok(
+    away < 80,
+    `first waypoint is ${away.toFixed(1)} m from the shared takeoff; the near corner should start the box`,
+  );
+});
+
+test('a polygon after a separate rectangle still marks the whole plan clipped', () => {
+  const rect = boxAround(-94.5, 32.7, 140, 100);
+  const frame = makeFrame(-94.48, 32.7);
+  const ring = [
+    { x: 0, y: 0 },
+    { x: 120, y: 0 },
+    { x: 120, y: 90 },
+    { x: 0, y: 90 },
+  ].map((p) => frame.toLonLat(p.x, p.y));
+  const plan = planAreas(
+    [
+      { id: 'r', name: 'Rect', kind: 'rect', box: rect },
+      { id: 'p', name: 'Poly', kind: 'polygon', ring },
+    ],
+    opts,
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.clippedToPolygon, true);
+  assert.ok(
+    plan.footprintMarginM > 20 && plan.footprintMarginM < 100,
+    `margin ${plan.footprintMarginM}`,
+  );
 });
 

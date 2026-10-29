@@ -234,17 +234,95 @@ function specContains(spec, p) {
   return pointInRing(p, spec.ring);
 }
 
+function distanceToRing(p, ring) {
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i += 1) {
+    best = Math.min(best, distanceToSegment(p, ring[i], ring[(i + 1) % ring.length]));
+  }
+  return best;
+}
+
+/** Index of the first ring that contains `point`, or -1. A ring may be `{ ring, margin }`. */
+export function areaIndexForPoint(point, rings) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return -1;
+  for (let i = 0; i < (rings ?? []).length; i += 1) {
+    const spec = ringSpec(rings[i]);
+    if (spec.ring.length < 3) continue;
+    if (specContains(spec, point)) return i;
+  }
+  return -1;
+}
+
+/**
+ * Where a→b crosses the margin boundary. The step is the distance to that
+ * boundary, not 1 m: a straight line cannot cross sooner than that, and a
+ * long line over empty ground used to sample every metre.
+ */
 function marginCrossings(a, b, spec) {
   const length = Math.hypot(b.x - a.x, b.y - a.y);
-  const n = Math.max(1, Math.ceil(length / 1));
+  if (!(length > 1e-9) || spec.ring.length < 3) return [];
+  const pad = spec.margin > 0 ? spec.margin : 0;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of spec.ring) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const misses =
+    (a.x < minX - pad && b.x < minX - pad) ||
+    (a.x > maxX + pad && b.x > maxX + pad) ||
+    (a.y < minY - pad && b.y < minY - pad) ||
+    (a.y > maxY + pad && b.y > maxY + pad);
+  if (misses) return [];
   const hits = [];
+  let t = 0;
   let prev = specContains(spec, a);
-  for (let i = 1; i <= n; i += 1) {
-    const t = i / n;
-    const now = specContains(spec, at(a, b, t));
+  let steps = 0;
+  const maxSteps = 48 + spec.ring.length;
+  while (t < 1 - 1e-12 && steps < maxSteps) {
+    steps += 1;
+    const p = at(a, b, t);
+    const inside = pointInRing(p, spec.ring);
+    const dist = distanceToRing(p, spec.ring);
+    const slack = inside ? dist + pad : Math.abs(dist - pad);
+    const nextT = Math.min(1, t + Math.max(0.5, slack) / length);
+    if (nextT <= t + 1e-15) break;
+    const now = specContains(spec, at(a, b, nextT));
+    if (now === prev) {
+      t = nextT;
+      continue;
+    }
+    let lo = t;
+    let hi = nextT;
+    for (let k = 0; k < 24; k += 1) {
+      const mid = (lo + hi) / 2;
+      if (specContains(spec, at(a, b, mid)) === prev) lo = mid;
+      else hi = mid;
+    }
+    hits.push(hi);
+    prev = !prev;
+    t = Math.min(1, hi + 0.05 / length);
+  }
+  if (steps >= maxSteps && t < 1 - 1e-12) {
+    hits.push(...sampleMarginCrossings(a, b, spec, t, prev));
+  }
+  return hits;
+}
+
+/** 1 m fallback for the rest of a line the distance jump did not finish. */
+function sampleMarginCrossings(a, b, spec, fromT, prevIn) {
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  const hits = [];
+  let prev = prevIn;
+  for (let d = fromT * length + 1; d < length; d += 1) {
+    const now = specContains(spec, at(a, b, d / length));
     if (now === prev) continue;
-    let lo = (i - 1) / n;
-    let hi = t;
+    let lo = (d - 1) / length;
+    let hi = d / length;
     for (let k = 0; k < 20; k += 1) {
       const mid = (lo + hi) / 2;
       if (specContains(spec, at(a, b, mid)) === prev) lo = mid;
