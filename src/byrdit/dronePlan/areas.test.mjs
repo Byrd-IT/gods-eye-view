@@ -779,6 +779,97 @@ test('areas planned together start at the corner nearest the shared takeoff', ()
   );
 });
 
+test('a clipped line keeps its pieces in travel order when the start turns toward takeoff', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  // U opening north. East-west lines through the arms are two pieces with a gap.
+  const ring = [
+    [0, 0],
+    [300, 0],
+    [300, 200],
+    [260, 200],
+    [260, 50],
+    [40, 50],
+    [40, 200],
+    [0, 200],
+  ].map(([x, y]) => frame.toLonLat(x, y));
+  const area = [{ id: 'u', name: 'U', kind: 'polygon', ring }];
+  const shared = { ...opts, direction: 'ew' };
+  const notch = frame.toLonLat(150, 220);
+  const calm = frame.toLonLat(-20, -20);
+
+  function legXY(leg) {
+    return {
+      a: frame.toXY(leg.waypoints[0].lon, leg.waypoints[0].lat),
+      b: frame.toXY(leg.waypoints.at(-1).lon, leg.waypoints.at(-1).lat),
+    };
+  }
+  function transitSum(plan) {
+    let sum = 0;
+    for (let i = 1; i < plan.legs.length; i += 1) {
+      sum += groundDistanceM(
+        plan.legs[i - 1].waypoints.at(-1),
+        plan.legs[i].waypoints[0],
+      );
+    }
+    return sum;
+  }
+  function sameLineJumps(plan) {
+    const jumps = [];
+    for (let i = 1; i < plan.legs.length; i += 1) {
+      const prev = legXY(plan.legs[i - 1]);
+      const cur = legXY(plan.legs[i]);
+      if (Math.abs(prev.a.y - cur.a.y) < 5) {
+        jumps.push(
+          groundDistanceM(plan.legs[i - 1].waypoints.at(-1), plan.legs[i].waypoints[0]),
+        );
+      }
+    }
+    return jumps;
+  }
+  function assertOrdered(plan, label) {
+    assert.equal(plan.error, undefined, plan.message);
+    const jumps = sameLineJumps(plan);
+    assert.ok(
+      jumps.length >= 2,
+      `${label} should split a line into pieces, got ${jumps.length}`,
+    );
+    for (const jump of jumps) {
+      assert.ok(
+        jump < 120,
+        `${label} piece jump ${jump.toFixed(0)} m backtracks along the line`,
+      );
+    }
+    for (const leg of plan.legs) {
+      if ((leg.waypoints?.length ?? 0) < 3) continue;
+      const { a, b } = legXY(leg);
+      const mid = leg.waypoints[Math.floor(leg.waypoints.length / 2)];
+      const m = frame.toXY(mid.lon, mid.lat);
+      const along = (m.x - a.x) * (b.x - a.x) + (m.y - a.y) * (b.y - a.y);
+      assert.ok(along > 0, `${label} line points were reversed`);
+    }
+  }
+
+  const turned = planAreas(area, { ...shared, takeoff: notch });
+  const calmPlan = planAreas(area, { ...shared, takeoff: calm });
+  assertOrdered(turned, 'nadir');
+  const turnedTransit = transitSum(turned);
+  const calmTransit = transitSum(calmPlan);
+  assert.ok(
+    turnedTransit <= calmTransit + 150,
+    `turned transit ${turnedTransit.toFixed(0)} m is worse than the unturned ${calmTransit.toFixed(0)} m`,
+  );
+
+  const tilted = planAreas(area, { ...shared, pattern: 'double', takeoff: notch });
+  const tiltedCalm = planAreas(area, { ...shared, pattern: 'double', takeoff: calm });
+  assertOrdered(tilted, 'tilted');
+  const tiltedTransit = transitSum(tilted);
+  const tiltedCalmTransit = transitSum(tiltedCalm);
+  assert.ok(
+    tiltedTransit <= tiltedCalmTransit + 150,
+    `tilted transit ${tiltedTransit.toFixed(0)} m is worse than the unturned ${tiltedCalmTransit.toFixed(0)} m`,
+  );
+});
+
 test('a polygon after a separate rectangle still marks the whole plan clipped', () => {
   const rect = boxAround(-94.5, 32.7, 140, 100);
   const frame = makeFrame(-94.48, 32.7);

@@ -312,12 +312,14 @@ function reverseLegPoints(leg) {
 }
 
 /**
- * planFlight starts a rectangle at the box's own corner, ignoring the shared
- * takeoff. Turn the lawnmower so the first waypoint is the corner nearest
- * that takeoff. A tilted line keeps its direction: reversing its points would
- * put the camera look-ahead on the wrong end. Only the order of the legs and
- * of the points on a nadir leg changes. Notes that depend on order are
- * rebuilt by planAreas; this does not recompute them.
+ * planFlight starts a box at its own corner, ignoring the shared takeoff.
+ * Turn whole survey lines so the first waypoint is the corner nearest that
+ * takeoff. Call this on the shell legs before clipShell. A clipped line is
+ * several pieces of one shell leg; turning those pieces on their own makes
+ * the drone fly the line backwards between the pieces. A tilted line keeps
+ * its direction: reversing its points would put the camera look-ahead on the
+ * wrong end. Only the order of the lines, and of the points on a nadir line,
+ * changes. Notes that depend on order are rebuilt by planAreas.
  */
 function orientLegsToward(legs, takeoff, lookAhead) {
   if (!takeoff || !legs?.length) return legs;
@@ -377,19 +379,20 @@ function planCluster(members, rawOptions, sharedTakeoff) {
   const shell = planFlight(shellBox, rawOptions);
   if (shell.error) return shell;
   const lookAhead = lookAheadM(options);
-  const clipped = clipShell(shell, members, frame, margin, lookAhead);
+  // Turn the shell lines first. Clipping then keeps each line's pieces in
+  // travel order. Turning the pieces afterwards can send the drone back
+  // along the same line.
+  const turned = orientLegsToward(shell.legs, sharedTakeoff, lookAhead);
+  const clipped = clipShell({ ...shell, legs: turned }, members, frame, margin, lookAhead);
   if (!clipped.legs.length) {
     return {
       error: 'too-narrow',
       message: 'Nothing to fly inside that area',
     };
   }
-  // A rectangle planned alone is turned above. A clipped polygon, or several
-  // areas in one group, would otherwise start at the shell's own corner.
-  const turned = orientLegsToward(clipped.legs, sharedTakeoff, lookAhead);
   return {
     ...shell,
-    legs: turned,
+    legs: clipped.legs,
     waypointCount: clipped.waypointCount,
     box: bboxOfPoints(points),
     clippedToPolygon: members.some((area) => area.kind === 'polygon'),
