@@ -587,7 +587,7 @@ try {
     JSON.stringify({ areas: merged.areas, jobs: merged.jobs }),
   );
   check(
-    'an area with no photos of its own may have no processing job',
+    'the first area has a job; an area with no photos of its own may have none',
     merged.jobs.length >= 1 &&
       merged.jobs.includes(merged.names[0]) &&
       merged.jobs.length <= merged.names.length &&
@@ -610,7 +610,7 @@ try {
     // jobs get a folder each. buildBundleZip uses that split.
     const oneJob = merged.jobs.length <= 1;
     check(
-      'the ZIP has a folder per processing job and a README',
+      'the ZIP has a folder per job, flat when there is one job, and a README',
       jobNames.includes('README.txt') &&
         (oneJob
           ? folders.size === 0 &&
