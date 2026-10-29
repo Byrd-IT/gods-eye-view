@@ -177,6 +177,28 @@ test('a second tool can reuse the drag under its own claim, preview, cursor clas
   await f.tool.destroy();
 });
 
+test('shorterArc keeps a dateline drag on the short arc; the default still min/maxes', async () => {
+  const pickWorld = (_viewer, nx, ny) =>
+    ny < 0.05 ? null : { lon: nx < 0.5 ? 179.5 : -179.5, lat: 1 };
+  const accept = (box) => ({ ok: true, box });
+  const plain = fixture({ pickWorld, validate: accept });
+  plain.tool.start();
+  plain.fire('LEFT_DOWN', { position: { x: 100, y: 200 } });
+  plain.fire('LEFT_UP', { position: { x: 800, y: 250 } });
+  assert.ok(plain.boxes[0].west < plain.boxes[0].east, 'default stays min/max');
+  assert.ok(plain.boxes[0].east - plain.boxes[0].west > 180);
+  await plain.tool.destroy();
+
+  const wrapped = fixture({ pickWorld, shorterArc: true, validate: accept });
+  wrapped.tool.start();
+  wrapped.fire('LEFT_DOWN', { position: { x: 100, y: 200 } });
+  wrapped.fire('LEFT_UP', { position: { x: 800, y: 250 } });
+  assert.ok(wrapped.boxes[0].west > wrapped.boxes[0].east);
+  const span = wrapped.boxes[0].east + 360 - wrapped.boxes[0].west;
+  assert.ok(span < 2, `short span ${span}`);
+  await wrapped.tool.destroy();
+});
+
 test('a second tool keeps its own refusal text for a box that is too small', async () => {
   const f = fixture({
     validate: () => ({

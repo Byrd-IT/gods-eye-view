@@ -46,6 +46,37 @@ test('a flyable box passes and edges are put in order', () => {
   );
 });
 
+test('a short box across the antimeridian is the short arc, not a 360 degree box', () => {
+  const lat = -15;
+  const m = metersPerDegree(lat);
+  const halfDeg = 200 / m.lon;
+  const south = lat - 200 / m.lat;
+  const north = lat + 200 / m.lat;
+  // What dragBox emits today: min/max of corners on either side of ±180.
+  const fromMinMax = validateDroneBox({
+    west: -180 + halfDeg,
+    east: 180 - halfDeg,
+    south,
+    north,
+  });
+  assert.equal(fromMinMax.ok, true, fromMinMax.message);
+  assert.ok(
+    fromMinMax.box.west > fromMinMax.box.east,
+    'a dateline box is returned with west > east',
+  );
+  const span = fromMinMax.box.east + 360 - fromMinMax.box.west;
+  assert.ok(span * m.lon < 500, `short span is ${span} deg`);
+
+  const kept = validateDroneBox({
+    west: 180 - halfDeg,
+    east: -180 + halfDeg,
+    south,
+    north,
+  });
+  assert.equal(kept.ok, true, kept.message);
+  assert.ok(kept.box.west > kept.box.east, 'west > east is not swapped back');
+});
+
 test('boxes that are too small, too big or not numbers are refused with a reason', () => {
   assert.equal(
     validateDroneBox(boxM(MIN_BOX_SIDE_M - 5, 200)).reason,

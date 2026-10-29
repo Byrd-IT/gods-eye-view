@@ -5,7 +5,7 @@
  * job. Messages go through msg() so the catalogs carry them.
  */
 import { msg } from '../../i18n/index.js';
-import { metersPerDegree } from './geo.js';
+import { lonSpanDeg, metersPerDegree, shorterLonEdges } from './geo.js';
 
 export const MIN_BOX_SIDE_M = 20;
 export const MAX_BOX_SIDE_M = 3000;
@@ -23,14 +23,15 @@ export function validateDroneBox(box) {
       message: msg('Box edges must be finite'),
     };
   }
+  const lons = shorterLonEdges(edges[0], edges[2]);
   const normalized = {
-    west: Math.min(edges[0], edges[2]),
-    east: Math.max(edges[0], edges[2]),
+    west: lons.west,
+    east: lons.east,
     south: Math.min(edges[1], edges[3]),
     north: Math.max(edges[1], edges[3]),
   };
   const m = metersPerDegree((normalized.south + normalized.north) / 2);
-  const width = (normalized.east - normalized.west) * m.lon;
+  const width = lonSpanDeg(normalized.west, normalized.east) * m.lon;
   const height = (normalized.north - normalized.south) * m.lat;
   if (width < MIN_BOX_SIDE_M || height < MIN_BOX_SIDE_M) {
     return {

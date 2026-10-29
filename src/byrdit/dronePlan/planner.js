@@ -19,8 +19,10 @@ import {
 import {
   bearingDeg,
   groundDistanceM,
+  lonSpanDeg,
   makeFrame,
   metersPerDegree,
+  wrapLon,
   toDeg,
   toRad,
   wrapHeading,
@@ -184,7 +186,7 @@ export function normalizeOptions(raw = {}, box = null) {
   if (box) {
     const m = metersPerDegree((box.south + box.north) / 2);
     const side = Math.max(
-      (box.east - box.west) * m.lon,
+      lonSpanDeg(box.west, box.east) * m.lon,
       (box.north - box.south) * m.lat,
     );
     const defaultRadius = clamp(side / 2, 15, 120);
@@ -284,13 +286,14 @@ function subdivide(start, end, maxStepM, minPoints = 2) {
  * (0 when it is inside).
  */
 export function takeoffDistanceFromBoxM(box, point) {
+  const span = lonSpanDeg(box.west, box.east);
   const center = {
-    lon: (box.west + box.east) / 2,
+    lon: wrapLon(box.west + span / 2),
     lat: (box.south + box.north) / 2,
   };
   const frame = makeFrame(center.lon, center.lat);
   const m = metersPerDegree(center.lat);
-  const hw = ((box.east - box.west) * m.lon) / 2;
+  const hw = (span * m.lon) / 2;
   const hh = ((box.north - box.south) * m.lat) / 2;
   const q = frame.toXY(point.lon, point.lat);
   return Math.hypot(
@@ -312,18 +315,20 @@ export function planFlight(box, rawOptions = {}) {
   if (
     !box ||
     ![box.west, box.south, box.east, box.north].every(Number.isFinite) ||
-    box.east <= box.west ||
+    !(lonSpanDeg(box.west, box.east) > 0) ||
+    lonSpanDeg(box.west, box.east) > 180 ||
     box.north <= box.south
   ) {
     return { error: 'bad-box', message: 'Draw a box on the globe first' };
   }
+  const span = lonSpanDeg(box.west, box.east);
   const center = {
-    lon: (box.west + box.east) / 2,
+    lon: wrapLon(box.west + span / 2),
     lat: (box.south + box.north) / 2,
   };
   const frame = makeFrame(center.lon, center.lat);
   const m = metersPerDegree(center.lat);
-  const hw = ((box.east - box.west) * m.lon) / 2;
+  const hw = (span * m.lon) / 2;
   const hh = ((box.north - box.south) * m.lat) / 2;
   let takeoff =
     options.takeoff &&

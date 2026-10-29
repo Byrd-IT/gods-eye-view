@@ -283,6 +283,39 @@ test('a takeoff point must be two real coordinates', () => {
   assert.deepEqual(ok.options.takeoff, { lon: -97.769, lat: 30.271 });
 });
 
+test('a short box across the antimeridian is planned on that arc, not the other side of the earth', () => {
+  const lat = -15;
+  const m = metersPerDegree(lat);
+  const half = 200 / m.lon;
+  const box = {
+    west: 180 - half,
+    east: -180 + half,
+    south: lat - 20 / m.lat,
+    north: lat + 20 / m.lat,
+  };
+  const across = groundDistanceM(
+    { lon: box.west, lat },
+    { lon: box.east, lat },
+  );
+  assert.ok(across < 500, `short arc is ${across} m, not a world crossing`);
+  const away = takeoffDistanceFromBoxM(box, { lon: 180, lat });
+  assert.ok(away < 30, `centre reads as ${away} m from the box`);
+  // A non-finite radius asks for the box-derived default. null is a set value
+  // (Number(null) is 0) and is not that path.
+  assert.equal(
+    normalizeOptions({ orbitRadiusM: Number.NaN }, box).options.orbitRadiusM,
+    120,
+  );
+  const plan = planFlight(box, { aglM: 50, frontOverlap: 70, sideOverlap: 60 });
+  assert.equal(plan.error, undefined, plan.message);
+  const lons = plan.legs.flatMap((leg) => leg.waypoints.map((w) => w.lon));
+  assert.ok(lons.length > 2);
+  for (const lon of lons) {
+    const fromDateline = Math.min(Math.abs(lon - 180), Math.abs(lon + 180));
+    assert.ok(fromDateline < 0.02, `waypoint lon ${lon} left the dateline`);
+  }
+});
+
 test('unplannable boxes are refused, not thrown', () => {
   assert.equal(planFlight(null).error, 'bad-box');
   assert.equal(

@@ -129,6 +129,7 @@ export function initDronePlan({
     previewName: 'gev-drone-plan-box-preview',
     bodyClass: 'gev-drone-box',
     validate: validateDroneBox,
+    shorterArc: true,
     onBox: (box) => {
       state.box = box;
       state.takeoff = null;
