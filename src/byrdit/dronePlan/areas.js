@@ -4,10 +4,11 @@
  * A single rectangle still goes through planFlight, so that plan does not
  * change. A polygon is clipped to its edge, expanded by half the photo
  * footprint so the edge is still covered. Overlapping areas are unioned and
- * flown once. Each area still keeps its own processing job: a line in the
- * overlap is given to the first area that contains it. Areas that do not
- * touch stay separate flight blocks. Orbit is planned around the centre of
- * each area and is not merged.
+ * flown once. Each area that has photos keeps its own processing job: a line
+ * in the overlap is given to the first area that contains it. An area with
+ * no photos of its own gets no job. Areas that do not touch stay separate
+ * flight blocks. Orbit is planned around the centre of each area and is not
+ * merged.
  */
 
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
@@ -239,6 +240,65 @@ function shellRing(area, frame, margin) {
   ];
 }
 
+/**
+ * Build the flown pieces of one survey line. clipShell and splitLegsByArea
+ * both shift the camera aim, drop a piece shorter than MIN_PIECE_M, and
+ * sample the drone line. `keep` drops a piece before it is sampled
+ * (splitLegsByArea skips an unowned piece). withIds keeps clipShell's
+ * temporary waypoint ids; splitLegsByArea leaves ids for planAreas.
+ * `pieces(aimA, aimB)` returns the clipped aim segments.
+ */
+function clipLegPieces(
+  leg,
+  frame,
+  lookAhead,
+  pieces,
+  { withIds = false, keep = () => true } = {},
+) {
+  const a = frame.toXY(leg.waypoints[0].lon, leg.waypoints[0].lat);
+  const b = frame.toXY(
+    leg.waypoints[leg.waypoints.length - 1].lon,
+    leg.waypoints[leg.waypoints.length - 1].lat,
+  );
+  const shift = travelShift(a, b, lookAhead);
+  const aimA = { x: a.x + shift.x, y: a.y + shift.y };
+  const aimB = { x: b.x + shift.x, y: b.y + shift.y };
+  const interval = leg.photoMode === 'interval';
+  const step = interval ? INTERVAL_WAYPOINT_STEP_M : leg.photoSpacingM;
+  const built = [];
+  for (const piece of pieces(aimA, aimB)) {
+    const start = { x: piece.start.x - shift.x, y: piece.start.y - shift.y };
+    const end = { x: piece.end.x - shift.x, y: piece.end.y - shift.y };
+    const length = Math.hypot(end.x - start.x, end.y - start.y);
+    if (length < MIN_PIECE_M || !keep(piece)) continue;
+    const { points } = sampleSegment(start, end, step);
+    const waypoints = points.map((p, id) => {
+      const ll = frame.toLonLat(p.x, p.y);
+      const fields = {
+        lon: Number(ll.lon.toFixed(8)),
+        lat: Number(ll.lat.toFixed(8)),
+        aglM: leg.waypoints[0].aglM,
+        pitchDeg: leg.pitchDeg,
+        headingDeg: leg.waypoints[0].headingDeg,
+        photo: !interval,
+      };
+      return withIds ? { id, ...fields } : fields;
+    });
+    built.push({
+      piece,
+      leg: {
+        ...leg,
+        waypoints,
+        lengthM: length,
+        photoCount: interval
+          ? Math.floor(length / leg.photoSpacingM + 1e-9) + 1
+          : waypoints.length,
+      },
+    });
+  }
+  return built;
+}
+
 function clipShell(shell, members, frame, margin, lookAhead) {
   const specs = members.map((area) => clipSpec(area, frame, margin));
   const out = [];
@@ -247,44 +307,16 @@ function clipShell(shell, members, frame, margin, lookAhead) {
       out.push(leg);
       continue;
     }
-    const a = frame.toXY(leg.waypoints[0].lon, leg.waypoints[0].lat);
-    const b = frame.toXY(
-      leg.waypoints[leg.waypoints.length - 1].lon,
-      leg.waypoints[leg.waypoints.length - 1].lat,
-    );
     // A tilted camera looks ahead of the drone. Clip that aim, then fly
     // the drone lookAhead back along the same line.
-    const shift = travelShift(a, b, lookAhead);
-    const aimA = { x: a.x + shift.x, y: a.y + shift.y };
-    const aimB = { x: b.x + shift.x, y: b.y + shift.y };
-    const interval = leg.photoMode === 'interval';
-    const step = interval ? INTERVAL_WAYPOINT_STEP_M : leg.photoSpacingM;
-    for (const piece of clipSegmentCovered(aimA, aimB, specs)) {
-      const start = { x: piece.start.x - shift.x, y: piece.start.y - shift.y };
-      const end = { x: piece.end.x - shift.x, y: piece.end.y - shift.y };
-      const length = Math.hypot(end.x - start.x, end.y - start.y);
-      if (length < MIN_PIECE_M) continue;
-      const { points } = sampleSegment(start, end, step);
-      const waypoints = points.map((p, id) => {
-        const ll = frame.toLonLat(p.x, p.y);
-        return {
-          id,
-          lon: Number(ll.lon.toFixed(8)),
-          lat: Number(ll.lat.toFixed(8)),
-          aglM: leg.waypoints[0].aglM,
-          pitchDeg: leg.pitchDeg,
-          headingDeg: leg.waypoints[0].headingDeg,
-          photo: !interval,
-        };
-      });
-      out.push({
-        ...leg,
-        waypoints,
-        lengthM: length,
-        photoCount: interval
-          ? Math.floor(length / leg.photoSpacingM + 1e-9) + 1
-          : waypoints.length,
-      });
+    for (const { leg: built } of clipLegPieces(
+      leg,
+      frame,
+      lookAhead,
+      (aimA, aimB) => clipSegmentCovered(aimA, aimB, specs),
+      { withIds: true },
+    )) {
+      out.push(built);
     }
   }
   let nextId = 0;
@@ -378,6 +410,10 @@ function planCluster(members, rawOptions, sharedTakeoff) {
   if (!expandedCheck.ok) {
     return { error: expandedCheck.reason, message: expandedCheck.message };
   }
+  // rawOptions has no takeoff. decideTakeoff strips it before the shell is
+  // planned, so this shell's own takeoff is the shell-box centre.
+  // orientLegsToward applies the shared takeoff after. Passing the takeoff
+  // into this planFlight call can change the path.
   const shell = planFlight(shellBox, rawOptions);
   if (shell.error) return shell;
   const lookAhead = lookAheadM(options);
@@ -445,41 +481,14 @@ function splitLegsByArea(planned, members, frame, margin, lookAhead) {
       if (owner >= 0) buckets[owner].push(leg);
       continue;
     }
-    const a = frame.toXY(leg.waypoints[0].lon, leg.waypoints[0].lat);
-    const b = frame.toXY(
-      leg.waypoints[leg.waypoints.length - 1].lon,
-      leg.waypoints[leg.waypoints.length - 1].lat,
-    );
-    const shift = travelShift(a, b, lookAhead);
-    const aimA = { x: a.x + shift.x, y: a.y + shift.y };
-    const aimB = { x: b.x + shift.x, y: b.y + shift.y };
-    const interval = leg.photoMode === 'interval';
-    const step = interval ? INTERVAL_WAYPOINT_STEP_M : leg.photoSpacingM;
-    for (const piece of assignSegmentToRings(aimA, aimB, rings)) {
-      const start = { x: piece.start.x - shift.x, y: piece.start.y - shift.y };
-      const end = { x: piece.end.x - shift.x, y: piece.end.y - shift.y };
-      const length = Math.hypot(end.x - start.x, end.y - start.y);
-      if (length < MIN_PIECE_M || piece.owner < 0) continue;
-      const { points } = sampleSegment(start, end, step);
-      const waypoints = points.map((p) => {
-        const ll = frame.toLonLat(p.x, p.y);
-        return {
-          lon: Number(ll.lon.toFixed(8)),
-          lat: Number(ll.lat.toFixed(8)),
-          aglM: leg.waypoints[0].aglM,
-          pitchDeg: leg.pitchDeg,
-          headingDeg: leg.waypoints[0].headingDeg,
-          photo: !interval,
-        };
-      });
-      buckets[piece.owner].push({
-        ...leg,
-        waypoints,
-        lengthM: length,
-        photoCount: interval
-          ? Math.floor(length / leg.photoSpacingM + 1e-9) + 1
-          : waypoints.length,
-      });
+    for (const { piece, leg: built } of clipLegPieces(
+      leg,
+      frame,
+      lookAhead,
+      (aimA, aimB) => assignSegmentToRings(aimA, aimB, rings),
+      { keep: (piece) => piece.owner >= 0 },
+    )) {
+      buckets[piece.owner].push(built);
     }
   }
   return buckets;

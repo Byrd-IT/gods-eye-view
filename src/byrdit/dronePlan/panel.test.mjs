@@ -241,6 +241,20 @@ test('DRAW BOX has a data-action the QA script can click', () => {
   w.handle.destroy();
 });
 
+test('a committed plan bumps the panel nonce, and a second plan bumps it again', async () => {
+  const w = setup();
+  assert.equal(w.panel.dataset.planNonce, undefined);
+  assert.equal(w.handle.setBox(boxM(300, 200)), true);
+  await w.handle.replan();
+  assert.equal(w.panel.dataset.state, 'ready');
+  assert.equal(w.panel.dataset.planNonce, '1');
+  w.handle.getState().options.aglM = 60;
+  await w.handle.replan();
+  assert.equal(w.panel.dataset.planNonce, '2');
+  assert.equal(w.panel.dataset.state, 'ready');
+  w.handle.destroy();
+});
+
 test('a drawn box becomes stats, a path on the globe and downloadable missions', async () => {
   const w = setup();
   assert.ok(w.handle);

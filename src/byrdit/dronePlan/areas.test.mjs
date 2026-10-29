@@ -985,3 +985,34 @@ test('the reported margin stays finite when height is left out', () => {
   assert.equal(plan.footprintMarginM, only.footprintMarginM);
 });
 
+test('an area with no photos of its own is left out of the jobs', () => {
+  // The inner box sits inside the outer one, so every photo in the overlap
+  // belongs to the first area. The inner bucket is empty and gets no job.
+  const outer = boxAround(-94.5, 32.7, 200, 200);
+  const inner = boxAround(-94.5, 32.7, 40, 40);
+  const plan = planAreas(
+    [
+      { id: 'outer', name: 'Outer', kind: 'rect', box: outer },
+      { id: 'inner', name: 'Inner', kind: 'rect', box: inner },
+    ],
+    opts,
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.deepEqual(
+    plan.areas.map((area) => area.name),
+    ['Outer', 'Inner'],
+  );
+  assert.deepEqual(
+    plan.jobs.map((job) => job.name),
+    ['Outer'],
+  );
+  assert.deepEqual(
+    plan.blocks.map((block) => block.areaIds),
+    [['outer']],
+  );
+  assert.equal(
+    plan.legs.every((leg) => leg.jobId === 'job-1'),
+    true,
+  );
+});
+

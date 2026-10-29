@@ -113,6 +113,10 @@ export function initDronePlan({
   const terrainCache = new Map();
   let cachedProvider = null;
   let planToken = 0;
+  // Bumps only when a new plan is committed, not when the panel is merely
+  // ready. A fast replan can be ready again before the first poll, so the
+  // QA script waits for this number instead of waiting for "ready" to leave.
+  let planNonce = 0;
   let reading = false;
   let timer = null;
   let destroyed = false;
@@ -348,6 +352,8 @@ export function initDronePlan({
     state.result = assembleAreaPlan(plan, { ...ground, wpM: byId });
     state.error = null;
     state.busy = false;
+    planNonce += 1;
+    panel.dataset.planNonce = String(planNonce);
     preview.showPlan(state.result);
     render();
   }
