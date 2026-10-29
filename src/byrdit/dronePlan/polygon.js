@@ -195,6 +195,57 @@ export function clipSegmentToRing(a, b, ring) {
   return pieces;
 }
 
+/**
+ * Split a→b where it crosses any ring. Each piece is given to the first ring
+ * that contains its midpoint, so an overlap is not given to two owners.
+ * Pieces outside every ring are dropped.
+ */
+export function assignSegmentToRings(a, b, rings) {
+  const ready = rings.map((ring) => normalizeRing(ring)).filter((pts) => pts.length >= 3);
+  const ts = [0, 1];
+  for (const pts of ready) {
+    for (let i = 0; i < pts.length; i += 1) {
+      for (const t of segmentEdgeHits(a, b, pts[i], pts[(i + 1) % pts.length])) {
+        ts.push(t);
+      }
+    }
+  }
+  ts.sort((p, q) => p - q);
+  const uniq = [];
+  for (const t of ts) {
+    if (!uniq.length || t - uniq[uniq.length - 1] > 1e-8) uniq.push(t);
+  }
+  const pieces = [];
+  for (let i = 0; i < uniq.length - 1; i += 1) {
+    const t0 = uniq[i];
+    const t1 = uniq[i + 1];
+    if (t1 - t0 < 1e-7) continue;
+    const mid = at(a, b, (t0 + t1) / 2);
+    let owner = -1;
+    for (let r = 0; r < ready.length; r += 1) {
+      if (pointInRing(mid, ready[r])) {
+        owner = r;
+        break;
+      }
+    }
+    if (owner < 0) continue;
+    const last = pieces[pieces.length - 1];
+    if (last && last.owner === owner && Math.abs(last.t1 - t0) < 1e-6) {
+      last.t1 = t1;
+      last.end = at(a, b, t1);
+    } else {
+      pieces.push({
+        owner,
+        t0,
+        t1,
+        start: at(a, b, t0),
+        end: at(a, b, t1),
+      });
+    }
+  }
+  return pieces;
+}
+
 function project(p, origin, dir) {
   return dot(sub(p, origin), dir);
 }

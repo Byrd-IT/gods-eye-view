@@ -26,6 +26,7 @@ import {
 } from './planner.js';
 import { getPreset, DEFAULT_PRESET_ID } from './presets.js';
 import {
+  assignSegmentToRings,
   clipSegmentToRings,
   offsetRing,
   pointInRing,
@@ -127,8 +128,11 @@ function checkArea(area, frame) {
   return null;
 }
 
-function clusterIndices(areas, frame) {
-  const rings = areas.map((area) => ringXY(areaRing(area), frame));
+function clusterIndices(areas, frame, margin = 0) {
+  const rings = areas.map((area) => {
+    const local = ringXY(areaRing(area), frame);
+    return area.kind === 'polygon' && margin > 0 ? offsetRing(local, margin) : local;
+  });
   const parent = areas.map((_, i) => i);
   const find = (i) => {
     let x = i;
@@ -296,34 +300,56 @@ function jobForArea(area, index) {
   };
 }
 
-/** Which area in this cluster owns a clipped leg. Overlap goes to the first. */
-function legOwner(leg, members, frame) {
-  if (!leg.waypoints.length) return 0;
-  const a = leg.waypoints[0];
-  const b = leg.waypoints[leg.waypoints.length - 1];
-  const pa = frame.toXY(a.lon, a.lat);
-  const pb = frame.toXY(b.lon, b.lat);
-  const p = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
-  for (let i = 0; i < members.length; i += 1) {
-    if (pointInRing(p, ringXY(areaRing(members[i]), frame))) return i;
-  }
-  let best = 0;
-  let bestD = Infinity;
-  for (let i = 0; i < members.length; i += 1) {
-    const ring = ringXY(areaRing(members[i]), frame);
-    let d = Infinity;
-    for (let k = 0; k < ring.length; k += 1) {
-      d = Math.min(
-        d,
-        distanceToSegment(p, ring[k], ring[(k + 1) % ring.length]),
+/**
+ * Cut each clipped line where it crosses an area edge. A piece in only one
+ * area stays with that area. A piece in the overlap goes to the first area.
+ */
+function splitLegsByArea(planned, members, frame, margin) {
+  const rings = members.map((area) =>
+    offsetRing(ringXY(areaRing(area), frame), margin),
+  );
+  const buckets = members.map(() => []);
+  for (const leg of planned.legs) {
+    if (leg.waypoints.length < 2) {
+      buckets[0].push(leg);
+      continue;
+    }
+    const a = frame.toXY(leg.waypoints[0].lon, leg.waypoints[0].lat);
+    const b = frame.toXY(
+      leg.waypoints[leg.waypoints.length - 1].lon,
+      leg.waypoints[leg.waypoints.length - 1].lat,
+    );
+    const interval = leg.photoMode === 'interval';
+    const step = interval ? INTERVAL_WAYPOINT_STEP_M : leg.photoSpacingM;
+    for (const piece of assignSegmentToRings(a, b, rings)) {
+      const length = Math.hypot(
+        piece.end.x - piece.start.x,
+        piece.end.y - piece.start.y,
       );
-    }
-    if (d < bestD) {
-      bestD = d;
-      best = i;
+      if (length < MIN_PIECE_M || piece.owner < 0) continue;
+      const { points } = sampleSegment(piece.start, piece.end, step);
+      const waypoints = points.map((p) => {
+        const ll = frame.toLonLat(p.x, p.y);
+        return {
+          lon: Number(ll.lon.toFixed(8)),
+          lat: Number(ll.lat.toFixed(8)),
+          aglM: leg.waypoints[0].aglM,
+          pitchDeg: leg.pitchDeg,
+          headingDeg: leg.waypoints[0].headingDeg,
+          photo: !interval,
+        };
+      });
+      buckets[piece.owner].push({
+        ...leg,
+        waypoints,
+        lengthM: length,
+        photoCount: interval
+          ? Math.floor(length / leg.photoSpacingM + 1e-9) + 1
+          : waypoints.length,
+      });
     }
   }
-  return best;
+  return buckets;
 }
 
 /**
@@ -411,7 +437,15 @@ export function planAreas(areas, rawOptions = {}) {
   const clusters =
     options.pattern === 'orbit'
       ? list.map((_, i) => [i])
-      : clusterIndices(list, frame);
+      : clusterIndices(
+          list,
+          frame,
+          marginM(
+            getPreset(options.presetId) ?? getPreset(DEFAULT_PRESET_ID),
+            options,
+            list.some((area) => area.kind === 'polygon'),
+          ),
+        );
   const whole = {
     id: 'job-1',
     name: 'Whole plan',
@@ -447,10 +481,12 @@ export function planAreas(areas, rawOptions = {}) {
         grouping === 'whole' ? whole.areaIds : [members[0].id],
       );
     } else {
-      const buckets = members.map(() => []);
-      for (const leg of planned.legs) {
-        buckets[legOwner(leg, members, frame)].push(leg);
-      }
+      const margin = marginM(
+        getPreset(options.presetId) ?? getPreset(DEFAULT_PRESET_ID),
+        options,
+        members.some((area) => area.kind === 'polygon'),
+      );
+      const buckets = splitLegsByArea(planned, members, frame, margin);
       members.forEach((area, i) => {
         if (!buckets[i].length) return;
         pushLegs(

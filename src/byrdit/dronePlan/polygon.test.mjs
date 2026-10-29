@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  assignSegmentToRings,
   clipSegmentToRing,
   clipSegmentToRings,
   offsetRing,
@@ -182,4 +183,25 @@ test('disjoint rectangles stay two separate pieces', () => {
   nearPt(pieces[0].end, 100, 50);
   nearPt(pieces[1].start, 200, 50);
   nearPt(pieces[1].end, 300, 50);
+});
+
+test('a line through two overlapping squares is split, and the overlap stays with the first', () => {
+  const a = square;
+  const b = [
+    { x: 60, y: 0 },
+    { x: 160, y: 0 },
+    { x: 160, y: 100 },
+    { x: 60, y: 100 },
+  ];
+  const pieces = assignSegmentToRings({ x: -10, y: 50 }, { x: 180, y: 50 }, [
+    a,
+    b,
+  ]);
+  assert.equal(pieces.length, 2);
+  assert.equal(pieces[0].owner, 0);
+  assert.equal(pieces[1].owner, 1);
+  nearPt(pieces[0].start, 0, 50);
+  nearPt(pieces[0].end, 100, 50);
+  nearPt(pieces[1].start, 100, 50);
+  nearPt(pieces[1].end, 160, 50);
 });

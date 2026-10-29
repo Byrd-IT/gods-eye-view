@@ -1048,12 +1048,16 @@ export function initDronePlan({
       name: `GEV Drone Flight Plan ${index + 1}/${result.missions.length}`,
     });
     const named = (result.jobs ?? []).length > 1;
+    const mission = result.missions[index];
+    const same = named
+      ? result.missions.filter((item) => item.jobId === mission.jobId)
+      : result.missions;
     downloadFile(
       kmzFileName(
-        index,
-        result.missions.length,
+        same.indexOf(mission),
+        same.length,
         when,
-        named ? result.missions[index].jobName : '',
+        named ? mission.jobName : '',
       ),
       bytes,
       'application/vnd.google-earth.kmz',

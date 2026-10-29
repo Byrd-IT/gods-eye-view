@@ -147,6 +147,49 @@ test('overlapping rectangles are flown once and keep a job each', () => {
   assert.equal(built.areaStats[0].shared, false);
 });
 
+test('a waypoint in only one of two overlapping boxes stays in that box job', () => {
+  const shift = 100 / metersPerDegree(32.7).lon;
+  const a = boxAround(-94.5, 32.7, 200, 120);
+  const b = {
+    west: a.west + shift,
+    east: a.east + shift,
+    south: a.south,
+    north: a.north,
+  };
+  const plan = planAreas(
+    [
+      { id: 'a', name: 'West', kind: 'rect', box: a },
+      { id: 'b', name: 'East', kind: 'rect', box: b },
+    ],
+    opts,
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.jobs.length, 2);
+  const inside = (box, w) =>
+    w.lon >= box.west &&
+    w.lon <= box.east &&
+    w.lat >= box.south &&
+    w.lat <= box.north;
+  let onlyWest = 0;
+  let onlyEast = 0;
+  for (const leg of plan.legs) {
+    for (const w of leg.waypoints) {
+      const west = inside(a, w);
+      const east = inside(b, w);
+      if (west && !east) {
+        onlyWest += 1;
+        assert.equal(leg.jobId, 'job-1', `${w.lon},${w.lat}`);
+      }
+      if (east && !west) {
+        onlyEast += 1;
+        assert.equal(leg.jobId, 'job-2', `${w.lon},${w.lat}`);
+      }
+    }
+  }
+  assert.ok(onlyWest > 0, 'west exclusive ground has no photos');
+  assert.ok(onlyEast > 0, 'east exclusive ground has no photos');
+});
+
 test('disjoint rectangles stay separate flight blocks', () => {
   const a = boxAround(-94.5, 32.7, 140, 100);
   const b = boxAround(-94.48, 32.7, 140, 100);
