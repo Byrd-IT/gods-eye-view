@@ -1015,4 +1015,3 @@ test('an area with no photos of its own is left out of the jobs', () => {
     true,
   );
 });
-

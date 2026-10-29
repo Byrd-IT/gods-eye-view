@@ -589,6 +589,7 @@ try {
   check(
     'an area with no photos of its own may have no processing job',
     merged.jobs.length >= 1 &&
+      merged.jobs.includes(merged.names[0]) &&
       merged.jobs.length <= merged.names.length &&
       merged.jobs.every((name) => merged.names.includes(name)),
     JSON.stringify({ areas: merged.areas, jobs: merged.jobs }),

@@ -255,6 +255,43 @@ test('a committed plan bumps the panel nonce, and a second plan bumps it again',
   w.handle.destroy();
 });
 
+test('a failed plan does not bump the nonce', async () => {
+  const w = setup();
+  assert.equal(w.handle.setBox(boxM(300, 200)), true);
+  await w.handle.replan();
+  assert.equal(w.panel.dataset.planNonce, '1');
+  Object.assign(w.handle.getState().options, {
+    aglM: 10,
+    frontOverlap: 95,
+    sideOverlap: 95,
+  });
+  w.handle.setBox(boxM(3000, 3000));
+  await w.handle.replan();
+  assert.equal(w.panel.dataset.state, 'idle');
+  assert.equal(w.panel.dataset.planNonce, '1');
+  w.handle.destroy();
+});
+
+test('a plan overtaken by a newer one does not bump the nonce', async () => {
+  const slow = deferred();
+  let calls = 0;
+  const w = setup({
+    sample: async (cartos) => {
+      calls += 1;
+      if (calls === 1) await slow.promise;
+      return flat(cartos);
+    },
+  });
+  w.handle.setBox(boxM(300, 200));
+  const first = w.handle.replan();
+  await w.handle.replan();
+  assert.equal(w.panel.dataset.planNonce, '1');
+  slow.resolve();
+  await first;
+  assert.equal(w.panel.dataset.planNonce, '1');
+  w.handle.destroy();
+});
+
 test('a drawn box becomes stats, a path on the globe and downloadable missions', async () => {
   const w = setup();
   assert.ok(w.handle);
