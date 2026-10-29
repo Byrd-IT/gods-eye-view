@@ -277,3 +277,22 @@ test('a long line still clips a small margin exactly', () => {
   nearPt(pieces[0].start, 2492, 5, 0.05);
   nearPt(pieces[0].end, 2518, 5, 0.05);
 });
+
+test('a line that grazes the margin still ends on the boundary', () => {
+  const ring = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 10 },
+    { x: 0, y: 10 },
+  ];
+  const pieces = clipSegmentToMargin(
+    { x: -20, y: -7.8 },
+    { x: 102, y: -7.8 },
+    ring,
+    8,
+  );
+  assert.equal(pieces.length, 1);
+  const reach = Math.sqrt(64 - 7.8 * 7.8);
+  nearPt(pieces[0].start, -reach, -7.8, 0.05);
+  nearPt(pieces[0].end, 100 + reach, -7.8, 0.05);
+});

@@ -318,11 +318,18 @@ function sampleMarginCrossings(a, b, spec, fromT, prevIn) {
   const length = Math.hypot(b.x - a.x, b.y - a.y);
   const hits = [];
   let prev = prevIn;
-  for (let d = fromT * length + 1; d < length; d += 1) {
-    const now = specContains(spec, at(a, b, d / length));
-    if (now === prev) continue;
-    let lo = (d - 1) / length;
-    let hi = d / length;
+  let loT = fromT;
+  const marks = [];
+  for (let d = fromT * length + 1; d < length; d += 1) marks.push(d / length);
+  marks.push(1);
+  for (const t of marks) {
+    const now = specContains(spec, at(a, b, t));
+    if (now === prev) {
+      loT = t;
+      continue;
+    }
+    let lo = loT;
+    let hi = t;
     for (let k = 0; k < 20; k += 1) {
       const mid = (lo + hi) / 2;
       if (specContains(spec, at(a, b, mid)) === prev) lo = mid;
@@ -330,6 +337,7 @@ function sampleMarginCrossings(a, b, spec, fromT, prevIn) {
     }
     hits.push(hi);
     prev = now;
+    loT = t;
   }
   return hits;
 }

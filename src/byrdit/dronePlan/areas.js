@@ -315,7 +315,9 @@ function reverseLegPoints(leg) {
  * planFlight starts a rectangle at the box's own corner, ignoring the shared
  * takeoff. Turn the lawnmower so the first waypoint is the corner nearest
  * that takeoff. A tilted line keeps its direction: reversing its points would
- * put the camera look-ahead on the wrong end.
+ * put the camera look-ahead on the wrong end. Only the order of the legs and
+ * of the points on a nadir leg changes. Notes that depend on order are
+ * rebuilt by planAreas; this does not recompute them.
  */
 function orientLegsToward(legs, takeoff, lookAhead) {
   if (!takeoff || !legs?.length) return legs;
@@ -656,7 +658,7 @@ export function planAreas(areas, rawOptions = {}) {
     planNotes.push({ code: 'vlos', params: { distanceM: Math.round(farthest) } });
   }
   const anyPolygon = list.some((area) => area.kind === 'polygon');
-  const preset = getPreset(decided.options.presetId) ?? getPreset(DEFAULT_PRESET_ID);
+  const preset = getPreset(options.presetId) ?? getPreset(DEFAULT_PRESET_ID);
   return {
     ...first,
     takeoff: decided.takeoff,
@@ -671,8 +673,9 @@ export function planAreas(areas, rawOptions = {}) {
     orbitPerArea: options.pattern === 'orbit',
     // A rectangle planned on its own does not carry these. Copy them from
     // the whole list, not from whichever group happened to be first.
+    // `options` is the normalized set the lines were clipped with.
     clippedToPolygon: anyPolygon,
-    footprintMarginM: marginM(preset, decided.options, anyPolygon),
+    footprintMarginM: marginM(preset, options, anyPolygon),
   };
 }
 

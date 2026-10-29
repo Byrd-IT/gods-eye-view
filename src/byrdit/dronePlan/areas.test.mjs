@@ -743,3 +743,26 @@ test('a polygon after a separate rectangle still marks the whole plan clipped', 
   );
 });
 
+test('the reported margin stays finite when height is left out', () => {
+  const rect = boxAround(-94.5, 32.7, 140, 100);
+  const frame = makeFrame(-94.48, 32.7);
+  const ring = [
+    { x: 0, y: 0 },
+    { x: 120, y: 0 },
+    { x: 120, y: 90 },
+    { x: 0, y: 90 },
+  ].map((p) => frame.toLonLat(p.x, p.y));
+  const bare = { ...opts };
+  delete bare.aglM;
+  const areas = [
+    { id: 'r', name: 'Rect', kind: 'rect', box: rect },
+    { id: 'p', name: 'Poly', kind: 'polygon', ring },
+  ];
+  const plan = planAreas(areas, bare);
+  const only = planAreas([{ id: 'p', name: 'Poly', kind: 'polygon', ring }], bare);
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(only.error, undefined, only.message);
+  assert.equal(Number.isFinite(plan.footprintMarginM), true);
+  assert.equal(plan.footprintMarginM, only.footprintMarginM);
+});
+
