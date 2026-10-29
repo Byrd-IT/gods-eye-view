@@ -59,9 +59,13 @@ function matchAircraft(raw) {
   // instead of guessing, and never echo the caller's string.
   if (!key || key.length < 3) return null;
   const presets = listPresets();
-  const exact = presets.filter(
-    (preset) => fold(preset.id) === key || fold(preset.name) === key,
-  );
+  const exact = presets.filter((preset) => {
+    const id = fold(preset.id);
+    const name = fold(preset.name);
+    const bare = (folded) =>
+      folded.startsWith('dji') ? folded.slice(3) : folded;
+    return id === key || name === key || bare(id) === key || bare(name) === key;
+  });
   if (exact.length === 1) return exact[0];
   const partial = presets.filter(
     (preset) =>
@@ -244,10 +248,7 @@ export function createDronePlanVoice(handle) {
         if (mode != null && !MODES.includes(mode))
           return fail('mode must be mapping-grid, splat-orbit, or fast-survey');
         ensureOpen();
-        if (
-          handle.useRecommended(mode ?? undefined, { planNow: true }) !== true
-        )
-          return fail('mode must be mapping-grid, splat-orbit, or fast-survey');
+        handle.useRecommended(mode ?? undefined, { planNow: true });
         await handle.replan();
         return summary();
       });
@@ -350,22 +351,23 @@ export function createDronePlanVoice(handle) {
         if (which !== 'mission' && which !== 'all' && which !== 'suite')
           return fail('which must be mission, all, or suite');
         if (which === 'suite') {
-          if (handle.suiteAllowed?.() !== true)
+          if (handle.downloadSuite() !== true)
             return fail('Downloads are not available yet');
-          handle.downloadSuite();
           return { ok: true, downloaded: true, which };
         }
-        if (handle.downloadsAllowed?.() !== true)
-          return fail('Downloads are not available yet');
         if (which === 'all') {
-          handle.downloadAll();
+          if (handle.downloadAll() !== true)
+            return fail('Downloads are not available yet');
           return { ok: true, downloaded: true, which };
         }
         const missions = handle.getResult?.()?.missions ?? [];
         const index = args.index == null ? 0 : args.index;
+        if (handle.downloadsAllowed?.() !== true)
+          return fail('Downloads are not available yet');
         if (!integerIn(index, 0, missions.length - 1))
           return fail('No mission at that index');
-        handle.downloadMission(index);
+        if (handle.downloadMission(index) !== true)
+          return fail('Downloads are not available yet');
         return { ok: true, downloaded: true, which, index };
       });
     },

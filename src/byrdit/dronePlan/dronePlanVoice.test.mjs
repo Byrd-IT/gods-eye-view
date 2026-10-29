@@ -104,12 +104,15 @@ function fakeHandle(over = {}) {
     },
     downloadMission(index) {
       calls.push(['downloadMission', index]);
+      return true;
     },
     downloadAll() {
       calls.push(['downloadAll']);
+      return true;
     },
     downloadSuite() {
       calls.push(['downloadSuite']);
+      return true;
     },
     downloadsAllowed: () => state.result != null,
     suiteAllowed: () => state.suite != null,
@@ -347,6 +350,20 @@ test('suite replans a dirty area before the passes', async () => {
   assert.equal(result.ok, true);
   const names = calls.map((call) => call[0]);
   assert.ok(names.indexOf('replan') < names.indexOf('planSuite'));
+});
+
+test('spoken names match one catalog aircraft, including Air 3 beside Air 3S', async () => {
+  const { handle, state } = fakeHandle();
+  const voice = createDronePlanVoice(handle);
+  for (const [spoken, id] of [
+    ['Air 3', 'dji-air-3'],
+    ['Air 3S', 'dji-air-3s'],
+    ['Mavic 3', 'dji-mavic-3'],
+  ]) {
+    const result = await voice.options({ aircraft: spoken });
+    assert.equal(result.ok, true, spoken);
+    assert.equal(state.options.presetId, id, spoken);
+  }
 });
 
 test('a missing panel does not throw', async () => {

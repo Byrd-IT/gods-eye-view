@@ -1192,13 +1192,14 @@ export function initDronePlan({
   }
 
   function downloadSuite(when = new Date()) {
-    if (!suiteAllowed()) return;
+    if (!suiteAllowed()) return false;
     const bytes = buildSuiteZip(state.suite.passes, {
       when,
       wpml: wpmlOverride(),
     });
     const stamp = kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
     downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
+    return true;
   }
 
   const kmzOk = () =>
@@ -1240,7 +1241,7 @@ export function initDronePlan({
 
   function downloadMission(index, when = new Date()) {
     const result = state.result;
-    if (!downloadsAllowed() || !result.missions[index]) return;
+    if (!downloadsAllowed() || !result.missions[index]) return false;
     const bytes = buildKmz(result.missions[index], result.plan, {
       when,
       wpml: wpmlOverride(),
@@ -1261,14 +1262,16 @@ export function initDronePlan({
       bytes,
       'application/vnd.google-earth.kmz',
     );
+    return true;
   }
 
   function downloadAll(when = new Date()) {
     const result = state.result;
-    if (!downloadsAllowed()) return;
+    if (!downloadsAllowed()) return false;
     const bytes = buildBundleZip(result, { when, wpml: wpmlOverride() });
     const stamp = kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
     downloadFile(`${stamp}-all.zip`, bytes, 'application/zip');
+    return true;
   }
 
   // --------------------------------------------------------- open/close --
@@ -1388,11 +1391,7 @@ export function initDronePlan({
       if (!preset) return false;
       o.presetId = preset.id;
       if (!Object.hasOwn(patch, 'speedMs')) o.speedMs = preset.defaultSpeedMs;
-      if (
-        !Object.hasOwn(patch, 'droneEnumValue') &&
-        patch.clearDroneCode !== true
-      )
-        state.wpml = { droneEnumValue: null, droneSubEnumValue: null };
+      state.wpml = { droneEnumValue: null, droneSubEnumValue: null };
       plan = true;
     }
     if (Object.hasOwn(patch, 'mode') && modeFor(o) !== patch.mode) {
