@@ -738,4 +738,35 @@ export const ACTION_DESCRIPTIONS = {
       },
     },
   },
+  control_droneplan: {
+    description:
+      'Drone Flight Plan rail: draw an area, set aircraft and capture options, plan DJI Fly KMZ missions, or plan every recommended pass. open shows the panel and does not start a draw. draw starts the box or polygon tool; the person still has to drag or click. box and polygon set an area from coordinates. recommend applies the recommended speed, height, overlap and shutter for the current aircraft and mode. options sets one or more panel controls. takeoff is pick (the person clicks the ground), clear (box centre), or point (lat and lon). suite plans every recommended pass. download saves a mission, all missions, or the suite zip only when downloads is true. close clears the plan from the globe. Say the resulting aircraft, mode and counts, not the request. If downloaded is false, do not claim a file was saved. If drawing is false, the draw did not start. If terrainComplete is false, heights are incomplete. These files are NOT FLIGHT-TESTED: never say a mission is safe to fly.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: {
+          description:
+            'open, close, status, draw (kind box or polygon), box (west south east north), polygon (ring), recommend (mode optional), options, takeoff (pick, clear, or point), remove (areaId), replan, suite, or download (which mission, all, or suite; index for one mission).',
+          $position: 2,
+        },
+        kind: {
+          description: 'For draw: box or polygon.',
+          $position: 1,
+        },
+        aircraft: {
+          description:
+            'For options: a catalog aircraft name or preset id, such as Mini 5 Pro or dji-phantom-4. An unknown name returns no match.',
+          $position: 1,
+        },
+        which: {
+          description: 'For download: mission, all, or suite.',
+          $position: 1,
+        },
+        takeoff: {
+          description: 'For takeoff: pick, clear, or point.',
+          $position: 1,
+        },
+      },
+    },
+  },
 };

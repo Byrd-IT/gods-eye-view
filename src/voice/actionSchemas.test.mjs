@@ -50,9 +50,10 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // History playback voice adds the control_history tool (last).
     // Sky view voice adds the control_sky tool (last).
     // Imagery-by-year voice adds the control_imagery tool (last).
+    // Drone Flight Plan voice adds the control_droneplan tool (last).
     // drawn/compare/waybackOff speaking rule, description only.
     // waybackStillOn and starting speaking rule, description only.
-    '0d6e295b1061a279c70f3e985cbf704571e94eaecf1ab9200bb54234569eb1ba',
+    '2977c15c980fadaea0adfdae79f1b9c7c1dde48374222421828bef2d54f1d74f',
   );
 });
 
@@ -118,6 +119,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'control_history',
         'control_sky',
         'control_imagery',
+        'control_droneplan',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by

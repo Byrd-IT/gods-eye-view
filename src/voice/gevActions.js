@@ -271,6 +271,7 @@ export function createGevActionRunner({
   history = null,
   sky = null,
   imagery = null,
+  dronePlan = null,
 }) {
   // Voice enable times and analyst follow-up memory belong to this runner.
   // Speech builders turn results into say/display envelopes; callers extend
@@ -1314,6 +1315,10 @@ export function createGevActionRunner({
       return controlImagery(imagery?.(), args);
     }
 
+    if (name === 'control_droneplan') {
+      return controlDronePlan(dronePlan?.(), args);
+    }
+
     if (name === 'control_cctv') {
       const action = String(args.action || '').toLowerCase();
       if (
@@ -1778,6 +1783,54 @@ async function controlImagery(voice, args = {}) {
   if (action === 'off') return wrap(await voice.off({ target: args.target }));
   const token = /^[a-z]{1,20}$/.test(action) ? action : 'missing';
   throw new Error(`Unknown imagery action: ${token}`);
+}
+
+/**
+ * Voice Drone Flight Plan control over the panel adapter (dronePlanVoice.js,
+ * handed in as `dronePlan`). The rail is unchanged; this only calls it.
+ */
+async function controlDronePlan(voice, args = {}) {
+  const action = String(args.action || '').toLowerCase();
+  const wrap = (result) => ({ action: 'control_droneplan', ...result });
+  if (!voice)
+    return wrap({
+      ok: false,
+      error: 'Drone Flight Plan is not available in this host',
+    });
+  if (action === 'open') return wrap(await voice.open());
+  if (action === 'close') return wrap(await voice.close());
+  if (action === 'status') return wrap(await voice.status());
+  if (action === 'draw') return wrap(await voice.draw(args.kind));
+  if (action === 'box')
+    return wrap(
+      await voice.box({
+        west: args.west,
+        south: args.south,
+        east: args.east,
+        north: args.north,
+      }),
+    );
+  if (action === 'polygon') return wrap(await voice.polygon(args.ring));
+  if (action === 'recommend') return wrap(await voice.recommend(args.mode));
+  if (action === 'options') return wrap(await voice.options(args));
+  if (action === 'takeoff')
+    return wrap(
+      await voice.takeoff({
+        takeoff: args.takeoff,
+        lat: args.lat,
+        lon: args.lon,
+      }),
+    );
+  if (action === 'remove')
+    return wrap(await voice.remove({ areaId: args.areaId, index: args.index }));
+  if (action === 'replan') return wrap(await voice.replan());
+  if (action === 'suite') return wrap(await voice.suite());
+  if (action === 'download')
+    return wrap(await voice.download({ which: args.which, index: args.index }));
+  // A token that is not a short word is not repeated: the model may have
+  // put a secret in the action field.
+  const token = /^[a-z]{1,20}$/.test(action) ? action : 'missing';
+  throw new Error(`Unknown drone plan action: ${token}`);
 }
 
 /** Voice CCTV control over the cctv layer module's public surface. */

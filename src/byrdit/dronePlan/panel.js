@@ -177,8 +177,7 @@ export function initDronePlan({
   }
 
   function showCommitted() {
-    const onlyRect =
-      state.areas.length === 1 && state.areas[0].kind === 'rect';
+    const onlyRect = state.areas.length === 1 && state.areas[0].kind === 'rect';
     if (onlyRect) {
       preview.showBox(state.areas[0].box);
       preview.showAreas(null);
@@ -283,17 +282,17 @@ export function initDronePlan({
         ? takeoffDistanceFromBoxM(state.box, point)
         : 0;
     if (away > MAX_TAKEOFF_FROM_BOX_M) {
-        status(
-          warningText({
-            code: 'takeoff-too-far',
-            params: {
-              distanceM: Math.round(away),
-              limitM: MAX_TAKEOFF_FROM_BOX_M,
-            },
-          }),
-          'warn',
-        );
-        return false;
+      status(
+        warningText({
+          code: 'takeoff-too-far',
+          params: {
+            distanceM: Math.round(away),
+            limitM: MAX_TAKEOFF_FROM_BOX_M,
+          },
+        }),
+        'warn',
+      );
+      return false;
     }
     state.takeoff = point;
     status('');
@@ -663,15 +662,7 @@ export function initDronePlan({
     });
     ui.suiteButton.addEventListener('click', () => planSuite());
     ui.useRecommended.addEventListener('click', () => {
-      const rec = recommend(getPreset(o.presetId), ui.mode.value, {
-        orbitRadiusM:
-          o.orbitRadiusM ??
-          state.result?.plan?.options?.orbitRadiusM ??
-          undefined,
-      });
-      Object.assign(o, recommendedOptions(rec));
-      syncControls();
-      schedule();
+      useRecommended();
     });
     onInput(ui.agl, () => (o.aglM = Number(ui.agl.value)));
     onInput(ui.front, () => (o.frontOverlap = Number(ui.front.value)));
@@ -724,16 +715,10 @@ export function initDronePlan({
     ui.polygonButton.addEventListener('click', () => drawPolygon());
     ui.closeButton.addEventListener('click', () => close());
     ui.takeoffButton.addEventListener('click', () => {
-      if (!state.areas.length)
-        return status(t('Draw a box on the globe first'), 'warn');
-      boxTool?.cancel('switch');
-      polygonTool?.cancel('switch');
-      if (takeoffTool?.isActive()) takeoffTool.cancel('cancel');
-      else takeoffTool?.start();
+      startTakeoffPick();
     });
     ui.takeoffReset.addEventListener('click', () => {
-      state.takeoff = null;
-      schedule(0);
+      clearTakeoff();
     });
   }
 
@@ -890,24 +875,15 @@ export function initDronePlan({
         schedule();
       });
       const kind = el(doc, 'span', row, { cls: 'gev-dp-area-kind' });
-      kind.textContent = area.kind === 'polygon' ? t('Polygon') : t('Rectangle');
+      kind.textContent =
+        area.kind === 'polygon' ? t('Polygon') : t('Rectangle');
       const remove = el(doc, 'button', row, {
         cls: 'data-toggle-chip',
         text: t('Remove'),
         attrs: { type: 'button', 'data-remove-area': area.id },
       });
       remove.addEventListener('click', () => {
-        state.areas = state.areas.filter((item) => item.id !== area.id);
-        state.box = state.areas.at(-1)?.box ?? null;
-        if (
-          state.takeoff &&
-          (!state.areas.length ||
-            distanceToAreasM(state.areas, state.takeoff) > MAX_TAKEOFF_FROM_BOX_M)
-        ) {
-          state.takeoff = null;
-        }
-        showCommitted();
-        schedule(0);
+        removeArea(area.id);
       });
     }
   }
@@ -929,7 +905,11 @@ export function initDronePlan({
     } else if (state.busy) {
       status(t('Reading terrain heights'), 'info');
       reading = true;
-    } else if (!state.areas.length && !boxTool?.isActive() && !polygonTool?.isActive()) {
+    } else if (
+      !state.areas.length &&
+      !boxTool?.isActive() &&
+      !polygonTool?.isActive()
+    ) {
       status(t('Draw a box over the area to map'), 'info');
     } else if (reading) {
       // The "reading terrain" line must not outlive the reading.
@@ -980,12 +960,13 @@ export function initDronePlan({
       const row = el(doc, 'div', list, { cls: 'gev-dp-mission' });
       el(doc, 'span', row, {
         cls: 'gev-dp-mission-label',
-        text: t('Mission {n}: {wp} waypoints, {photos} photos, {time}', {
-          n: num(i + 1),
-          wp: num(m.waypointCount),
-          photos: num(m.photoCount),
-          time: durationText(m.durationS),
-        }) + (m.jobName && result.jobs?.length > 1 ? ` · ${m.jobName}` : ''),
+        text:
+          t('Mission {n}: {wp} waypoints, {photos} photos, {time}', {
+            n: num(i + 1),
+            wp: num(m.waypointCount),
+            photos: num(m.photoCount),
+            time: durationText(m.durationS),
+          }) + (m.jobName && result.jobs?.length > 1 ? ` · ${m.jobName}` : ''),
       });
       const button = el(doc, 'button', row, {
         cls: 'data-toggle-chip',
@@ -1043,7 +1024,14 @@ export function initDronePlan({
   }
 
   async function planSuite() {
-    if (destroyed || !state.areas.length || state.suiteBusy || state.busy || state.dirty) return;
+    if (
+      destroyed ||
+      !state.areas.length ||
+      state.suiteBusy ||
+      state.busy ||
+      state.dirty
+    )
+      return;
     const token = ++suiteToken;
     state.suiteBusy = true;
     state.suite = null;
@@ -1063,7 +1051,12 @@ export function initDronePlan({
           jobGrouping: state.jobGrouping,
         });
         if (plan.error) {
-          passes.push({ id: pass.id, label: pass.label, result: null, error: plan.error });
+          passes.push({
+            id: pass.id,
+            label: pass.label,
+            result: null,
+            error: plan.error,
+          });
           continue;
         }
         const points = plan.legs.flatMap((leg) => leg.waypoints);
@@ -1098,7 +1091,9 @@ export function initDronePlan({
     if (destroyed || token !== suiteToken) return;
     state.suite = { passes, when: new Date() };
     state.suiteBusy = false;
-    panel.dataset.suiteNonce = String((Number(panel.dataset.suiteNonce) || 0) + 1);
+    panel.dataset.suiteNonce = String(
+      (Number(panel.dataset.suiteNonce) || 0) + 1,
+    );
     render();
   }
 
@@ -1130,7 +1125,8 @@ export function initDronePlan({
 
   function renderSuite() {
     ui.suite.replaceChildren();
-    ui.suiteButton.disabled = !state.areas.length || state.suiteBusy || state.busy;
+    ui.suiteButton.disabled =
+      !state.areas.length || state.suiteBusy || state.busy;
     if (state.suiteBusy) {
       el(doc, 'p', ui.suite, {
         cls: 'gev-dp-note',
@@ -1150,11 +1146,14 @@ export function initDronePlan({
         text = `${pass.label}: ${t('not planned')} (${planErrorText(pass.error)})`;
       } else {
         const tot = pass.result.totals;
-        text = `${pass.label}: ${t('{missions} missions, {photos} photos, {time}', {
-          missions: num(tot.missionCount),
-          photos: num(tot.photoCount),
-          time: durationText(tot.durationS),
-        })}`;
+        text = `${pass.label}: ${t(
+          '{missions} missions, {photos} photos, {time}',
+          {
+            missions: num(tot.missionCount),
+            photos: num(tot.photoCount),
+            time: durationText(tot.durationS),
+          },
+        )}`;
         const bad = pass.result.warnings
           .map((w) => warningText(w))
           .filter(Boolean);
@@ -1288,11 +1287,13 @@ export function initDronePlan({
     polygonTool?.cancel('switch');
     if (boxTool?.isActive()) {
       boxTool.cancel('cancel');
-      return;
+      return false;
     }
     if (!boxTool?.start()) {
       status(t('Another tool is using the pointer. Close it first'), 'warn');
+      return false;
     }
+    return true;
   }
 
   function drawPolygon() {
@@ -1300,11 +1301,13 @@ export function initDronePlan({
     boxTool?.cancel('switch');
     if (polygonTool?.isActive()) {
       polygonTool.cancel('cancel');
-      return;
+      return false;
     }
     if (!polygonTool?.start()) {
       status(t('Another tool is using the pointer. Close it first'), 'warn');
+      return false;
     }
+    return true;
   }
 
   function open({ draw = true } = {}) {
@@ -1344,6 +1347,149 @@ export function initDronePlan({
   syncControls();
   panel.hidden = true;
 
+  function useRecommended(mode) {
+    const o = state.options;
+    const selected =
+      typeof mode === 'string' && MODES.includes(mode) ? mode : ui.mode.value;
+    if (modeFor(o) !== selected) {
+      const next = recommend(getPreset(o.presetId), selected);
+      o.pattern = next.pattern;
+      o.photoMode = next.photoMode;
+    }
+    const rec = recommend(getPreset(o.presetId), selected, {
+      orbitRadiusM:
+        o.orbitRadiusM ??
+        state.result?.plan?.options?.orbitRadiusM ??
+        undefined,
+    });
+    Object.assign(o, recommendedOptions(rec));
+    syncControls();
+    schedule();
+    return true;
+  }
+
+  function applyOptions(patch = {}) {
+    const o = state.options;
+    let plan = false;
+    if (Object.hasOwn(patch, 'presetId')) {
+      const preset = getPreset(patch.presetId);
+      if (!preset) return false;
+      o.presetId = preset.id;
+      if (!Object.hasOwn(patch, 'speedMs')) o.speedMs = preset.defaultSpeedMs;
+      if (
+        !Object.hasOwn(patch, 'droneEnumValue') &&
+        patch.clearDroneCode !== true
+      )
+        state.wpml = { droneEnumValue: null, droneSubEnumValue: null };
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'mode') && modeFor(o) !== patch.mode) {
+      const next = recommend(getPreset(o.presetId), patch.mode);
+      if (!Object.hasOwn(patch, 'pattern')) o.pattern = next.pattern;
+      if (!Object.hasOwn(patch, 'photoMode')) o.photoMode = next.photoMode;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'pattern')) {
+      o.pattern = patch.pattern;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'photoMode')) {
+      o.photoMode = patch.photoMode;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'direction')) {
+      o.direction = patch.direction;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'aglM')) {
+      o.aglM = patch.aglM;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'frontOverlap')) {
+      o.frontOverlap = patch.frontOverlap;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'sideOverlap')) {
+      o.sideOverlap = patch.sideOverlap;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'tiltPitchDeg')) {
+      o.tiltPitchDeg = patch.tiltPitchDeg;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'orbitRadiusM')) {
+      o.orbitRadiusM = patch.orbitRadiusM;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'orbitHeightsM')) {
+      o.orbitHeightsM = patch.orbitHeightsM;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'speedMs')) {
+      o.speedMs = patch.speedMs;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'shutterDenominator')) {
+      o.shutterDenominator = patch.shutterDenominator;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'batteryMin')) {
+      o.batteryMin = patch.batteryMin;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'jobs')) {
+      state.jobGrouping = patch.jobs === 'whole' ? 'whole' : 'per-area';
+      plan = true;
+    }
+    if (patch.clearDroneCode === true) state.wpml.droneEnumValue = null;
+    else if (Object.hasOwn(patch, 'droneEnumValue'))
+      state.wpml.droneEnumValue = patch.droneEnumValue;
+    syncControls();
+    if (plan) schedule();
+    else if (
+      state.result &&
+      (patch.clearDroneCode === true || Object.hasOwn(patch, 'droneEnumValue'))
+    )
+      render();
+    return true;
+  }
+
+  function clearTakeoff() {
+    state.takeoff = null;
+    schedule(0);
+    return true;
+  }
+
+  function startTakeoffPick() {
+    if (!state.areas.length) {
+      status(t('Draw a box on the globe first'), 'warn');
+      return false;
+    }
+    boxTool?.cancel('switch');
+    polygonTool?.cancel('switch');
+    if (takeoffTool?.isActive()) {
+      takeoffTool.cancel('cancel');
+      return false;
+    }
+    return Boolean(takeoffTool?.start());
+  }
+
+  function removeArea(id) {
+    if (!state.areas.some((item) => item.id === id)) return false;
+    state.areas = state.areas.filter((item) => item.id !== id);
+    state.box = state.areas.at(-1)?.box ?? null;
+    if (
+      state.takeoff &&
+      (!state.areas.length ||
+        distanceToAreasM(state.areas, state.takeoff) > MAX_TAKEOFF_FROM_BOX_M)
+    ) {
+      state.takeoff = null;
+    }
+    showCommitted();
+    schedule(0);
+    return true;
+  }
+
   const handle = {
     open,
     close,
@@ -1368,6 +1514,15 @@ export function initDronePlan({
     downloadSuite,
     setTakeoff: acceptTakeoff,
     replan,
+    drawBox,
+    drawPolygon,
+    useRecommended,
+    applyOptions,
+    clearTakeoff,
+    startTakeoffPick,
+    removeArea,
+    downloadsAllowed,
+    suiteAllowed,
     destroy() {
       if (destroyed) return;
       destroyed = true;

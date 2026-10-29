@@ -4,6 +4,7 @@ import { initDrawTool } from '../annotations/drawTool.js';
 import { initGeoFileImport } from '../ui/geoFileImport.js';
 import { initImageryBoxTool } from '../ui/imageryBoxTool.js';
 import { initDronePlan } from '../byrdit/dronePlan/panel.js';
+import { createDronePlanVoice } from '../byrdit/dronePlan/dronePlanVoice.js';
 import { createRecentImageryPanel } from '../ui/recentImagery.js';
 import { initGevVoiceCommands } from '../voice/gevRealtime.js';
 import { installViews, isEmbeddedInline } from './embed.js';
@@ -74,6 +75,7 @@ export function createApplicationTools({
   // to the application lifetime too.
   const dronePlan = initDronePlan({ viewer });
   if (dronePlan) {
+    dronePlan.voice = createDronePlanVoice(dronePlan);
     window.__gevDronePlan = dronePlan;
     defer(() => {
       if (window.__gevDronePlan === dronePlan) delete window.__gevDronePlan;
@@ -213,6 +215,7 @@ export function createApplicationTools({
     history: () => window.__gevHistorySwap?.voice ?? null,
     sky: () => window.__gevSky?.voice ?? null,
     imagery: () => window.__gevImagery?.voice ?? null,
+    dronePlan: () => window.__gevDronePlan?.voice ?? null,
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });

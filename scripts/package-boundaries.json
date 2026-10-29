@@ -1905,6 +1905,7 @@
       "src/byrdit/dronePlan/format.js",
       "src/byrdit/dronePlan/geo.js",
       "src/byrdit/dronePlan/limits.js",
+      "src/byrdit/dronePlan/dronePlanVoice.js",
       "src/byrdit/dronePlan/panel.js",
       "src/byrdit/dronePlan/planner.js",
       "src/byrdit/dronePlan/pointTool.js",

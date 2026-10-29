@@ -26,11 +26,11 @@ const css = readStylesheet(new URL('../style.css', import.meta.url));
 
 function realtimeTools() { return GEV_REALTIME_TOOLS; }
 
-test('Realtime schema exposes the authoritative 34-tool inventory', () => {
+test('Realtime schema exposes the authoritative 35-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 34);
+  assert.equal(tools.length, 35);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 34, 'tool names are unique');
+  assert.equal(new Set(names).size, 35, 'tool names are unique');
   assert.ok(names.includes('set_context_mode'));
   assert.ok(names.includes('control_cockpit'));
   assert.ok(names.includes('set_voice_inactivity_timeout'));
@@ -40,6 +40,7 @@ test('Realtime schema exposes the authoritative 34-tool inventory', () => {
   assert.ok(names.includes('next_iss_pass'));
   assert.ok(names.includes('control_sky'));
   assert.ok(names.includes('control_imagery'));
+  assert.ok(names.includes('control_droneplan'));
   // Every tool closes its parameter object: an open schema lets the model
   // invent arguments the runner silently drops.
   for (const tool of tools) {
@@ -208,6 +209,8 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     'control_sky',
     // Imagery-by-year voice: a new tool, appended last.
     'control_imagery',
+    // Drone Flight Plan voice: a new tool, appended last.
+    'control_droneplan',
   ]);
   const unchanged = realtimeTools()
     .filter((tool) => !TOUCHED.has(tool.name))

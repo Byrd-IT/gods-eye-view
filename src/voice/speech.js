@@ -861,6 +861,7 @@ const STEP_TITLES = Object.freeze({
   control_history: msg('Control history'),
   control_sky: msg('Control sky'),
   control_imagery: msg('Control imagery'),
+  control_droneplan: msg('Control drone plan'),
   control_cctv: msg('Control CCTV'),
   control_radio: msg('Control radio'),
   track_entity: msg('Track contact'),

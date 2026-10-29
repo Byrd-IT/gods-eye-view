@@ -45,11 +45,12 @@ function harness(imagery) {
   return { runner, voice };
 }
 
-test('control_imagery is the last Realtime tool and does not reorder control_sky', () => {
+test('control_imagery stays just before control_droneplan and does not reorder control_sky', () => {
   const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);
-  assert.equal(names.at(-1), 'control_imagery');
-  assert.equal(names.at(-2), 'control_sky');
-  assert.equal(names.at(-3), 'control_history');
+  assert.equal(names.at(-1), 'control_droneplan');
+  assert.equal(names.at(-2), 'control_imagery');
+  assert.equal(names.at(-3), 'control_sky');
+  assert.equal(names.at(-4), 'control_history');
   const tool = GEV_REALTIME_TOOLS.find(
     (item) => item.name === 'control_imagery',
   );

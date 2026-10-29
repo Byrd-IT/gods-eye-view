@@ -855,3 +855,21 @@ test('PLAN ALL RECOMMENDED PASSES plans every pass and zips them; a change makes
   assert.equal(w.handle.getState().suite, null, 'a replan drops the stale suite');
   w.handle.destroy();
 });
+
+test("voice handle methods drive the same plan the buttons do", async () => {
+  const w = setup();
+  w.handle.open({ draw: false });
+  assert.equal(w.handle.isOpen(), true);
+  assert.equal(w.handle.applyOptions({ aglM: 80 }), true);
+  assert.equal(w.handle.getState().options.aglM, 80);
+  w.handle.setBox(boxM(300, 200));
+  assert.equal(w.handle.getState().areas.length, 1);
+  const id = w.handle.getState().areas[0].id;
+  assert.equal(w.handle.removeArea(id), true);
+  assert.equal(w.handle.getState().areas.length, 0);
+  w.handle.setBox(boxM(300, 200));
+  assert.equal(w.handle.useRecommended("mapping-grid"), true);
+  assert.equal(typeof w.handle.downloadsAllowed(), "boolean");
+  assert.equal(typeof w.handle.suiteAllowed(), "boolean");
+  w.handle.destroy();
+});
