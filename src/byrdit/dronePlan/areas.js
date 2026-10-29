@@ -189,6 +189,24 @@ function marginM(preset, options, hasPolygon) {
   return Math.max(fp.acrossM, fp.alongM) / 2;
 }
 
+/** Metres the camera looks ahead of the drone. Zero for a nadir grid. */
+function lookAheadM(options) {
+  if (options.pattern !== 'double') return 0;
+  const tilt = ((90 + options.tiltPitchDeg) * Math.PI) / 180;
+  const ahead = options.aglM * Math.tan(tilt);
+  return Number.isFinite(ahead) && ahead > 0 ? ahead : 0;
+}
+
+/** Shift from a drone point to the point the tilted camera is aimed at. */
+function travelShift(a, b, lookAhead) {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!(len > 1e-6) || !(lookAhead > 0)) return { x: 0, y: 0 };
+  return {
+    x: ((b.x - a.x) / len) * lookAhead,
+    y: ((b.y - a.y) / len) * lookAhead,
+  };
+}
+
 function clipSpec(area, frame, margin) {
   const local = ringXY(areaRing(area), frame);
   if (area.kind !== 'polygon' || !(margin > 0)) return local;
@@ -220,7 +238,7 @@ function shellRing(area, frame, margin) {
   ];
 }
 
-function clipShell(shell, members, frame, margin) {
+function clipShell(shell, members, frame, margin, lookAhead) {
   const specs = members.map((area) => clipSpec(area, frame, margin));
   const out = [];
   for (const leg of shell.legs) {
@@ -233,12 +251,19 @@ function clipShell(shell, members, frame, margin) {
       leg.waypoints[leg.waypoints.length - 1].lon,
       leg.waypoints[leg.waypoints.length - 1].lat,
     );
+    // A tilted camera looks ahead of the drone. Clip that aim, then fly
+    // the drone lookAhead back along the same line.
+    const shift = travelShift(a, b, lookAhead);
+    const aimA = { x: a.x + shift.x, y: a.y + shift.y };
+    const aimB = { x: b.x + shift.x, y: b.y + shift.y };
     const interval = leg.photoMode === 'interval';
     const step = interval ? INTERVAL_WAYPOINT_STEP_M : leg.photoSpacingM;
-    for (const piece of clipSegmentCovered(a, b, specs)) {
-      const length = Math.hypot(piece.end.x - piece.start.x, piece.end.y - piece.start.y);
+    for (const piece of clipSegmentCovered(aimA, aimB, specs)) {
+      const start = { x: piece.start.x - shift.x, y: piece.start.y - shift.y };
+      const end = { x: piece.end.x - shift.x, y: piece.end.y - shift.y };
+      const length = Math.hypot(end.x - start.x, end.y - start.y);
       if (length < MIN_PIECE_M) continue;
-      const { points } = sampleSegment(piece.start, piece.end, step);
+      const { points } = sampleSegment(start, end, step);
       const waypoints = points.map((p, id) => {
         const ll = frame.toLonLat(p.x, p.y);
         return {
@@ -296,7 +321,8 @@ function planCluster(members, rawOptions) {
   }
   const shell = planFlight(shellBox, rawOptions);
   if (shell.error) return shell;
-  const clipped = clipShell(shell, members, frame, margin);
+  const lookAhead = lookAheadM(options);
+  const clipped = clipShell(shell, members, frame, margin, lookAhead);
   if (!clipped.legs.length) {
     return {
       error: 'too-narrow',
@@ -310,6 +336,7 @@ function planCluster(members, rawOptions) {
     box: bboxOfPoints(points),
     clippedToPolygon: members.some((area) => area.kind === 'polygon'),
     footprintMarginM: margin,
+    clusterFrame: frame,
   };
 }
 
@@ -338,7 +365,7 @@ function jobForArea(area, index) {
  * Cut each clipped line where it crosses an area edge. A piece in only one
  * area stays with that area. A piece in the overlap goes to the first area.
  */
-function splitLegsByArea(planned, members, frame, margin) {
+function splitLegsByArea(planned, members, frame, margin, lookAhead) {
   const rings = members.map((area) => clipSpec(area, frame, margin));
   const buckets = members.map(() => []);
   for (const leg of planned.legs) {
@@ -351,15 +378,17 @@ function splitLegsByArea(planned, members, frame, margin) {
       leg.waypoints[leg.waypoints.length - 1].lon,
       leg.waypoints[leg.waypoints.length - 1].lat,
     );
+    const shift = travelShift(a, b, lookAhead);
+    const aimA = { x: a.x + shift.x, y: a.y + shift.y };
+    const aimB = { x: b.x + shift.x, y: b.y + shift.y };
     const interval = leg.photoMode === 'interval';
     const step = interval ? INTERVAL_WAYPOINT_STEP_M : leg.photoSpacingM;
-    for (const piece of assignSegmentToRings(a, b, rings)) {
-      const length = Math.hypot(
-        piece.end.x - piece.start.x,
-        piece.end.y - piece.start.y,
-      );
+    for (const piece of assignSegmentToRings(aimA, aimB, rings)) {
+      const start = { x: piece.start.x - shift.x, y: piece.start.y - shift.y };
+      const end = { x: piece.end.x - shift.x, y: piece.end.y - shift.y };
+      const length = Math.hypot(end.x - start.x, end.y - start.y);
       if (length < MIN_PIECE_M || piece.owner < 0) continue;
-      const { points } = sampleSegment(piece.start, piece.end, step);
+      const { points } = sampleSegment(start, end, step);
       const waypoints = points.map((p) => {
         const ll = frame.toLonLat(p.x, p.y);
         return {
@@ -501,6 +530,8 @@ export function planAreas(areas, rawOptions = {}) {
     const members = indices.map((i) => list[i]);
     const planned = planCluster(members, decided.options);
     if (planned.error) return planned;
+    const clusterFrame = planned.clusterFrame;
+    delete planned.clusterFrame;
     first ??= planned;
     if (grouping === 'whole' || members.length === 1) {
       const job =
@@ -518,7 +549,13 @@ export function planAreas(areas, rawOptions = {}) {
         options,
         members.some((area) => area.kind === 'polygon'),
       );
-      const buckets = splitLegsByArea(planned, members, frame, margin);
+      const buckets = splitLegsByArea(
+        planned,
+        members,
+        clusterFrame,
+        margin,
+        lookAheadM(options),
+      );
       members.forEach((area, i) => {
         if (!buckets[i].length) return;
         pushLegs(

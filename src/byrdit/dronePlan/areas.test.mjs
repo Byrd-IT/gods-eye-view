@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { assembleAreaPlan, distanceToAreasM, jobSlug, planAreas } from './areas.js';
 import { makeFrame, metersPerDegree } from './geo.js';
+import { pointInRing } from './polygon.js';
 import { assembleMissions, planFlight } from './planner.js';
 
 function boxAround(lon, lat, widthM, heightM) {
@@ -428,6 +429,112 @@ test('a double-grid polygon plans without using the bounding box as the flown ar
   assert.equal(plan.error, undefined, plan.message);
   assert.ok(plan.legs.length > 1);
   assert.equal(plan.jobs.length, 1);
+});
+
+function legAims(leg, frame, look) {
+  const pts = leg.waypoints.map((w) => frame.toXY(w.lon, w.lat));
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  const ux = len > 1e-6 ? (b.x - a.x) / len : 0;
+  const uy = len > 1e-6 ? (b.y - a.y) / len : 0;
+  return pts.map((p) => ({
+    x: p.x + ux * look,
+    y: p.y + uy * look,
+    jobId: leg.jobId,
+  }));
+}
+
+function distToSeg(p, a, b) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby;
+  const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2));
+  return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
+}
+
+test('a double-grid of two overlapping rectangles aims at each edge and keeps each job in its own box', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const agl = 60;
+  const tilt = -45;
+  const look = agl * Math.tan(((90 + tilt) * Math.PI) / 180);
+  near(look, agl, 0.01, 'look-ahead');
+  const rect = (x0, y0, x1, y1) => {
+    const sw = frame.toLonLat(x0, y0);
+    const ne = frame.toLonLat(x1, y1);
+    return { west: sw.lon, south: sw.lat, east: ne.lon, north: ne.lat };
+  };
+  const plan = planAreas(
+    [
+      { id: 'a', name: 'West', kind: 'rect', box: rect(0, 0, 180, 140) },
+      { id: 'b', name: 'East', kind: 'rect', box: rect(90, 0, 270, 140) },
+    ],
+    { ...opts, pattern: 'double', aglM: agl, tiltPitchDeg: tilt },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.jobs.length, 2);
+  const spacing = Math.max(...plan.legs.map((leg) => leg.photoSpacingM));
+  const aims = plan.legs.flatMap((leg) => legAims(leg, frame, look));
+  const west = aims.filter((p) => p.jobId === 'job-1');
+  const east = aims.filter((p) => p.jobId === 'job-2');
+  assert.ok(west.length > 0 && east.length > 0);
+  for (const p of west) {
+    assert.ok(p.x >= -1 && p.x <= 181 && p.y >= -1 && p.y <= 141, `west aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`);
+  }
+  for (const p of east) {
+    assert.ok(p.x >= 179 && p.x <= 271 && p.y >= -1 && p.y <= 141, `east aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`);
+  }
+  const edges = [
+    [{ x: 0, y: 0 }, { x: 0, y: 140 }],
+    [{ x: 270, y: 0 }, { x: 270, y: 140 }],
+    [{ x: 0, y: 0 }, { x: 270, y: 0 }],
+    [{ x: 0, y: 140 }, { x: 270, y: 140 }],
+  ];
+  for (const [a, b] of edges) {
+    const best = Math.min(...aims.map((p) => distToSeg(p, a, b)));
+    assert.ok(best <= spacing, `edge ${a.x},${a.y}-${b.x},${b.y} is ${best.toFixed(1)} m from the nearest aim (spacing ${spacing.toFixed(1)})`);
+  }
+});
+
+test('a double-grid polygon aims at its own edges and not at the missing corner', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const agl = 60;
+  const tilt = -45;
+  const look = agl * Math.tan(((90 + tilt) * Math.PI) / 180);
+  const local = [
+    { x: 0, y: 0 },
+    { x: 150, y: 0 },
+    { x: 150, y: 200 },
+    { x: 400, y: 200 },
+    { x: 400, y: 400 },
+    { x: 0, y: 400 },
+  ];
+  const plan = planAreas(
+    [{ id: 'L', name: 'L field', kind: 'polygon', ring: local.map((p) => frame.toLonLat(p.x, p.y)) }],
+    { ...opts, pattern: 'double', aglM: agl, tiltPitchDeg: tilt },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  const spacing = Math.max(...plan.legs.map((leg) => leg.photoSpacingM));
+  const margin = plan.footprintMarginM;
+  const aims = plan.legs.flatMap((leg) => legAims(leg, frame, look));
+  assert.ok(aims.length > 4);
+  for (const p of aims) {
+    const inside = pointInRing(p, local) || distToRing(p, local) <= margin * Math.SQRT2 + 2;
+    assert.ok(inside, `aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)} is outside the footprint`);
+    assert.ok(
+      !(p.x > 150 + margin * Math.SQRT2 + 2 && p.y < 200 - margin * Math.SQRT2 - 2),
+      `aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)} is in the missing corner`,
+    );
+  }
+  for (let i = 0; i < local.length; i += 1) {
+    const a = local[i];
+    const b = local[(i + 1) % local.length];
+    const best = Math.min(...aims.map((p) => distToSeg(p, a, b)));
+    assert.ok(
+      best <= spacing,
+      `edge ${i} is ${best.toFixed(1)} m from the nearest aim (spacing ${spacing.toFixed(1)})`,
+    );
+  }
 });
 
 function distToRing(p, ring) {
