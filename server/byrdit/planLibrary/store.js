@@ -26,9 +26,12 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 
 export const PLAN_DIR_ENV = 'GEV_PLAN_DIR';
-export const MAX_PLAN_BYTES = 25 * 1024 * 1024;
+// A plan is the editable state (areas, settings, imports): kilobytes in practice.
+export const MAX_PLAN_BYTES = 8 * 1024 * 1024;
+// All versions and trash of one user together (disk is shared with the system).
+export const MAX_USER_BYTES = 300 * 1024 * 1024;
 export const MAX_PLANS_PER_USER = 500;
-export const MAX_VERSIONS = 100;
+export const MAX_VERSIONS = 50;
 export const TRASH_DAYS = 30;
 export const STATUSES = Object.freeze(['planned', 'flown', 'processed']);
 
@@ -62,6 +65,16 @@ function atomicWrite(file, text) {
     closeSync(fd);
   }
   renameSync(tmp, file);
+  try {
+    const dirFd = openSync(path.dirname(file), 'r');
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
+    }
+  } catch {
+    // Directory fsync is best effort (not supported everywhere).
+  }
 }
 
 function readJson(file) {
@@ -169,14 +182,73 @@ export function createStore({
     }
   }
 
+  /** Bytes of stored plan versions of one user (trash included). */
+  function userBytes(user) {
+    let total = 0;
+    for (const id of ids(user)) {
+      const dir = path.join(planDir(user, id), 'v');
+      let names = [];
+      try {
+        names = readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const n of names) {
+        try {
+          total += statSync(path.join(dir, n)).size;
+        } catch {
+          // removed meanwhile
+        }
+      }
+    }
+    return total;
+  }
+  function checkQuota(user, body) {
+    if (userBytes(user) + Buffer.byteLength(body) > MAX_USER_BYTES) {
+      throw new LibraryError(
+        'quota',
+        'Storage limit reached: delete plans or old versions',
+        507,
+      );
+    }
+  }
+
   /** Public fields of a plan; the id is the only handle. */
   function view(user, meta) {
     return { ...meta, owner: user };
   }
 
+  /** Temp files a crashed write left behind (older than an hour). */
+  function sweepTmp(user) {
+    const cutoff = Date.now() - 3_600_000; // file mtimes are real time
+    for (const id of ids(user)) {
+      for (const dir of [
+        planDir(user, id),
+        path.join(planDir(user, id), 'v'),
+      ]) {
+        let names = [];
+        try {
+          names = readdirSync(dir);
+        } catch {
+          continue;
+        }
+        for (const n of names) {
+          if (!n.endsWith('.tmp')) continue;
+          try {
+            const f = path.join(dir, n);
+            if (statSync(f).mtimeMs < cutoff) rmSync(f, { force: true });
+          } catch {
+            // removed meanwhile
+          }
+        }
+      }
+    }
+  }
+
   /** Trash older than TRASH_DAYS goes for good. */
   function purge(user) {
     const limit = now() - TRASH_DAYS * 86_400_000;
+    sweepTmp(user);
     for (const id of ids(user)) {
       let meta;
       try {
@@ -211,6 +283,7 @@ export function createStore({
     create(user, details, plan) {
       const clean = cleanDetails(details, { requireName: true });
       const body = planText(plan);
+      checkQuota(user, body);
       if (ids(user).length >= MAX_PLANS_PER_USER) {
         throw new LibraryError(
           'too-many',
@@ -261,6 +334,7 @@ export function createStore({
       }
       const clean = cleanDetails(details);
       const body = planText(plan);
+      checkQuota(user, body);
       const next = Math.max(meta.version, ...versionNumbers(user, id)) + 1;
       writeVersion(user, id, next, body);
       const updated = { ...meta, ...clean, version: next, updatedAt: now() };

@@ -1,4 +1,4 @@
-// Reading and checking DJI Fly waypoint files: Brandon's two REAL Mini 5 Pro
+// Reading and checking DJI Fly waypoint files: two REAL DJI Fly Mini 5 Pro
 // files (saved 2026-10-30) and the KMZ this tool writes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +19,7 @@ const load = (id) => new Uint8Array(readFileSync(new URL(`${id}.kmz`, dir)));
 const mini5 = getPreset('dji-mini-5-pro');
 const codes = (list) => list.map((x) => x.code);
 
-test('the fixtures are the files Brandon saved (sha256)', () => {
+test('the fixtures are the real DJI Fly files (sha256)', () => {
   const sha = (id) => createHash('sha256').update(load(id)).digest('hex');
   assert.match(sha(A), /^674137ca.*6608$/);
   assert.match(sha(B), /^ba616447.*a4a3$/);
@@ -145,7 +145,12 @@ test('unreadable input comes back as an error code, never a throw', async () => 
 });
 
 test('XML reader: entities, CDATA, nesting limit, no external entities', () => {
-  const doc = parseXml('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><a b="1&amp;2"><c><![CDATA[<x>]]>&lt;&#65;</c><d/></a>'.replace(/<!DOCTYPE[\s\S]*?\]>/, ''));
+  const doc = parseXml('<?xml version="1.0"?><a b="1&amp;2"><c><![CDATA[<x>]]>&lt;&#65;</c><d/></a>');
+  // A DTD (the way external entities are declared) is refused, never processed.
+  assert.throws(
+    () => parseXml('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><a>&e;</a>'),
+    /Malformed/,
+  );
   assert.equal(doc.children[0].attrs.b, '1&2');
   assert.equal(doc.children[0].children[0].text, '<x><A');
   assert.throws(() => parseXml('<a>'.repeat(100)), /deep/);
@@ -165,4 +170,20 @@ test('what this tool exports passes its own check and reads back', async () => {
   assert.equal(parsed.waypoints.length, mission.waypointCount);
   assert.deepEqual(checkMission(parsed, { preset: result.plan.preset }), []);
   assert.ok(distanceM(parsed.waypoints[0], parsed.waypoints[1]) > 0);
+});
+
+test('zip bomb: total inflated size is capped and unwanted entries are never inflated', async () => {
+  const chunk = new Uint8Array(15 * 1024 * 1024); // compresses to almost nothing
+  const bomb = makeZip(Array.from({ length: 4 }, (_, i) => ({ name: `junk/${i}.bin`, data: chunk })));
+  await assert.rejects(() => readZipAsync(bomb), /too large/);
+  const files = await readZipAsync(bomb, { only: (n) => n === 'nothing' });
+  assert.equal(files.size, 0, 'skipped entries are not read');
+  const kmz = makeZip([
+    { name: 'junk/a.bin', data: chunk },
+    { name: 'junk/b.bin', data: chunk },
+    { name: 'junk/c.bin', data: chunk },
+    { name: 'wpmz/template.kml', data: '<kml/>' },
+  ]);
+  const m = await parseDjiKmz(kmz, { fileName: 'x.kmz' });
+  assert.notEqual(m.error, 'not-a-kmz', 'junk entries beside the mission do not trip the cap');
 });

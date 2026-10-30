@@ -160,6 +160,8 @@ export function readZip(bytes) {
 /** Largest entry (after inflating) and entry count readZipAsync accepts. */
 export const MAX_ZIP_ENTRY_BYTES = 20 * 1024 * 1024;
 export const MAX_ZIP_ENTRIES = 64;
+/** All inflated entries together (a 64 x 20 MB archive is a bomb). */
+export const MAX_ZIP_TOTAL_BYTES = 32 * 1024 * 1024;
 
 async function inflateRaw(data, limit) {
   const stream = new Blob([data])
@@ -193,7 +195,8 @@ async function inflateRaw(data, limit) {
  * @param {Uint8Array} bytes
  * @returns {Promise<Map<string, Uint8Array>>}
  */
-export async function readZipAsync(bytes) {
+export async function readZipAsync(bytes, { only = null } = {}) {
+  let total = 0;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let end = -1;
   for (
@@ -224,8 +227,15 @@ export async function readZipAsync(bytes) {
     const commentLen = view.getUint16(at + 32, true);
     const localAt = view.getUint32(at + 42, true);
     const name = textDecoder.decode(bytes.subarray(at + 46, at + 46 + nameLen));
+    // Entries the caller does not want are never inflated.
+    if (only && !only(name)) {
+      at += 46 + nameLen + extraLen + commentLen;
+      continue;
+    }
     if (size > MAX_ZIP_ENTRY_BYTES)
       throw new Error(`ZIP entry ${name} is too large`);
+    total += size;
+    if (total > MAX_ZIP_TOTAL_BYTES) throw new Error('ZIP is too large');
     if (method !== 0 && method !== 8) {
       throw new Error(`Unsupported ZIP method for ${name}`);
     }

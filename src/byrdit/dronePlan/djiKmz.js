@@ -141,7 +141,10 @@ export async function parseDjiKmz(bytes, { fileName = '' } = {}) {
   if (bytes.length > MAX_KMZ_BYTES) return { ...base, error: 'too-large' };
   let files;
   try {
-    files = await readZipAsync(bytes);
+    // Only the two mission files are inflated; the rest of the archive is skipped.
+    files = await readZipAsync(bytes, {
+      only: (n) => /(^|\/)wpmz\/(waylines\.wpml|template\.kml)$/i.test(n),
+    });
   } catch {
     return { ...base, error: 'not-a-kmz' };
   }

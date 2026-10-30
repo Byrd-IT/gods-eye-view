@@ -3,14 +3,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtempSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, existsSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   cleanUserName,
   libraryIdentity,
 } from '../../server/byrdit/planLibrary/identity.js';
-import { createStore } from '../../server/byrdit/planLibrary/store.js';
+import { createStore, MAX_USER_BYTES, MAX_VERSIONS } from '../../server/byrdit/planLibrary/store.js';
 import { createPlanLibraryHandler } from '../../server/byrdit/planLibrary/api.js';
 
 const PLAN = { schema: 'gevplan', areas: [{ kind: 'box' }], options: { aglM: 60 } };
@@ -57,6 +57,7 @@ async function boot({ trusted = '127.0.0.1', now } = {}) {
     root,
     store,
     call,
+    port,
     close: async () => {
       await new Promise((r) => server.close(r));
       rmSync(root, { recursive: true, force: true });
@@ -259,8 +260,10 @@ test('CSRF: writes need X-Requested-With and a same-origin Origin', async () => 
     const body = { name: 'x', plan: PLAN };
     assert.equal((await s.call('POST', '', { user: 'alice', body, headers: { 'x-requested-with': '' } })).status, 403);
     assert.equal((await s.call('POST', '', { user: 'alice', body, headers: { origin: 'https://evil.example' } })).status, 403);
-    const ok = await s.call('POST', '', { user: 'alice', body, headers: { origin: `http://127.0.0.1:${0}` } });
-    assert.equal(ok.status, 403, 'wrong port');
+    const wrong = await s.call('POST', '', { user: 'alice', body, headers: { origin: `http://127.0.0.1:${s.port + 1}` } });
+    assert.equal(wrong.status, 403, 'wrong port');
+    const same = await s.call('POST', '', { user: 'alice', body, headers: { origin: `http://127.0.0.1:${s.port}` } });
+    assert.equal(same.status, 201, 'the same origin is accepted');
     assert.equal((await s.call('POST', '', { user: 'alice', body })).status, 201);
   } finally {
     await s.close();
@@ -283,5 +286,39 @@ test('size limit, plan count limit, atomic files', async () => {
     assert.ok(existsSync(path.join(dir, first, 'meta.json')));
   } finally {
     await s.close();
+  }
+});
+
+test('per-user byte quota, version cap and stale temp sweep', () => {
+  const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevq-'));
+  try {
+    const store = createStore({ root });
+    const blob = (n) => ({ blob: 'x'.repeat(n) });
+    // Versions are capped.
+    const p = store.create('dave', { name: 'v' }, { a: 1 });
+    for (let i = 0; i < MAX_VERSIONS + 5; i += 1) store.save('dave', p.id, { a: i });
+    assert.equal(store.versions('dave', p.id).length, MAX_VERSIONS);
+    // The quota stops one user from filling the disk, and nobody else.
+    const q = createStore({ root });
+    const per = 7 * 1024 * 1024;
+    const n = Math.floor(MAX_USER_BYTES / per);
+    const first = q.create('erin', { name: 'big' }, blob(per));
+    for (let i = 1; i < n; i += 1) q.save('erin', first.id, blob(per));
+    assert.throws(() => q.save('erin', first.id, blob(per)), (e) => e.status === 507);
+    assert.throws(() => q.create('erin', { name: 'more' }, blob(per)), (e) => e.status === 507);
+    assert.ok(q.create('frank', { name: 'fine' }, blob(per)), 'another user is unaffected');
+    // A leftover temp file from a crash is swept once it is old.
+    const dir = path.join(root, 'dave', p.id, 'v');
+    const tmp = path.join(dir, '9.json.1.abcd.tmp');
+    writeFileSync(tmp, 'partial');
+    const old = new Date(Date.now() - 2 * 3_600_000);
+    utimesSync(tmp, old, old);
+    const fresh = path.join(dir, '10.json.1.efgh.tmp');
+    writeFileSync(fresh, 'partial');
+    store.list('dave');
+    assert.ok(!existsSync(tmp), 'old temp file removed');
+    assert.ok(existsSync(fresh), 'recent temp file kept (a write may be running)');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
