@@ -12,6 +12,7 @@
  */
 import * as Cesium from 'cesium';
 import { createCheckLayer } from './checkLayer.js';
+import { createObstacleLayer } from './obstacleLayer.js';
 
 export const PREVIEW_DATA_SOURCE = 'gev-drone-plan';
 export const MISSION_COLORS = Object.freeze([
@@ -59,7 +60,13 @@ export const MAX_MARKERS = 1500;
  *   clear: () => void,
  *   destroy: () => Promise<void> }}
  */
-export function createDronePlanPreview({ viewer, cesium = Cesium }) {
+export function createDronePlanPreview({
+  viewer,
+  cesium = Cesium,
+  overlay = null,
+  onObstacleHeight,
+  kindText,
+}) {
   const dataSource = new cesium.CustomDataSource(PREVIEW_DATA_SOURCE);
   let attaching = Promise.resolve(viewer.dataSources.add(dataSource)).catch(
     () => null,
@@ -83,6 +90,15 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
     return [];
   };
   const check = createCheckLayer({ dataSource, cesium, requestRender });
+  const obstacles = createObstacleLayer({
+    dataSource,
+    cesium,
+    viewer,
+    requestRender,
+    overlay,
+    onHeight: onObstacleHeight,
+    kindText,
+  });
   // What the 3D check is drawn from: the all-passes plan when there is one,
   // otherwise the single plan. It is rebuilt only when that source changes,
   // so the show/clear pairs of a re-sync do not redraw it twice.
@@ -195,6 +211,24 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
                 },
               }),
             );
+          }
+          // Legs the height cap cannot lift over an obstacle: red.
+          for (const leg of mission.legs ?? []) {
+            if (!leg.obstacleBlocked) continue;
+            const hot = leg.waypoints.flatMap((w) => [w.lon, w.lat]);
+            if (hot.length >= 4) {
+              planEntities.push(
+                dataSource.entities.add({
+                  name: 'Blocked by obstacle',
+                  polyline: {
+                    positions: cesium.Cartesian3.fromDegreesArray(hot),
+                    width: 6,
+                    ...ground,
+                    material: color('#ff2d2d', 0.95),
+                  },
+                }),
+              );
+            }
           }
           mission.waypoints.forEach((w, i) => {
             if (i % step && i !== mission.waypoints.length - 1) return;
@@ -360,6 +394,13 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
     setCheck(patch) {
       check.setOptions(patch);
     },
+    /** Draw the obstacle columns (and their labels) from a list. */
+    setObstacles(list) {
+      obstacles.set(list);
+    },
+    obstacleCount() {
+      return obstacles.count();
+    },
     /** { count, index, current } for the photo in view. */
     checkInfo() {
       return check.info();
@@ -369,6 +410,7 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
       return check.counts();
     },
     clear() {
+      obstacles.clear();
       planCheck = null;
       planSource = null;
       suiteCheck = null;
@@ -384,6 +426,7 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
     destroy() {
       if (destroyed) return attaching;
       destroyed = true;
+      obstacles.destroy();
       dataSource.entities.removeAll();
       attaching = attaching.then(() => {
         try {

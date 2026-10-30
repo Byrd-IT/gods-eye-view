@@ -120,6 +120,16 @@ export function warningText(warning) {
         'Orbit heights were raised to {min} m: the trees are {obstacle} m tall and the drone keeps a margin above them',
         { min: fixed(p.minAglM), obstacle: fixed(p.obstacleHeightM) },
       );
+    case 'obstacle-raised':
+      return t(
+        '{count} waypoints were raised to clear an obstacle column (its height plus 5 m)',
+        { count: fixed(p.count) },
+      );
+    case 'obstacle-blocked':
+      return t(
+        '{count} waypoints cannot clear an obstacle: they would need {need} m but the limit is {cap} m above ground. Those legs are red on the globe. Lower the column, move the route or skip the area',
+        { count: fixed(p.count), need: fixed(p.needM), cap: fixed(p.capM) },
+      );
     default:
       // An unknown code is never echoed back into the page.
       return '';
@@ -135,8 +145,6 @@ export function planErrorText(code) {
   if (code === 'no-orbit-targets')
     return t('Turn on at least one orbit target');
   if (code === 'self-intersecting')
-    return t(
-      'That polygon crosses itself. Remove a corner or draw it again.',
-    );
+    return t('That polygon crosses itself. Remove a corner or draw it again.');
   return t('Draw a box on the globe first');
 }

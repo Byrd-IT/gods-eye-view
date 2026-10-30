@@ -4,6 +4,7 @@ import { initDrawTool } from '../annotations/drawTool.js';
 import { initGeoFileImport } from '../ui/geoFileImport.js';
 import { initImageryBoxTool } from '../ui/imageryBoxTool.js';
 import { createBuildingFootprintProvider } from '../byrdit/dronePlan/buildingFootprints.js';
+import { fetchOpenObstacles } from '../byrdit/dronePlan/obstacleData.js';
 import { initDronePlan } from '../byrdit/dronePlan/panel.js';
 import { createDronePlanVoice } from '../byrdit/dronePlan/dronePlanVoice.js';
 import { createRecentImageryPanel } from '../ui/recentImagery.js';
@@ -77,6 +78,7 @@ export function createApplicationTools({
   const dronePlan = initDronePlan({
     viewer,
     getBuildingFootprints: createBuildingFootprintProvider(),
+    fetchObstacles: fetchOpenObstacles,
   });
   if (dronePlan) {
     dronePlan.voice = createDronePlanVoice(dronePlan);

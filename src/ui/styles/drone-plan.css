@@ -306,3 +306,39 @@ body.gev-drone-box .cesium-widget canvas {
 #right-context-rail #drone-plan-panel.collapsed .panel-divider {
   display: none;
 }
+
+/* Per-obstacle heights: one row per column on the globe. */
+.gev-dp-obstacle {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.gev-dp-obstacle .gev-dp-area-kind {
+  flex: 0 0 auto;
+  min-width: 52px;
+}
+.gev-dp-obstacle-height {
+  flex: 0 0 64px;
+  width: 64px;
+  min-width: 0;
+}
+.gev-dp-obstacle-source {
+  flex: 1 1 100px;
+  min-width: 0;
+  opacity: 0.75;
+  font-size: 11px;
+}
+.gev-dp-obstacle button {
+  flex: 0 0 auto;
+}
+.gev-dp-obstacle button[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+.gev-dp-obstacle-list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+.gev-dp-obstacle-disclaimer {
+  margin-top: 6px;
+}

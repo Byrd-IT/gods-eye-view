@@ -25,6 +25,7 @@ import { mapillaryProxy } from './mapillary.js';
 import { keySetupEndpoint } from '../standalone/key-setup.js';
 import { weatherProxy } from './weather.js';
 import { firePerimetersProxy } from './firePerimeters.js';
+import { obstaclesProxy } from './obstacles.js';
 import { gnssIntegrityProxy } from './gnssIntegrity.js';
 import { ghostMapsProxy } from './ghostMaps.js';
 import { cycloneProxy } from './cyclones.js';
@@ -66,6 +67,7 @@ function localProviderPlugins({ realtime, gemini } = {}) {
     mapillaryProxy(),
     keyIsolationProxy(),
     firePerimetersProxy(),
+    obstaclesProxy(),
     gnssIntegrityProxy(),
     ghostMapsProxy(),
     keySetupEndpoint(),

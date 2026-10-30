@@ -8,6 +8,7 @@
  *                                          <= battery time) with heights
  *                                          relative to the takeoff point
  */
+import { applyObstacleClearance, normalizeObstacles } from './obstacles.js';
 import { DEFAULT_PRESET_ID, getPreset } from './presets.js';
 import {
   DEFAULT_SHUTTER_DENOMINATOR,
@@ -145,6 +146,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
   orbitTargetHeightM: 3,
   obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
   orbitTargets: null,
+  obstacles: null,
   takeoff: null,
 });
 
@@ -298,6 +300,7 @@ export function normalizeOptions(raw = {}, box = null) {
     AGL_CAP_M - OBSTACLE_MARGIN_M,
   );
   o.orbitTargets = normalizeOrbitTargets(o.orbitTargets);
+  o.obstacles = normalizeObstacles(o.obstacles);
   if (box) {
     const m = metersPerDegree((box.south + box.north) / 2);
     const side = Math.max(
@@ -896,6 +899,28 @@ export function assembleMissions(plan, ground) {
   const warnings = [...plan.notes];
   const known = ground?.known === true;
   if (!known) warnings.push({ code: 'terrain-unknown', params: {} });
+  // Per-obstacle heights: lift every stretch that passes a column, and flag
+  // the ones the height cap cannot lift (drawn red on the globe).
+  const cleared = applyObstacleClearance(plan.legs, options.obstacles, {
+    capM: AGL_CAP_M,
+  });
+  const planLegs = cleared.legs;
+  if (cleared.raised) {
+    warnings.push({
+      code: 'obstacle-raised',
+      params: { count: cleared.raised },
+    });
+  }
+  if (cleared.blocked.length) {
+    warnings.push({
+      code: 'obstacle-blocked',
+      params: {
+        count: cleared.blocked.length,
+        needM: Math.round(Math.max(...cleared.blocked.map((b) => b.needAglM))),
+        capM: AGL_CAP_M,
+      },
+    });
+  }
   const takeoffM = known ? ground.takeoffM : 0;
 
   // A waypoint the terrain gave no height for takes the nearest read height
@@ -903,14 +928,14 @@ export function assembleMissions(plan, ground) {
   // the ground there) and is counted, so the plan can say it is a guess.
   // A gap at the very start of the route takes the first height read after it.
   const firstRead = known
-    ? plan.legs
+    ? planLegs
         .flatMap((leg) => leg.waypoints)
         .map((w) => ground.wpM[w.id])
         .find((g) => typeof g === 'number' && Number.isFinite(g))
     : undefined;
   let lastGroundM = firstRead ?? takeoffM;
   let missing = 0;
-  const legs = plan.legs.map((leg) => ({
+  const legs = planLegs.map((leg) => ({
     ...leg,
     waypoints: leg.waypoints.map((w) => {
       const g = known ? ground.wpM[w.id] : 0;

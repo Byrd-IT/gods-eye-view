@@ -620,3 +620,40 @@ test('3D check: an interval-photo plan still shows footprints and pyramids at th
   preview.setCheck({ index: 3 });
   assert.equal(preview.checkInfo().index, 3);
 });
+
+const tallTower = (over = {}) => ({
+  id: 'faa-1',
+  kind: 'tower',
+  lon: -97.77,
+  lat: 30.27,
+  radiusM: 6,
+  heightM: 150,
+  source: 'faa',
+  estimatedHeightM: 150,
+  userEdited: false,
+  ...over,
+});
+
+test('obstacles: columns are drawn with the plan, and a leg the cap cannot lift is red', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  const planned = result(200, 200, { aglM: 60, obstacles: [tallTower()] });
+  preview.showPlan(planned);
+  const red = source.entities.values.filter((e) => e.name === 'Blocked by obstacle');
+  assert.ok(red.length >= 1, 'a blocked leg is drawn red');
+  assert.equal(red[0].polyline.material.css, '#ff2d2d');
+  preview.setObstacles([tallTower()]);
+  assert.equal(preview.obstacleCount(), 1);
+  assert.equal(source.entities.values.filter((e) => e.cylinder).length, 1);
+  const clear = result(200, 200, { aglM: 60, obstacles: [tallTower({ heightM: 20 })] });
+  preview.showPlan(clear);
+  assert.equal(
+    source.entities.values.filter((e) => e.name === 'Blocked by obstacle').length,
+    0,
+    'a liftable obstacle leaves no red leg',
+  );
+  preview.clear();
+  assert.equal(source.entities.values.length, 0);
+  assert.equal(preview.obstacleCount(), 0);
+});

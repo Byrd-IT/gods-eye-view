@@ -1382,3 +1382,129 @@ test('3D check follows each pass checkbox and goes with replan and destroy', asy
   w.handle.destroy();
   assert.equal(globe(w).length, 0);
 });
+
+// -------------------------------------------------- per-obstacle heights --
+const obstacleRows = () => [
+  { id: 'faa-48-1', kind: 'tower', source: 'faa', lon: -97.77, lat: 30.27, radiusM: 6, estimatedHeightM: 61, heightM: 61 },
+  { id: 'chm-1', kind: 'tree', source: 'canopy', lon: -97.7695, lat: 30.2703, radiusM: 20, estimatedHeightM: 18, heightM: 18 },
+];
+
+function obstacleWorld(fetchObstacles) {
+  resetPointerOwnership();
+  const dom = makeDoc();
+  const world = makeWorld({ sample: async (c) => flat(c) });
+  const overlays = [];
+  const handle = initDronePlan({
+    viewer: world.viewer,
+    cesium: world.cesium,
+    document: dom.doc,
+    downloadFile: () => {},
+    getBuildingFootprints: async () => [],
+    fetchObstacles,
+    overlay: { set: (l) => overlays.push(l), clear: () => overlays.push(null) },
+  });
+  const find = (pred) => all(dom.body, pred);
+  const heightBox = (id) =>
+    find((n) => n.getAttribute('data-obstacle-height') === id)[0];
+  const button = (attr, id) =>
+    find((n) => n.tagName === 'BUTTON' && n.getAttribute(attr) === id)[0];
+  return { ...dom, ...world, handle, overlays, find, heightBox, button };
+}
+const settle = () => new Promise((r) => setTimeout(r, 15));
+
+test('obstacles: open-data estimates appear in the panel with their source', async () => {
+  const w = obstacleWorld(async () => ({
+    obstacles: obstacleRows(),
+    status: { faa: 'ok', canopy: 'ok' },
+  }));
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  const list = w.handle.obstacles.list();
+  assert.deepEqual(list.map((o) => o.id).sort(), ['chm-1', 'faa-48-1']);
+  assert.equal(w.heightBox('faa-48-1').value, '61');
+  const text = w.find((n) => n.className.includes('gev-dp-obstacle-source')).map((n) => n.textContent);
+  assert.ok(text.some((x) => x.includes('FAA obstacle file: 61 m')), text.join('|'));
+  assert.ok(w.overlays.some((l) => l?.some((e) => e.title === 'tower 61 m')));
+  assert.match(
+    w.find((n) => n.className.includes('gev-dp-obstacle-disclaimer'))[0].textContent,
+    /not a survey.*Trees grow.*Power lines.*not flight-tested/s,
+  );
+  w.handle.destroy();
+});
+
+test('obstacles: typing a height changes the column and the plan, Reset goes back, x removes', async () => {
+  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  const box = w.heightBox('faa-48-1');
+  box.value = '90';
+  box.dispatch('input');
+  const o = w.handle.obstacles.list().find((x) => x.id === 'faa-48-1');
+  assert.equal(o.heightM, 90);
+  assert.equal(o.userEdited, true);
+  assert.equal(w.handle.getState().options.obstacles.find((x) => x.id === 'faa-48-1').heightM, 90);
+  w.overlays.length = 0;
+  w.handle.obstacles.setHeight('chm-1', 25);
+  assert.ok(w.overlays.at(-1).some((e) => e.title === 'tree 25 m'));
+  const reset = w.button('data-reset-obstacle', 'faa-48-1');
+  assert.equal(reset.disabled, false);
+  reset.dispatch('click');
+  assert.equal(w.handle.obstacles.list().find((x) => x.id === 'faa-48-1').heightM, 61);
+  w.button('data-remove-obstacle', 'chm-1').dispatch('click');
+  assert.deepEqual(w.handle.obstacles.list().map((x) => x.id), ['faa-48-1']);
+  w.handle.destroy();
+});
+
+test('obstacles: an edit survives a new look-up, and a failing look-up never blocks the plan', async () => {
+  let fail = false;
+  const w = obstacleWorld(async () => {
+    if (fail) throw new Error('down');
+    return { obstacles: obstacleRows(), status: {} };
+  });
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  w.handle.obstacles.setHeight('faa-48-1', 99);
+  const mine = w.handle.obstacles.add({ lon: -97.7701, lat: 30.2701 });
+  assert.ok(mine);
+  fail = true;
+  w.handle.obstacles.refresh();
+  await settle();
+  assert.equal(w.handle.obstacles.list().find((x) => x.id === 'faa-48-1').heightM, 99);
+  assert.ok(w.handle.obstacles.list().some((x) => x.id === mine.id));
+  assert.match(
+    w.find((n) => n.className.includes('gev-dp-obstacle-status'))[0].textContent,
+    /unavailable/,
+  );
+  await w.handle.replan();
+  assert.equal(w.panel.dataset.state, 'ready');
+  w.handle.destroy();
+});
+
+test('obstacles: a tall obstacle lifts the plan and warns; the plan keeps working with none', async () => {
+  const w = obstacleWorld(async () => ({ obstacles: [], status: {} }));
+  w.handle.setBox(boxM(160, 160));
+  w.handle.getState().options.aglM = 40;
+  await w.handle.replan();
+  const before = w.handle.getResult().missions.flatMap((m) => m.waypoints).map((p) => p.aglM);
+  assert.ok(before.every((h) => h === 40));
+  w.handle.obstacles.add({ lon: -97.77, lat: 30.27, heightM: 80 });
+  await settle();
+  await w.handle.replan();
+  const after = w.handle.getResult();
+  assert.ok(after.missions.flatMap((m) => m.waypoints).some((p) => p.aglM >= 85));
+  assert.ok(after.warnings.some((x) => x.code === 'obstacle-raised'));
+  w.handle.destroy();
+});
+
+test('obstacles: closing the panel and starting over forgets the obstacles', async () => {
+  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  assert.equal(w.handle.obstacles.list().length, 2);
+  w.handle.destroy();
+  assert.equal(w.handle.obstacles.list().length, 0);
+});

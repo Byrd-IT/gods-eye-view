@@ -23,6 +23,17 @@ import {
   MIN_ZONE_HALF_WIDTH_M,
 } from './checkGeometry.js';
 import { createDronePlanPreview, passStyle } from './preview.js';
+import {
+  clearOverlaySource,
+  setOverlayEntries,
+} from '../../overlays/worldOverlay.js';
+import { OBSTACLE_OVERLAY_SOURCE } from './obstacleLayer.js';
+import { buildingObstacles, SOURCE_NAMES } from './obstacleData.js';
+import {
+  createObstacleStore,
+  MAX_OBSTACLE_HEIGHT_M,
+  MAX_OBSTACLES,
+} from './obstacles.js';
 import { sampleGround } from './terrain.js';
 import { recommendOrbitTargets, targetInsideAreas } from './orbitTargets.js';
 import {
@@ -62,6 +73,7 @@ export const BODY_ID = 'drone-plan-panel-body';
 /** The card's own header button is the launcher: there is no DISPLAY entry. */
 export const ENTRY_SELECTOR = '.panel-collapse-btn';
 export const TARGET_POINTER_OWNER = 'drone-plan-orbit-target';
+export const OBSTACLE_ADD_POINTER_OWNER = 'drone-plan-obstacle-add';
 const BOX_OWNER = 'drone-plan-box';
 const REPLAN_DELAY_MS = 160;
 const MAX_TERRAIN_CACHE = 30000;
@@ -89,6 +101,11 @@ export function initDronePlan({
   document: doc = globalThis.document,
   downloadFile = browserDownload,
   getBuildingFootprints = null,
+  fetchObstacles = null,
+  overlay = {
+    set: (entries) => setOverlayEntries(OBSTACLE_OVERLAY_SOURCE, entries),
+    clear: () => clearOverlaySource(OBSTACLE_OVERLAY_SOURCE),
+  },
 } = {}) {
   const panel = doc?.getElementById?.(PANEL_ID);
   const body = doc?.getElementById?.(BODY_ID);
@@ -118,6 +135,7 @@ export function initDronePlan({
       orbitTargetHeightM: 3,
       obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
       orbitTargets: [],
+      obstacles: [],
     },
     // True once the person adds, removes or switches a target: from then on
     // the list is theirs and is no longer rebuilt from the areas.
@@ -155,7 +173,36 @@ export function initDronePlan({
   let timer = null;
   let destroyed = false;
 
-  const preview = createDronePlanPreview({ viewer, cesium });
+  // Per-obstacle heights: first guesses from open data, then the operator's
+  // own numbers (typed or dragged). Estimates only, never surveyed.
+  let obstacleMuted = false;
+  let obstacleTyping = false;
+  let obstacleKey = null;
+  let obstacleToken = 0;
+  let obstacleStatusText = '';
+  const kindName = (kind) =>
+    ({
+      tree: t('tree'),
+      tower: t('tower'),
+      building: t('building'),
+      other: t('other'),
+    })[kind] ?? kind;
+  const obstacleStore = createObstacleStore({
+    onChange: (list) => {
+      state.options.obstacles = list;
+      preview.setObstacles(list);
+      if (obstacleMuted || destroyed) return;
+      renderObstacles();
+      schedule();
+    },
+  });
+  const preview = createDronePlanPreview({
+    viewer,
+    cesium,
+    overlay,
+    kindText: kindName,
+    onObstacleHeight: (id, h) => obstacleStore.setHeight(id, h),
+  });
   const ui = {};
 
   // ---------------------------------------------------------------- tools --
@@ -216,6 +263,28 @@ export function initDronePlan({
       ui.targetAdd?.setAttribute('aria-pressed', String(active));
       if (active)
         status(t('Click the structure or tree you want to orbit'), 'info');
+    },
+  });
+
+  const obstacleTool = initPointTool({
+    viewer,
+    cesium,
+    owner: OBSTACLE_ADD_POINTER_OWNER,
+    onPoint: (point) => addObstacle(point),
+    onCancel: (reason) => {
+      if (reason === 'sky')
+        status(t('Click on the ground, not the sky'), 'warn');
+      else if (reason === 'escape') status(t('Obstacle pick cancelled'));
+      else if (reason === 'pointer-busy')
+        status(t('Another tool is using the pointer. Close it first'), 'warn');
+    },
+    onActive: (active) => {
+      ui.obstacleAdd?.setAttribute('aria-pressed', String(active));
+      if (active)
+        status(
+          t('Click the tree, tower or building to mark as an obstacle'),
+          'info',
+        );
     },
   });
 
@@ -316,6 +385,7 @@ export function initDronePlan({
   // ------------------------------------------------------------- planning --
   // ------------------------------------------------------ orbit targets --
   const footprintCache = new Map();
+  const footprintPromises = new Map();
 
   function areasKey() {
     return JSON.stringify(
@@ -342,8 +412,11 @@ export function initDronePlan({
       });
       if (getBuildingFootprints && !footprintCache.has(key)) {
         footprintCache.set(key, []);
-        Promise.resolve()
-          .then(() => getBuildingFootprints(state.areas))
+        const pending = Promise.resolve().then(() =>
+          getBuildingFootprints(state.areas),
+        );
+        footprintPromises.set(key, pending);
+        pending
           .then((found) => {
             if (destroyed || !Array.isArray(found) || !found.length) return;
             footprintCache.set(key, found);
@@ -438,6 +511,207 @@ export function initDronePlan({
     return state.options.orbitTargets.length;
   }
 
+  // ------------------------------------------------------------ obstacles --
+  function resetObstacles() {
+    obstacleToken += 1;
+    obstacleKey = null;
+    obstacleStatusText = '';
+    obstacleMuted = true;
+    obstacleStore.clear();
+    obstacleMuted = false;
+    state.options.obstacles = [];
+    preview.setObstacles([]);
+  }
+
+  function buildingsFor(key) {
+    if (!getBuildingFootprints) return Promise.resolve([]);
+    if (!footprintPromises.has(key)) {
+      if (!footprintCache.has(key)) footprintCache.set(key, []);
+      const pending = Promise.resolve().then(() =>
+        getBuildingFootprints(state.areas),
+      );
+      footprintPromises.set(key, pending);
+      pending.then(
+        (found) => {
+          if (Array.isArray(found) && found.length)
+            footprintCache.set(key, found);
+        },
+        () => {},
+      );
+    }
+    return footprintPromises.get(key).catch(() => []);
+  }
+
+  /** Look up open-data estimates once per area set; fail soft. */
+  function syncObstacles({ force = false } = {}) {
+    if (!state.areas.length) {
+      obstacleKey = null;
+      return;
+    }
+    const key = areasKey();
+    if (!force && key === obstacleKey) return;
+    if (!fetchObstacles && !getBuildingFootprints) return;
+    obstacleKey = key;
+    const token = ++obstacleToken;
+    obstacleStatusText = t('Looking up open-data heights…');
+    renderObstacleStatus();
+    Promise.resolve()
+      .then(async () => {
+        const [open, buildings] = await Promise.all([
+          fetchObstacles
+            ? fetchObstacles(state.areas)
+            : { obstacles: [], status: {} },
+          buildingsFor(key),
+        ]);
+        if (destroyed || token !== obstacleToken) return;
+        const osm = buildingObstacles(buildings);
+        const found = open?.obstacles ?? [];
+        const towers = found.filter((x) => x.source === 'faa');
+        const trees = found.filter((x) => x.source !== 'faa');
+        const failed = Object.entries(open?.status ?? {})
+          .filter(([, v]) => v === 'failed' || v === 'partial')
+          .map(([k]) => t(SOURCE_NAMES[k] ?? k));
+        obstacleStatusText =
+          t(
+            'Open data: {towers} towers, {trees} tree patches, {buildings} buildings.',
+            {
+              towers: num(towers.length),
+              trees: num(trees.length),
+              buildings: num(osm.length),
+            },
+          ) +
+          (failed.length
+            ? ` ${t('Could not read: {names}. The plan uses the default height there.', { names: failed.join(', ') })}`
+            : '');
+        obstacleMuted = false;
+        obstacleStore.replaceEstimates([...towers, ...osm, ...trees]);
+        renderObstacleStatus();
+      })
+      .catch(() => {
+        if (destroyed || token !== obstacleToken) return;
+        obstacleStatusText = t(
+          'Open-data heights are unavailable. The plan uses the default height.',
+        );
+        renderObstacleStatus();
+      });
+  }
+
+  function addObstacle(point) {
+    const lon = Number(point?.lon);
+    const lat = Number(point?.lat);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    const made = obstacleStore.add({
+      lon,
+      lat,
+      kind: point.kind ?? 'tree',
+      heightM: point.heightM ?? state.options.obstacleHeightM,
+    });
+    if (!made) {
+      status(t('At most {count} obstacles', { count: MAX_OBSTACLES }), 'warn');
+      return null;
+    }
+    status('');
+    return made;
+  }
+
+  function startObstaclePick({ toggle = true } = {}) {
+    boxTool?.cancel('switch');
+    polygonTool?.cancel('switch');
+    takeoffTool?.cancel('switch');
+    targetTool?.cancel('switch');
+    if (obstacleTool?.isActive()) {
+      if (!toggle) return true;
+      obstacleTool.cancel('cancel');
+      return false;
+    }
+    return Boolean(obstacleTool?.start());
+  }
+
+  function renderObstacleStatus() {
+    if (ui.obstacleStatus) ui.obstacleStatus.textContent = obstacleStatusText;
+  }
+
+  function renderObstacles() {
+    if (!ui.obstacleList) return;
+    // Typing in a height box must not rebuild the box under the caret.
+    const active = doc.activeElement;
+    if (obstacleTyping || (active && ui.obstacleList.contains?.(active)))
+      return;
+    ui.obstacleList.replaceChildren();
+    const list = obstacleStore.list();
+    if (!list.length) {
+      el(doc, 'p', ui.obstacleList, {
+        cls: 'gev-dp-note',
+        text: state.areas.length
+          ? t('No obstacles found. ADD places one on the globe.')
+          : t('Draw a box on the globe first'),
+      });
+      return;
+    }
+    for (const o of list) {
+      const row = el(doc, 'div', ui.obstacleList, {
+        cls: 'gev-dp-area gev-dp-obstacle',
+        attrs: { 'data-obstacle': o.id },
+      });
+      el(doc, 'span', row, {
+        cls: 'gev-dp-area-kind',
+        text: kindName(o.kind),
+        attrs: {
+          title: `${num(o.lat, 5)}, ${num(o.lon, 5)} · r ${num(o.radiusM)} m`,
+        },
+      });
+      const height = el(doc, 'input', row, {
+        cls: 'pp-text-input gev-dp-obstacle-height',
+        attrs: {
+          type: 'number',
+          min: '0',
+          max: String(MAX_OBSTACLE_HEIGHT_M),
+          step: '1',
+          'aria-label': t('Obstacle height (m)'),
+          'data-obstacle-height': o.id,
+        },
+      });
+      height.value = String(Math.round(o.heightM * 10) / 10);
+      height.addEventListener('input', () => {
+        obstacleTyping = true;
+        try {
+          obstacleStore.setHeight(o.id, height.value);
+        } finally {
+          obstacleTyping = false;
+        }
+      });
+      height.addEventListener('change', () => renderObstacles());
+      el(doc, 'span', row, {
+        cls: 'gev-dp-obstacle-source',
+        text:
+          o.estimatedHeightM === null
+            ? t('Set by you')
+            : `${t(SOURCE_NAMES[o.source] ?? o.source)}: ${num(o.estimatedHeightM)} m`,
+      });
+      const reset = el(doc, 'button', row, {
+        cls: 'data-toggle-chip',
+        text: t('Reset'),
+        attrs: {
+          type: 'button',
+          'data-reset-obstacle': o.id,
+          title: t('Back to the open-data estimate'),
+        },
+      });
+      reset.disabled = !(o.userEdited && o.estimatedHeightM !== null);
+      reset.addEventListener('click', () => obstacleStore.reset(o.id));
+      const remove = el(doc, 'button', row, {
+        cls: 'data-toggle-chip',
+        text: '×',
+        attrs: {
+          type: 'button',
+          'data-remove-obstacle': o.id,
+          'aria-label': t('Remove'),
+        },
+      });
+      remove.addEventListener('click', () => obstacleStore.remove(o.id));
+    }
+  }
+
   function startTargetPick({ toggle = true } = {}) {
     if (!state.areas.length) {
       status(t('Draw a box on the globe first'), 'warn');
@@ -525,6 +799,7 @@ export function initDronePlan({
     }
     state.ack = false;
     syncOrbitTargets();
+    syncObstacles();
     const options = {
       ...state.options,
       takeoff: state.takeoff,
@@ -758,6 +1033,53 @@ export function initDronePlan({
     ));
     ui.obstacleNote = el(doc, 'p', body, {
       cls: 'gev-dp-note gev-dp-obstacle-note',
+    });
+    ui.obstaclesBox = el(doc, 'div', body, {
+      cls: 'gev-dp-targets gev-dp-obstacles',
+    });
+    const obstacleBar = el(doc, 'div', ui.obstaclesBox, {
+      cls: 'gev-dp-row gev-dp-target-bar',
+    });
+    el(doc, 'span', obstacleBar, {
+      cls: 'gev-dp-label',
+      text: t('Obstacle heights'),
+    });
+    const obstacleWrap = el(doc, 'span', obstacleBar, {
+      cls: 'gev-dp-control',
+    });
+    ui.obstacleRefresh = el(doc, 'button', obstacleWrap, {
+      cls: 'data-toggle-chip',
+      text: t('LOOK UP'),
+      attrs: {
+        type: 'button',
+        'data-action': 'refresh-obstacles',
+        title: t(
+          'Fetch first-guess heights from open data. Your own edits are kept',
+        ),
+      },
+    });
+    ui.obstacleAdd = el(doc, 'button', obstacleWrap, {
+      cls: 'data-toggle-chip',
+      text: t('ADD'),
+      attrs: {
+        type: 'button',
+        'aria-pressed': 'false',
+        'data-action': 'add-obstacle',
+        title: t('Click the globe to add an obstacle'),
+      },
+    });
+    ui.obstacleStatus = el(doc, 'p', ui.obstaclesBox, {
+      cls: 'gev-dp-note gev-dp-obstacle-status',
+      attrs: { 'aria-live': 'polite' },
+    });
+    ui.obstacleList = el(doc, 'div', ui.obstaclesBox, {
+      cls: 'gev-dp-target-list gev-dp-obstacle-list',
+    });
+    el(doc, 'p', ui.obstaclesBox, {
+      cls: 'gev-dp-note gev-dp-obstacle-disclaimer',
+      text: t(
+        'Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.',
+      ),
     });
     ui.targetsBox = el(doc, 'div', body, { cls: 'gev-dp-targets' });
     const targetBar = el(doc, 'div', ui.targetsBox, {
@@ -1045,6 +1367,10 @@ export function initDronePlan({
     );
     onInput(ui.obstacle, () => (o.obstacleHeightM = Number(ui.obstacle.value)));
     ui.targetRecommend.addEventListener('click', () => recommendTargets());
+    ui.obstacleRefresh.addEventListener('click', () =>
+      syncObstacles({ force: true }),
+    );
+    ui.obstacleAdd.addEventListener('click', () => startObstaclePick());
     ui.targetAdd.addEventListener('click', () => startTargetPick());
     ui.rings.addEventListener('change', () => {
       const list = ui.rings.value
@@ -1301,6 +1627,8 @@ export function initDronePlan({
     ui.jobNote.textContent = jobNote;
     renderAreas();
     renderTargets();
+    renderObstacleStatus();
+    renderObstacles();
   }
 
   function renderTargets() {
@@ -1875,6 +2203,7 @@ export function initDronePlan({
     polygonTool?.cancel('close');
     takeoffTool?.cancel('close');
     targetTool?.cancel('close');
+    obstacleTool?.cancel('close');
     state.box = null;
     state.areas = [];
     state.nextArea = 1;
@@ -1882,6 +2211,8 @@ export function initDronePlan({
     state.options.orbitTargets = [];
     state.orbitTargetsTouched = false;
     footprintCache.clear();
+    footprintPromises.clear();
+    resetObstacles();
     state.result = null;
     state.error = null;
     state.busy = false;
@@ -1918,6 +2249,7 @@ export function initDronePlan({
       polygonTool?.cancel('close');
       takeoffTool?.cancel('close');
       targetTool?.cancel('close');
+      obstacleTool?.cancel('close');
     }
   };
   const onEntry = () => queueMicrotask(syncOpenToCard);
@@ -2120,6 +2452,15 @@ export function initDronePlan({
     startTakeoffPick,
     startTargetPick,
     addOrbitTarget,
+    startObstaclePick,
+    obstacles: {
+      list: () => obstacleStore.list(),
+      add: addObstacle,
+      remove: (id) => obstacleStore.remove(id),
+      setHeight: (id, h) => obstacleStore.setHeight(id, h),
+      reset: (id) => obstacleStore.reset(id),
+      refresh: () => syncObstacles({ force: true }),
+    },
     removeOrbitTarget,
     setOrbitTargetActive,
     recommendTargets,
@@ -2137,6 +2478,8 @@ export function initDronePlan({
       polygonTool?.destroy();
       takeoffTool?.destroy();
       targetTool?.destroy();
+      obstacleTool?.destroy();
+      resetObstacles();
       preview.destroy();
       body.replaceChildren();
     },
