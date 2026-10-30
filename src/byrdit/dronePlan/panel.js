@@ -2150,7 +2150,7 @@ export function initDronePlan({
     render();
     // The panel scrolls and the plan buttons sit well down it: bring the
     // totals into view so the answer to PLAN ALL is on screen.
-    ui.summary.scrollIntoView?.({ block: 'nearest' });
+    if (!ui.summary.hidden) ui.summary.scrollIntoView?.({ block: 'nearest' });
   }
 
   function resultAllowed(result) {

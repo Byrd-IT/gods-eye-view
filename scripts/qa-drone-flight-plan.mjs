@@ -519,6 +519,8 @@ try {
       text: node.textContent,
       top: Math.max(r.top, pr.top),
       bottom: Math.min(r.bottom, pr.bottom),
+      rawTop: r.top,
+      rawBottom: r.bottom,
       inPanel: r.top >= pr.top - 1 && r.bottom <= pr.bottom + 1,
       vh: window.innerHeight,
       flights,
