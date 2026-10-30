@@ -4,15 +4,19 @@
  *
  * Format source: DJI's published WPML reference (developer.dji.com, Cloud API
  * "DJI WPML": Template.kml, Waylines.wpml, Common Elements) for the element
- * names, actions and trigger types, and the namespace/element layout of a
- * native DJI Fly mission made on a DJI RC 2 (documented by the open-source
- * FlyPath planner, verified there against a Mini 4 Pro dump). The same
- * waypoint list is written to BOTH files because DJI Fly rebuilds a mission
- * from template.kml when it is re-saved.
+ * names, actions and trigger types, and two REAL files DJI Fly wrote for a
+ * Mini 5 Pro on 2026-10-30 (test fixtures under fixtures/djifly-mini5pro).
  *
- * NOT YET VERIFIED against a Mini 5 Pro: compare with a KMZ that DJI Fly
- * itself wrote for this aircraft before trusting it in the air. The namespace
- * and drone enum are constants below so a mismatch is a one-line change.
+ * Layout of a real DJI Fly file: `wpmz/template.kml` holds ONLY author,
+ * createTime, updateTime and missionConfig (no waypoints, no Folder); every
+ * waypoint lives in `wpmz/waylines.wpml`. So the waypoints are written to
+ * waylines.wpml only. Action groups are `parallel`, actionGroupId starts at 1
+ * and actionId is unique across the whole mission (1, 2, 3 ...).
+ *
+ * Still NOT verified by a real file: takePhoto, multipleDistance interval
+ * photos, and smoothTransition orbit headings (DJI Fly's own files only hold
+ * gimbalRotate and gimbalEvenlyRotate). The namespace and drone enum are
+ * constants so a mismatch is a one-line change.
  */
 import { jobFolder, jobSlug } from './areas.js';
 import { TRANSIT_SPEED_MS } from './planner.js';
@@ -95,7 +99,7 @@ function actionGroup({ id, start, end, trigger, triggerParam, actions }) {
           <wpml:actionGroupId>${id}</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>${start}</wpml:actionGroupStartIndex>
           <wpml:actionGroupEndIndex>${end}</wpml:actionGroupEndIndex>
-          <wpml:actionGroupMode>sequence</wpml:actionGroupMode>
+          <wpml:actionGroupMode>parallel</wpml:actionGroupMode>
           <wpml:actionTrigger>
             <wpml:actionTriggerType>${trigger}</wpml:actionTriggerType>${param}
           </wpml:actionTrigger>
@@ -135,10 +139,17 @@ ${groups}        <wpml:waypointGimbalHeadingParam>
       </Placemark>`;
 }
 
-/** Placemark XML for every waypoint of a mission, with its photo actions. */
+/**
+ * Placemark XML for every waypoint of a mission, with its photo actions.
+ * Group ids start at 1 and action ids are unique across the mission, as DJI
+ * Fly writes them. The gimbal turn sits in its OWN group at the first
+ * waypoint and the photo in a separate group: groups run in parallel, so a
+ * photo in the same group could fire while the gimbal is still turning.
+ */
 function placemarks(mission, speedMs) {
   const blocks = [];
-  let groupId = 0;
+  let groupId = 1;
+  let actionId = 1;
   for (const leg of mission.legs) {
     const wps = leg.waypoints;
     const last = wps[wps.length - 1].index;
@@ -151,7 +162,7 @@ function placemarks(mission, speedMs) {
             start: wp.index,
             end: wp.index,
             trigger: 'reachPoint',
-            actions: [gimbalAction(0, wp.pitchDeg)],
+            actions: [gimbalAction(actionId++, wp.pitchDeg)],
           });
           groups += actionGroup({
             id: groupId++,
@@ -159,20 +170,26 @@ function placemarks(mission, speedMs) {
             end: last,
             trigger: 'multipleDistance',
             triggerParam: Math.max(1, leg.photoSpacingM),
-            actions: [photoAction(0)],
+            actions: [photoAction(actionId++)],
           });
         }
       } else {
-        const actions = [];
-        if (i === 0) actions.push(gimbalAction(actions.length, wp.pitchDeg));
-        if (wp.photo) actions.push(photoAction(actions.length));
-        if (actions.length) {
+        if (i === 0) {
           groups += actionGroup({
             id: groupId++,
             start: wp.index,
             end: wp.index,
             trigger: 'reachPoint',
-            actions,
+            actions: [gimbalAction(actionId++, wp.pitchDeg)],
+          });
+        }
+        if (wp.photo) {
+          groups += actionGroup({
+            id: groupId++,
+            start: wp.index,
+            end: wp.index,
+            trigger: 'reachPoint',
+            actions: [photoAction(actionId++)],
           });
         }
       }
@@ -203,20 +220,6 @@ export function buildMissionFiles(mission, plan, opts = {}) {
     <wpml:createTime>${created}</wpml:createTime>
     <wpml:updateTime>${created}</wpml:updateTime>
 ${config}
-    <Folder>
-      <wpml:templateType>waypoint</wpml:templateType>
-      <wpml:templateId>0</wpml:templateId>
-      <wpml:waylineCoordinateSysParam>
-        <wpml:coordinateMode>WGS84</wpml:coordinateMode>
-        <wpml:heightMode>relativeToStartPoint</wpml:heightMode>
-        <wpml:positioningType>GPS</wpml:positioningType>
-      </wpml:waylineCoordinateSysParam>
-      <wpml:autoFlightSpeed>${one(speedMs)}</wpml:autoFlightSpeed>
-      <wpml:globalHeight>${one(plan.options.aglM)}</wpml:globalHeight>
-      <wpml:caliFlightEnable>0</wpml:caliFlightEnable>
-      <wpml:gimbalPitchMode>usePointSetting</wpml:gimbalPitchMode>
-${body}
-    </Folder>
   </Document>
 </kml>
 `;

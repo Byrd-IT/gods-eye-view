@@ -157,4 +157,90 @@ export function readZip(bytes) {
   return files;
 }
 
+/** Largest entry (after inflating) and entry count readZipAsync accepts. */
+export const MAX_ZIP_ENTRY_BYTES = 20 * 1024 * 1024;
+export const MAX_ZIP_ENTRIES = 64;
+
+async function inflateRaw(data, limit) {
+  const stream = new Blob([data])
+    .stream()
+    .pipeThrough(new DecompressionStream('deflate-raw'));
+  const reader = stream.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      throw new Error('ZIP entry is too large');
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+}
+
+/**
+ * Like readZip, but also reads DEFLATE entries (DJI Fly compresses its KMZ).
+ * Entry sizes are capped, so a hostile file cannot inflate to gigabytes.
+ * @param {Uint8Array} bytes
+ * @returns {Promise<Map<string, Uint8Array>>}
+ */
+export async function readZipAsync(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = -1;
+  for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 22 - 65535; i -= 1) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) throw new Error('Not a ZIP archive');
+  const count = view.getUint16(end + 10, true);
+  if (count > MAX_ZIP_ENTRIES) throw new Error('ZIP has too many entries');
+  let at = view.getUint32(end + 16, true);
+  const files = new Map();
+  for (let n = 0; n < count; n += 1) {
+    if (at + 46 > bytes.length || view.getUint32(at, true) !== 0x02014b50) {
+      throw new Error('Corrupt ZIP central directory');
+    }
+    const method = view.getUint16(at + 10, true);
+    const crc = view.getUint32(at + 16, true);
+    const packed = view.getUint32(at + 20, true);
+    const size = view.getUint32(at + 24, true);
+    const nameLen = view.getUint16(at + 28, true);
+    const extraLen = view.getUint16(at + 30, true);
+    const commentLen = view.getUint16(at + 32, true);
+    const localAt = view.getUint32(at + 42, true);
+    const name = textDecoder.decode(bytes.subarray(at + 46, at + 46 + nameLen));
+    if (size > MAX_ZIP_ENTRY_BYTES) throw new Error(`ZIP entry ${name} is too large`);
+    if (method !== 0 && method !== 8) {
+      throw new Error(`Unsupported ZIP method for ${name}`);
+    }
+    if (localAt + 30 > bytes.length || view.getUint32(localAt, true) !== 0x04034b50) {
+      throw new Error('Corrupt ZIP local header');
+    }
+    const localName = view.getUint16(localAt + 26, true);
+    const localExtra = view.getUint16(localAt + 28, true);
+    const start = localAt + 30 + localName + localExtra;
+    if (start + packed > bytes.length) throw new Error('Corrupt ZIP entry');
+    const raw = bytes.subarray(start, start + packed);
+    const data =
+      method === 0 ? raw.slice() : await inflateRaw(raw, MAX_ZIP_ENTRY_BYTES);
+    if (data.length !== size || crc32(data) !== crc) {
+      throw new Error(`Bad CRC for ${name}`);
+    }
+    files.set(name, data);
+    at += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+
 export { crc32 };
