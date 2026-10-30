@@ -184,13 +184,9 @@ try {
     downloadPath: DOWNLOADS,
   });
 
-  await page.evaluate(() => {
-    const rail = document.getElementById('pp-toggles');
-    if (rail?.classList.contains('collapsed'))
-      document
-        .querySelector('.panel-collapse-btn[data-collapse-target="pp-toggles"]')
-        ?.click();
-  });
+  // The Drone Flight Plan card is its own launcher on the right rail. Do NOT
+  // expand the DISPLAY rail (pp-toggles) first: while it is open the card is
+  // hidden (aria-hidden, 0 x 0) and its button cannot be clicked.
   await page.waitForFunction(
     () =>
       document.getElementById('drone-plan-panel')?.getBoundingClientRect()
@@ -337,6 +333,124 @@ try {
   );
   await page.screenshot({
     path: path.join(SHOT_DIR, 'drone-plan-desktop.jpg'),
+    type: 'jpeg',
+    quality: 85,
+  });
+
+  // ------------------------------------------------------- 3D check --
+  // Shaded safety zone, height curtain and camera view, on the globe and in
+  // the panel. A visual aid: nothing here detects a collision.
+  const layerCounts = () =>
+    page.evaluate(() => {
+      const viewer = window.__godsEyeView.viewer;
+      const ds = viewer.dataSources.getByName('gev-drone-plan')[0];
+      const mine = (p) =>
+        ds.entities.values.filter((e) => (e.name || '').startsWith(`3D check ${p}`));
+      const shape = mine('zone')[0]?.polylineVolume?.shape?.getValue(
+        viewer.clock.currentTime,
+      );
+      return {
+        zone: mine('zone').length,
+        curtain: mine('curtain').length,
+        footprint: mine('footprint').length,
+        view: mine('view').length,
+        halfWidth: shape ? shape[1].x : null,
+      };
+    });
+  const checkUi = () =>
+    page.evaluate(() => {
+      const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+      const box = (k) => root?.querySelector(`input[data-check="${k}"]`)?.checked;
+      return {
+        present: Boolean(root),
+        text: root?.textContent ?? '',
+        zone: box('zone'),
+        curtain: box('curtain'),
+        footprints: box('footprints'),
+        view: root?.querySelector('select[data-check="frustum"]')?.value,
+        width: root?.querySelector('input[data-check-slider="width"]')?.value,
+        photos: root?.querySelector('input[data-check-slider="photo"]')?.max,
+        readout: root?.querySelector('[data-role="check-readout"]')?.textContent,
+      };
+    });
+  const ui3 = await checkUi();
+  check(
+    'the 3D check section is there, says it is a visual check only, and has the owner defaults',
+    ui3.present &&
+      /Visual check only/.test(ui3.text) &&
+      /no trees or power lines/.test(ui3.text) &&
+      ui3.zone &&
+      ui3.curtain &&
+      ui3.footprints &&
+      ui3.view === 'one' &&
+      ui3.width === '10',
+    JSON.stringify({ ...ui3, text: undefined }),
+  );
+  const l0 = await layerCounts();
+  check(
+    '3D check: safety zone, curtain, footprints and ONE camera pyramid are on the globe',
+    l0.zone >= 1 && l0.curtain >= 1 && l0.footprint >= 1 && l0.view === 5,
+    JSON.stringify(l0),
+  );
+  check(
+    '3D check: the zone is 10 m to each side by default',
+    l0.halfWidth === 10,
+    String(l0.halfWidth),
+  );
+  await page.evaluate(() => {
+    const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+    const c = root.querySelector('input[data-check="curtain"]');
+    c.checked = false;
+    c.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const l1 = await layerCounts();
+  check(
+    '3D check: switching the curtain off removes only the curtain',
+    l1.curtain === 0 &&
+      l1.zone === l0.zone &&
+      l1.footprint === l0.footprint &&
+      l1.view === l0.view,
+    JSON.stringify(l1),
+  );
+  await page.evaluate(() => {
+    const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+    const c = root.querySelector('input[data-check="curtain"]');
+    c.checked = true;
+    c.dispatchEvent(new Event('change', { bubbles: true }));
+    const w = root.querySelector('input[data-check-slider="width"]');
+    w.value = '20';
+    w.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await wait(600);
+  const l2 = await layerCounts();
+  check(
+    '3D check: the half-width slider widens the zone and the curtain is back',
+    l2.halfWidth === 20 && l2.curtain === l0.curtain,
+    JSON.stringify(l2),
+  );
+  const before3 = (await checkUi()).readout;
+  await page.evaluate(() => {
+    const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+    const p = root.querySelector('input[data-check-slider="photo"]');
+    p.value = String(Math.min(Number(p.max), 5));
+    p.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const after3 = await checkUi();
+  const l3 = await layerCounts();
+  check(
+    '3D check: the photo slider steps the single pyramid',
+    after3.readout !== before3 && /Photo 5 of/.test(after3.readout) && l3.view === 5,
+    `${before3} -> ${after3.readout}`,
+  );
+  await page.evaluate(() => {
+    const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+    const w = root.querySelector('input[data-check-slider="width"]');
+    w.value = '10';
+    w.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await wait(500);
+  await page.screenshot({
+    path: path.join(SHOT_DIR, 'drone-plan-3d-check.jpg'),
     type: 'jpeg',
     quality: 85,
   });

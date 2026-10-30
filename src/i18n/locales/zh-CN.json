@@ -3047,5 +3047,21 @@
   "Tree-free zone": "无树区域",
   "around each target": "每个目标周围",
   "Show on the globe": "在地球上显示",
-  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "建筑目标来自 OpenStreetMap。该数据不包含树木、塔架和电线：请自行确认净空。未经实飞测试。"
+  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "建筑目标来自 OpenStreetMap。该数据不包含树木、塔架和电线：请自行确认净空。未经实飞测试。",
+  "3D check": "3D 检查",
+  "Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.": "仅作目视检查：这里不会检测任何碰撞。请在能显示树木的 Google Photorealistic 3D 上查看。OpenStreetMap 建筑数据不含树木和电线。",
+  "Show 3D check": "显示 3D 检查",
+  "Safety zone": "安全区",
+  "Zone half-width": "安全区半宽",
+  "Height curtain": "高度帘幕",
+  "Photo footprints": "照片地面覆盖范围",
+  "One at a time": "逐张查看",
+  "Several, thinned": "多张，抽稀显示",
+  "Off": "关",
+  "Camera view": "相机视角",
+  "Step photos": "逐张翻看照片",
+  "Step through the photos": "逐张翻看照片",
+  "No photos to show yet": "暂无可显示的照片",
+  "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "第 {n} 张，共 {total} 张：{pass}，俯仰 {pitch} 度，高度 {h}，覆盖 {w} × {d}",
+  "Mission {n}": "任务 {n}"
 }

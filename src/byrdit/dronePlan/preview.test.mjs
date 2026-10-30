@@ -10,6 +10,14 @@ import {
 import { assembleMissions, planFlight } from './planner.js';
 import { metersPerDegree } from './geo.js';
 import { suiteOptions } from './suite.js';
+import {
+  MAX_FOOTPRINTS,
+  MAX_FRUSTUMS,
+  photoFootprint,
+  photoHeadingDeg,
+  thinIndexes,
+} from './checkGeometry.js';
+import { getPreset } from './presets.js';
 
 function fakeCesium() {
   const paint = (css, a = 1) => ({ css, a, withAlpha: (x) => paint(css, x) });
@@ -42,6 +50,13 @@ function fakeCesium() {
         this.options = options;
       }
     },
+    Cartesian2: class {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+      }
+    },
+    CornerType: { MITERED: 'mitered' },
     ClassificationType: { BOTH: 'both' },
     HeightReference: { CLAMP_TO_GROUND: 'clamp' },
   };
@@ -339,4 +354,232 @@ test('destroy removes the suite entities with the data source', async () => {
   assert.equal(source.entities.values.length, 0);
   preview.showSuite(suitePasses());
   assert.equal(source.entities.values.length, 0, 'no drawing after destroy');
+});
+
+// ------------------------------------------------------------ 3D check --
+const FRAME = getPreset('dji-mini-4-pro');
+const layerOf = (source, prefix) =>
+  source.entities.values.filter((e) => e.name?.startsWith(prefix));
+const zones = (source) => layerOf(source, '3D check zone');
+const curtains = (source) => layerOf(source, '3D check curtain');
+const footprints = (source) => layerOf(source, '3D check footprint');
+const views = (source) => layerOf(source, '3D check view');
+const checkEntities = (source) => layerOf(source, '3D check');
+function checkRig(options = {}, planned = result(300, 200, { aglM: 80 })) {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  preview.setCheck({ enabled: true, frame: FRAME, ...options });
+  preview.showPlan(planned);
+  return { viewer, preview, source };
+}
+
+test('3D check: a bare preview draws nothing extra until the panel enables it', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  preview.showPlan(result(300, 200));
+  assert.equal(checkEntities(viewer.dataSources.sources[0]).length, 0);
+});
+
+test('3D check: footprint maths - nadir is a rectangle of the expected size', () => {
+  const wp = { lon: -97.77, lat: 30.27, aglM: 100, groundM: 0, pitchDeg: -90 };
+  const fp = photoFootprint(wp, 90, FRAME);
+  const across = (100 * FRAME.sensorWidthMm) / FRAME.focalMm;
+  const along = (100 * FRAME.sensorHeightMm) / FRAME.focalMm;
+  assert.ok(Math.abs(fp.widthNearM - across) < 0.5, `${fp.widthNearM}`);
+  assert.ok(Math.abs(fp.widthFarM - across) < 0.5);
+  assert.ok(Math.abs(fp.depthM - along) < 0.5, `${fp.depthM}`);
+  assert.equal(fp.clipped, false);
+  assert.equal(fp.corners.length, 4);
+  // Heading east: the long side of the frame runs north-south.
+  const m = metersPerDegree(30.27);
+  const ns = Math.abs(fp.corners[0].lat - fp.corners[1].lat) * m.lat;
+  assert.ok(Math.abs(ns - across) < 0.5, `north-south ${ns}`);
+});
+
+test('3D check: a tilted footprint is a trapezoid, wider and farther on the far side', () => {
+  const wp = { lon: -97.77, lat: 30.27, aglM: 100, groundM: 0, pitchDeg: -45 };
+  const fp = photoFootprint(wp, 0, FRAME);
+  assert.ok(fp.widthFarM > fp.widthNearM * 1.5);
+  // The frame's half height over the focal length is the half view angle.
+  const half = Math.atan(FRAME.sensorHeightMm / 2 / FRAME.focalMm);
+  const tilt = Math.PI / 4;
+  const near = 100 / Math.tan(tilt + half);
+  const far = 100 / Math.tan(tilt - half);
+  assert.ok(Math.abs(fp.depthM - (far - near)) < 1, `${fp.depthM}`);
+  // Facing north: the far edge is north of the drone, the near edge too.
+  assert.ok(fp.corners[2].lat > fp.corners[0].lat);
+});
+
+test('3D check: a ray above the horizon is cut, not sent to infinity', () => {
+  const wp = { lon: -97.77, lat: 30.27, aglM: 100, groundM: 0, pitchDeg: -20 };
+  const fp = photoFootprint(wp, 0, FRAME);
+  assert.equal(fp.clipped, true);
+  assert.ok(fp.depthM <= 1001);
+});
+
+test('3D check: a waypoint without a heading faces along the flight', () => {
+  const wps = [
+    { lon: -97.77, lat: 30.27 },
+    { lon: -97.769, lat: 30.27 },
+  ];
+  assert.ok(Math.abs(photoHeadingDeg(wps, 0) - 90) < 0.5);
+  assert.ok(Math.abs(photoHeadingDeg(wps, 1) - 90) < 0.5, 'last looks back');
+  assert.equal(photoHeadingDeg([{ lon: 1, lat: 1, headingDeg: 33 }], 0), 33);
+  assert.deepEqual(thinIndexes(10, 4), [0, 3, 6, 9]);
+  assert.equal(thinIndexes(3, 10).length, 3);
+});
+
+test('3D check: zone corridor half-width follows the slider and flies at the real height', () => {
+  const { preview, source } = checkRig({ halfWidthM: 10, frustum: 'off' });
+  const first = zones(source);
+  assert.ok(first.length >= 1);
+  const shape = first[0].polylineVolume.shape;
+  assert.equal(shape[1].x - shape[0].x, 20, 'default 10 m each side');
+  assert.equal(shape[2].y - shape[1].y, 20, 'above and below too');
+  const heights = first[0].polylineVolume.positions.heights;
+  const w0 = result(300, 200, { aglM: 80 }).missions[0].waypoints[0];
+  assert.equal(heights[2], (w0.groundM ?? 0) + w0.aglM);
+  preview.setCheck({ halfWidthM: 25 });
+  const next = zones(source);
+  assert.equal(next[0].polylineVolume.shape[1].x - next[0].polylineVolume.shape[0].x, 50);
+  assert.equal(next.length, first.length);
+  preview.setCheck({ halfWidthM: 500 });
+  const clamped = zones(source)[0].polylineVolume.shape;
+  assert.equal(clamped[1].x - clamped[0].x, 60, 'slider range is 2 to 30 m');
+});
+
+test('3D check: each toggle adds and removes only its own entities', () => {
+  const { preview, source } = checkRig({ frustum: 'one' });
+  assert.ok(zones(source).length && curtains(source).length);
+  assert.ok(footprints(source).length && views(source).length);
+  const keep = (list) => list.slice();
+  const before = {
+    zone: keep(zones(source)),
+    curtain: keep(curtains(source)),
+    foot: keep(footprints(source)),
+    view: keep(views(source)),
+    plan: source.entities.values.filter((e) => !e.name?.startsWith('3D check')),
+  };
+  const same = (a, b) => a.length === b.length && a.every((e, i) => e === b[i]);
+  preview.setCheck({ curtain: false });
+  assert.equal(curtains(source).length, 0);
+  assert.ok(same(zones(source), before.zone), 'zone untouched');
+  assert.ok(same(footprints(source), before.foot), 'footprints untouched');
+  assert.ok(same(views(source), before.view), 'view untouched');
+  preview.setCheck({ curtain: true, zone: false });
+  assert.equal(zones(source).length, 0);
+  assert.ok(curtains(source).length);
+  assert.ok(same(footprints(source), before.foot));
+  preview.setCheck({ zone: true, footprints: false });
+  assert.equal(footprints(source).length, 0);
+  assert.ok(views(source).length, 'pyramid stays when footprints go');
+  preview.setCheck({ frustum: 'off' });
+  assert.equal(views(source).length, 0);
+  assert.ok(zones(source).length && curtains(source).length);
+  const plan = source.entities.values.filter((e) => !e.name?.startsWith('3D check'));
+  assert.ok(same(plan, before.plan), 'path and markers never touched');
+  preview.setCheck({ enabled: false });
+  assert.equal(checkEntities(source).length, 0);
+});
+
+test('3D check: the curtain is a wall from the flight height down to the ground', () => {
+  const { source } = checkRig({ frustum: 'off' }, result(300, 200, { aglM: 80 }));
+  const wall = curtains(source)[0].wall;
+  assert.equal(wall.minimumHeights.length, wall.positions.heights.length / 3);
+  assert.ok(wall.material.a < 0.2, 'faint');
+});
+
+test('3D check: one pyramid by default; the index steps it; thinned shows many within the cap', () => {
+  const { preview, source } = checkRig({ frustum: 'one', index: 0 });
+  assert.equal(views(source).length, 5, '4 faces and an edge line');
+  const apex = (e) => e.polygon.hierarchy.heights?.slice(0, 3) ?? e.polygon.hierarchy;
+  const at0 = views(source)[0].polygon.hierarchy.heights.slice(0, 3);
+  preview.setCheck({ index: 7 });
+  assert.equal(views(source).length, 5);
+  const at7 = views(source)[0].polygon.hierarchy.heights.slice(0, 3);
+  assert.notDeepEqual(at0, at7, 'the pyramid moved');
+  assert.equal(preview.checkInfo().index, 7);
+  assert.ok(preview.checkInfo().count > 8);
+  preview.setCheck({ index: 99999 });
+  assert.equal(preview.checkInfo().index, preview.checkInfo().count - 1);
+  preview.setCheck({ frustum: 'thinned' });
+  assert.ok(views(source).length > 5);
+  assert.ok(views(source).length <= MAX_FRUSTUMS * 5);
+  assert.ok(apex);
+});
+
+test('3D check: entity caps hold on a plan of about 600 photos or more', () => {
+  const big = result(1500, 1200, { aglM: 60, batteryMin: 60 });
+  const { preview, source } = checkRig({ frustum: 'thinned' }, big);
+  assert.ok(preview.checkInfo().count > MAX_FOOTPRINTS);
+  assert.ok(footprints(source).length <= MAX_FOOTPRINTS);
+  assert.ok(views(source).length <= MAX_FRUSTUMS * 5);
+  assert.equal(zones(source).length, big.missions.length);
+});
+
+test('3D check: a footprint is shaded on the ground, classified onto 3D tiles', () => {
+  const { source } = checkRig({ frustum: 'off' });
+  const poly = footprints(source)[0].polygon;
+  assert.equal(poly.classificationType, 'both');
+  assert.equal(poly.hierarchy.length, 8, 'four lon/lat corners');
+  assert.ok(poly.material.a < 0.4, 'see-through');
+});
+
+test('3D check: it follows each pass checkbox and is coloured per pass', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  preview.setCheck({ enabled: true, frame: FRAME, frustum: 'off', footprints: false });
+  preview.showSuite(suitePasses());
+  const ids = (list) => new Set(list.map((e) => e.name.split(': ')[1].split(' ')[0]));
+  assert.deepEqual([...ids(zones(source))].sort(), [...SUITE_IDS].sort());
+  const nadirZone = zones(source).find((e) => e.name.includes(': nadir'));
+  assert.equal(nadirZone.polylineVolume.material.css, PASS_STYLES.nadir.color);
+  preview.setSuiteHidden(['nadir', 'orbit']);
+  assert.deepEqual([...ids(zones(source))].sort(), ['oblique45', 'oblique60']);
+  assert.deepEqual([...ids(curtains(source))].sort(), ['oblique45', 'oblique60']);
+  preview.setSuiteHidden(SUITE_IDS);
+  assert.equal(checkEntities(source).length, 0);
+  preview.setSuiteHidden([]);
+  assert.equal(ids(zones(source)).size, 4);
+});
+
+test('3D check: re-syncing the same plan does not rebuild the layers', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  preview.setCheck({ enabled: true, frame: FRAME });
+  const passes = suitePasses();
+  preview.showSuite(passes);
+  const before = zones(source).slice();
+  preview.showPlan(null);
+  preview.showSuite(passes);
+  const after = zones(source);
+  assert.ok(before.length && before.every((e, i) => e === after[i]));
+});
+
+test('3D check: clear, replan and destroy remove every check entity', async () => {
+  const { viewer, preview, source } = checkRig({ frustum: 'thinned' });
+  assert.ok(checkEntities(source).length > 0);
+  preview.showPlan(result(200, 200, { aglM: 70 }));
+  assert.ok(checkEntities(source).length > 0, 'a new plan replaces the layers');
+  const n = zones(source).length;
+  assert.equal(n, result(200, 200, { aglM: 70 }).missions.length);
+  preview.showPlan(null);
+  assert.equal(checkEntities(source).length, 0, 'replan clears');
+  preview.showPlan(result(200, 200));
+  preview.showSuite(suitePasses());
+  preview.clear();
+  assert.equal(source.entities.values.length, 0, 'clear removes everything');
+  preview.showPlan(result(200, 200));
+  await preview.destroy();
+  assert.equal(viewer.dataSources.sources.length, 0);
+  assert.equal(source.entities.values.length, 0);
+});
+
+test('3D check: no footprints or pyramids without a camera', () => {
+  const { source } = checkRig({ frame: null });
+  assert.equal(footprints(source).length + views(source).length, 0);
+  assert.ok(zones(source).length && curtains(source).length);
 });

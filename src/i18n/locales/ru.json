@@ -3254,5 +3254,21 @@
   "Tree-free zone": "Зона без деревьев",
   "around each target": "вокруг каждой цели",
   "Show on the globe": "Показать на глобусе",
-  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "Цели-здания берутся из OpenStreetMap. Деревьев, вышек и линий электропередачи в этих данных нет: проверяйте свободное пространство сами. В полёте не проверено."
+  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "Цели-здания берутся из OpenStreetMap. Деревьев, вышек и линий электропередачи в этих данных нет: проверяйте свободное пространство сами. В полёте не проверено.",
+  "3D check": "3D-проверка",
+  "Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.": "Только визуальная проверка: ничто здесь не обнаруживает столкновения. Смотрите её поверх Google Photorealistic 3D, где видны деревья. В зданиях OpenStreetMap нет деревьев и линий электропередачи.",
+  "Show 3D check": "Показать 3D-проверку",
+  "Safety zone": "Зона безопасности",
+  "Zone half-width": "Полуширина зоны",
+  "Height curtain": "Высотная завеса",
+  "Photo footprints": "Следы снимков на земле",
+  "One at a time": "По одному",
+  "Several, thinned": "Несколько, с прореживанием",
+  "Off": "Выкл.",
+  "Camera view": "Вид камеры",
+  "Step photos": "Листать снимки",
+  "Step through the photos": "Листать снимки по порядку",
+  "No photos to show yet": "Снимков для показа пока нет",
+  "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "Снимок {n} из {total}: {pass}, наклон {pitch} град., высота {h}, охват {w} на {d}",
+  "Mission {n}": "Миссия {n}"
 }

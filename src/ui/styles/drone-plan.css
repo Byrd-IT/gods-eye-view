@@ -266,3 +266,21 @@ body.gev-drone-box .cesium-widget canvas {
 .gev-dp-targets[hidden] {
   display: none;
 }
+
+.gev-dp-check {
+  margin: 8px 0 0;
+}
+.gev-dp-check > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.gev-dp-check-note {
+  margin-bottom: 4px;
+}
+.gev-dp-check-readout {
+  min-height: 2.6em;
+}
+.gev-dp-check input:disabled,
+.gev-dp-check select:disabled {
+  opacity: 0.45;
+}

@@ -3185,5 +3185,21 @@
   "Tree-free zone": "Zona libre de árboles",
   "around each target": "alrededor de cada objetivo",
   "Show on the globe": "Mostrar en el globo",
-  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "Los objetivos de edificios vienen de OpenStreetMap. Árboles, torres y tendidos eléctricos no están en esos datos: comprueba tú mismo el margen libre. No probado en vuelo."
+  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "Los objetivos de edificios vienen de OpenStreetMap. Árboles, torres y tendidos eléctricos no están en esos datos: comprueba tú mismo el margen libre. No probado en vuelo.",
+  "3D check": "Revisión 3D",
+  "Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.": "Solo revisión visual: nada aquí detecta una colisión. Mírala sobre Google Photorealistic 3D, que muestra los árboles. Los edificios de OpenStreetMap no incluyen árboles ni tendidos eléctricos.",
+  "Show 3D check": "Mostrar revisión 3D",
+  "Safety zone": "Zona de seguridad",
+  "Zone half-width": "Semiancho de la zona",
+  "Height curtain": "Cortina de altura",
+  "Photo footprints": "Huellas de las fotos",
+  "One at a time": "Una a la vez",
+  "Several, thinned": "Varias, reducidas",
+  "Off": "Desactivado",
+  "Camera view": "Vista de la cámara",
+  "Step photos": "Recorrer fotos",
+  "Step through the photos": "Recorrer las fotos",
+  "No photos to show yet": "Aún no hay fotos que mostrar",
+  "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "Foto {n} de {total}: {pass}, inclinación {pitch} grados, altura {h}, cubre {w} por {d}",
+  "Mission {n}": "Misión {n}"
 }

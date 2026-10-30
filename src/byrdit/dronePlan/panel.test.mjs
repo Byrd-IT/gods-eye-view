@@ -167,6 +167,13 @@ function makeWorld({ sample }) {
         this.options = options;
       }
     },
+    Cartesian2: class {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+      }
+    },
+    CornerType: { MITERED: 'mitered' },
     Cartesian3: {
       fromDegreesArray: (v) => v,
       fromDegreesArrayHeights: (v) => ({ heights: v }),
@@ -1240,4 +1247,139 @@ test('orbit: a failing or timed-out lookup falls back to the area centre', async
     assert.equal(handle.getResult().plan.orbit.targets[0].radiusM, handle.getResult().plan.options.orbitRadiusM);
     handle.destroy();
   }
+});
+
+// --------------------------------------------------------------- 3D check --
+const checkOf = (w, prefix) =>
+  globe(w).filter((e) => e.name?.startsWith(`3D check ${prefix}`));
+const checkBox = (w, key) =>
+  w.find((n) => n.getAttribute('data-check') === key)[0];
+const checkSlider = (w, key) =>
+  w.find((n) => n.getAttribute('data-check-slider') === key)[0];
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('3D check section: defaults are zone 10 m, curtain on, one pyramid, and it says visual only', async () => {
+  const w = setup();
+  const section = w.find((n) => n.getAttribute('data-role') === '3d-check')[0];
+  assert.ok(section, 'section exists');
+  const text = section.textContent;
+  assert.match(text, /Visual check only/);
+  assert.match(text, /no trees or power lines/);
+  assert.equal(checkBox(w, 'enabled').checked, true);
+  assert.equal(checkBox(w, 'zone').checked, true);
+  assert.equal(checkBox(w, 'curtain').checked, true, 'curtain on by default');
+  assert.equal(checkBox(w, 'footprints').checked, true);
+  assert.equal(checkSlider(w, 'width').value, '10');
+  assert.equal(checkBox(w, 'frustum').value, 'one');
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  assert.ok(checkOf(w, 'zone').length >= 1);
+  assert.ok(checkOf(w, 'curtain').length >= 1);
+  assert.ok(checkOf(w, 'footprint').length >= 1);
+  assert.equal(checkOf(w, 'view').length, 5, 'one pyramid');
+  assert.equal(checkOf(w, 'zone')[0].polylineVolume.shape[1].x, 10);
+  w.handle.destroy();
+});
+
+test('3D check: the width slider rebuilds only the zone, after it settles', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const curtain = checkOf(w, 'curtain').slice();
+  const slider = checkSlider(w, 'width');
+  slider.value = '18';
+  slider.dispatch('input');
+  slider.value = '20';
+  slider.dispatch('input');
+  assert.equal(checkOf(w, 'zone')[0].polylineVolume.shape[1].x, 10, 'debounced');
+  await wait(260);
+  assert.equal(checkOf(w, 'zone')[0].polylineVolume.shape[1].x, 20);
+  assert.ok(checkOf(w, 'curtain').every((e, i) => e === curtain[i]));
+  assert.match(
+    w.find((n) => n.tagName === 'OUTPUT' && /20 m/.test(n.textContent))[0].textContent,
+    /20 m/,
+  );
+  w.handle.destroy();
+});
+
+test('3D check: toggles remove only their own layer; master switch removes all', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const flipTo = (key, on) => {
+    const box = checkBox(w, key);
+    box.checked = on;
+    box.dispatch('change');
+  };
+  flipTo('curtain', false);
+  assert.equal(checkOf(w, 'curtain').length, 0);
+  assert.ok(checkOf(w, 'zone').length && checkOf(w, 'footprint').length);
+  flipTo('zone', false);
+  assert.equal(checkOf(w, 'zone').length, 0);
+  flipTo('footprints', false);
+  assert.equal(checkOf(w, 'footprint').length, 0);
+  assert.equal(checkOf(w, 'view').length, 5);
+  flipTo('enabled', true);
+  const view = checkBox(w, 'frustum');
+  view.value = 'off';
+  view.dispatch('change');
+  assert.equal(checkOf(w, 'view').length, 0);
+  flipTo('curtain', true);
+  assert.ok(checkOf(w, 'curtain').length);
+  flipTo('enabled', false);
+  assert.equal(globe(w).filter((e) => e.name?.startsWith('3D check')).length, 0);
+  assert.equal(checkBox(w, 'zone').disabled, true);
+  w.handle.destroy();
+});
+
+test('3D check: the photo slider steps one pyramid through the plan and the readout follows', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const slider = checkSlider(w, 'photo');
+  const photos = Number(slider.max);
+  assert.ok(photos > 10, `photos ${photos}`);
+  assert.equal(slider.value, '1');
+  const readout = () =>
+    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0].textContent;
+  assert.match(readout(), /Photo 1 of/);
+  const first = checkOf(w, 'view')[0].polygon.hierarchy.heights.slice(0, 3);
+  slider.value = '9';
+  slider.dispatch('input');
+  assert.equal(checkOf(w, 'view').length, 5);
+  assert.match(readout(), /Photo 9 of/);
+  assert.notDeepEqual(
+    checkOf(w, 'view')[0].polygon.hierarchy.heights.slice(0, 3),
+    first,
+  );
+  const view = checkBox(w, 'frustum');
+  view.value = 'thinned';
+  view.dispatch('change');
+  assert.ok(checkOf(w, 'view').length > 5);
+  assert.equal(checkSlider(w, 'photo').disabled, true, 'slider only in one-at-a-time mode');
+  w.handle.destroy();
+});
+
+test('3D check follows each pass checkbox and goes with replan and destroy', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await w.handle.planSuite();
+  const passesOf = (prefix) =>
+    new Set(checkOf(w, prefix).map((e) => e.name.split(': ')[1].split(' ')[0]));
+  assert.deepEqual([...passesOf('zone')].sort(), [...PASS_IDS].sort());
+  flip(toggle(w, 'oblique60'));
+  assert.equal(passesOf('zone').has('oblique60'), false);
+  assert.equal(passesOf('curtain').has('oblique60'), false);
+  assert.equal(passesOf('zone').has('nadir'), true);
+  assert.match(
+    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0].textContent,
+    /Photo 1 of/,
+  );
+  w.handle.setBox(boxM(200, 200));
+  await w.handle.replan();
+  assert.equal(passesOf('zone').has('nadir'), false, 'replan drops the suite layers');
+  assert.ok(checkOf(w, 'zone').length >= 1, 'single plan drawn instead');
+  w.handle.destroy();
+  assert.equal(globe(w).length, 0);
 });

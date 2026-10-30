@@ -284,6 +284,9 @@ export function readmeText(result, when = new Date()) {
     'replace its KMZ with one of these (keep the file name DJI Fly gave it).',
     'Check airspace and local rules, keep the aircraft in sight, and fly the',
     'first mission short and supervised.',
+    'The 3D check on the globe is a VISUAL aid only: it does not detect a',
+    'collision, and OpenStreetMap has no trees or power lines. Look at the path',
+    'over the Google 3D view and check clearance yourself.',
     ...(plan.orbit
       ? [
           'Building orbits use OpenStreetMap footprints. Trees, towers and power lines',
@@ -303,7 +306,10 @@ export function readmeText(result, when = new Date()) {
       'Processing jobs:',
       'Process the images from one job together (ODM). Do not mix jobs.',
     );
-    if ((result.plan?.jobGrouping ?? 'per-area') !== 'whole' && jobs.length > 1) {
+    if (
+      (result.plan?.jobGrouping ?? 'per-area') !== 'whole' &&
+      jobs.length > 1
+    ) {
       lines.push(
         'Where areas overlap, photos of that ground are only in the first job.',
         'A later job has no photos there.',
@@ -335,8 +341,15 @@ export function bundleEntries(result, opts = {}) {
       : result.missions;
     const index = same.indexOf(mission);
     const job = jobs.find((item) => item.id === mission.jobId);
-    const file = kmzFileName(index, same.length, when, multi ? mission.jobName : '');
-    const folder = multi ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/` : '';
+    const file = kmzFileName(
+      index,
+      same.length,
+      when,
+      multi ? mission.jobName : '',
+    );
+    const folder = multi
+      ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/`
+      : '';
     return {
       name: `${folder}${file}`,
       data: buildKmz(mission, result.plan, { ...opts, when }),

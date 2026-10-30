@@ -17,12 +17,14 @@ import { assembleAreaPlan, distanceToAreasM, planAreas } from './areas.js';
 import { initPolygonTool } from './polygonTool.js';
 import { validateDroneBox } from './limits.js';
 import { initPointTool } from './pointTool.js';
+import {
+  DEFAULT_ZONE_HALF_WIDTH_M,
+  MAX_ZONE_HALF_WIDTH_M,
+  MIN_ZONE_HALF_WIDTH_M,
+} from './checkGeometry.js';
 import { createDronePlanPreview, passStyle } from './preview.js';
 import { sampleGround } from './terrain.js';
-import {
-  recommendOrbitTargets,
-  targetInsideAreas,
-} from './orbitTargets.js';
+import { recommendOrbitTargets, targetInsideAreas } from './orbitTargets.js';
 import {
   AGL_CAP_M,
   DEFAULT_OBSTACLE_HEIGHT_M,
@@ -63,6 +65,7 @@ export const TARGET_POINTER_OWNER = 'drone-plan-orbit-target';
 const BOX_OWNER = 'drone-plan-box';
 const REPLAN_DELAY_MS = 160;
 const MAX_TERRAIN_CACHE = 30000;
+const CHECK_SLIDER_DELAY_MS = 150;
 
 const el = (doc, tag, parent, { text, cls, attrs } = {}) => {
   const node = doc.createElement(tag);
@@ -123,6 +126,16 @@ export function initDronePlan({
     result: null,
     suite: null,
     suiteHidden: new Set(),
+    // The 3D check on the globe: a visual aid, it detects nothing.
+    check: {
+      enabled: true,
+      zone: true,
+      halfWidthM: DEFAULT_ZONE_HALF_WIDTH_M,
+      curtain: true,
+      footprints: true,
+      frustum: 'one',
+      index: 0,
+    },
     suiteBusy: false,
     error: null,
     busy: false,
@@ -201,7 +214,8 @@ export function initDronePlan({
     },
     onActive: (active) => {
       ui.targetAdd?.setAttribute('aria-pressed', String(active));
-      if (active) status(t('Click the structure or tree you want to orbit'), 'info');
+      if (active)
+        status(t('Click the structure or tree you want to orbit'), 'info');
     },
   });
 
@@ -478,6 +492,7 @@ export function initDronePlan({
   // The globe shows the all-passes plan when there is one, otherwise the
   // single plan: a suite replaces the single plan while it exists.
   function syncGlobe() {
+    pushCheck();
     if (state.suite) {
       preview.showPlan(null);
       preview.showSuite(state.suite.passes, state.suiteHidden);
@@ -554,6 +569,7 @@ export function initDronePlan({
     state.busy = false;
     planNonce += 1;
     panel.dataset.planNonce = String(planNonce);
+    pushCheck();
     preview.showPlan(state.result);
     render();
   }
@@ -836,6 +852,71 @@ export function initDronePlan({
       cls: 'gev-slider-value gev-dp-coords',
     });
 
+    // ---- 3D check: shaded safety zone, height curtain, camera view.
+    ui.check = el(doc, 'details', body, {
+      cls: 'gev-dp-check',
+      attrs: { open: '', 'data-role': '3d-check' },
+    });
+    el(doc, 'summary', ui.check, { text: t('3D check') });
+    el(doc, 'p', ui.check, {
+      cls: 'gev-dp-note gev-dp-check-note',
+      text: t(
+        'Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.',
+      ),
+    });
+    const checkBox = (label, key) => {
+      const row = el(doc, 'label', ui.check, { cls: 'gev-dp-row' });
+      const box = el(doc, 'input', null, {
+        attrs: { type: 'checkbox', 'data-check': key },
+      });
+      el(doc, 'span', row, { cls: 'gev-dp-label', text: label });
+      el(doc, 'span', row, { cls: 'gev-dp-control' }).append(box);
+      return box;
+    };
+    ui.checkEnabled = checkBox(t('Show 3D check'), 'enabled');
+    ui.checkZone = checkBox(t('Safety zone'), 'zone');
+    const widthRow = el(doc, 'label', ui.check, { cls: 'gev-dp-row' });
+    el(doc, 'span', widthRow, {
+      cls: 'gev-dp-label',
+      text: t('Zone half-width'),
+    });
+    const widthWrap = el(doc, 'span', widthRow, { cls: 'gev-dp-control' });
+    ui.checkWidth = slider(
+      t('Zone half-width'),
+      MIN_ZONE_HALF_WIDTH_M,
+      MAX_ZONE_HALF_WIDTH_M,
+      1,
+    );
+    ui.checkWidth.setAttribute('data-check-slider', 'width');
+    widthWrap.append(ui.checkWidth);
+    ui.checkWidthOut = el(doc, 'output', widthWrap, {
+      cls: 'gev-slider-value',
+    });
+    ui.checkCurtain = checkBox(t('Height curtain'), 'curtain');
+    ui.checkFootprints = checkBox(t('Photo footprints'), 'footprints');
+    ui.checkView = select(
+      [
+        ['one', t('One at a time')],
+        ['thinned', t('Several, thinned')],
+        ['off', t('Off')],
+      ],
+      t('Camera view'),
+    );
+    ui.checkView.setAttribute('data-check', 'frustum');
+    const viewRow = el(doc, 'label', ui.check, { cls: 'gev-dp-row' });
+    el(doc, 'span', viewRow, { cls: 'gev-dp-label', text: t('Camera view') });
+    el(doc, 'span', viewRow, { cls: 'gev-dp-control' }).append(ui.checkView);
+    const photoRow = el(doc, 'label', ui.check, { cls: 'gev-dp-row' });
+    el(doc, 'span', photoRow, { cls: 'gev-dp-label', text: t('Step photos') });
+    const photoWrap = el(doc, 'span', photoRow, { cls: 'gev-dp-control' });
+    ui.checkPhoto = slider(t('Step through the photos'), 1, 1, 1);
+    ui.checkPhoto.setAttribute('data-check-slider', 'photo');
+    photoWrap.append(ui.checkPhoto);
+    ui.checkReadout = el(doc, 'p', ui.check, {
+      cls: 'gev-dp-note gev-dp-check-readout',
+      attrs: { 'data-role': 'check-readout', 'aria-live': 'polite' },
+    });
+
     const advanced = el(doc, 'details', body, { cls: 'gev-dp-advanced' });
     el(doc, 'summary', advanced, { text: t('DJI model code') });
     ui.enum = el(doc, 'input', null, {
@@ -880,6 +961,37 @@ export function initDronePlan({
         syncControls();
         schedule();
       });
+    const c = state.check;
+    for (const [box, key] of [
+      [ui.checkEnabled, 'enabled'],
+      [ui.checkZone, 'zone'],
+      [ui.checkCurtain, 'curtain'],
+      [ui.checkFootprints, 'footprints'],
+    ]) {
+      box.addEventListener('change', () => {
+        c[key] = Boolean(box.checked);
+        pushCheck();
+        syncCheckUi();
+      });
+    }
+    ui.checkView.addEventListener('change', () => {
+      c.frustum = ui.checkView.value;
+      pushCheck();
+      syncCheckUi();
+    });
+    ui.checkPhoto.addEventListener('input', () => {
+      c.index = Math.max(0, Number(ui.checkPhoto.value) - 1);
+      pushCheck();
+      syncCheckUi();
+    });
+    // The zone is rebuilt once the slider settles, not on every pixel.
+    ui.checkWidth.addEventListener('input', () => {
+      c.halfWidthM = Number(ui.checkWidth.value);
+      ui.checkWidthOut.textContent = heightText(c.halfWidthM);
+      clearTimeout(checkTimer);
+      checkTimer = setTimeout(pushCheck, CHECK_SLIDER_DELAY_MS);
+    });
+    syncCheckUi();
     ui.preset.addEventListener('change', () => {
       o.presetId = ui.preset.value;
       o.speedMs = getPreset(o.presetId).defaultSpeedMs;
@@ -931,10 +1043,7 @@ export function initDronePlan({
       ui.targetHeight,
       () => (o.orbitTargetHeightM = Number(ui.targetHeight.value)),
     );
-    onInput(
-      ui.obstacle,
-      () => (o.obstacleHeightM = Number(ui.obstacle.value)),
-    );
+    onInput(ui.obstacle, () => (o.obstacleHeightM = Number(ui.obstacle.value)));
     ui.targetRecommend.addEventListener('click', () => recommendTargets());
     ui.targetAdd.addEventListener('click', () => startTargetPick());
     ui.rings.addEventListener('change', () => {
@@ -1038,6 +1147,74 @@ export function initDronePlan({
           format: rec.camera.format,
         },
       ),
+    );
+  }
+
+  let checkTimer = null;
+  /** Hand the 3D check options (and the camera of the chosen aircraft) over. */
+  function pushCheck() {
+    clearTimeout(checkTimer);
+    if (destroyed) return;
+    const c = state.check;
+    preview.setCheck({
+      enabled: c.enabled,
+      zone: c.zone,
+      halfWidthM: c.halfWidthM,
+      curtain: c.curtain,
+      footprints: c.footprints,
+      frustum: c.frustum,
+      index: c.index,
+      frame: getPreset(state.options.presetId),
+    });
+  }
+
+  /** Keep the 3D check controls and the photo readout true to the globe. */
+  function syncCheckUi() {
+    if (destroyed || !ui.check) return;
+    const c = state.check;
+    ui.checkEnabled.checked = c.enabled;
+    ui.checkZone.checked = c.zone;
+    ui.checkCurtain.checked = c.curtain;
+    ui.checkFootprints.checked = c.footprints;
+    ui.checkView.value = c.frustum;
+    ui.checkWidth.value = String(c.halfWidthM);
+    ui.checkWidthOut.textContent = heightText(c.halfWidthM);
+    for (const control of [
+      ui.checkZone,
+      ui.checkWidth,
+      ui.checkCurtain,
+      ui.checkFootprints,
+      ui.checkView,
+    ]) {
+      control.disabled = !c.enabled;
+    }
+    const info = preview.checkInfo();
+    ui.checkPhoto.max = String(Math.max(1, info.count));
+    ui.checkPhoto.value = String(info.index + 1);
+    ui.checkPhoto.disabled =
+      !c.enabled || c.frustum !== 'one' || info.count < 1;
+    const cur = info.current;
+    if (!c.enabled || !cur) {
+      ui.checkReadout.textContent = t('No photos to show yet');
+      return;
+    }
+    const mission = /^mission-(\d+)$/.exec(cur.passId);
+    const pass = mission
+      ? t('Mission {n}', { n: mission[1] })
+      : (state.suite?.passes.find((p) => p.id === cur.passId)?.label ??
+        cur.passId);
+    const fp = cur.footprint;
+    ui.checkReadout.textContent = t(
+      'Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}',
+      {
+        n: num(info.index + 1),
+        total: num(info.count),
+        pass,
+        pitch: num(cur.pitchDeg ?? -90),
+        h: heightText(cur.aglM ?? 0),
+        w: fp ? heightText(fp.widthM) : '-',
+        d: fp ? heightText(fp.depthM) : '-',
+      },
     );
   }
 
@@ -1217,6 +1394,8 @@ export function initDronePlan({
 
   function render() {
     syncControls();
+    pushCheck();
+    syncCheckUi();
     ui.stats.replaceChildren();
     ui.warnings.replaceChildren();
     ui.missions.replaceChildren();
@@ -1514,6 +1693,7 @@ export function initDronePlan({
         if (toggle.checked) state.suiteHidden.delete(pass.id);
         else state.suiteHidden.add(pass.id);
         preview.setSuiteHidden(state.suiteHidden);
+        syncCheckUi();
       });
       const swatch = el(doc, 'span', row, { cls: 'gev-dp-swatch' });
       swatch.setAttribute('aria-hidden', 'true');
@@ -1743,7 +1923,10 @@ export function initDronePlan({
     typeof globalThis.MutationObserver === 'function'
       ? new globalThis.MutationObserver(syncOpenToCard)
       : null;
-  cardObserver?.observe(panel, { attributes: true, attributeFilter: ['class'] });
+  cardObserver?.observe(panel, {
+    attributes: true,
+    attributeFilter: ['class'],
+  });
 
   build();
   syncControls();
@@ -1944,6 +2127,7 @@ export function initDronePlan({
       if (destroyed) return;
       destroyed = true;
       clearTimeout(timer);
+      clearTimeout(checkTimer);
       entry?.removeEventListener('click', onEntry);
       cardObserver?.disconnect();
       boxTool?.destroy();

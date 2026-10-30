@@ -5,8 +5,13 @@
  *
  * "Plan all recommended passes" draws every pass at once (showSuite), each in
  * its own colour and line style; a pass can be hidden without replanning.
+ *
+ * The 3D check (checkLayer.js) rides on whatever plan is shown: a shaded
+ * safety corridor, a height curtain and camera view pyramids. A visual aid
+ * only; it detects nothing.
  */
 import * as Cesium from 'cesium';
+import { createCheckLayer } from './checkLayer.js';
 
 export const PREVIEW_DATA_SOURCE = 'gev-drone-plan';
 export const MISSION_COLORS = Object.freeze([
@@ -48,6 +53,9 @@ export const MAX_MARKERS = 1500;
  *   showPlan: (result: object|null) => void,
  *   showSuite: (passes: object[]|null, hiddenIds?: Iterable<string>) => void,
  *   setSuiteHidden: (hiddenIds: Iterable<string>) => void,
+ *   setCheck: (patch: object) => void,
+ *   checkInfo: () => object,
+ *   checkCounts: () => object,
  *   clear: () => void,
  *   destroy: () => Promise<void> }}
  */
@@ -73,6 +81,21 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
   const drop = (list) => {
     for (const entity of list) dataSource.entities.remove(entity);
     return [];
+  };
+  const check = createCheckLayer({ dataSource, cesium, requestRender });
+  // What the 3D check is drawn from: the all-passes plan when there is one,
+  // otherwise the single plan. It is rebuilt only when that source changes,
+  // so the show/clear pairs of a re-sync do not redraw it twice.
+  let planCheck = null;
+  let planSource = null;
+  let suiteCheck = null;
+  let suiteSource = null;
+  let checkSource = null;
+  const refreshCheck = () => {
+    const next = suiteCheck ? suiteSource : planSource;
+    if (next === checkSource) return;
+    checkSource = next;
+    check.setData(suiteCheck ?? planCheck);
   };
 
   return {
@@ -142,6 +165,15 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
     },
     showPlan(result) {
       planEntities = drop(planEntities);
+      planSource = result && !destroyed ? result : null;
+      planCheck = planSource
+        ? result.missions.map((mission, mi) => ({
+            id: `mission-${mi + 1}`,
+            color: MISSION_COLORS[mi % MISSION_COLORS.length],
+            missions: [mission],
+          }))
+        : null;
+      refreshCheck();
       if (result && !destroyed) {
         const total = result.missions.reduce(
           (n, m) => n + m.waypoints.length,
@@ -212,8 +244,30 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
     showSuite(passes, hiddenIds = []) {
       suiteEntities = drop(suiteEntities);
       suitePasses = passes?.length ? passes : null;
+      const hidden = new Set(hiddenIds);
+      const shown = suitePasses
+        ? suitePasses.filter((p) => p.result && !hidden.has(p.id))
+        : [];
+      // A new array each call, so identity cannot stand in for "same":
+      // compare the passes and which are hidden.
+      const sourceKey = shown.map((p) => p.id).join('|');
+      if (!suitePasses || destroyed || !shown.length) {
+        suiteCheck = null;
+        suiteSource = null;
+      } else if (
+        !suiteSource ||
+        suiteSource.key !== sourceKey ||
+        suiteSource.passes !== suitePasses
+      ) {
+        suiteSource = { key: sourceKey, passes: suitePasses };
+        suiteCheck = shown.map((p) => ({
+          id: p.id,
+          color: passStyle(p.id, suitePasses.indexOf(p)).color,
+          missions: p.result.missions,
+        }));
+      }
+      refreshCheck();
       if (suitePasses && !destroyed) {
-        const hidden = new Set(hiddenIds);
         const planned = suitePasses.filter((p) => p.result);
         const total = planned.reduce(
           (n, p) =>
@@ -301,7 +355,25 @@ export function createDronePlanPreview({ viewer, cesium = Cesium }) {
     setSuiteHidden(hiddenIds = []) {
       if (suitePasses) this.showSuite(suitePasses, hiddenIds);
     },
+    /** 3D check options: enabled, zone, halfWidthM, curtain, footprints,
+     * frustum ('off' | 'one' | 'thinned'), index, frame (the camera preset). */
+    setCheck(patch) {
+      check.setOptions(patch);
+    },
+    /** { count, index, current } for the photo in view. */
+    checkInfo() {
+      return check.info();
+    },
+    /** Entities per 3D check layer. */
+    checkCounts() {
+      return check.counts();
+    },
     clear() {
+      planCheck = null;
+      planSource = null;
+      suiteCheck = null;
+      suiteSource = null;
+      refreshCheck();
       boxEntities = drop(boxEntities);
       areaEntities = drop(areaEntities);
       planEntities = drop(planEntities);
