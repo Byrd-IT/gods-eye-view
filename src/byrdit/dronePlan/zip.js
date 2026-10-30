@@ -251,7 +251,9 @@ export async function readZipAsync(bytes, { only = null } = {}) {
     if (start + packed > bytes.length) throw new Error('Corrupt ZIP entry');
     const raw = bytes.subarray(start, start + packed);
     const data =
-      method === 0 ? raw.slice() : await inflateRaw(raw, MAX_ZIP_ENTRY_BYTES);
+      method === 0
+        ? raw.slice()
+        : await inflateRaw(raw, Math.min(size, MAX_ZIP_ENTRY_BYTES));
     if (data.length !== size || crc32(data) !== crc) {
       throw new Error(`Bad CRC for ${name}`);
     }

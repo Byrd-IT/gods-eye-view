@@ -1901,6 +1901,27 @@ test('a controller mission id names the exported KMZ <UUID>.kmz, in the zip too'
   w.handle.destroy();
 });
 
+test('controller ids keep their flight positions through open, import and edit', async () => {
+  const { readFileSync } = await import('node:fs');
+  const w = setup();
+  const X = '9560F7B3-DAA9-481A-B2F5-37CCF3B8B996';
+  const Y = '8A05BD5F-A9CE-4867-923F-7AACC02AF9A9';
+  const area = { kind: 'rect', name: 'A', box: { west: -97.1, east: -97.09, south: 30.1, north: 30.11 } };
+  await w.handle.loadPlan({ schema: 'gevplan', version: 1, areas: [area], controllerIds: [null, X] });
+  assert.deepEqual(w.handle.getState().controllerIds, [null, X]);
+  const box = () => w.find((n) => n.getAttribute?.('data-field') === 'controller-ids')[0];
+  // Importing Y fills the empty first slot; X stays second.
+  const bytes = new Uint8Array(readFileSync(new URL(`./fixtures/djifly-mini5pro/${Y}.kmz`, import.meta.url)));
+  await w.handle.library().importBytes(bytes, `${Y}.kmz`);
+  assert.deepEqual(w.handle.getState().controllerIds, [Y, X]);
+  // A text edit that blanks the first line keeps X second.
+  box().value = `\n${X}`;
+  box().dispatch('change');
+  assert.deepEqual(w.handle.getState().controllerIds, [null, X]);
+  assert.equal(box().value, `\n${X}`);
+  w.handle.destroy();
+});
+
 test('opening a plan with a bad document is refused and changes nothing', async () => {
   const w = setup();
   w.handle.setBox(boxM(400, 200));

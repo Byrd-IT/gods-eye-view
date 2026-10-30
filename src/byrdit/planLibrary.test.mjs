@@ -10,7 +10,7 @@ import {
   cleanUserName,
   libraryIdentity,
 } from '../../server/byrdit/planLibrary/identity.js';
-import { createStore, MAX_USER_BYTES, MAX_VERSIONS } from '../../server/byrdit/planLibrary/store.js';
+import { createStore } from '../../server/byrdit/planLibrary/store.js';
 import { createPlanLibraryHandler } from '../../server/byrdit/planLibrary/api.js';
 
 const PLAN = { schema: 'gevplan', areas: [{ kind: 'box' }], options: { aglM: 60 } };
@@ -278,8 +278,9 @@ test('size limit, plan count limit, atomic files', async () => {
     assert.ok(r.status === 413 || r.status === 'closed', String(r.status));
     assert.deepEqual(s.store.list('alice'), []);
     const store = createStore({ root: s.root });
-    for (let i = 0; i < 500; i += 1) store.create('carol', { name: `p${i}` }, { a: 1 });
-    assert.throws(() => store.create('carol', { name: 'one more' }, { a: 1 }), /Too many/);
+    const small = createStore({ root: s.root, limits: { maxPlans: 5 } });
+    for (let i = 0; i < 5; i += 1) small.create('carol', { name: `p${i}` }, { a: 1 });
+    assert.throws(() => small.create('carol', { name: 'one more' }, { a: 1 }), /Too many/);
     const dir = path.join(s.root, 'carol');
     const first = readdirSync(dir)[0];
     assert.ok(!readdirSync(path.join(dir, first)).some((n) => n.endsWith('.tmp')));
@@ -292,21 +293,28 @@ test('size limit, plan count limit, atomic files', async () => {
 test('per-user byte quota, version cap and stale temp sweep', () => {
   const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevq-'));
   try {
-    const store = createStore({ root });
+    const limits = { maxUserBytes: 20_000, maxVersions: 4, maxPlans: 3 };
+    const store = createStore({ root, limits });
     const blob = (n) => ({ blob: 'x'.repeat(n) });
     // Versions are capped.
     const p = store.create('dave', { name: 'v' }, { a: 1 });
-    for (let i = 0; i < MAX_VERSIONS + 5; i += 1) store.save('dave', p.id, { a: i });
-    assert.equal(store.versions('dave', p.id).length, MAX_VERSIONS);
+    for (let i = 0; i < 9; i += 1) store.save('dave', p.id, { a: i });
+    assert.equal(store.versions('dave', p.id).length, 4);
     // The quota stops one user from filling the disk, and nobody else.
-    const q = createStore({ root });
-    const per = 7 * 1024 * 1024;
-    const n = Math.floor(MAX_USER_BYTES / per);
-    const first = q.create('erin', { name: 'big' }, blob(per));
-    for (let i = 1; i < n; i += 1) q.save('erin', first.id, blob(per));
-    assert.throws(() => q.save('erin', first.id, blob(per)), (e) => e.status === 507);
-    assert.throws(() => q.create('erin', { name: 'more' }, blob(per)), (e) => e.status === 507);
-    assert.ok(q.create('frank', { name: 'fine' }, blob(per)), 'another user is unaffected');
+    const first = store.create('erin', { name: 'big' }, blob(6000));
+    store.save('erin', first.id, blob(6000));
+    store.save('erin', first.id, blob(6000));
+    assert.throws(() => store.save('erin', first.id, blob(6000)), (e) => e.status === 507);
+    assert.throws(() => store.create('erin', { name: 'more' }, blob(6000)), (e) => e.status === 507);
+    assert.ok(store.create('frank', { name: 'fine' }, blob(6000)), 'another user is unaffected');
+    // The plan count limit; expired trash is purged by create, so it cannot hold the count.
+    let t = 1_000_000;
+    const clocked = createStore({ root, limits, now: () => t });
+    const g = ['a', 'b', 'c'].map((n) => clocked.create('gina', { name: n }, { a: 1 }));
+    assert.throws(() => clocked.create('gina', { name: 'd' }, { a: 1 }), /Too many/);
+    clocked.trash('gina', g[0].id);
+    t += 31 * 86_400_000;
+    assert.ok(clocked.create('gina', { name: 'd' }, { a: 1 }), 'trash older than 30 days freed a slot');
     // A leftover temp file from a crash is swept once it is old.
     const dir = path.join(root, 'dave', p.id, 'v');
     const tmp = path.join(dir, '9.json.1.abcd.tmp');
@@ -320,5 +328,17 @@ test('per-user byte quota, version cap and stale temp sweep', () => {
     assert.ok(existsSync(fresh), 'recent temp file kept (a write may be running)');
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('no identity: 401 and the store root is not even created', async () => {
+  const s = await boot();
+  try {
+    rmSync(s.root, { recursive: true, force: true });
+    const r = await s.call('GET', '/');
+    assert.equal(r.status, 401);
+    assert.equal(existsSync(s.root), false);
+  } finally {
+    await s.close();
   }
 });

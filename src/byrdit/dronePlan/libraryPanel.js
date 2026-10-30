@@ -310,6 +310,8 @@ export function mountLibrary({
     f.notes.value = d.notes ?? '';
     f.status.value = d.status ?? 'planned';
   };
+  /** One line per flight; a flight with no id is a blank line (kept, not dropped). */
+  const idsText = (ids) => (ids ?? []).map((id) => id ?? '').join('\n');
   const parseIds = () =>
     f.controllers.value
       .split(/\r?\n/)
@@ -588,9 +590,7 @@ export function mountLibrary({
         readOnly: !mine,
       };
       await host.load(out.plan);
-      f.controllers.value = (host.controllerIds() ?? [])
-        .filter(Boolean)
-        .join('\n');
+      f.controllers.value = idsText(host.controllerIds());
       renderImports();
       drawMap();
       status(t('Opened {name}', { name: out.meta.name }), 'info');
@@ -772,9 +772,7 @@ export function mountLibrary({
       setDetails(out.details);
       s.current = null;
       await host.load(out.plan);
-      f.controllers.value = (host.controllerIds() ?? [])
-        .filter(Boolean)
-        .join('\n');
+      f.controllers.value = idsText(host.controllerIds());
       renderImports();
       drawMap();
       renderNote();
@@ -789,10 +787,16 @@ export function mountLibrary({
     }
     host.addImport(out.item);
     if (out.item.uuid) {
-      const ids = host.controllerIds().filter(Boolean);
-      if (!ids.includes(out.item.uuid))
-        host.setControllerIds([...ids, out.item.uuid]);
-      f.controllers.value = host.controllerIds().filter(Boolean).join('\n');
+      // Positions matter (one id per flight, in order): fill the first empty
+      // slot or append, and never close up gaps.
+      const ids = [...(host.controllerIds() ?? [])];
+      if (!ids.includes(out.item.uuid)) {
+        const free = ids.indexOf(null);
+        if (free >= 0) ids[free] = out.item.uuid;
+        else ids.push(out.item.uuid);
+        host.setControllerIds(ids);
+      }
+      f.controllers.value = idsText(host.controllerIds());
     }
     s.findings = out.warnings;
     s.findingsTitle = t('Compatibility check of {name}', { name: fileName });

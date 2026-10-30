@@ -128,8 +128,13 @@ function planText(plan) {
 export function createStore({
   root = defaultRoot(),
   now = () => Date.now(),
+  limits = {},
 } = {}) {
   const base = path.resolve(root);
+  // Injectable so tests need not write hundreds of megabytes.
+  const maxUserBytes = limits.maxUserBytes ?? MAX_USER_BYTES;
+  const maxPlans = limits.maxPlans ?? MAX_PLANS_PER_USER;
+  const maxVersions = limits.maxVersions ?? MAX_VERSIONS;
 
   function userDir(user) {
     if (typeof user !== 'string' || !USER.test(user)) {
@@ -177,7 +182,7 @@ export function createStore({
   function writeVersion(user, id, n, body) {
     atomicWrite(path.join(planDir(user, id), 'v', `${n}.json`), body);
     const all = versionNumbers(user, id);
-    for (const old of all.slice(0, Math.max(0, all.length - MAX_VERSIONS))) {
+    for (const old of all.slice(0, Math.max(0, all.length - maxVersions))) {
       rmSync(path.join(planDir(user, id), 'v', `${old}.json`), { force: true });
     }
   }
@@ -204,7 +209,7 @@ export function createStore({
     return total;
   }
   function checkQuota(user, body) {
-    if (userBytes(user) + Buffer.byteLength(body) > MAX_USER_BYTES) {
+    if (userBytes(user) + Buffer.byteLength(body) > maxUserBytes) {
       throw new LibraryError(
         'quota',
         'Storage limit reached: delete plans or old versions',
@@ -283,8 +288,9 @@ export function createStore({
     create(user, details, plan) {
       const clean = cleanDetails(details, { requireName: true });
       const body = planText(plan);
+      purge(user); // expired trash must not hold the count
       checkQuota(user, body);
-      if (ids(user).length >= MAX_PLANS_PER_USER) {
+      if (ids(user).length >= maxPlans) {
         throw new LibraryError(
           'too-many',
           'Too many plans: delete some first',
