@@ -901,8 +901,15 @@ export function assembleMissions(plan, ground) {
   if (!known) warnings.push({ code: 'terrain-unknown', params: {} });
   // Per-obstacle heights: lift every stretch that passes a column, and flag
   // the ones the height cap cannot lift (drawn red on the globe).
+  const readM = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const cleared = applyObstacleClearance(plan.legs, options.obstacles, {
     capM: AGL_CAP_M,
+    takeoff,
+    // Ground under each waypoint and under each column, from the terrain
+    // read (never from the 3D tiles): a column on higher ground needs the
+    // difference added on top.
+    groundOf: known ? (w) => readM(ground.wpM?.[w.id]) : null,
+    obstacleGroundOf: known ? (o) => readM(ground.obstacleM?.[o.id]) : null,
   });
   const planLegs = cleared.legs;
   if (cleared.raised) {

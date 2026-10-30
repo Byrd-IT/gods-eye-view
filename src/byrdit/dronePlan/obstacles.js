@@ -161,6 +161,18 @@ export function createObstacleStore({ onChange } = {}) {
       );
       return true;
     },
+    /** What the obstacle is. Only for obstacles the operator added. */
+    setKind(id, kind) {
+      const target = list.find((o) => o.id === id);
+      if (!target || target.source !== 'user') return false;
+      if (!OBSTACLE_KINDS.includes(kind)) return false;
+      replace(
+        list.map((o) =>
+          o.id === id ? { ...o, kind, radiusM: DEFAULT_RADIUS_M[kind] } : o,
+        ),
+      );
+      return true;
+    },
     setRadius(id, radiusM) {
       if (!finite(radiusM)) return false;
       if (!list.some((o) => o.id === id)) return false;
@@ -270,69 +282,109 @@ export function requiredAglM(obstacle) {
  * @param {{ capM: number }} limits the highest allowed AGL
  * @returns {{ legs: object[], raised: number, blocked: object[] }}
  */
-export function applyObstacleClearance(legs, obstacles, { capM }) {
+export function applyObstacleClearance(
+  legs,
+  obstacles,
+  { capM, takeoff = null, groundOf = null, obstacleGroundOf = null },
+) {
   const list = normalizeObstacles(obstacles);
   if (!list.length || !legs?.length) {
     return { legs, raised: 0, blocked: [] };
   }
+  // The whole route in flight order: stretches between legs (the turn from
+  // one grid line to the next) are flown too, so they are checked too.
+  const seq = [];
+  legs.forEach((leg, li) => {
+    (leg.waypoints ?? []).forEach((w, wi) => seq.push({ li, wi, w }));
+  });
+  if (!seq.length) return { legs, raised: 0, blocked: [] };
+  const need = seq.map(() => 0);
+  const cause = seq.map(() => null);
+  for (const ob of list) {
+    const m = metersPerDegree(ob.lat);
+    const reach = ob.radiusM + OBSTACLE_HORIZONTAL_MARGIN_M;
+    const base = requiredAglM(ob);
+    const obGround = obstacleGroundOf ? obstacleGroundOf(ob) : null;
+    // The column stands on ITS ground; a waypoint on lower ground needs the
+    // difference on top, or the 5 m margin is eaten on a slope.
+    const req = (i) => {
+      const wg = groundOf ? groundOf(seq[i].w) : null;
+      const extra =
+        Number.isFinite(obGround) && Number.isFinite(wg)
+          ? Math.max(0, obGround - wg)
+          : 0;
+      return base + extra;
+    };
+    const lift = (i) => {
+      const r = req(i);
+      if (r > need[i]) {
+        need[i] = r;
+        cause[i] = ob.id;
+      }
+    };
+    const pts = seq.map(({ w }) => xy(ob, m, w.lon, w.lat));
+    pts.forEach((p, i) => {
+      if (Math.hypot(p.x, p.y) <= reach) lift(i);
+    });
+    const pair = (a, b) => {
+      if (distToSegment(pts[a], pts[b]) <= reach) {
+        lift(a);
+        lift(b);
+      }
+    };
+    for (let i = 1; i < pts.length; i += 1) pair(i - 1, i);
+    // An orbit ring is a closed loop: the last point flies back to the first.
+    let start = 0;
+    for (let i = 1; i <= seq.length; i += 1) {
+      if (i === seq.length || seq[i].li !== seq[start].li) {
+        if (legs[seq[start].li].kind === 'orbit' && i - start > 2) {
+          pair(i - 1, start);
+        }
+        start = i;
+      }
+    }
+    // Out from the takeoff point to the first waypoint and back home: the
+    // takeoff end stays on the ground, so the waypoint end is lifted.
+    if (takeoff) {
+      const t = xy(ob, m, takeoff.lon, takeoff.lat);
+      if (distToSegment(t, pts[0]) <= reach) lift(0);
+      if (distToSegment(pts[pts.length - 1], t) <= reach) lift(pts.length - 1);
+    }
+  }
   let raised = 0;
   const blocked = [];
-  const out = legs.map((leg) => {
-    const wps = leg.waypoints;
-    if (!wps?.length) return leg;
-    const need = wps.map(() => 0);
-    const cause = wps.map(() => null);
-    for (const ob of list) {
-      const m = metersPerDegree(ob.lat);
-      const reach = ob.radiusM + OBSTACLE_HORIZONTAL_MARGIN_M;
-      const req = requiredAglM(ob);
-      const pts = wps.map((w) => xy(ob, m, w.lon, w.lat));
-      const lift = (i) => {
-        if (req > need[i]) {
-          need[i] = req;
-          cause[i] = ob.id;
-        }
-      };
-      pts.forEach((p, i) => {
-        if (Math.hypot(p.x, p.y) <= reach) lift(i);
+  const changedLegs = new Map();
+  const legBlocked = new Set();
+  seq.forEach((entry, i) => {
+    const { li, wi, w } = entry;
+    if (!need[i] || w.aglM >= need[i] - 1e-9) return;
+    const target = Math.min(need[i], capM);
+    const capped = need[i] > capM + 1e-9;
+    let next = w;
+    if (capped) {
+      legBlocked.add(li);
+      blocked.push({
+        legId: legs[li].id,
+        waypointId: w.id,
+        obstacleId: cause[i],
+        needAglM: round1(need[i]),
+        capM,
       });
-      const pair = (a, b) => {
-        if (distToSegment(pts[a], pts[b]) <= reach) {
-          lift(a);
-          lift(b);
-        }
-      };
-      for (let i = 1; i < pts.length; i += 1) pair(i - 1, i);
-      // An orbit ring is a closed loop: the last point flies back to the first.
-      if (leg.kind === 'orbit' && pts.length > 2) pair(pts.length - 1, 0);
+      next = { ...w, obstacleBlocked: true };
     }
-    let changed = false;
-    let legBlocked = false;
-    const next = wps.map((w, i) => {
-      if (!need[i] || w.aglM >= need[i] - 1e-9) return w;
-      changed = true;
-      const target = Math.min(need[i], capM);
-      const capped = need[i] > capM + 1e-9;
-      if (capped) {
-        legBlocked = true;
-        blocked.push({
-          legId: leg.id,
-          waypointId: w.id,
-          obstacleId: cause[i],
-          needAglM: round1(need[i]),
-          capM,
-        });
-      }
-      if (target <= w.aglM) return capped ? { ...w, obstacleBlocked: true } : w;
+    if (target > w.aglM) {
       raised += 1;
-      return capped
-        ? { ...w, aglM: target, obstacleBlocked: true }
-        : { ...w, aglM: target };
-    });
-    if (!changed) return leg;
-    return legBlocked
-      ? { ...leg, waypoints: next, obstacleBlocked: true }
-      : { ...leg, waypoints: next };
+      next = { ...next, aglM: target };
+    }
+    if (next === w) return;
+    if (!changedLegs.has(li)) changedLegs.set(li, [...legs[li].waypoints]);
+    changedLegs.get(li)[wi] = next;
+  });
+  const out = legs.map((leg, li) => {
+    if (!changedLegs.has(li)) return leg;
+    return legBlocked.has(li)
+      ? { ...leg, waypoints: changedLegs.get(li), obstacleBlocked: true }
+      : { ...leg, waypoints: changedLegs.get(li) };
   });
   return { legs: out, raised, blocked };
 }

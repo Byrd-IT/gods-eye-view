@@ -1546,3 +1546,24 @@ test('obstacles: a newer look-up aborts the older one', async () => {
   w.handle.destroy();
   assert.equal(signals.at(-1).aborted, true);
 });
+
+test('obstacles: an obstacle the operator added can be set to a tower, and the credit line is shown', async () => {
+  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  const mine = w.handle.obstacles.add({ lon: -97.7701, lat: 30.2701 });
+  const sel = w.find((n) => n.getAttribute?.('data-obstacle-kind') === mine.id)[0];
+  assert.ok(sel, 'a kind selector for user obstacles');
+  assert.equal(w.find((n) => n.getAttribute?.('data-obstacle-kind') === 'faa-48-1').length, 0, 'not for open-data rows');
+  sel.value = 'tower';
+  sel.dispatch('change');
+  const o = w.handle.obstacles.list().find((x) => x.id === mine.id);
+  assert.equal(o.kind, 'tower');
+  assert.equal(o.radiusM, 6);
+  assert.match(
+    w.find((n) => n.className.includes('gev-dp-obstacle-credit'))[0].textContent,
+    /Meta and WRI \(CC BY 4\.0\).*FAA.*OpenStreetMap/,
+  );
+  w.handle.destroy();
+});

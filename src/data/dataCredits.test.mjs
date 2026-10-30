@@ -141,3 +141,12 @@ test('every Street Level imagery source is in the attribution lightbox', () => {
       `${key} has no credit`,
     );
 });
+
+test('the Drone Flight Plan obstacle data is credited (CC BY 4.0 needs attribution)', () => {
+  const canopy = DATA_CREDITS.find((entry) => entry.key === 'canopy-height');
+  assert.ok(canopy);
+  assert.match(canopy.html, /Meta/);
+  assert.match(canopy.html, /World Resources Institute/);
+  assert.match(canopy.html, /CC BY 4\.0/);
+  assert.ok(DATA_CREDITS.some((entry) => entry.key === 'faa-dof'));
+});

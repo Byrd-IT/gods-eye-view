@@ -391,7 +391,7 @@ test('guard: the ADD tool is given the terrain-only pick, not the annotation dep
   const panel = readFileSync(join(dir, 'panel.js'), 'utf8');
   assert.match(
     panel,
-    /owner: OBSTACLE_ADD_POINTER_OWNER,\s*pickWorld: \(v, nx, ny\) => pickTerrainLonLat\(v, nx, ny, cesium\)/,
+    /owner: OBSTACLE_ADD_POINTER_OWNER,\s*pickWorld: \(v, nx, ny\) =>\s*pickTerrainLonLat\(v, nx, ny, cesium, groundHintM\)/,
   );
 });
 
@@ -424,3 +424,85 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
   const flat = applyObstacleClearance([{ id: 'o', kind: 'path', waypoints: ring }], [ob], { capM: 120 });
   assert.equal(flat.legs[0].waypoints[0].aglM, 30, 'only a ring closes on itself');
 });
+
+// ------------------------------------------- stretches between legs / slope --
+{
+  const m = metersPerDegree(30.27);
+  const at = (id, x, y, aglM = 30) => ({
+    id,
+    lon: CENTER.lon + x / m.lon,
+    lat: CENTER.lat + y / m.lat,
+    aglM,
+  });
+  const col = (x, y, heightM = 80, radiusM = 3) => ({
+    id: 'col',
+    kind: 'tower',
+    source: 'user',
+    lon: CENTER.lon + x / m.lon,
+    lat: CENTER.lat + y / m.lat,
+    radiusM,
+    heightM,
+  });
+
+  test('clearance: the turn between two grid lines is checked, not only each line', () => {
+    const legs = [
+      { id: 'l1', kind: 'path', waypoints: [at('a', -100, 0), at('b', 100, 0)] },
+      { id: 'l2', kind: 'path', waypoints: [at('c', 100, 60), at('d', -100, 60)] },
+    ];
+    // The column stands between b and c: on neither line.
+    const out = applyObstacleClearance(legs, [col(100, 30)], { capM: 120 });
+    assert.equal(out.legs[0].waypoints[1].aglM, 85);
+    assert.equal(out.legs[1].waypoints[0].aglM, 85);
+    assert.equal(out.legs[0].waypoints[0].aglM, 30, 'far ends stay put');
+  });
+
+  test('clearance: the way out from takeoff and the way home are checked', () => {
+    const legs = [{ id: 'l1', kind: 'path', waypoints: [at('a', 200, 0), at('b', 300, 0)] }];
+    const takeoff = { lon: CENTER.lon, lat: CENTER.lat };
+    const out = applyObstacleClearance(legs, [col(100, 0)], { capM: 120, takeoff });
+    assert.equal(out.legs[0].waypoints[0].aglM, 85);
+    assert.equal(out.legs[0].waypoints[1].aglM, 85, 'the way home passes it too');
+    const none = applyObstacleClearance(legs, [col(100, 0)], { capM: 120 });
+    assert.equal(none.legs[0].waypoints[0].aglM, 30, 'no takeoff given: not checked');
+  });
+
+  test('clearance: a column on higher ground than the waypoint needs the difference on top', () => {
+    const legs = [{ id: 'l1', kind: 'path', waypoints: [at('a', -5, 0), at('b', 5, 0)] }];
+    const ground = { a: 100, b: 100 };
+    const out = applyObstacleClearance(legs, [col(0, 0, 40)], {
+      capM: 120,
+      groundOf: (w) => ground[w.id],
+      obstacleGroundOf: () => 130,
+    });
+    // 40 m column + 5 m margin + 30 m higher ground.
+    assert.equal(out.legs[0].waypoints[0].aglM, 75);
+    const flat = applyObstacleClearance(legs, [col(0, 0, 40)], {
+      capM: 120,
+      groundOf: (w) => ground[w.id],
+      obstacleGroundOf: () => 90,
+    });
+    assert.equal(flat.legs[0].waypoints[0].aglM, 45, 'lower ground adds nothing');
+    const capped = applyObstacleClearance(legs, [col(0, 0, 100)], {
+      capM: 120,
+      groundOf: (w) => ground[w.id],
+      obstacleGroundOf: () => 130,
+    });
+    assert.equal(capped.blocked.length, 2, 'the slope can make a column impossible to clear');
+  });
+
+  test('planner: obstacle ground from the terrain read lifts the real plan', () => {
+    const plan = planFlight(boxAround(160, 160), {
+      aglM: 40,
+      obstacles: [col(0, 0, 30, 5)],
+    });
+    assert.ok(!plan.error, plan.error);
+    const ids = plan.legs.flatMap((l) => l.waypoints.map((w) => w.id));
+    const wpM = [];
+    ids.forEach((id) => (wpM[id] = 100));
+    const flat = assembleMissions(plan, { known: true, takeoffM: 100, wpM, obstacleM: { col: 100 } });
+    const hill = assembleMissions(plan, { known: true, takeoffM: 100, wpM, obstacleM: { col: 160 } });
+    const maxAgl = (r) => Math.max(...r.missions.flatMap((mi) => mi.waypoints.map((w) => w.aglM)));
+    assert.equal(maxAgl(flat), 40);
+    assert.equal(maxAgl(hill), 95, '30 m column + 5 m margin + 60 m higher ground');
+  });
+}

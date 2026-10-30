@@ -3087,5 +3087,7 @@
   "LOOK UP": "查找",
   "Fetch first-guess heights from open data. Your own edits are kept": "从开放数据获取初步高度。你自己的修改会保留",
   "Click the globe to add an obstacle": "点击地球以添加障碍物",
-  "Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.": "高度是来自开放数据的估计值或你设定的数值，不是测量结果。树会生长。这些来源都不包含电线。计划与每个柱体保持 5 米间距。拖动柱体上的黄点或输入高度。请用肉眼对照 3D 视图查看柱体。这只是目视检查，未经飞行测试。"
+  "Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.": "高度是来自开放数据的估计值或你设定的数值，不是测量结果。树会生长。这些来源都不包含电线。计划与每个柱体保持 5 米间距。拖动柱体上的黄点或输入高度。请用肉眼对照 3D 视图查看柱体。这只是目视检查，未经飞行测试。",
+  "Data: tree canopy height by Meta and WRI (CC BY 4.0), towers from the FAA Digital Obstacle File, buildings from OpenStreetMap contributors.": "数据：树冠高度来自 Meta 和 WRI（CC BY 4.0），塔来自 FAA 数字障碍物文件，建筑来自 OpenStreetMap 贡献者。",
+  "Obstacle kind": "障碍物类型"
 }

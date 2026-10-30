@@ -307,3 +307,28 @@ test('drag: down on the handle claims the pointer, move sets a clamped height, u
   assert.equal(isPointerFree(), true);
   layer.destroy();
 });
+
+test('pickTerrainLonLat with the globe hidden uses an ellipsoid raised to the terrain height', () => {
+  let seen = null;
+  class Ellipsoid {
+    constructor(x, y, z) { this.radii = { x, y, z }; }
+  }
+  Ellipsoid.WGS84 = new Ellipsoid(6378137, 6378137, 6356752);
+  const cesium = {
+    Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
+    Cartographic: { fromCartesian: (c) => ({ longitude: c.lon, latitude: c.lat }) },
+    Math: { toDegrees: (v) => v },
+    Ellipsoid,
+  };
+  const viewer = {
+    scene: { canvas: { clientWidth: 10, clientHeight: 10 }, globe: { pick: () => undefined } },
+    camera: {
+      getPickRay: () => ({}),
+      pickEllipsoid: (_w, e) => ((seen = e), { lon: -97, lat: 30 }),
+    },
+  };
+  assert.deepEqual(pickTerrainLonLat(viewer, 0.5, 0.5, cesium, 250), { lon: -97, lat: 30 });
+  assert.equal(seen.radii.x, 6378137 + 250);
+  pickTerrainLonLat(viewer, 0.5, 0.5, cesium, 0);
+  assert.equal(seen, Ellipsoid.WGS84);
+});

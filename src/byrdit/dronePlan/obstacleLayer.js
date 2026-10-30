@@ -34,7 +34,13 @@ const MIN_DRAW_LENGTH_M = 0.5;
  * on, and the Google terms bar reading picks from it. Only the globe is hit.
  * @returns {{lon:number,lat:number}|null}
  */
-export function pickTerrainLonLat(viewer, nx, ny, cesium = Cesium) {
+export function pickTerrainLonLat(
+  viewer,
+  nx,
+  ny,
+  cesium = Cesium,
+  groundHintM = 0,
+) {
   try {
     const canvas = viewer?.scene?.canvas;
     const w = canvas?.clientWidth || canvas?.width;
@@ -43,9 +49,24 @@ export function pickTerrainLonLat(viewer, nx, ny, cesium = Cesium) {
     const win = new cesium.Cartesian2(nx * w, ny * h);
     const ray = viewer.camera.getPickRay(win);
     if (!ray) return null;
+    // With the globe hidden (Photorealistic 3D on) it cannot answer: use the
+    // ellipsoid raised to the plan's terrain height, so a click on high ground
+    // does not land far off. The height comes from the terrain read only.
+    const wgs = cesium.Ellipsoid?.WGS84;
+    const raised =
+      Number.isFinite(groundHintM) &&
+      groundHintM !== 0 &&
+      wgs?.radii &&
+      typeof cesium.Ellipsoid === 'function'
+        ? new cesium.Ellipsoid(
+            wgs.radii.x + groundHintM,
+            wgs.radii.y + groundHintM,
+            wgs.radii.z + groundHintM,
+          )
+        : wgs;
     const hit =
       viewer.scene.globe.pick(ray, viewer.scene) ??
-      viewer.camera.pickEllipsoid(win, cesium.Ellipsoid?.WGS84);
+      viewer.camera.pickEllipsoid(win, raised);
     if (!hit) return null;
     const c = cesium.Cartographic.fromCartesian(hit);
     const lon = cesium.Math.toDegrees(c.longitude);

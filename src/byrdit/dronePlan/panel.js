@@ -27,13 +27,11 @@ import {
   clearOverlaySource,
   setOverlayEntries,
 } from '../../overlays/worldOverlay.js';
-import {
-  OBSTACLE_OVERLAY_SOURCE,
-  pickTerrainLonLat,
-} from './obstacleLayer.js';
+import { OBSTACLE_OVERLAY_SOURCE, pickTerrainLonLat } from './obstacleLayer.js';
 import { buildingObstacles, SOURCE_NAMES } from './obstacleData.js';
 import {
   createObstacleStore,
+  OBSTACLE_KINDS,
   MAX_OBSTACLE_HEIGHT_M,
   MAX_OBSTACLES,
 } from './obstacles.js';
@@ -183,6 +181,7 @@ export function initDronePlan({
   let obstacleKey = null;
   let obstacleToken = 0;
   let obstacleAbort = null;
+  let groundHintM = 0;
   let obstacleStatusText = '';
   const kindName = (kind) =>
     ({
@@ -274,7 +273,7 @@ export function initDronePlan({
     viewer,
     cesium,
     owner: OBSTACLE_ADD_POINTER_OWNER,
-    pickWorld: (v, nx, ny) => pickTerrainLonLat(v, nx, ny, cesium),
+    pickWorld: (v, nx, ny) => pickTerrainLonLat(v, nx, ny, cesium, groundHintM),
     onPoint: (point) => addObstacle(point),
     onCancel: (reason) => {
       if (reason === 'sky')
@@ -517,6 +516,29 @@ export function initDronePlan({
   }
 
   // ------------------------------------------------------------ obstacles --
+  /** Ground under each obstacle, from the terrain model (never the 3D tiles). */
+  async function sampleObstacleGround(plan) {
+    const list = obstacleStore.list();
+    if (!list.length) return {};
+    try {
+      const g = await sampleGround({
+        viewer,
+        cesium,
+        points: list.map((o) => ({ lon: o.lon, lat: o.lat })),
+        takeoff: plan.takeoff,
+        cache: terrainCache,
+      });
+      if (!g.known) return {};
+      const out = {};
+      list.forEach((o, i) => {
+        if (typeof g.wpM[i] === 'number') out[o.id] = g.wpM[i];
+      });
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
   function resetObstacles() {
     obstacleAbort?.abort();
     obstacleAbort = null;
@@ -672,13 +694,31 @@ export function initDronePlan({
         cls: 'gev-dp-area gev-dp-obstacle',
         attrs: { 'data-obstacle': o.id },
       });
-      el(doc, 'span', row, {
-        cls: 'gev-dp-area-kind',
-        text: kindName(o.kind),
-        attrs: {
-          title: `${num(o.lat, 5)}, ${num(o.lon, 5)} · r ${num(o.radiusM)} m`,
-        },
-      });
+      const where = `${num(o.lat, 5)}, ${num(o.lon, 5)} · r ${num(o.radiusM)} m`;
+      if (o.source === 'user') {
+        // The operator placed it: they say what it is.
+        const kind = el(doc, 'select', row, {
+          cls: 'pp-select gev-field gev-field--compact gev-dp-area-kind',
+          attrs: {
+            title: where,
+            'aria-label': t('Obstacle kind'),
+            'data-obstacle-kind': o.id,
+          },
+        });
+        for (const k of OBSTACLE_KINDS) {
+          el(doc, 'option', kind, { text: kindName(k), attrs: { value: k } });
+        }
+        kind.value = o.kind;
+        kind.addEventListener('change', () => {
+          obstacleStore.setKind(o.id, kind.value);
+        });
+      } else {
+        el(doc, 'span', row, {
+          cls: 'gev-dp-area-kind',
+          text: kindName(o.kind),
+          attrs: { title: where },
+        });
+      }
       const height = el(doc, 'input', row, {
         cls: 'pp-text-input gev-dp-obstacle-height',
         attrs: {
@@ -853,18 +893,21 @@ export function initDronePlan({
       cache: terrainCache,
     });
     if (destroyed || token !== planToken) return;
+    const obstacleM = await sampleObstacleGround(plan);
+    if (destroyed || token !== planToken) return;
     // wpM is indexed by waypoint id, which is the order points were listed in.
     const byId = [];
     points.forEach((w, i) => {
       byId[w.id] = ground.wpM[i];
     });
-    state.result = assembleAreaPlan(plan, { ...ground, wpM: byId });
+    state.result = assembleAreaPlan(plan, { ...ground, wpM: byId, obstacleM });
     state.error = null;
     state.busy = false;
     planNonce += 1;
     panel.dataset.planNonce = String(planNonce);
     pushCheck();
-    preview.setObstacleGround(ground.known ? ground.takeoffM : 0);
+    groundHintM = ground.known ? ground.takeoffM : 0;
+    preview.setObstacleGround(groundHintM);
     preview.showPlan(state.result);
     render();
   }
@@ -1099,6 +1142,12 @@ export function initDronePlan({
       cls: 'gev-dp-note gev-dp-obstacle-disclaimer',
       text: t(
         'Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.',
+      ),
+    });
+    el(doc, 'p', ui.obstaclesBox, {
+      cls: 'gev-dp-note gev-dp-obstacle-credit',
+      text: t(
+        'Data: tree canopy height by Meta and WRI (CC BY 4.0), towers from the FAA Digital Obstacle File, buildings from OpenStreetMap contributors.',
       ),
     });
     ui.targetsBox = el(doc, 'div', body, { cls: 'gev-dp-targets' });
@@ -1936,6 +1985,8 @@ export function initDronePlan({
           cache: terrainCache,
         });
         if (destroyed || token !== suiteToken) return;
+        const obstacleM = await sampleObstacleGround(plan);
+        if (destroyed || token !== suiteToken) return;
         const byId = [];
         points.forEach((w, i) => {
           byId[w.id] = ground.wpM[i];
@@ -1943,7 +1994,7 @@ export function initDronePlan({
         passes.push({
           id: pass.id,
           label: pass.label,
-          result: assembleAreaPlan(plan, { ...ground, wpM: byId }),
+          result: assembleAreaPlan(plan, { ...ground, wpM: byId, obstacleM }),
           error: null,
         });
       }

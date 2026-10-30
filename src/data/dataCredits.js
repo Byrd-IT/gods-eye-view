@@ -99,6 +99,21 @@ export const NYC_DOT_DISCLAIMER =
   'The public is advised to observe posted signage for compliance with applicable laws and regulations.';
 
 export const DATA_CREDITS = [
+  // ── Drone Flight Plan obstacle heights ──────────────────────────
+  {
+    key: 'canopy-height',
+    html:
+      'Tree canopy height: Meta and World Resources Institute, ' +
+      '<a href="https://sustainability.atmeta.com/blog/2024/04/22/using-artificial-intelligence-to-map-the-worlds-forests/" target="_blank" rel="noopener">High Resolution Canopy Height Maps</a> ' +
+      '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>)',
+  },
+  {
+    key: 'faa-dof',
+    html:
+      'Tower and mast heights: ' +
+      '<a href="https://www.faa.gov/air_traffic/flight_info/aeronav/obstacle_data/" target="_blank" rel="noopener">FAA Digital Obstacle File</a> ' +
+      '(US government data; not a survey)',
+  },
   // ── Live sources ────────────────────────────────────────────────
   {
     key: 'opensky',
