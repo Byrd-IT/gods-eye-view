@@ -1957,7 +1957,7 @@ async function server() {
   return { clientFor, close: async () => { await new Promise((r) => srv.close(r)); rmSync(root, { recursive: true, force: true }); } };
 }
 
-const settleUi = () => new Promise((r) => setTimeout(r, 60));
+const settleUi = () => new Promise((r) => setTimeout(r, 250));
 const btn = (w, action) => w.find((n) => n.tagName === 'BUTTON' && n.getAttribute('data-action') === action);
 const field = (w, name) => w.find((n) => n.getAttribute?.('data-field') === name)[0];
 const rows = (w) => w.find((n) => n.getAttribute?.('data-plan'));
