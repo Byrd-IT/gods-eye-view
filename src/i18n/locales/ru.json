@@ -3255,7 +3255,6 @@
   "around each target": "вокруг каждой цели",
   "Show on the globe": "Показать на глобусе",
   "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "Цели-здания берутся из OpenStreetMap. Деревьев, вышек и линий электропередачи в этих данных нет: проверяйте свободное пространство сами. В полёте не проверено.",
-  "3D check": "3D-проверка",
   "Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.": "Только визуальная проверка: ничто здесь не обнаруживает столкновения. Смотрите её поверх Google Photorealistic 3D, где видны деревья. В зданиях OpenStreetMap нет деревьев и линий электропередачи.",
   "Show 3D check": "Показать 3D-проверку",
   "Adjust": "Настроить",

@@ -3048,7 +3048,6 @@
   "around each target": "每个目标周围",
   "Show on the globe": "在地球上显示",
   "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "建筑目标来自 OpenStreetMap。该数据不包含树木、塔架和电线：请自行确认净空。未经实飞测试。",
-  "3D check": "3D 检查",
   "Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.": "仅作目视检查：这里不会检测任何碰撞。请在能显示树木的 Google Photorealistic 3D 上查看。OpenStreetMap 建筑数据不含树木和电线。",
   "Show 3D check": "显示 3D 检查",
   "Adjust": "调整",
