@@ -43,6 +43,9 @@ export function createObstacleLayer({
   let drag = null;
   let lease = null;
   let destroyed = false;
+  // Ground height from the plan's terrain read, for when the globe is hidden
+  // (Photorealistic tiles on) and cannot answer. Never taken from the tiles.
+  let groundHintM = 0;
 
   const color = (css, alpha) =>
     cesium.Color.fromCssColorString(css).withAlpha(alpha);
@@ -52,9 +55,9 @@ export function createObstacleLayer({
       const h = viewer.scene?.globe?.getHeight?.(
         cesium.Cartographic.fromDegrees(o.lon, o.lat),
       );
-      return Number.isFinite(h) ? h : 0;
+      return Number.isFinite(h) ? h : groundHintM;
     } catch {
-      return 0;
+      return groundHintM;
     }
   }
 
@@ -227,6 +230,13 @@ export function createObstacleLayer({
       current = Array.isArray(list) ? list : [];
       if (current.length) bind();
       draw();
+    },
+    /** Ground elevation (m) to use where the globe has no height. */
+    setGroundHint(m) {
+      const next = Number.isFinite(m) ? m : 0;
+      if (next === groundHintM) return;
+      groundHintM = next;
+      if (current.length && !destroyed) draw();
     },
     clear() {
       endDrag();

@@ -398,6 +398,9 @@ export function createDronePlanPreview({
     setObstacles(list) {
       obstacles.set(list);
     },
+    setObstacleGround(m) {
+      obstacles.setGroundHint(m);
+    },
     obstacleCount() {
       return obstacles.count();
     },

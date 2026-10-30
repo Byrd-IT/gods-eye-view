@@ -24,7 +24,8 @@ const M_PER_DEG_LAT = 111320;
 /**
  * Split the planning area into at most MAX_LOOKUP_BOXES boxes of at most
  * 0.05 degrees (about 5 km), centred on the area. Bigger areas are looked up
- * around their centre only: the cap bounds cost, not correctness.
+ * around their centre only: the cap bounds cost; the status then says
+ * `partial` so the panel can tell the operator.
  */
 export function lookupBoxes(areas) {
   const box = areasBox(areas);
@@ -122,10 +123,18 @@ export async function fetchOpenObstacles(
     fromSource('faa', boxes, deps),
     fromSource('canopy', boxes, deps),
   ]);
+  // Areas wider than the capped boxes are only read around their centre.
+  const area = areasBox(areas);
+  const covered =
+    !area ||
+    (Math.min(...boxes.map((b) => b.west)) <= area.west + 1e-9 &&
+      Math.max(...boxes.map((b) => b.east)) >= area.east - 1e-9 &&
+      Math.min(...boxes.map((b) => b.south)) <= area.south + 1e-9 &&
+      Math.max(...boxes.map((b) => b.north)) >= area.north - 1e-9);
   const grade = (r) =>
     r.failed >= r.boxes
       ? 'failed'
-      : r.failed
+      : r.failed || !covered
         ? 'partial'
         : r.found.length
           ? 'ok'

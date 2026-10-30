@@ -374,3 +374,13 @@ test('no obstacle code reads heights or picks from the Google 3D tiles', () => {
     assert.ok(!/clampToHeight|sampleHeight\b|sampleHeightMostDetailed/.test(code), f);
   }
 });
+
+test('store: estimates of a source that failed to load are kept, the others are replaced', () => {
+  const store = createObstacleStore();
+  store.replaceEstimates([
+    { id: 'faa-1', kind: 'tower', source: 'faa', lon: -97.77, lat: 30.27, radiusM: 6, estimatedHeightM: 60, heightM: 60 },
+    { id: 'chm-1', kind: 'tree', source: 'canopy', lon: -97.77, lat: 30.28, radiusM: 20, estimatedHeightM: 18, heightM: 18 },
+  ]);
+  store.replaceEstimates([], { keepSources: ['faa'] });
+  assert.deepEqual(store.list().map((o) => o.id), ['faa-1']);
+});

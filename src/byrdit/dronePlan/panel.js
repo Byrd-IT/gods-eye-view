@@ -584,7 +584,12 @@ export function initDronePlan({
             ? ` ${t('Could not read: {names}. The plan uses the default height there.', { names: failed.join(', ') })}`
             : '');
         obstacleMuted = false;
-        obstacleStore.replaceEstimates([...towers, ...osm, ...trees]);
+        const unread = Object.entries(open?.status ?? {})
+          .filter(([, v]) => v === 'failed')
+          .map(([k]) => k);
+        obstacleStore.replaceEstimates([...towers, ...osm, ...trees], {
+          keepSources: unread,
+        });
         renderObstacleStatus();
       })
       .catch(() => {
@@ -845,6 +850,7 @@ export function initDronePlan({
     planNonce += 1;
     panel.dataset.planNonce = String(planNonce);
     pushCheck();
+    preview.setObstacleGround(ground.known ? ground.takeoffM : 0);
     preview.showPlan(state.result);
     render();
   }

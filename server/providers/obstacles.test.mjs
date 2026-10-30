@@ -204,14 +204,6 @@ const call = async (proxy, url, method = 'GET', remote = '10.0.0.5') => {
   await handler({ method, url, socket: { remoteAddress: remote }, headers: {} }, res);
   return { status: res.status, body: res.body ? JSON.parse(res.body) : null };
 };
-const jsonResponse = (value, status = 200) => ({
-  ok: status === 200,
-  status,
-  headers: new Headers({ 'content-type': 'application/json' }),
-  body: null,
-  json: async () => value,
-  text: async () => JSON.stringify(value),
-});
 const BOX = '?west=-95.02&south=32.58&east=-94.99&north=32.6';
 
 test('route: FAA, with a fixture and no live network', async () => {
@@ -303,5 +295,16 @@ test('route: bad method, route, box and the rate limit', async () => {
     last = (await call(proxy, `/faa?west=-95.02&south=${(32.58 - i * 0.0001).toFixed(4)}&east=-94.99&north=32.6`, 'GET', '10.9.9.9')).status;
   }
   assert.equal(last, 429);
-  void jsonResponse;
+});
+
+import { REAL_CANOPY_HEADER_BASE64 } from './obstacles.fixture.mjs';
+
+test('parseTiffHeader reads the layout of a REAL Meta/WRI canopy tile', () => {
+  const head = new Uint8Array(Buffer.from(REAL_CANOPY_HEADER_BASE64, 'base64'));
+  assert.equal(head.length, 4096);
+  const info = parseTiffHeader(head);
+  assert.equal(info.width, 65536);
+  assert.equal(info.height, 65536);
+  assert.ok(info.stripOffsets > 0 && info.stripBytes > 0);
+  assert.ok(info.scaleAt > 0 && info.tiepointAt > 0);
 });

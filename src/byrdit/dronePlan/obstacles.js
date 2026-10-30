@@ -185,16 +185,21 @@ export function createObstacleStore({ onChange } = {}) {
     },
     /**
      * Merge a fresh set of open-data estimates. Estimates not seen again are
-     * dropped; an obstacle the operator edited keeps their height (its
+     * dropped, except those of `keepSources` (sources that failed to load); an obstacle the operator edited keeps their height (its
      * estimate is refreshed); user-added ones are untouched.
      */
-    replaceEstimates(found) {
+    replaceEstimates(found, { keepSources = [] } = {}) {
       const fresh = normalizeObstacles(found).filter(
         (o) => o.source !== 'user',
       );
       const freshById = new Map(fresh.map((o) => [o.id, o]));
+      // A source that could not be read this time says nothing about what is
+      // there: what it gave before, and every edit, stays as it was.
       const kept = list.filter(
-        (o) => o.source === 'user' || (o.userEdited && freshById.has(o.id)),
+        (o) =>
+          o.source === 'user' ||
+          keepSources.includes(o.source) ||
+          (o.userEdited && freshById.has(o.id)),
       );
       const merged = kept.map((o) => {
         const f = freshById.get(o.id);

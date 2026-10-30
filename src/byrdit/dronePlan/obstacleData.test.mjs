@@ -202,3 +202,11 @@ test('globe: a drag only starts when the pointer is free, and gives the pointer 
   assert.equal(OBSTACLE_POINTER_OWNER, 'drone-plan-obstacle-drag');
   layer.destroy();
 });
+
+test('fetchOpenObstacles: a wide area is only partly read and the status says so', async () => {
+  const wide = { id: 'w', kind: 'box', box: { west: -96, south: 31, east: -94, north: 33 } };
+  const out = await fetchOpenObstacles([wide], {
+    fetchImpl: async () => ({ ok: true, json: async () => ({ obstacles: [faaRow] }) }),
+  });
+  assert.equal(out.status.faa, 'partial');
+});

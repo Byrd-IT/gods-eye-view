@@ -39,6 +39,8 @@ const MIN_TREE_M = 3;
 const MAX_TREE_M = 100;
 const MIN_COVERAGE = 0.25;
 const MIB = 1024 * 1024;
+/** Largest tile side accepted; the real tiles are 65536. */
+const MAX_TIFF_SIDE = 131072;
 const TILE_CACHE_MAX = 4;
 const RESULT_TTL_MS = 600_000;
 
@@ -165,6 +167,8 @@ export function parseTiffHeader(buf) {
   const width = scalar(256);
   const height = scalar(257);
   if (
+    !(width <= MAX_TIFF_SIDE) ||
+    !(height <= MAX_TIFF_SIDE) ||
     scalar(258) !== 8 ||
     scalar(259) !== 8 ||
     scalar(277) !== 1 ||
@@ -281,6 +285,7 @@ export function obstaclesProxy({
     return readResponseBytesCapped(response, cap, signal);
   }
 
+  /** The header of one canopy tile (a few KB), cached for a few tiles. */
   async function loadTile(key) {
     const hit = tiles.get(key);
     if (hit) {
@@ -292,15 +297,7 @@ export function obstaclesProxy({
     const pending = (async () => {
       const head = await ranged(url, 0, 4095, 8192);
       const info = parseTiffHeader(head);
-      const bytes = info.height * 8;
-      const [offs, counts, scale, tie] = await Promise.all([
-        ranged(
-          url,
-          info.stripOffsets,
-          info.stripOffsets + bytes - 1,
-          bytes + 16,
-        ),
-        ranged(url, info.stripBytes, info.stripBytes + bytes - 1, bytes + 16),
+      const [scale, tie] = await Promise.all([
         ranged(url, info.scaleAt, info.scaleAt + 23, 64),
         ranged(url, info.tiepointAt, info.tiepointAt + 47, 128),
       ]);
@@ -309,8 +306,8 @@ export function obstaclesProxy({
         url,
         width: info.width,
         height: info.height,
-        offs: view(offs),
-        counts: view(counts),
+        offsetsAt: info.stripOffsets,
+        countsAt: info.stripBytes,
         res: view(scale).getFloat64(0, true),
         x0: view(tie).getFloat64(24, true),
         y0: view(tie).getFloat64(32, true),
@@ -326,9 +323,31 @@ export function obstaclesProxy({
     }
   }
 
-  async function readRow(tile, row) {
-    const off = Number(tile.offs.getBigUint64(row * 8, true));
-    const len = Number(tile.counts.getBigUint64(row * 8, true));
+  /** The strip tables for rows first..last only (8 bytes a row each). */
+  async function loadRowTables(tile, first, last) {
+    const bytes = (last - first + 1) * 8;
+    const [offs, counts] = await Promise.all([
+      ranged(
+        tile.url,
+        tile.offsetsAt + first * 8,
+        tile.offsetsAt + first * 8 + bytes - 1,
+        bytes + 16,
+      ),
+      ranged(
+        tile.url,
+        tile.countsAt + first * 8,
+        tile.countsAt + first * 8 + bytes - 1,
+        bytes + 16,
+      ),
+    ]);
+    const view = (b) => new DataView(b.buffer, b.byteOffset, b.byteLength);
+    return { first, offs: view(offs), counts: view(counts) };
+  }
+
+  async function readRow(tile, tables, row) {
+    const at = (row - tables.first) * 8;
+    const off = Number(tables.offs.getBigUint64(at, true));
+    const len = Number(tables.counts.getBigUint64(at, true));
     if (!(len > 0) || len > 4 * MIB) throw new Error('bad_row');
     const bytes = await ranged(tile.url, off, off + len - 1, len + 16);
     return decodeRow(bytes, tile.width);
@@ -337,16 +356,30 @@ export function obstaclesProxy({
   async function loadCanopy(box) {
     const dLon = (box.east - box.west) / GRID;
     const dLat = (box.north - box.south) / GRID;
-    const lonMid = (box.west + box.east) / 2;
-    // The whole box almost always sits in one tile; a box on a tile edge
-    // reads each sample row from the tile its own centre falls in.
+    const tile = await loadTile(
+      quadkey((box.west + box.east) / 2, (box.north + box.south) / 2),
+    );
+    const rowOf = (lat) => Math.round((tile.y0 - mercY(lat)) / tile.res - 0.5);
+    const colOf = (lon) => Math.floor((mercX(lon) - tile.x0) / tile.res);
+    // A box that sticks out of the tile is only partly read: say so.
+    const inside =
+      rowOf(box.north) >= 0 &&
+      rowOf(box.south) < tile.height &&
+      colOf(box.west) >= 0 &&
+      colOf(box.east) < tile.width;
     const jobs = [];
     for (let r = 0; r < GRID; r += 1) {
       for (let s = 0; s < SUB_ROWS; s += 1) {
-        const lat = box.south + (r + (s + 0.5) / SUB_ROWS) * dLat;
-        jobs.push({ r, lat });
+        const row = rowOf(box.south + (r + (s + 0.5) / SUB_ROWS) * dLat);
+        if (row >= 0 && row < tile.height) jobs.push({ r, row });
       }
     }
+    if (!jobs.length) throw new Error('canopy_unavailable');
+    const tables = await loadRowTables(
+      tile,
+      Math.min(...jobs.map((j) => j.row)),
+      Math.max(...jobs.map((j) => j.row)),
+    );
     const rows = [];
     let failed = 0;
     let next = 0;
@@ -354,16 +387,10 @@ export function obstaclesProxy({
       while (next < jobs.length) {
         const job = jobs[next++];
         try {
-          const tile = await loadTile(quadkey(lonMid, job.lat));
-          const y = mercY(job.lat);
-          const row = Math.round((tile.y0 - y) / tile.res - 0.5);
-          if (row < 0 || row >= tile.height) continue;
-          const data = await readRow(tile, row);
+          const data = await readRow(tile, tables, job.row);
           const samples = [];
           for (let c = 0; c < GRID; c += 1) {
-            const a = Math.floor(
-              (mercX(box.west + c * dLon) - tile.x0) / tile.res,
-            );
+            const a = colOf(box.west + c * dLon);
             const b = Math.ceil(
               (mercX(box.west + (c + 1) * dLon) - tile.x0) / tile.res,
             );
@@ -384,7 +411,10 @@ export function obstaclesProxy({
     await Promise.all(Array.from({ length: 6 }, worker));
     // Mostly failed: say so rather than reporting "no trees here".
     if (rows.length < jobs.length / 2) throw new Error('canopy_unavailable');
-    return { obstacles: summarizeCells(rows, box), partial: failed > 0 };
+    return {
+      obstacles: summarizeCells(rows, box),
+      partial: failed > 0 || !inside,
+    };
   }
 
   async function loadFaa(box) {
