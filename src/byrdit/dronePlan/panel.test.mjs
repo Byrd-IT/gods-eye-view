@@ -1035,6 +1035,8 @@ test('orbit: obstacle height raises the orbit and shows the fly-over height', as
     ),
   );
   assert.ok(w.stats()['Fly-over height']);
+  w.handle.destroy();
+});
 
 // ------------------------------------------- all passes on the globe --
 const PASS_IDS = ['nadir', 'oblique60', 'oblique45', 'orbit'];
