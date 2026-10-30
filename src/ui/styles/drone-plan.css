@@ -284,3 +284,25 @@ body.gev-drone-box .cesium-widget canvas {
 .gev-dp-check select:disabled {
   opacity: 0.45;
 }
+/* The collapsed launcher is narrow: DRONE FLIGHT PLAN wraps onto two lines
+   (in every language) instead of pushing the disclosure arrow out of the
+   card. Beats the generic nowrap/ellipsis rules for rail titles. */
+#right-context-rail #drone-plan-panel .panel-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  /* two 9px lines must fit the 22px content height of the 50px launcher */
+  line-height: 1.2;
+}
+#right-context-rail #drone-plan-panel .panel-collapse-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+/* Collapsed, the divider's gap is the room the second word needs. */
+#right-context-rail #drone-plan-panel.collapsed .panel-divider {
+  display: none;
+}

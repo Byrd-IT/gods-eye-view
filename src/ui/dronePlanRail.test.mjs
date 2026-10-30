@@ -61,3 +61,28 @@ test('every rail rule written for Time travel has its Drone Flight Plan twin', (
   }
   assert.match(read('style.css'), /styles\/drone-plan\.css/);
 });
+
+test('the DRONE FLIGHT PLAN title wraps so the arrow stays inside the card', () => {
+  const css = read('src/ui/styles/drone-plan.css');
+  const title = css.match(
+    /#right-context-rail #drone-plan-panel \.panel-title \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(title, 'a rail-scoped title rule exists');
+  assert.match(title, /white-space: normal/);
+  assert.match(title, /min-width: 0/);
+  const btn = css.match(
+    /#right-context-rail #drone-plan-panel \.panel-collapse-btn \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(btn, 'a rail-scoped arrow rule exists');
+  assert.match(btn, /flex: 0 0 auto/, 'the arrow never shrinks');
+  assert.match(title, /line-height: 1\.2/, 'two lines fit the 50px launcher');
+  assert.match(
+    css,
+    /#right-context-rail #drone-plan-panel\.collapsed \.panel-divider \{\s*display: none;/,
+  );
+  assert.match(
+    read('src/ui/templates/context.html'),
+    /<span class="panel-title" data-i18n>DRONE FLIGHT PLAN<\/span>/,
+    'the title text is unchanged',
+  );
+});
