@@ -135,7 +135,7 @@ test('store: a refresh keeps the operator edits and user obstacles, drops stale 
   ]);
   const ids = store.list().map((o) => o.id);
   assert.ok(ids.includes('faa-1'), 'edited and seen again: kept');
-  assert.ok(!ids.includes('faa-2'), 'edited but gone from the data: dropped with the data');
+  assert.ok(ids.includes('faa-2'), 'an edited obstacle is never dropped by a refresh');
   assert.ok(!ids.includes('faa-3'));
   assert.ok(ids.includes('faa-4'));
   assert.ok(ids.includes(mine.id), 'user obstacle always survives');
@@ -348,8 +348,9 @@ test('no obstacle code reads heights or picks from the Google 3D tiles', () => {
     /clampToHeight/i,
     /pickPosition/i,
     /drillPick/i,
-    /scene\.pick\s*\(/,
-    /globe\.pick\s*\(/,
+    /scene\??\.pick\w*\s*\(/,
+    /pickFromRay/,
+    /3d-tiles|3dTiles/i,
     /photorealistic/i,
     /tile\.googleapis\.com/i,
     /Cesium3DTileset/,
@@ -383,4 +384,43 @@ test('store: estimates of a source that failed to load are kept, the others are 
   ]);
   store.replaceEstimates([], { keepSources: ['faa'] });
   assert.deepEqual(store.list().map((o) => o.id), ['faa-1']);
+});
+
+test('guard: the ADD tool is given the terrain-only pick, not the annotation depth pick', () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const panel = readFileSync(join(dir, 'panel.js'), 'utf8');
+  assert.match(
+    panel,
+    /owner: OBSTACLE_ADD_POINTER_OWNER,\s*pickWorld: \(v, nx, ny\) => pickTerrainLonLat\(v, nx, ny, cesium\)/,
+  );
+});
+
+test('store: an edited obstacle survives when the area moves and its ids change', () => {
+  const store = createObstacleStore();
+  const row = (id, lon) => ({ id, kind: 'tree', source: 'canopy', lon, lat: 30.28, radiusM: 100, estimatedHeightM: 18, heightM: 18 });
+  store.replaceEstimates([row('chm-a', -97.77)]);
+  store.setHeight('chm-a', 40);
+  store.replaceEstimates([row('chm-b', -97.7702)]);
+  const list = store.list();
+  assert.equal(list.length, 1, 'the fresh row at the same place is not added twice');
+  assert.equal(list[0].heightM, 40);
+  assert.equal(list[0].userEdited, true);
+  store.replaceEstimates([]);
+  assert.equal(store.list()[0].heightM, 40, 'never dropped, even when nothing comes back');
+});
+
+test('planner: a column on the closing gap of an orbit ring is cleared too', () => {
+  const m = metersPerDegree(30.27);
+  const wp = (id, x, y) => ({ id, lon: -97.77 + x / m.lon, lat: 30.27 + y / m.lat, aglM: 30 });
+  // Ring points around (0,0) at 60 m; the gap between the last and first
+  // point passes through (60, 0): put the column there, away from all points.
+  const ring = [
+    wp('p0', 60, 30), wp('p1', 0, 60), wp('p2', -60, 0), wp('p3', 0, -60), wp('p4', 60, -30),
+  ];
+  const ob = { id: 'x', kind: 'tower', source: 'user', lon: -97.77 + 60 / m.lon, lat: 30.27, radiusM: 3, heightM: 80 };
+  const out = applyObstacleClearance([{ id: 'o', kind: 'orbit', waypoints: ring }], [ob], { capM: 120 });
+  assert.ok(out.legs[0].waypoints[0].aglM >= 85);
+  assert.ok(out.legs[0].waypoints[4].aglM >= 85);
+  const flat = applyObstacleClearance([{ id: 'o', kind: 'path', waypoints: ring }], [ob], { capM: 120 });
+  assert.equal(flat.legs[0].waypoints[0].aglM, 30, 'only a ring closes on itself');
 });

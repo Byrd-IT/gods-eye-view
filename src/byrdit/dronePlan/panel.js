@@ -27,7 +27,10 @@ import {
   clearOverlaySource,
   setOverlayEntries,
 } from '../../overlays/worldOverlay.js';
-import { OBSTACLE_OVERLAY_SOURCE } from './obstacleLayer.js';
+import {
+  OBSTACLE_OVERLAY_SOURCE,
+  pickTerrainLonLat,
+} from './obstacleLayer.js';
 import { buildingObstacles, SOURCE_NAMES } from './obstacleData.js';
 import {
   createObstacleStore,
@@ -179,6 +182,7 @@ export function initDronePlan({
   let obstacleTyping = false;
   let obstacleKey = null;
   let obstacleToken = 0;
+  let obstacleAbort = null;
   let obstacleStatusText = '';
   const kindName = (kind) =>
     ({
@@ -270,6 +274,7 @@ export function initDronePlan({
     viewer,
     cesium,
     owner: OBSTACLE_ADD_POINTER_OWNER,
+    pickWorld: (v, nx, ny) => pickTerrainLonLat(v, nx, ny, cesium),
     onPoint: (point) => addObstacle(point),
     onCancel: (reason) => {
       if (reason === 'sky')
@@ -513,6 +518,8 @@ export function initDronePlan({
 
   // ------------------------------------------------------------ obstacles --
   function resetObstacles() {
+    obstacleAbort?.abort();
+    obstacleAbort = null;
     obstacleToken += 1;
     obstacleKey = null;
     obstacleStatusText = '';
@@ -552,6 +559,9 @@ export function initDronePlan({
     if (!force && key === obstacleKey) return;
     if (!fetchObstacles && !getBuildingFootprints) return;
     obstacleKey = key;
+    obstacleAbort?.abort();
+    obstacleAbort = new AbortController();
+    const abort = obstacleAbort;
     const token = ++obstacleToken;
     obstacleStatusText = t('Looking up open-data heights…');
     renderObstacleStatus();
@@ -559,7 +569,7 @@ export function initDronePlan({
       .then(async () => {
         const [open, buildings] = await Promise.all([
           fetchObstacles
-            ? fetchObstacles(state.areas)
+            ? fetchObstacles(state.areas, { signal: abort.signal })
             : { obstacles: [], status: {} },
           buildingsFor(key),
         ]);
@@ -585,7 +595,7 @@ export function initDronePlan({
             : '');
         obstacleMuted = false;
         const unread = Object.entries(open?.status ?? {})
-          .filter(([, v]) => v === 'failed')
+          .filter(([, v]) => v === 'failed' || v === 'partial')
           .map(([k]) => k);
         obstacleStore.replaceEstimates([...towers, ...osm, ...trees], {
           keepSources: unread,
@@ -640,8 +650,12 @@ export function initDronePlan({
     if (!ui.obstacleList) return;
     // Typing in a height box must not rebuild the box under the caret.
     const active = doc.activeElement;
-    if (obstacleTyping || (active && ui.obstacleList.contains?.(active)))
-      return;
+    const typing =
+      active &&
+      ui.obstacleList.contains?.(active) &&
+      active.getAttribute?.('data-obstacle-height') !== null &&
+      active.getAttribute?.('data-obstacle-height') !== undefined;
+    if (obstacleTyping || typing) return;
     ui.obstacleList.replaceChildren();
     const list = obstacleStore.list();
     if (!list.length) {

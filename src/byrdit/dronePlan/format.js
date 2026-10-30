@@ -145,6 +145,8 @@ export function planErrorText(code) {
   if (code === 'no-orbit-targets')
     return t('Turn on at least one orbit target');
   if (code === 'self-intersecting')
-    return t('That polygon crosses itself. Remove a corner or draw it again.');
+    return t(
+      'That polygon crosses itself. Remove a corner or draw it again.',
+    );
   return t('Draw a box on the globe first');
 }

@@ -193,22 +193,38 @@ export function createObstacleStore({ onChange } = {}) {
         (o) => o.source !== 'user',
       );
       const freshById = new Map(fresh.map((o) => [o.id, o]));
-      // A source that could not be read this time says nothing about what is
-      // there: what it gave before, and every edit, stays as it was.
+      // A source that could not be read (fully or partly) says nothing about
+      // what is there: what it gave before stays. An edited obstacle is never
+      // dropped: the operator corrected it, and ids can change when the area
+      // moves, so a fresh row is matched to it by position as well as by id.
       const kept = list.filter(
         (o) =>
-          o.source === 'user' ||
-          keepSources.includes(o.source) ||
-          (o.userEdited && freshById.has(o.id)),
+          o.source === 'user' || o.userEdited || keepSources.includes(o.source),
       );
+      const near = (a, b) => {
+        const m = metersPerDegree(a.lat);
+        return (
+          a.kind === b.kind &&
+          Math.hypot(deltaLon(a.lon, b.lon) * m.lon, (b.lat - a.lat) * m.lat) <=
+            Math.max(a.radiusM, b.radiusM)
+        );
+      };
+      const taken = new Set();
       const merged = kept.map((o) => {
-        const f = freshById.get(o.id);
+        if (o.source === 'user') return o;
+        const f =
+          freshById.get(o.id) ??
+          (o.userEdited ? fresh.find((x) => near(o, x)) : null);
         if (!f) return o;
-        freshById.delete(o.id);
-        return { ...o, estimatedHeightM: f.estimatedHeightM };
+        taken.add(f.id);
+        return o.userEdited
+          ? { ...o, estimatedHeightM: f.estimatedHeightM }
+          : o;
       });
       for (const o of fresh) {
-        if (!freshById.has(o.id)) continue;
+        if (taken.has(o.id)) continue;
+        // A kept row (failed source) stands in for the same fresh row.
+        if (merged.some((k) => k.id === o.id)) continue;
         if (merged.length >= MAX_OBSTACLES) break;
         merged.push(o);
       }
@@ -280,12 +296,15 @@ export function applyObstacleClearance(legs, obstacles, { capM }) {
       pts.forEach((p, i) => {
         if (Math.hypot(p.x, p.y) <= reach) lift(i);
       });
-      for (let i = 1; i < pts.length; i += 1) {
-        if (distToSegment(pts[i - 1], pts[i]) <= reach) {
-          lift(i - 1);
-          lift(i);
+      const pair = (a, b) => {
+        if (distToSegment(pts[a], pts[b]) <= reach) {
+          lift(a);
+          lift(b);
         }
-      }
+      };
+      for (let i = 1; i < pts.length; i += 1) pair(i - 1, i);
+      // An orbit ring is a closed loop: the last point flies back to the first.
+      if (leg.kind === 'orbit' && pts.length > 2) pair(pts.length - 1, 0);
     }
     let changed = false;
     let legBlocked = false;

@@ -1508,3 +1508,41 @@ test('obstacles: closing the panel and starting over forgets the obstacles', asy
   w.handle.destroy();
   assert.equal(w.handle.obstacles.list().length, 0);
 });
+
+test('obstacles: Reset and x still redraw the list while that button has focus', async () => {
+  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  w.handle.obstacles.setHeight('faa-48-1', 90);
+  // Like a browser: the list contains whatever is inside it.
+  const listNode = w.find((n) => n.className.includes('gev-dp-obstacle-list'))[0];
+  listNode.contains = (n) => all(listNode, (x) => x === n).length > 0;
+  const reset = w.button('data-reset-obstacle', 'faa-48-1');
+  w.doc.activeElement = reset;
+  reset.dispatch('click');
+  assert.equal(w.heightBox('faa-48-1').value, '61', 'the box shows the estimate again');
+  const remove = w.button('data-remove-obstacle', 'chm-1');
+  w.doc.activeElement = remove;
+  remove.dispatch('click');
+  assert.equal(w.button('data-remove-obstacle', 'chm-1'), undefined, 'the row is gone');
+  w.handle.destroy();
+});
+
+test('obstacles: a newer look-up aborts the older one', async () => {
+  const signals = [];
+  const w = obstacleWorld(async (areas, opts) => {
+    signals.push(opts?.signal);
+    return { obstacles: [], status: {} };
+  });
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  w.handle.obstacles.refresh();
+  await settle();
+  assert.ok(signals.length >= 2);
+  assert.equal(signals[0].aborted, true);
+  assert.equal(signals.at(-1).aborted, false);
+  w.handle.destroy();
+  assert.equal(signals.at(-1).aborted, true);
+});

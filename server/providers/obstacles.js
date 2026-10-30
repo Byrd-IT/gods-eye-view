@@ -204,7 +204,9 @@ export function undoPredictor(row) {
 
 /** Inflate and un-predict one strip (one image row). */
 export function decodeRow(compressed, width) {
-  const row = Uint8Array.from(inflateSync(compressed));
+  const row = Uint8Array.from(
+    inflateSync(compressed, { maxOutputLength: width + 16 }),
+  );
   if (row.length !== width) throw new Error('bad_row');
   return undoPredictor(row);
 }

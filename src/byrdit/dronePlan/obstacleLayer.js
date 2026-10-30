@@ -27,6 +27,35 @@ const MIN_DRAW_LENGTH_M = 0.5;
  *   onHeight?: (id: string, heightM: number) => void,
  *   kindText?: (kind: string) => string }} deps
  */
+/**
+ * Where a screen point meets the TERRAIN globe (not the 3D tiles), as lon/lat.
+ * This is the pick the ADD tool uses: the standard annotation pick does a depth
+ * pick on whatever is rendered, which is Google Photorealistic 3D when it is
+ * on, and the Google terms bar reading picks from it. Only the globe is hit.
+ * @returns {{lon:number,lat:number}|null}
+ */
+export function pickTerrainLonLat(viewer, nx, ny, cesium = Cesium) {
+  try {
+    const canvas = viewer?.scene?.canvas;
+    const w = canvas?.clientWidth || canvas?.width;
+    const h = canvas?.clientHeight || canvas?.height;
+    if (!w || !h || !cesium?.Cartesian2) return null;
+    const win = new cesium.Cartesian2(nx * w, ny * h);
+    const ray = viewer.camera.getPickRay(win);
+    if (!ray) return null;
+    const hit =
+      viewer.scene.globe.pick(ray, viewer.scene) ??
+      viewer.camera.pickEllipsoid(win, cesium.Ellipsoid?.WGS84);
+    if (!hit) return null;
+    const c = cesium.Cartographic.fromCartesian(hit);
+    const lon = cesium.Math.toDegrees(c.longitude);
+    const lat = cesium.Math.toDegrees(c.latitude);
+    return Number.isFinite(lon) && Number.isFinite(lat) ? { lon, lat } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createObstacleLayer({
   dataSource,
   cesium,
@@ -189,9 +218,12 @@ export function createObstacleLayer({
     return Number.isFinite(s) ? s : null;
   }
 
+  let inputsBefore = true;
   function setCameraInputs(on) {
     const c = viewer.scene?.screenSpaceCameraController;
-    if (c) c.enableInputs = on;
+    if (!c) return;
+    if (!on) inputsBefore = c.enableInputs !== false;
+    c.enableInputs = on ? inputsBefore : false;
   }
 
   function onDown(event) {

@@ -9,6 +9,7 @@ import {
 import { createObstacleLayer, OBSTACLE_POINTER_OWNER } from './obstacleLayer.js';
 import {
   claimPointer,
+  isPointerFree,
   releasePointer,
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
@@ -209,4 +210,100 @@ test('fetchOpenObstacles: a wide area is only partly read and the status says so
     fetchImpl: async () => ({ ok: true, json: async () => ({ obstacles: [faaRow] }) }),
   });
   assert.equal(out.status.faa, 'partial');
+});
+
+import { pickTerrainLonLat } from './obstacleLayer.js';
+import { parseBox } from '../../../server/providers/obstacles.js';
+
+test('every box the browser sends is accepted by the server', () => {
+  const areas = [
+    { id: 'a', kind: 'box', box: { west: -95.5, south: 32.1, east: -95.3, north: 32.3 } },
+    { id: 'b', kind: 'box', box: { west: -95.02, south: 32.58, east: -94.97, north: 32.63 } },
+    { id: 'c', kind: 'box', box: { west: -95.123457, south: 32.123457, east: -95.073457, north: 32.173457 } },
+  ];
+  for (const area of areas) {
+    for (const b of lookupBoxes([area])) {
+      const q = new URLSearchParams({
+        west: b.west.toFixed(6), south: b.south.toFixed(6),
+        east: b.east.toFixed(6), north: b.north.toFixed(6),
+      });
+      assert.ok(parseBox(q), JSON.stringify(b));
+    }
+  }
+});
+
+test('pickTerrainLonLat hits the terrain globe only and returns lon/lat', () => {
+  const cesium = {
+    Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
+    Cartographic: { fromCartesian: (c) => ({ longitude: c.lon, latitude: c.lat }) },
+    Math: { toDegrees: (v) => v },
+    Ellipsoid: { WGS84: {} },
+  };
+  const calls = [];
+  const viewer = {
+    scene: {
+      canvas: { clientWidth: 200, clientHeight: 100 },
+      globe: { pick: (ray) => (calls.push('globe'), ray.hit ? { lon: -97.5, lat: 30.5 } : undefined) },
+      pickPosition: () => { throw new Error('depth pick must never be used'); },
+      pick: () => { throw new Error('scene pick must never be used'); },
+    },
+    camera: {
+      getPickRay: (w) => ({ hit: w.x === 100 && w.y === 50 }),
+      pickEllipsoid: () => (calls.push('ellipsoid'), { lon: -97.4, lat: 30.4 }),
+    },
+  };
+  assert.deepEqual(pickTerrainLonLat(viewer, 0.5, 0.5, cesium), { lon: -97.5, lat: 30.5 });
+  assert.deepEqual(pickTerrainLonLat(viewer, 0.1, 0.1, cesium), { lon: -97.4, lat: 30.4 });
+  assert.equal(pickTerrainLonLat({}, 0.5, 0.5, cesium), null);
+});
+
+test('drag: down on the handle claims the pointer, move sets a clamped height, up gives everything back', () => {
+  resetPointerOwnership();
+  const bound = {};
+  class Handler {
+    constructor() { this.destroyed = false; }
+    setInputAction(fn, type) { bound[type] = fn; }
+    destroy() { this.destroyed = true; }
+  }
+  const heights = [];
+  const controller = { enableInputs: true };
+  const ob = { id: 'a', kind: 'tower', lon: -95, lat: 32.5, radiusM: 6, heightM: 60, source: 'user', estimatedHeightM: null, userEdited: true };
+  const dataSource = { entities: { values: [], add: (e) => (dataSource.entities.values.push(e), e), remove: () => {} } };
+  const cesium = {
+    Color: { fromCssColorString: (c) => ({ withAlpha: () => c }) },
+    Cartesian3: Object.assign(function (x, y, z) { this.x = x; this.y = y; this.z = z; }, {
+      fromDegrees: (lon, lat, h) => ({ x: 0, y: 0, z: h }),
+      subtract: (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }),
+      dot: (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
+    }),
+    Cartographic: { fromDegrees: (lon, lat) => ({ lon, lat }) },
+    Ellipsoid: { WGS84: { geodeticSurfaceNormal: () => ({ x: 0, y: 0, z: 1 }) } },
+    SceneTransforms: { worldToWindowCoordinates: () => ({ x: 100, y: 100 }) },
+    ScreenSpaceEventHandler: Handler,
+    ScreenSpaceEventType: { LEFT_DOWN: 'down', MOUSE_MOVE: 'move', LEFT_UP: 'up' },
+  };
+  const viewer = {
+    scene: { globe: { getHeight: () => 0 }, canvas: {}, screenSpaceCameraController: controller },
+    camera: { getPickRay: () => ({ origin: { x: 0, y: 0, z: 10 }, direction: { x: 0.6, y: 0, z: 0.8 } }) },
+  };
+  const layer = createObstacleLayer({
+    dataSource, cesium, viewer, requestRender: () => {},
+    onHeight: (id, h) => heights.push([id, h]),
+  });
+  layer.set([ob]);
+  assert.ok(bound.down && bound.move && bound.up);
+  bound.down({ position: { x: 300, y: 300 } });
+  assert.equal(layer.isDragging(), false, 'a press away from the handle does nothing');
+  bound.down({ position: { x: 102, y: 101 } });
+  assert.equal(layer.isDragging(), true);
+  assert.equal(controller.enableInputs, false);
+  assert.equal(isPointerFree(), false);
+  bound.move({ endPosition: { x: 100, y: 90 } });
+  assert.deepEqual(heights.at(-1), ['a', 10]);
+  assert.ok(heights.every(([id, h]) => id === 'a' && h >= 0 && h <= 400));
+  bound.up();
+  assert.equal(layer.isDragging(), false);
+  assert.equal(controller.enableInputs, true);
+  assert.equal(isPointerFree(), true);
+  layer.destroy();
 });

@@ -18,7 +18,7 @@ export const OBSTACLES_ENDPOINT = '/api/obstacles';
 export const OBSTACLE_FETCH_TIMEOUT_MS = 30000;
 /** Most requests one lookup makes per source. */
 export const MAX_LOOKUP_BOXES = 4;
-const BOX_DEG = 0.05;
+const BOX_DEG = 0.049;
 const M_PER_DEG_LAT = 111320;
 
 /**
