@@ -2062,6 +2062,7 @@ export function initDronePlan({
     // footprints (orbit targets, obstacles) and the open-data look-up. Their
     // late answers would otherwise replan and silently drop the suite.
     suiteSettling = true;
+    ui.suiteButton.disabled = true;
     try {
       if (!state.orbitTargetsTouched) await buildingsFor(areasKey());
       await obstaclePending?.catch(() => {});
@@ -2069,7 +2070,10 @@ export function initDronePlan({
     } finally {
       suiteSettling = false;
     }
-    if (blocked()) return;
+    if (blocked()) {
+      render();
+      return;
+    }
     const token = ++suiteToken;
     state.suiteBusy = true;
     state.suite = null;
@@ -2179,7 +2183,8 @@ export function initDronePlan({
   function renderSummary() {
     ui.summary.replaceChildren();
     ui.summary.hidden = true;
-    if (state.suiteBusy) return;
+    // A plan being rebuilt has no trustworthy totals yet.
+    if (state.suiteBusy || state.busy || state.dirty) return;
     const sum = planSummary({
       suite: state.suite,
       result: state.result,
@@ -2190,15 +2195,18 @@ export function initDronePlan({
     ui.summary.hidden = false;
     el(doc, 'p', ui.summary, {
       cls: 'gev-dp-summary-line',
-      text: t(
-        'Total: {time} flying · {flights} flights · about {batteries} batteries ({min} min each)',
-        {
-          time: durationText(durationS),
-          flights: num(flights),
-          batteries: num(batteries),
-          min: num(minutes),
-        },
-      ),
+      text: t('Total: {time} flying · {flights} · {batteries} ({min} min each)', {
+        time: durationText(durationS),
+        flights:
+          flights === 1
+            ? t('{count} flight', { count: num(flights) })
+            : t('{count} flights', { count: num(flights) }),
+        batteries:
+          batteries === 1
+            ? t('about {count} battery', { count: num(batteries) })
+            : t('about {count} batteries', { count: num(batteries) }),
+        min: num(minutes),
+      }),
     });
     if (sum.sharedBatteries) {
       el(doc, 'p', ui.summary, {

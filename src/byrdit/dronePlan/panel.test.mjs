@@ -1715,11 +1715,11 @@ test('summary: a single plan shows time in the air, flights and batteries from i
   const { totals } = w.handle.getResult();
   const min = w.handle.getState().options.batteryMin;
   const text = summaryText(w);
-  assert.match(text, /^Total: .* flying · \d+ flights · about \d+ batteries \(\d+ min each\)/);
-  assert.ok(text.includes(`${totals.missionCount} flights`));
-  assert.ok(
-    text.includes(`about ${Math.max(1, Math.ceil(totals.durationS / (min * 60)))} batteries (${min} min each)`),
-  );
+  const b = Math.max(1, Math.ceil(totals.durationS / (min * 60)));
+  const fl = `${totals.missionCount} flight${totals.missionCount === 1 ? '' : 's'}`;
+  const ba = `about ${b} batter${b === 1 ? 'y' : 'ies'}`;
+  assert.match(text, /^Total: .* flying · /);
+  assert.ok(text.includes(` · ${fl} · ${ba} (${min} min each)`), text);
   assert.doesNotMatch(text, /on site/);
   w.handle.destroy();
 });
@@ -1730,14 +1730,16 @@ test('summary: PLAN ALL shows the grand total over all passes, hidden ones inclu
   await w.handle.replan();
   await w.handle.planSuite();
   const st = w.handle.getState();
-  w.handle.getState().suiteHidden.add('oblique45');
   const flights = st.suite.passes.reduce((n, p) => n + p.result.totals.missionCount, 0);
   const seconds = st.suite.passes.reduce((n, p) => n + p.result.totals.durationS, 0);
   const expected = planSummary({ suite: st.suite, result: null, batteryMin: st.options.batteryMin });
   assert.equal(expected.flights, flights);
   assert.equal(expected.durationS, seconds);
-  assert.ok(summaryText(w).includes(`${flights} flights`));
-  w.handle.close?.();
+  const hidden = summaryText(w);
+  w.handle.getState().suiteHidden.add('oblique45');
+  w.handle.getState().suiteHidden.add('orbit');
+  assert.equal(summaryText(w), hidden, 'hiding passes does not change the total');
+  assert.ok(hidden.includes(` · ${flights} flights · `), hidden);
   w.handle.destroy();
 });
 
@@ -1761,12 +1763,15 @@ test('summary: more flights than batteries adds the shared-battery note', async 
   assert.equal(sum.batteries, 1);
   assert.equal(sum.sharedBatteries, true);
   assert.equal(planSummary({ suite: null, result: fakeResult(40 * 60, 2), batteryMin: 25 }).sharedBatteries, false);
-  w.handle.setBox(boxM(300, 200));
+  // A real plan with more flights than batteries: a long area at a tiny
+  // battery time gives several flights per battery-length of air time.
+  w.handle.applyOptions({ batteryMin: 600 });
+  w.handle.setBox(boxM(900, 700));
   await w.handle.replan();
   const { totals } = w.handle.getResult();
-  const min = w.handle.getState().options.batteryMin;
-  const shared = Math.max(1, Math.ceil(totals.durationS / (min * 60))) < totals.missionCount;
-  assert.equal(/200-waypoint limit/.test(summaryText(w)), shared);
+  assert.ok(totals.missionCount >= 2, `needs 2+ flights, got ${totals.missionCount}`);
+  assert.match(summaryText(w), /about 1 battery \(600 min each\)/);
+  assert.match(summaryText(w), /200-waypoint limit/);
   w.handle.destroy();
 });
 
