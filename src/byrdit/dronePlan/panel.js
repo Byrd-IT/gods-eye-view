@@ -1197,6 +1197,7 @@ export function initDronePlan({
         preview.setSuiteHidden(state.suiteHidden);
       });
       const swatch = el(doc, 'span', row, { cls: 'gev-dp-swatch' });
+      swatch.setAttribute('aria-hidden', 'true');
       swatch.style.backgroundColor = passStyle(
         pass.id,
         suite.passes.indexOf(pass),
