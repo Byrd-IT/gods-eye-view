@@ -194,6 +194,7 @@ export function initDronePlan({
   const obstacleStore = createObstacleStore({
     onChange: (list) => {
       state.options.obstacles = list;
+      state.options.obstaclesDropped = obstacleStore.dropped();
       preview.setObstacles(list);
       if (obstacleMuted || destroyed) return;
       renderObstacles();
@@ -615,6 +616,9 @@ export function initDronePlan({
           ) +
           (failed.length
             ? ` ${t('Could not read: {names}. The plan uses the default height there.', { names: failed.join(', ') })}`
+            : '') +
+          (obstacleStore.dropped()
+            ? ` ${t('{count} more not planned (too many).', { count: num(obstacleStore.dropped()) })}`
             : '');
         obstacleMuted = false;
         const unread = Object.entries(open?.status ?? {})

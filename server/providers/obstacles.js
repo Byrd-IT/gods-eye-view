@@ -69,6 +69,11 @@ function faaKind(code) {
  * no position or no usable height are dropped.
  */
 export function parseFaaPayload(payload) {
+  return parseFaa(payload).rows;
+}
+
+/** FAA rows, tallest first, capped; `truncated` says rows were left out. */
+export function parseFaa(payload) {
   const out = [];
   const seen = new Set();
   for (const f of Array.isArray(payload?.features) ? payload.features : []) {
@@ -96,9 +101,12 @@ export function parseFaaPayload(payload) {
       heightM: Math.round(agl * FEET_M * 10) / 10,
       note: code.slice(0, 20),
     });
-    if (out.length >= MAX_FAA_RESULTS) break;
   }
-  return out;
+  out.sort((a, b) => b.heightM - a.heightM || a.id.localeCompare(b.id));
+  return {
+    rows: out.slice(0, MAX_FAA_RESULTS),
+    truncated: out.length > MAX_FAA_RESULTS,
+  };
 }
 
 // ------------------------------------------------------------ canopy --
@@ -218,6 +226,11 @@ export function decodeRow(compressed, width) {
  * pixels are tall enough; its height is the 90th percentile of those.
  */
 export function summarizeCells(rows, box, grid = GRID) {
+  return summarizeCellsCapped(rows, box, grid).rows;
+}
+
+/** Canopy cells, strongest first, capped; `truncated` says cells were left out. */
+export function summarizeCellsCapped(rows, box, grid = GRID) {
   const cells = new Map();
   for (const row of rows) {
     for (const s of row.samples) {
@@ -260,7 +273,10 @@ export function summarizeCells(rows, box, grid = GRID) {
       b.estimatedHeightM * b.coverage - a.estimatedHeightM * a.coverage ||
       a.id.localeCompare(b.id),
   );
-  return out.slice(0, MAX_CANOPY_RESULTS);
+  return {
+    rows: out.slice(0, MAX_CANOPY_RESULTS),
+    truncated: out.length > MAX_CANOPY_RESULTS,
+  };
 }
 
 /** Fixed-origin FAA and canopy routes for dev and preview. */
@@ -413,9 +429,10 @@ export function obstaclesProxy({
     await Promise.all(Array.from({ length: 6 }, worker));
     // Mostly failed: say so rather than reporting "no trees here".
     if (rows.length < jobs.length / 2) throw new Error('canopy_unavailable');
+    const cells = summarizeCellsCapped(rows, box);
     return {
-      obstacles: summarizeCells(rows, box),
-      partial: failed > 0 || !inside,
+      obstacles: cells.rows,
+      partial: failed > 0 || !inside || cells.truncated,
     };
   }
 
@@ -442,10 +459,11 @@ export function obstaclesProxy({
     const payload = await readResponseJsonCapped(response, 2 * MIB, signal);
     if (payload?.error || !Array.isArray(payload?.features))
       throw new Error('invalid_payload');
+    const faa = parseFaa(payload);
     return {
-      obstacles: parseFaaPayload(payload),
-      // The query stops at its row limit: say so, the rest is not shown.
-      partial: payload.exceededTransferLimit === true,
+      obstacles: faa.rows,
+      // Rows left out, by the query's row limit or by our cap: say so.
+      partial: payload.exceededTransferLimit === true || faa.truncated,
     };
   }
 

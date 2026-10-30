@@ -91,7 +91,7 @@ export function normalizeObstacle(raw) {
 }
 
 /** Clean a list: invalid and duplicate ids dropped, capped at MAX_OBSTACLES. */
-export function normalizeObstacles(list) {
+export function normalizeObstacles(list, max = MAX_OBSTACLES) {
   const out = [];
   const seen = new Set();
   for (const raw of Array.isArray(list) ? list : []) {
@@ -99,7 +99,7 @@ export function normalizeObstacles(list) {
     if (!o || seen.has(o.id)) continue;
     seen.add(o.id);
     out.push(o);
-    if (out.length >= MAX_OBSTACLES) break;
+    if (out.length >= max) break;
   }
   return out;
 }
@@ -111,6 +111,7 @@ export function normalizeObstacles(list) {
 export function createObstacleStore({ onChange } = {}) {
   let list = [];
   let nextUser = 1;
+  let droppedCount = 0;
   const emit = () => onChange?.(list);
   const replace = (next) => {
     list = next;
@@ -118,9 +119,12 @@ export function createObstacleStore({ onChange } = {}) {
   };
   return {
     list: () => list,
+    /** Open-data rows the last refresh could not keep (over the cap). */
+    dropped: () => droppedCount,
     get: (id) => list.find((o) => o.id === id) ?? null,
     clear() {
       nextUser = 1;
+      droppedCount = 0;
       if (list.length) replace([]);
     },
     /** The operator clicked the map. Returns the new obstacle or null (full). */
@@ -202,7 +206,7 @@ export function createObstacleStore({ onChange } = {}) {
      * estimate is refreshed); user-added ones are untouched.
      */
     replaceEstimates(found, { keepSources = [], within = null } = {}) {
-      const fresh = normalizeObstacles(found).filter(
+      const fresh = normalizeObstacles(found, Infinity).filter(
         (o) => o.source !== 'user',
       );
       const freshById = new Map(fresh.map((o) => [o.id, o]));
@@ -251,6 +255,12 @@ export function createObstacleStore({ onChange } = {}) {
         if (final.length >= MAX_OBSTACLES) break;
         final.push(o);
       }
+      droppedCount = Math.max(
+        0,
+        added.length +
+          merged.filter((o) => !mine(o)).length -
+          (final.length - merged.filter(mine).length),
+      );
       replace(final);
       return final.length;
     },

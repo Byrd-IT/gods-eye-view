@@ -3227,5 +3227,7 @@
   "Click the globe to add an obstacle": "Haz clic en el globo para añadir un obstáculo",
   "Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.": "Las alturas son estimaciones de datos abiertos o cifras que tú fijas, no un levantamiento. Los árboles crecen. Las líneas eléctricas no están en ninguna de estas fuentes. El plan mantiene 5 m sobre cada columna. Arrastra el punto amarillo de una columna o escribe una altura. Compara las columnas con la vista 3D a simple vista. Es una comprobación visual, no probada en vuelo.",
   "Data: tree canopy height by Meta and WRI (CC BY 4.0), towers from the FAA Digital Obstacle File, buildings from OpenStreetMap contributors.": "Datos: altura del arbolado de Meta y WRI (CC BY 4.0), torres del Archivo Digital de Obstáculos de la FAA, edificios de los colaboradores de OpenStreetMap.",
-  "Obstacle kind": "Tipo de obstáculo"
+  "Obstacle kind": "Tipo de obstáculo",
+  "{count} more obstacles were found than the plan can use, so they are not planned. Draw a smaller area, or check those places by eye": "Se encontraron {count} obstáculos más de los que el plan puede usar, así que no se planifican. Dibuje un área más pequeña o revise esos lugares a simple vista",
+  "{count} more not planned (too many).": "{count} más no planificados (demasiados)."
 }

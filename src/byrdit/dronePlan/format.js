@@ -130,6 +130,11 @@ export function warningText(warning) {
         '{count} waypoints cannot clear an obstacle: they would need {need} m but the limit is {cap} m above ground. Those legs are red on the globe. Lower the column, move the route or skip the area',
         { count: fixed(p.count), need: fixed(p.needM), cap: fixed(p.capM) },
       );
+    case 'obstacle-list-cut':
+      return t(
+        '{count} more obstacles were found than the plan can use, so they are not planned. Draw a smaller area, or check those places by eye',
+        { count: fixed(p.count) },
+      );
     default:
       // An unknown code is never echoed back into the page.
       return '';

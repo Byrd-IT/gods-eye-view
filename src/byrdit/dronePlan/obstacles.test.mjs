@@ -544,3 +544,41 @@ test('store: when the cap bites, new towers beat old rows kept from a failed sou
   store.replaceEstimates([tower], { keepSources: ['canopy'], within: (o) => o.lon > -50 });
   assert.deepEqual(store.list().map((o) => o.id), ['faa-new']);
 });
+
+test('store: rows over the cap are counted, towers kept first, and the planner warns', () => {
+  const store = createObstacleStore();
+  const trees = Array.from({ length: 70 }, (_, i) => ({
+    id: `chm-${i}`, kind: 'tree', source: 'canopy', lon: -97 + i * 1e-4, lat: 30, radiusM: 20, estimatedHeightM: 10, heightM: 10,
+  }));
+  const towers = Array.from({ length: 5 }, (_, i) => ({
+    id: `faa-${i}`, kind: 'tower', source: 'faa', lon: -97.1 + i * 1e-4, lat: 30, radiusM: 6, estimatedHeightM: 80, heightM: 80,
+  }));
+  store.replaceEstimates([...trees, ...towers]);
+  assert.equal(store.list().length, MAX_OBSTACLES);
+  assert.equal(store.dropped(), 15);
+  assert.equal(store.list().filter((o) => o.kind === 'tower').length, 5);
+  const plan = planFlight(boxAround(160, 160), { aglM: 40, obstacles: store.list(), obstaclesDropped: store.dropped() });
+  assert.ok(plan.warnings?.some?.((w) => w.code === 'obstacle-list-cut') || assembleMissions(plan, { known: false }).warnings.some((w) => w.code === 'obstacle-list-cut'));
+  store.replaceEstimates([]);
+  assert.equal(store.dropped(), 0);
+});
+
+test('planner: lifting a mission end past the DJI height limit is warned about', () => {
+  const box = boxAround(900, 300);
+  const opts = { aglM: 60, batteryMin: 3 };
+  const base = planFlight(box, { ...opts, obstacles: [] });
+  const m0 = assembleMissions(base, { known: false });
+  const second = m0.missions[1].waypoints[0];
+  const tower = {
+    id: 'mid', kind: 'tower', source: 'user', radiusM: 3, heightM: 80,
+    lon: (base.takeoff.lon + second.lon) / 2, lat: (base.takeoff.lat + second.lat) / 2,
+  };
+  const ids = base.legs.flatMap((l) => l.waypoints.map((w) => w.id));
+  const wpM = [];
+  ids.forEach((id) => (wpM[id] = 140));
+  const ground = { known: true, takeoffM: 100, wpM };
+  const quiet = assembleMissions(base, ground);
+  assert.ok(!quiet.warnings.some((w) => w.code === 'rel-height-over-limit'));
+  const lifted = assembleMissions(planFlight(box, { ...opts, obstacles: [tower] }), ground);
+  assert.ok(lifted.warnings.some((w) => w.code === 'rel-height-over-limit'), JSON.stringify(lifted.warnings.map((w) => w.code)));
+});

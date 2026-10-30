@@ -6,10 +6,12 @@ import {
   decodeRow,
   obstaclesProxy,
   parseBox,
+  parseFaa,
   parseFaaPayload,
   parseTiffHeader,
   quadkey,
   summarizeCells,
+  summarizeCellsCapped,
   undoPredictor,
 } from './obstacles.js';
 
@@ -316,12 +318,15 @@ test('parseFaaPayload reads a REAL recorded ArcGIS response (padded Type_Code, f
   );
   const rows = parseFaaPayload(real);
   assert.equal(rows.length, real.features.length);
-  for (const [i, f] of real.features.entries()) {
-    assert.equal(rows[i].id, `faa-${f.attributes.OAS_Number}`);
-    assert.equal(rows[i].kind, 'tower');
-    assert.ok(Math.abs(rows[i].heightM - f.attributes.AGL * 0.3048) < 0.06);
-    assert.ok(Math.abs(rows[i].lon - f.geometry.x) < 1e-6);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  for (const f of real.features) {
+    const r = byId.get(`faa-${f.attributes.OAS_Number}`);
+    assert.ok(r, 'every real row is read');
+    assert.equal(r.kind, 'tower');
+    assert.ok(Math.abs(r.heightM - f.attributes.AGL * 0.3048) < 0.06);
+    assert.ok(Math.abs(r.lon - f.geometry.x) < 1e-6);
   }
+  assert.ok(rows[0].heightM >= rows.at(-1).heightM, 'tallest first');
 });
 
 test('the FAA route says partial when the query hit its row limit', async () => {
@@ -341,4 +346,41 @@ test('the FAA route says partial when the query hit its row limit', async () => 
     { writeHead() {}, setHeader() {}, end(b) { out = JSON.parse(b); } },
   );
   assert.equal(out.partial, true);
+});
+
+test('FAA: more than the cap keeps the TALLEST and says partial', async () => {
+  const features = Array.from({ length: 90 }, (_, i) => ({
+    attributes: { OAS_Number: `48-${100000 + i}`, Type_Code: 'TOWER', AGL: 100 + i },
+    geometry: { x: -95.05 + i * 1e-4, y: 32.58 },
+  }));
+  const { rows, truncated } = parseFaa({ features });
+  assert.equal(truncated, true);
+  assert.equal(rows.length, 60);
+  assert.equal(Math.max(...rows.map((r) => r.heightM)), Math.round(189 * 0.3048 * 10) / 10);
+  assert.ok(rows.every((r) => r.heightM >= 130 * 0.3048 - 0.1), 'the short ones are the ones left out');
+  const proxy = obstaclesProxy({
+    fetchImpl: async () => new Response(JSON.stringify({ features }), { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
+  let handler;
+  proxy.configureServer({ middlewares: { use: (_p, f) => (handler = f) } });
+  let out;
+  await handler(
+    { method: 'GET', url: '/faa?west=-95.2&south=32.5&east=-95.16&north=32.54', socket: { remoteAddress: '8.8.4.4' }, headers: {} },
+    { writeHead() {}, setHeader() {}, end(b) { out = JSON.parse(b); } },
+  );
+  assert.equal(out.partial, true);
+  assert.equal(out.obstacles.length, 60);
+});
+
+test('canopy cells over the cap are reported as truncated', () => {
+  const box = { west: -95.05, south: 32.55, east: -95.0, north: 32.6 };
+  const rows = [];
+  for (let r = 0; r < GRID; r += 1) {
+    rows.push({ cellRow: r, samples: Array.from({ length: GRID }, (_, c) => ({ cellCol: c, value: 20 })) });
+  }
+  const capped = summarizeCellsCapped(rows, box);
+  assert.equal(capped.rows.length, 40);
+  assert.equal(capped.truncated, true);
+  assert.equal(summarizeCells(rows, box).length, 40);
+  assert.equal(summarizeCellsCapped(rows.slice(0, 1), box).truncated, false);
 });

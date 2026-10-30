@@ -151,6 +151,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
   obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
   orbitTargets: null,
   obstacles: null,
+  obstaclesDropped: 0,
   takeoff: null,
 });
 
@@ -305,6 +306,7 @@ export function normalizeOptions(raw = {}, box = null) {
   );
   o.orbitTargets = normalizeOrbitTargets(o.orbitTargets);
   o.obstacles = normalizeObstacles(o.obstacles);
+  o.obstaclesDropped = clamp(Math.round(num(o.obstaclesDropped, 0)), 0, 1e6);
   if (box) {
     const m = metersPerDegree((box.south + box.north) / 2);
     const side = Math.max(
@@ -931,6 +933,12 @@ export function assembleMissions(plan, ground) {
       },
     });
   }
+  if (options.obstaclesDropped > 0) {
+    warnings.push({
+      code: 'obstacle-list-cut',
+      params: { count: options.obstaclesDropped },
+    });
+  }
   const takeoffM = known ? ground.takeoffM : 0;
 
   // A waypoint the terrain gave no height for takes the nearest read height
@@ -1089,6 +1097,7 @@ export function assembleMissions(plan, ground) {
   // are checked per mission, after the split.
   let transitBlocked = 0;
   let transitNeedM = 0;
+  let transitMaxRel = -Infinity;
   const withTransit = (missionLegs) => {
     const wps = missionLegs.flatMap((leg) => leg.waypoints);
     if (!wps.length || !options.obstacles?.length) return missionLegs;
@@ -1122,10 +1131,12 @@ export function assembleMissions(plan, ground) {
           transitBlocked += 1;
           transitNeedM = Math.max(transitNeedM, n);
         }
+        const rel = round(w.relHeightM + Math.max(0, to - w.aglM), 1);
+        transitMaxRel = Math.max(transitMaxRel, rel);
         return {
           ...w,
           aglM: Math.max(w.aglM, to),
-          relHeightM: round(w.relHeightM + Math.max(0, to - w.aglM), 1),
+          relHeightM: rel,
           ...(capped ? { obstacleBlocked: true } : {}),
         };
       });
@@ -1146,6 +1157,11 @@ export function assembleMissions(plan, ground) {
     }));
     const wps = flatten(reindexed);
     const est = estimateMission(wps, takeoff, speedMs, reindexed.length);
+    // The lift can make a mission longer than the battery: say so.
+    if (est.durationS > budgetS && !overBudget) {
+      overBudget = true;
+      warnings.push({ code: 'mission-over-budget', params: {} });
+    }
     return {
       index,
       legs: reindexed,
@@ -1158,6 +1174,20 @@ export function assembleMissions(plan, ground) {
     };
   });
 
+  // The lifted ends can pass the height DJI Fly allows above the takeoff point.
+  if (
+    transitMaxRel > DJI_DEFAULT_HEIGHT_LIMIT_M &&
+    !warnings.some((w) => w.code === 'rel-height-over-limit')
+  ) {
+    warnings.push({
+      code: 'rel-height-over-limit',
+      params: {
+        maxRelM: Math.round(transitMaxRel),
+        limitM: DJI_DEFAULT_HEIGHT_LIMIT_M,
+        terrainRangeM: Math.round(terrainRangeM),
+      },
+    });
+  }
   if (transitBlocked) {
     warnings.push({
       code: 'obstacle-blocked',

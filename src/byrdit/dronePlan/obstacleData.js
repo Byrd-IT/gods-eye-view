@@ -12,7 +12,7 @@
  * operator compares the drawn columns against by eye.
  */
 import { areasBox } from './buildingFootprints.js';
-import { MAX_OBSTACLES, normalizeObstacles } from './obstacles.js';
+import { normalizeObstacles } from './obstacles.js';
 
 export const OBSTACLES_ENDPOINT = '/api/obstacles';
 export const OBSTACLE_FETCH_TIMEOUT_MS = 30000;
@@ -142,9 +142,11 @@ export async function fetchOpenObstacles(
   status.faa = grade(faa);
   status.canopy = grade(canopy);
   // Towers first: they are the rare, high-value ones when the cap bites.
-  const obstacles = normalizeObstacles([...faa.found, ...canopy.found]).slice(
-    0,
-    MAX_OBSTACLES,
+  // Not capped here: the panel's store keeps the best MAX_OBSTACLES and says
+  // how many it left out, so the cut is never silent.
+  const obstacles = normalizeObstacles(
+    [...faa.found, ...canopy.found],
+    Infinity,
   );
   return { obstacles, status };
 }

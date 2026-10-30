@@ -3296,5 +3296,7 @@
   "Click the globe to add an obstacle": "Нажмите на глобус, чтобы добавить препятствие",
   "Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.": "Высоты — это оценки по открытым данным или значения, заданные вами, а не съёмка. Деревья растут. Линий электропередачи нет ни в одном из этих источников. План держит 5 м над каждым столбом. Перетащите жёлтую точку на столбе или введите высоту. Сравнивайте столбы с 3D-видом на глаз. Это визуальная проверка, не проверенная в полёте.",
   "Data: tree canopy height by Meta and WRI (CC BY 4.0), towers from the FAA Digital Obstacle File, buildings from OpenStreetMap contributors.": "Данные: высота крон — Meta и WRI (CC BY 4.0), вышки — Цифровой файл препятствий FAA, здания — участники OpenStreetMap.",
-  "Obstacle kind": "Тип препятствия"
+  "Obstacle kind": "Тип препятствия",
+  "{count} more obstacles were found than the plan can use, so they are not planned. Draw a smaller area, or check those places by eye": "Найдено на {count} препятствий больше, чем может учесть план, поэтому они не планируются. Нарисуйте область меньше или проверьте эти места на глаз",
+  "{count} more not planned (too many).": "Ещё {count} не учтено (слишком много)."
 }
