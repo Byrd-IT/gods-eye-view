@@ -3183,5 +3183,6 @@
   "Fly-over height": "Altura de sobrevuelo",
   "{min} m min over {obstacle} m trees": "mín. {min} m sobre árboles de {obstacle} m",
   "Tree-free zone": "Zona libre de árboles",
-  "around each target": "alrededor de cada objetivo"
+  "around each target": "alrededor de cada objetivo",
+  "Show on the globe": "Mostrar en el globo"
 }

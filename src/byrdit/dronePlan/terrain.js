@@ -1,7 +1,9 @@
 /**
  * Ground elevation under each waypoint, from the terrain the globe already
- * uses (no new network source). Heights are only ever compared with each
- * other (relative to the takeoff point), so the datum cancels.
+ * uses (no new network source). Heights are ellipsoidal (WGS84), the same
+ * datum the globe renders. The planner and KMZ only compare them with each
+ * other (relative to the takeoff point); the all-passes globe preview draws
+ * orbit rings at groundM + aglM and relies on that shared datum.
  */
 import { hasRealTerrain } from '../skyView/observer.js';
 

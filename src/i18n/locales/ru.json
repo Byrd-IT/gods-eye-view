@@ -3252,5 +3252,6 @@
   "Fly-over height": "Высота пролёта",
   "{min} m min over {obstacle} m trees": "мин. {min} м над деревьями {obstacle} м",
   "Tree-free zone": "Зона без деревьев",
-  "around each target": "вокруг каждой цели"
+  "around each target": "вокруг каждой цели",
+  "Show on the globe": "Показать на глобусе"
 }
