@@ -1319,7 +1319,6 @@ test('3D check: toggles remove only their own layer; master switch removes all',
   flipTo('footprints', false);
   assert.equal(checkOf(w, 'footprint').length, 0);
   assert.equal(checkOf(w, 'view').length, 5);
-  flipTo('enabled', true);
   const view = checkBox(w, 'frustum');
   view.value = 'off';
   view.dispatch('change');

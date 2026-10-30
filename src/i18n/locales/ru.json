@@ -3270,5 +3270,6 @@
   "Step through the photos": "Листать снимки по порядку",
   "No photos to show yet": "Снимков для показа пока нет",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "Снимок {n} из {total}: {pass}, наклон {pitch} град., высота {h}, охват {w} на {d}",
-  "Mission {n}": "Миссия {n}"
+  "Mission {n}": "Миссия {n}",
+  "Part of the view is above the horizon, so the far edge is cut short.": "Часть кадра выше горизонта, поэтому дальний край обрезан."
 }

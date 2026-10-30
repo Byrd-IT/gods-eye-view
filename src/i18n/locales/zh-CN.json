@@ -3063,5 +3063,6 @@
   "Step through the photos": "逐张翻看照片",
   "No photos to show yet": "暂无可显示的照片",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "第 {n} 张，共 {total} 张：{pass}，俯仰 {pitch} 度，高度 {h}，覆盖 {w} × {d}",
-  "Mission {n}": "任务 {n}"
+  "Mission {n}": "任务 {n}",
+  "Part of the view is above the horizon, so the far edge is cut short.": "画面的一部分高于地平线，因此远端边缘被截短。"
 }

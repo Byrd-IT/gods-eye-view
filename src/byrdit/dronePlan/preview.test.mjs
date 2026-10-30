@@ -442,7 +442,10 @@ test('3D check: zone corridor half-width follows the slider and flies at the rea
   assert.equal(heights[2], (w0.groundM ?? 0) + w0.aglM);
   preview.setCheck({ halfWidthM: 25 });
   const next = zones(source);
-  assert.equal(next[0].polylineVolume.shape[1].x - next[0].polylineVolume.shape[0].x, 50);
+  assert.equal(
+    next[0].polylineVolume.shape[1].x - next[0].polylineVolume.shape[0].x,
+    50,
+  );
   assert.equal(next.length, first.length);
   preview.setCheck({ halfWidthM: 500 });
   const clamped = zones(source)[0].polylineVolume.shape;
@@ -477,14 +480,19 @@ test('3D check: each toggle adds and removes only its own entities', () => {
   preview.setCheck({ frustum: 'off' });
   assert.equal(views(source).length, 0);
   assert.ok(zones(source).length && curtains(source).length);
-  const plan = source.entities.values.filter((e) => !e.name?.startsWith('3D check'));
+  const plan = source.entities.values.filter(
+    (e) => !e.name?.startsWith('3D check'),
+  );
   assert.ok(same(plan, before.plan), 'path and markers never touched');
   preview.setCheck({ enabled: false });
   assert.equal(checkEntities(source).length, 0);
 });
 
 test('3D check: the curtain is a wall from the flight height down to the ground', () => {
-  const { source } = checkRig({ frustum: 'off' }, result(300, 200, { aglM: 80 }));
+  const { source } = checkRig(
+    { frustum: 'off' },
+    result(300, 200, { aglM: 80 }),
+  );
   const wall = curtains(source)[0].wall;
   assert.equal(wall.minimumHeights.length, wall.positions.heights.length / 3);
   assert.ok(wall.material.a < 0.2, 'faint');
@@ -493,7 +501,8 @@ test('3D check: the curtain is a wall from the flight height down to the ground'
 test('3D check: one pyramid by default; the index steps it; thinned shows many within the cap', () => {
   const { preview, source } = checkRig({ frustum: 'one', index: 0 });
   assert.equal(views(source).length, 5, '4 faces and an edge line');
-  const apex = (e) => e.polygon.hierarchy.heights?.slice(0, 3) ?? e.polygon.hierarchy;
+  const apex = (e) =>
+    e.polygon.hierarchy.heights?.slice(0, 3) ?? e.polygon.hierarchy;
   const at0 = views(source)[0].polygon.hierarchy.heights.slice(0, 3);
   preview.setCheck({ index: 7 });
   assert.equal(views(source).length, 5);
@@ -530,15 +539,24 @@ test('3D check: it follows each pass checkbox and is coloured per pass', () => {
   const viewer = fakeViewer();
   const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
   const source = viewer.dataSources.sources[0];
-  preview.setCheck({ enabled: true, frame: FRAME, frustum: 'off', footprints: false });
+  preview.setCheck({
+    enabled: true,
+    frame: FRAME,
+    frustum: 'off',
+    footprints: false,
+  });
   preview.showSuite(suitePasses());
-  const ids = (list) => new Set(list.map((e) => e.name.split(': ')[1].split(' ')[0]));
+  const ids = (list) =>
+    new Set(list.map((e) => e.name.split(': ')[1].split(' ')[0]));
   assert.deepEqual([...ids(zones(source))].sort(), [...SUITE_IDS].sort());
   const nadirZone = zones(source).find((e) => e.name.includes(': nadir'));
   assert.equal(nadirZone.polylineVolume.material.css, PASS_STYLES.nadir.color);
   preview.setSuiteHidden(['nadir', 'orbit']);
   assert.deepEqual([...ids(zones(source))].sort(), ['oblique45', 'oblique60']);
-  assert.deepEqual([...ids(curtains(source))].sort(), ['oblique45', 'oblique60']);
+  assert.deepEqual([...ids(curtains(source))].sort(), [
+    'oblique45',
+    'oblique60',
+  ]);
   preview.setSuiteHidden(SUITE_IDS);
   assert.equal(checkEntities(source).length, 0);
   preview.setSuiteHidden([]);
@@ -582,4 +600,22 @@ test('3D check: no footprints or pyramids without a camera', () => {
   const { source } = checkRig({ frame: null });
   assert.equal(footprints(source).length + views(source).length, 0);
   assert.ok(zones(source).length && curtains(source).length);
+});
+
+test('3D check: an interval-photo plan still shows footprints and pyramids at the photo spots', () => {
+  const planned = result(300, 200, { aglM: 80, photoMode: 'interval' });
+  const { preview, source } = checkRig({ frustum: 'one' }, planned);
+  const info = preview.checkInfo();
+  const expected = planned.totals.photoCount;
+  assert.ok(info.count > 0, 'photos found');
+  assert.ok(
+    Math.abs(info.count - expected) <= planned.missions[0].legs.length + 1,
+    `${info.count} vs ${expected}`,
+  );
+  assert.ok(footprints(source).length > 0);
+  assert.equal(views(source).length, 5);
+  assert.ok(info.current.footprint.depthM > 0);
+  assert.ok(Number.isFinite(info.current.headingDeg));
+  preview.setCheck({ index: 3 });
+  assert.equal(preview.checkInfo().index, 3);
 });

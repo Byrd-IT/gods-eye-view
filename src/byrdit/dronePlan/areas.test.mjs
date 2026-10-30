@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  assembleAreaPlan,
-  distanceToAreasM,
-  jobSlug,
-  planAreas,
-} from './areas.js';
+import { assembleAreaPlan, distanceToAreasM, jobSlug, planAreas } from './areas.js';
 import { groundDistanceM, makeFrame, metersPerDegree } from './geo.js';
 import { pointInRing } from './polygon.js';
 import { assembleMissions, planFlight } from './planner.js';
@@ -36,14 +31,7 @@ function flatGround(plan, takeoffM = 100) {
 
 function waypointFields(plan) {
   return plan.legs.flatMap((leg) =>
-    leg.waypoints.map((w) => [
-      w.lon,
-      w.lat,
-      w.aglM,
-      w.photo,
-      w.pitchDeg,
-      w.headingDeg,
-    ]),
+    leg.waypoints.map((w) => [w.lon, w.lat, w.aglM, w.photo, w.pitchDeg, w.headingDeg]),
   );
 }
 
@@ -124,11 +112,7 @@ test('an L polygon is not flown over its missing corner', () => {
       }
     }
   }
-  assert.equal(
-    outsideOriginal,
-    true,
-    'the footprint margin must cover the edge',
-  );
+  assert.equal(outsideOriginal, true, 'the footprint margin must cover the edge');
   assert.equal(plan.jobs.length, 1);
   assert.equal(plan.jobs[0].name, 'L field');
 });
@@ -156,9 +140,7 @@ test('overlapping rectangles are flown once and keep a job each', () => {
   );
   const built = assembleAreaPlan(plan, flatGround(plan));
   assert.deepEqual(
-    built.missions
-      .map((m) => m.jobId)
-      .filter((id, i, all) => all.indexOf(id) === i),
+    built.missions.map((m) => m.jobId).filter((id, i, all) => all.indexOf(id) === i),
     ['job-1', 'job-2'],
   );
   const photos = built.areaStats.reduce((sum, row) => sum + row.photoCount, 0);
@@ -261,10 +243,7 @@ test('the mission split still caps a multi-area plan at 200 waypoints', () => {
   );
   assert.equal(plan.error, undefined, plan.message);
   const built = assembleAreaPlan(plan, flatGround(plan));
-  assert.ok(
-    built.missions.length > 1,
-    'a short waypoint cap must split the plan',
-  );
+  assert.ok(built.missions.length > 1, 'a short waypoint cap must split the plan');
   for (const mission of built.missions) {
     assert.ok(mission.waypointCount <= 12);
   }
@@ -280,28 +259,18 @@ test('a short box across the antimeridian still matches planFlight', () => {
   );
   assert.deepEqual(waypointFields(via), waypointFields(direct));
   const polygon = planAreas(
-    [
-      {
-        id: 'datep',
-        name: 'Dateline poly',
-        kind: 'polygon',
-        ring: [
-          { lon: box.west, lat: box.south },
-          { lon: box.east, lat: box.south },
-          { lon: box.east, lat: box.north },
-          { lon: box.west, lat: box.north },
-        ],
-      },
-    ],
+    [{ id: 'datep', name: 'Dateline poly', kind: 'polygon', ring: [
+      { lon: box.west, lat: box.south },
+      { lon: box.east, lat: box.south },
+      { lon: box.east, lat: box.north },
+      { lon: box.west, lat: box.north },
+    ] }],
     opts,
   );
   assert.equal(polygon.error, undefined, polygon.message);
   for (const leg of polygon.legs) {
     for (const w of leg.waypoints) {
-      assert.ok(
-        Math.abs(w.lon) > 179.9,
-        `lon ${w.lon} is not on the short arc`,
-      );
+      assert.ok(Math.abs(w.lon) > 179.9, `lon ${w.lon} is not on the short arc`);
     }
   }
 });
@@ -340,15 +309,11 @@ test('the download zip puts each job in its own folder and the README names them
   const names = [...files.keys()];
   assert.ok(names.includes('README.txt'));
   assert.ok(
-    names.some(
-      (name) => name.startsWith('job-1-North-field/') && name.endsWith('.kmz'),
-    ),
+    names.some((name) => name.startsWith('job-1-North-field/') && name.endsWith('.kmz')),
     names.join(', '),
   );
   assert.ok(
-    names.some(
-      (name) => name.startsWith('job-2-South-field/') && name.endsWith('.kmz'),
-    ),
+    names.some((name) => name.startsWith('job-2-South-field/') && name.endsWith('.kmz')),
     names.join(', '),
   );
   const readme = new TextDecoder().decode(files.get('README.txt'));
@@ -397,9 +362,7 @@ test('two jobs with the same name do not share a folder or a photo count', async
   assert.equal(new Set(folders).size, 2, names.join(', '));
   assert.equal(new Set(names).size, names.length, 'duplicate zip paths');
   const readme = readmeText(built, when);
-  const photos = [...readme.matchAll(/Photos: (\d+)/g)].map((m) =>
-    Number(m[1]),
-  );
+  const photos = [...readme.matchAll(/Photos: (\d+)/g)].map((m) => Number(m[1]));
   assert.equal(photos.length, 3);
   assert.equal(photos[1] + photos[2], photos[0]);
 });
@@ -486,13 +449,7 @@ function distToSeg(p, a, b) {
   const abx = b.x - a.x;
   const aby = b.y - a.y;
   const len2 = abx * abx + aby * aby;
-  const t =
-    len2 === 0
-      ? 0
-      : Math.min(
-          1,
-          Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2),
-        );
+  const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2));
   return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
 }
 
@@ -522,41 +479,20 @@ test('a double-grid of two overlapping rectangles aims at each edge and keeps ea
   const east = aims.filter((p) => p.jobId === 'job-2');
   assert.ok(west.length > 0 && east.length > 0);
   for (const p of west) {
-    assert.ok(
-      p.x >= -1 && p.x <= 181 && p.y >= -1 && p.y <= 141,
-      `west aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`,
-    );
+    assert.ok(p.x >= -1 && p.x <= 181 && p.y >= -1 && p.y <= 141, `west aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`);
   }
   for (const p of east) {
-    assert.ok(
-      p.x >= 179 && p.x <= 271 && p.y >= -1 && p.y <= 141,
-      `east aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`,
-    );
+    assert.ok(p.x >= 179 && p.x <= 271 && p.y >= -1 && p.y <= 141, `east aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`);
   }
   const edges = [
-    [
-      { x: 0, y: 0 },
-      { x: 0, y: 140 },
-    ],
-    [
-      { x: 270, y: 0 },
-      { x: 270, y: 140 },
-    ],
-    [
-      { x: 0, y: 0 },
-      { x: 270, y: 0 },
-    ],
-    [
-      { x: 0, y: 140 },
-      { x: 270, y: 140 },
-    ],
+    [{ x: 0, y: 0 }, { x: 0, y: 140 }],
+    [{ x: 270, y: 0 }, { x: 270, y: 140 }],
+    [{ x: 0, y: 0 }, { x: 270, y: 0 }],
+    [{ x: 0, y: 140 }, { x: 270, y: 140 }],
   ];
   for (const [a, b] of edges) {
     const best = Math.min(...aims.map((p) => distToSeg(p, a, b)));
-    assert.ok(
-      best <= spacing,
-      `edge ${a.x},${a.y}-${b.x},${b.y} is ${best.toFixed(1)} m from the nearest aim (spacing ${spacing.toFixed(1)})`,
-    );
+    assert.ok(best <= spacing, `edge ${a.x},${a.y}-${b.x},${b.y} is ${best.toFixed(1)} m from the nearest aim (spacing ${spacing.toFixed(1)})`);
   }
 });
 
@@ -574,14 +510,7 @@ test('a double-grid polygon aims at its own edges and not at the missing corner'
     { x: 0, y: 400 },
   ];
   const plan = planAreas(
-    [
-      {
-        id: 'L',
-        name: 'L field',
-        kind: 'polygon',
-        ring: local.map((p) => frame.toLonLat(p.x, p.y)),
-      },
-    ],
+    [{ id: 'L', name: 'L field', kind: 'polygon', ring: local.map((p) => frame.toLonLat(p.x, p.y)) }],
     { ...opts, pattern: 'double', aglM: agl, tiltPitchDeg: tilt },
   );
   assert.equal(plan.error, undefined, plan.message);
@@ -590,17 +519,10 @@ test('a double-grid polygon aims at its own edges and not at the missing corner'
   const aims = plan.legs.flatMap((leg) => legAims(leg, frame, look));
   assert.ok(aims.length > 4);
   for (const p of aims) {
-    const inside =
-      pointInRing(p, local) || distToRing(p, local) <= margin * Math.SQRT2 + 2;
+    const inside = pointInRing(p, local) || distToRing(p, local) <= margin * Math.SQRT2 + 2;
+    assert.ok(inside, `aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)} is outside the footprint`);
     assert.ok(
-      inside,
-      `aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)} is outside the footprint`,
-    );
-    assert.ok(
-      !(
-        p.x > 150 + margin * Math.SQRT2 + 2 &&
-        p.y < 200 - margin * Math.SQRT2 - 2
-      ),
+      !(p.x > 150 + margin * Math.SQRT2 + 2 && p.y < 200 - margin * Math.SQRT2 - 2),
       `aim ${p.x.toFixed(1)}, ${p.y.toFixed(1)} is in the missing corner`,
     );
   }
@@ -623,14 +545,8 @@ function distToRing(p, ring) {
     const abx = b.x - a.x;
     const aby = b.y - a.y;
     const len2 = abx * abx + aby * aby;
-    const t = Math.min(
-      1,
-      Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2),
-    );
-    best = Math.min(
-      best,
-      Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t)),
-    );
+    const t = Math.min(1, Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2));
+    best = Math.min(best, Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t)));
   }
   return best;
 }
@@ -643,14 +559,7 @@ test('a sharp polygon does not fly a spike past the footprint margin', () => {
     { x: 246, y: 43 },
   ];
   const plan = planAreas(
-    [
-      {
-        id: 'thin',
-        name: 'Thin',
-        kind: 'polygon',
-        ring: local.map((p) => frame.toLonLat(p.x, p.y)),
-      },
-    ],
+    [{ id: 'thin', name: 'Thin', kind: 'polygon', ring: local.map((p) => frame.toLonLat(p.x, p.y)) }],
     opts,
   );
   assert.equal(plan.error, undefined, plan.message);
@@ -682,14 +591,7 @@ test('a notch narrower than the footprint margin is not flown as a bowtie', () =
     { x: 0, y: 250 },
   ];
   const plan = planAreas(
-    [
-      {
-        id: 'notch',
-        name: 'Notch',
-        kind: 'polygon',
-        ring: local.map((p) => frame.toLonLat(p.x, p.y)),
-      },
-    ],
+    [{ id: 'notch', name: 'Notch', kind: 'polygon', ring: local.map((p) => frame.toLonLat(p.x, p.y)) }],
     opts,
   );
   assert.equal(plan.error, undefined, plan.message);
@@ -705,15 +607,10 @@ test('a notch narrower than the footprint margin is not flown as a bowtie', () =
         dist <= margin * Math.SQRT2 + 2,
         `waypoint ${dist.toFixed(1)} m from the ring`,
       );
-      if (p.x > 300 && p.x < 300 + margin && p.y > 40 && p.y < 80)
-        coveredEdge = true;
+      if (p.x > 300 && p.x < 300 + margin && p.y > 40 && p.y < 80) coveredEdge = true;
     }
   }
-  assert.equal(
-    coveredEdge,
-    true,
-    'the east edge still gets the footprint margin',
-  );
+  assert.equal(coveredEdge, true, 'the east edge still gets the footprint margin');
 });
 
 test('a rectangle overlapping a polygon is not flown past its own edges', () => {
@@ -732,12 +629,7 @@ test('a rectangle overlapping a polygon is not flown past its own edges', () => 
   };
   const plan = planAreas(
     [
-      {
-        id: 'poly',
-        name: 'Poly',
-        kind: 'polygon',
-        ring: poly.map((p) => frame.toLonLat(p.x, p.y)),
-      },
+      { id: 'poly', name: 'Poly', kind: 'polygon', ring: poly.map((p) => frame.toLonLat(p.x, p.y)) },
       { id: 'rect', name: 'Rect', kind: 'rect', box: rect },
     ],
     opts,
@@ -750,13 +642,9 @@ test('a rectangle overlapping a polygon is not flown past its own edges', () => 
   for (const leg of plan.legs) {
     for (const w of leg.waypoints) {
       const p = frame.toXY(w.lon, w.lat);
-      const inRect =
-        p.x >= 80 - 1 && p.x <= 240 + 1 && p.y >= 20 - 1 && p.y <= 140 + 1;
+      const inRect = p.x >= 80 - 1 && p.x <= 240 + 1 && p.y >= 20 - 1 && p.y <= 140 + 1;
       if (leg.jobId === 'job-2') {
-        assert.ok(
-          inRect,
-          `rectangle job flew ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`,
-        );
+        assert.ok(inRect, `rectangle job flew ${p.x.toFixed(1)}, ${p.y.toFixed(1)}`);
         if (p.x > 160 + 1) onlyRect += 1;
       }
       if (leg.jobId === 'job-1') {
@@ -768,14 +656,8 @@ test('a rectangle overlapping a polygon is not flown past its own edges', () => 
       }
     }
   }
-  assert.ok(
-    onlyPoly > 0,
-    'the polygon-only ground must stay in the polygon job',
-  );
-  assert.ok(
-    onlyRect > 0,
-    'the rectangle-only ground must stay in the rectangle job',
-  );
+  assert.ok(onlyPoly > 0, 'the polygon-only ground must stay in the polygon job');
+  assert.ok(onlyRect > 0, 'the rectangle-only ground must stay in the rectangle job');
 });
 
 test('the line-of-sight note is measured from the shared takeoff', () => {
@@ -804,14 +686,7 @@ test('a polygon whose footprint margin pushes the box past 3 km is refused', () 
     { x: 0, y: 40 },
   ];
   const plan = planAreas(
-    [
-      {
-        id: 'wide',
-        name: 'Wide',
-        kind: 'polygon',
-        ring: local.map((p) => frame.toLonLat(p.x, p.y)),
-      },
-    ],
+    [{ id: 'wide', name: 'Wide', kind: 'polygon', ring: local.map((p) => frame.toLonLat(p.x, p.y)) }],
     opts,
   );
   assert.equal(plan.error, 'too-large', plan.message);
@@ -854,10 +729,10 @@ test('a clipped polygon starts at the corner nearest the shared takeoff', () => 
   ].map((p) => frame.toLonLat(p.x, p.y));
   // South-east of the ring. An unturned shell starts at the south-west.
   const takeoff = frame.toLonLat(220, -20);
-  const plan = planAreas([{ id: 'p', name: 'Poly', kind: 'polygon', ring }], {
-    ...opts,
-    takeoff,
-  });
+  const plan = planAreas(
+    [{ id: 'p', name: 'Poly', kind: 'polygon', ring }],
+    { ...opts, takeoff },
+  );
   assert.equal(plan.error, undefined, plan.message);
   assert.equal(plan.clippedToPolygon, true);
   const start = plan.legs[0].waypoints[0];
@@ -945,10 +820,7 @@ test('a clipped line keeps its pieces in travel order when the start turns towar
       const cur = legXY(plan.legs[i]);
       if (Math.abs(prev.a.y - cur.a.y) < 5) {
         jumps.push(
-          groundDistanceM(
-            plan.legs[i - 1].waypoints.at(-1),
-            plan.legs[i].waypoints[0],
-          ),
+          groundDistanceM(plan.legs[i - 1].waypoints.at(-1), plan.legs[i].waypoints[0]),
         );
       }
     }
@@ -989,16 +861,8 @@ test('a clipped line keeps its pieces in travel order when the start turns towar
     `turned transit ${turnedTransit.toFixed(0)} m is worse than the unturned ${calmTransit.toFixed(0)} m`,
   );
 
-  const tilted = planAreas(area, {
-    ...shared,
-    pattern: 'double',
-    takeoff: notch,
-  });
-  const tiltedCalm = planAreas(area, {
-    ...shared,
-    pattern: 'double',
-    takeoff: calm,
-  });
+  const tilted = planAreas(area, { ...shared, pattern: 'double', takeoff: notch });
+  const tiltedCalm = planAreas(area, { ...shared, pattern: 'double', takeoff: calm });
   assertOrdered(tilted, 'tilted');
   const tiltedTransit = transitSum(tilted);
   const tiltedCalmTransit = transitSum(tiltedCalm);
@@ -1021,11 +885,10 @@ test('a clipped corner does not start farther than it does now, and a line does 
   ].map(([x, y]) => frame.toLonLat(x, y));
   const empty = frame.toLonLat(200, 200);
   const takeoff = frame.toLonLat(200 + 21, 200 + 21);
-  const plan = planAreas([{ id: 'tri', name: 'Tri', kind: 'polygon', ring }], {
-    ...opts,
-    direction: 'ew',
-    takeoff,
-  });
+  const plan = planAreas(
+    [{ id: 'tri', name: 'Tri', kind: 'polygon', ring }],
+    { ...opts, direction: 'ew', takeoff },
+  );
   assert.equal(plan.error, undefined, plan.message);
   near(groundDistanceM(empty, takeoff), 30, 1, 'empty corner');
   const startAway = groundDistanceM(takeoff, plan.legs[0].waypoints[0]);
@@ -1056,10 +919,10 @@ test('a polygon with no custom takeoff turns toward the area centre', () => {
     [0, 300],
     [300, 0],
   ].map(([x, y]) => frame.toLonLat(x, y));
-  const plan = planAreas([{ id: 'p', name: 'Poly', kind: 'polygon', ring }], {
-    ...opts,
-    direction: 'ew',
-  });
+  const plan = planAreas(
+    [{ id: 'p', name: 'Poly', kind: 'polygon', ring }],
+    { ...opts, direction: 'ew' },
+  );
   assert.equal(plan.error, undefined, plan.message);
   assert.equal(plan.takeoff.custom, false);
   const meanLon = ring.reduce((sum, p) => sum + p.lon, 0) / ring.length;
@@ -1115,10 +978,7 @@ test('the reported margin stays finite when height is left out', () => {
     { id: 'p', name: 'Poly', kind: 'polygon', ring },
   ];
   const plan = planAreas(areas, bare);
-  const only = planAreas(
-    [{ id: 'p', name: 'Poly', kind: 'polygon', ring }],
-    bare,
-  );
+  const only = planAreas([{ id: 'p', name: 'Poly', kind: 'polygon', ring }], bare);
   assert.equal(plan.error, undefined, plan.message);
   assert.equal(only.error, undefined, only.message);
   assert.equal(Number.isFinite(plan.footprintMarginM), true);

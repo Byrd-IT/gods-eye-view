@@ -1216,6 +1216,9 @@ export function initDronePlan({
         d: fp ? heightText(fp.depthM) : '-',
       },
     );
+    if (fp?.clipped) {
+      ui.checkReadout.textContent += ` ${t('Part of the view is above the horizon, so the far edge is cut short.')}`;
+    }
   }
 
   function syncControls() {

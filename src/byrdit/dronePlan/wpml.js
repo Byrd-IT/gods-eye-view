@@ -306,10 +306,7 @@ export function readmeText(result, when = new Date()) {
       'Processing jobs:',
       'Process the images from one job together (ODM). Do not mix jobs.',
     );
-    if (
-      (result.plan?.jobGrouping ?? 'per-area') !== 'whole' &&
-      jobs.length > 1
-    ) {
+    if ((result.plan?.jobGrouping ?? 'per-area') !== 'whole' && jobs.length > 1) {
       lines.push(
         'Where areas overlap, photos of that ground are only in the first job.',
         'A later job has no photos there.',
@@ -341,15 +338,8 @@ export function bundleEntries(result, opts = {}) {
       : result.missions;
     const index = same.indexOf(mission);
     const job = jobs.find((item) => item.id === mission.jobId);
-    const file = kmzFileName(
-      index,
-      same.length,
-      when,
-      multi ? mission.jobName : '',
-    );
-    const folder = multi
-      ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/`
-      : '';
+    const file = kmzFileName(index, same.length, when, multi ? mission.jobName : '');
+    const folder = multi ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/` : '';
     return {
       name: `${folder}${file}`,
       data: buildKmz(mission, result.plan, { ...opts, when }),

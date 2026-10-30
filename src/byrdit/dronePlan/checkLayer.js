@@ -12,6 +12,7 @@
  * VISUAL AID ONLY: nothing here detects a collision, and OpenStreetMap
  * buildings have no trees or power lines. Look at it over the Google 3D mesh.
  */
+import { makeFrame } from './geo.js';
 import {
   MAX_FOOTPRINTS,
   MAX_FRUSTUMS,
@@ -23,6 +24,9 @@ import {
   photoHeadingDeg,
   thinIndexes,
 } from './checkGeometry.js';
+
+/** Safety cap on photo spots sampled along interval-photo legs. */
+const MAX_INTERVAL_PHOTOS = 20000;
 
 export const CHECK_NAMES = Object.freeze({
   zone: '3D check zone',
@@ -86,12 +90,87 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     lists[name] = [];
   };
 
+  /**
+   * Where the camera fires along an interval-photo leg: its waypoints are not
+   * photo spots (the shutter runs on a timer), so walk the leg and drop a
+   * photo every photoSpacingM, facing along the leg unless it fixes a heading.
+   */
+  function intervalPhotos(leg) {
+    const wps = leg.waypoints ?? [];
+    const out = [];
+    if (wps.length < 2) return wps.map((wp) => ({ wp }));
+    const spacing = Math.max(1, Number(leg.photoSpacingM) || 1);
+    const frame = makeFrame(wps[0].lon, wps[0].lat);
+    const xy = wps.map((w) => frame.toXY(w.lon, w.lat));
+    let next = 0;
+    let travelled = 0;
+    for (let k = 1; k < wps.length; k += 1) {
+      const seg = Math.hypot(xy[k].x - xy[k - 1].x, xy[k].y - xy[k - 1].y);
+      if (seg <= 0) continue;
+      while (
+        next <= travelled + seg + 1e-9 &&
+        out.length < MAX_INTERVAL_PHOTOS
+      ) {
+        const f = Math.min(1, Math.max(0, (next - travelled) / seg));
+        const a = wps[k - 1];
+        const b = wps[k];
+        const ll = frame.toLonLat(
+          xy[k - 1].x + (xy[k].x - xy[k - 1].x) * f,
+          xy[k - 1].y + (xy[k].y - xy[k - 1].y) * f,
+        );
+        const mix = (p, q) =>
+          (Number(p) || 0) + ((Number(q) || 0) - (Number(p) || 0)) * f;
+        out.push({
+          wp: {
+            ...a,
+            lon: ll.lon,
+            lat: ll.lat,
+            aglM: mix(a.aglM, b.aglM),
+            groundM: mix(a.groundM, b.groundM),
+            pitchDeg: Number.isFinite(a.pitchDeg) ? a.pitchDeg : leg.pitchDeg,
+          },
+          headingDeg: Number.isFinite(a.headingDeg)
+            ? a.headingDeg
+            : (Math.atan2(xy[k].x - xy[k - 1].x, xy[k].y - xy[k - 1].y) * 180) /
+                Math.PI +
+              360,
+        });
+        next += spacing;
+      }
+      travelled += seg;
+    }
+    return out;
+  }
+
   /** Every photo of every shown pass, in flight order. */
   function photoItems() {
     if (itemsVersion === version) return items;
     items = [];
     for (const pass of passes ?? []) {
       pass.missions.forEach((mission, mi) => {
+        const legs = mission.legs;
+        if (legs?.some((leg) => leg.photoMode === 'interval')) {
+          for (const leg of legs) {
+            if (leg.photoMode === 'interval' && leg.kind === 'grid') {
+              for (const p of intervalPhotos(leg)) {
+                items.push({
+                  pass,
+                  mission,
+                  mi,
+                  wp: p.wp,
+                  i: 0,
+                  headingDeg: p.headingDeg,
+                });
+              }
+            } else {
+              leg.waypoints.forEach((wp) => {
+                if (wp.photo !== false)
+                  items.push({ pass, mission, mi, wp, i: wp.index ?? 0 });
+              });
+            }
+          }
+          return;
+        }
         mission.waypoints.forEach((wp, i) => {
           if (wp.photo === false) return;
           items.push({ pass, mission, mi, wp, i });
@@ -126,7 +205,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
               wps.flatMap((p) => [p.lon, p.lat, flightHeightM(p)]),
             ),
             shape,
-            cornerType: cesium.CornerType?.MITERED,
+            cornerType: cesium.CornerType?.BEVELED,
             material: color(pass.color, 0.16),
             outline: false,
           },
@@ -157,7 +236,10 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
 
   const cornersOf = (item) => {
     const wps = item.mission.waypoints;
-    return photoFootprint(item.wp, photoHeadingDeg(wps, item.i), options.frame);
+    const heading = Number.isFinite(item.headingDeg)
+      ? item.headingDeg % 360
+      : photoHeadingDeg(wps, item.i);
+    return photoFootprint(item.wp, heading, options.frame);
   };
 
   function buildFootprints() {
@@ -306,7 +388,9 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
         current: {
           passId: item.pass.id,
           pitchDeg: item.wp.pitchDeg ?? null,
-          headingDeg: photoHeadingDeg(item.mission.waypoints, item.i),
+          headingDeg: Number.isFinite(item.headingDeg)
+            ? item.headingDeg % 360
+            : photoHeadingDeg(item.mission.waypoints, item.i),
           aglM: item.wp.aglM ?? null,
           heightM: flightHeightM(item.wp),
           footprint: fp

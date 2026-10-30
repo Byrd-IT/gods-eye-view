@@ -3201,5 +3201,6 @@
   "Step through the photos": "Recorrer las fotos",
   "No photos to show yet": "Aún no hay fotos que mostrar",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "Foto {n} de {total}: {pass}, inclinación {pitch} grados, altura {h}, cubre {w} por {d}",
-  "Mission {n}": "Misión {n}"
+  "Mission {n}": "Misión {n}",
+  "Part of the view is above the horizon, so the far edge is cut short.": "Parte de la vista queda sobre el horizonte, así que el borde lejano se corta."
 }
