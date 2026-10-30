@@ -3025,5 +3025,6 @@
   "{missions} missions, {photos} photos, {time}": "{missions} 个任务，{photos} 张照片，{time}",
   "DOWNLOAD ALL PASSES (.ZIP)": "下载所有航线 (.ZIP)",
   "Every pass in its own folder, plus a README, in one zip": "每条航线单独一个文件夹，外加 README，打包为一个 zip",
-  "Could not plan all passes": "无法规划所有航线"
+  "Could not plan all passes": "无法规划所有航线",
+  "Show on the globe": "在地球上显示"
 }

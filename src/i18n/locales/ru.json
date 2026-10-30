@@ -3232,5 +3232,6 @@
   "{missions} missions, {photos} photos, {time}": "миссий: {missions}, фото: {photos}, {time}",
   "DOWNLOAD ALL PASSES (.ZIP)": "СКАЧАТЬ ВСЕ ПРОЛЁТЫ (.ZIP)",
   "Every pass in its own folder, plus a README, in one zip": "Каждый пролёт в своей папке, плюс README, в одном zip",
-  "Could not plan all passes": "Не удалось запланировать все пролёты"
+  "Could not plan all passes": "Не удалось запланировать все пролёты",
+  "Show on the globe": "Показать на глобусе"
 }

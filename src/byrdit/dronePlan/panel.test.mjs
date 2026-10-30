@@ -155,9 +155,16 @@ function makeWorld({ sample }) {
     ...fakes.cesium,
     CustomDataSource,
     EllipsoidTerrainProvider,
+    PolylineDashMaterialProperty: class {
+      constructor(options) {
+        this.options = options;
+      }
+    },
     Cartesian3: {
       fromDegreesArray: (v) => v,
-      fromDegrees: (lon, lat) => [lon, lat],
+      fromDegreesArrayHeights: (v) => ({ heights: v }),
+      fromDegrees: (lon, lat, h) =>
+        h === undefined ? [lon, lat] : [lon, lat, h],
     },
     Cartographic: {
       fromDegrees: (lon, lat) => ({ longitude: lon, latitude: lat }),
@@ -735,9 +742,9 @@ test('USE RECOMMENDED applies the aircraft and mode values and the plan honours 
   w.handle.setBox(boxM(400, 300));
   pick(w, 'Aircraft', 'dji-mavic-3');
   pick(w, 'Mode', 'fast-survey');
-  const use = w.buttons('data-action').find(
-    (b) => b.getAttribute('data-action') === 'use-recommended',
-  );
+  const use = w
+    .buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'use-recommended');
   use.click();
   await w.handle.replan();
   const r = w.handle.getResult();
@@ -825,9 +832,9 @@ test('P3: the shutter control shows a real option before any interaction', () =>
 test('PLAN ALL RECOMMENDED PASSES plans every pass and zips them; a change makes it stale', async () => {
   const w = setup();
   const btn = () =>
-    w.buttons('data-action').find(
-      (b) => b.getAttribute('data-action') === 'plan-suite',
-    );
+    w
+      .buttons('data-action')
+      .find((b) => b.getAttribute('data-action') === 'plan-suite');
   assert.equal(btn().disabled, true, 'off with no area');
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
@@ -839,9 +846,9 @@ test('PLAN ALL RECOMMENDED PASSES plans every pass and zips them; a change makes
     ['nadir', 'oblique60', 'oblique45', 'orbit'],
   );
   assert.ok(suite.passes.every((p) => p.result?.missions.length >= 1));
-  const dl = w.buttons('data-download').find(
-    (b) => b.getAttribute('data-download') === 'suite',
-  );
+  const dl = w
+    .buttons('data-download')
+    .find((b) => b.getAttribute('data-download') === 'suite');
   assert.equal(dl.disabled, false);
   w.handle.downloadSuite();
   assert.equal(w.downloads.length, 1);
@@ -849,15 +856,22 @@ test('PLAN ALL RECOMMENDED PASSES plans every pass and zips them; a change makes
   const names = [...readZip(w.downloads[0].bytes).keys()];
   assert.ok(names.includes('README.txt'));
   for (const id of ['nadir', 'oblique60', 'oblique45', 'orbit']) {
-    assert.ok(names.some((n) => n.includes(`-${id}/`) && n.endsWith('.kmz')), id);
+    assert.ok(
+      names.some((n) => n.includes(`-${id}/`) && n.endsWith('.kmz')),
+      id,
+    );
   }
   w.handle.getState().options.aglM = 60;
   await w.handle.replan();
-  assert.equal(w.handle.getState().suite, null, 'a replan drops the stale suite');
+  assert.equal(
+    w.handle.getState().suite,
+    null,
+    'a replan drops the stale suite',
+  );
   w.handle.destroy();
 });
 
-test("voice handle methods drive the same plan the buttons do", async () => {
+test('voice handle methods drive the same plan the buttons do', async () => {
   const w = setup();
   w.handle.open({ draw: false });
   assert.equal(w.handle.isOpen(), true);
@@ -869,9 +883,9 @@ test("voice handle methods drive the same plan the buttons do", async () => {
   assert.equal(w.handle.removeArea(id), true);
   assert.equal(w.handle.getState().areas.length, 0);
   w.handle.setBox(boxM(300, 200));
-  assert.equal(w.handle.useRecommended("mapping-grid"), true);
-  assert.equal(typeof w.handle.downloadsAllowed(), "boolean");
-  assert.equal(typeof w.handle.suiteAllowed(), "boolean");
+  assert.equal(w.handle.useRecommended('mapping-grid'), true);
+  assert.equal(typeof w.handle.downloadsAllowed(), 'boolean');
+  assert.equal(typeof w.handle.suiteAllowed(), 'boolean');
   w.handle.destroy();
 });
 
@@ -889,5 +903,143 @@ test('close drops the all-passes plan so voice cannot download it', async () => 
   assert.equal(w.handle.suiteAllowed(), false);
   const result = await voice.download({ which: 'suite' });
   assert.equal(result.ok, false);
+  w.handle.destroy();
+});
+
+// ------------------------------------------- all passes on the globe --
+const PASS_IDS = ['nadir', 'oblique60', 'oblique45', 'orbit'];
+const globe = (w) =>
+  w.viewer.dataSources.sources.find((x) => x.name === 'gev-drone-plan').entities
+    .values;
+const passLines = (w, id) =>
+  globe(w).filter((e) => e.polyline && e.name?.startsWith(`${id} mission`));
+const singleLines = (w) =>
+  globe(w).filter((e) => e.polyline && /^Mission \d/.test(e.name ?? ''));
+const toggles = (w) =>
+  w.find((n) => n.tagName === 'INPUT' && n.attributes.has('data-pass-visible'));
+const toggle = (w, id) =>
+  toggles(w).find((n) => n.getAttribute('data-pass-visible') === id);
+const flip = (box) => {
+  box.checked = !box.checked;
+  box.dispatch('change');
+};
+
+test('PLAN ALL RECOMMENDED PASSES draws every pass and replaces the single plan on the globe', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  assert.ok(singleLines(w).length >= 1, 'single plan drawn first');
+  await w.handle.planSuite();
+  assert.equal(singleLines(w).length, 0, 'the suite replaces the single plan');
+  for (const id of PASS_IDS) assert.ok(passLines(w, id).length >= 1, id);
+  const materials = new Set(
+    PASS_IDS.map((id) => {
+      const m = passLines(w, id)[0].polyline.material;
+      return m.options ? `dash-${m.options.dashLength}` : 'solid';
+    }),
+  );
+  assert.deepEqual(
+    [...materials].sort(),
+    ['dash-18', 'dash-6', 'solid'],
+    'nadir solid, oblique60 dashed, oblique45 dotted, orbit solid',
+  );
+  assert.ok(passLines(w, 'orbit')[0].polyline.positions.heights);
+  assert.equal(globe(w).filter((e) => e.name === 'Takeoff').length, 1);
+  w.handle.destroy();
+});
+
+test('every pass row has a checked checkbox and a colour swatch; hiding one removes only its drawing', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await w.handle.planSuite();
+  assert.deepEqual(
+    toggles(w).map((n) => n.getAttribute('data-pass-visible')),
+    PASS_IDS,
+  );
+  assert.ok(toggles(w).every((n) => n.checked && !n.disabled));
+  const swatches = w.find((n) => n.className.includes('gev-dp-swatch'));
+  assert.equal(swatches.length, 4);
+  assert.equal(new Set(swatches.map((n) => n.style.backgroundColor)).size, 4);
+  flip(toggle(w, 'oblique60'));
+  assert.equal(passLines(w, 'oblique60').length, 0);
+  for (const id of ['nadir', 'oblique45', 'orbit']) {
+    assert.ok(passLines(w, id).length >= 1, id);
+  }
+  assert.equal(w.handle.getState().suiteHidden.has('oblique60'), true);
+  flip(toggle(w, 'oblique60'));
+  assert.ok(passLines(w, 'oblique60').length >= 1, 'shown again');
+  w.handle.destroy();
+});
+
+test('pass visibility survives a re-render but resets when a new suite is planned', async () => {
+  // Partial terrain makes the suite show its acknowledge box, whose change
+  // re-renders the panel without replanning.
+  const w = setup({
+    sample: async (cartos) => cartos.map((c) => ({ ...c, height: undefined })),
+  });
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await w.handle.planSuite();
+  flip(toggle(w, 'nadir'));
+  const ack = w.find(
+    (n) =>
+      n.tagName === 'INPUT' && n.getAttribute('data-ack') === 'suite-terrain',
+  )[0];
+  assert.ok(ack, 'the terrain-ack box exists');
+  flip(ack);
+  assert.equal(
+    toggle(w, 'nadir').checked,
+    false,
+    'still unchecked after render',
+  );
+  assert.equal(passLines(w, 'nadir').length, 0);
+  await w.handle.planSuite();
+  assert.equal(toggle(w, 'nadir').checked, true, 'new suite: all visible');
+  assert.ok(passLines(w, 'nadir').length >= 1);
+  w.handle.destroy();
+});
+
+test('a pass with no result has a disabled, unchecked checkbox and no drawing', async () => {
+  // Partial terrain shows the acknowledge box, whose change re-renders.
+  const w = setup({
+    sample: async (cartos) => cartos.map((c) => ({ ...c, height: undefined })),
+  });
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await w.handle.planSuite();
+  const st = w.handle.getState();
+  st.suite.passes[1] = {
+    ...st.suite.passes[1],
+    result: null,
+    error: { code: 'x' },
+  };
+  flip(
+    w.find(
+      (n) =>
+        n.tagName === 'INPUT' && n.getAttribute('data-ack') === 'suite-terrain',
+    )[0],
+  );
+  assert.equal(toggle(w, 'oblique60').disabled, true);
+  assert.equal(toggle(w, 'oblique60').checked, false);
+  assert.equal(toggle(w, 'nadir').disabled, false);
+  w.handle.destroy();
+});
+
+test('a replan or closing the panel removes the suite drawing and restores the single plan', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await w.handle.planSuite();
+  assert.ok(passLines(w, 'nadir').length >= 1);
+  w.handle.getState().options.aglM = 60;
+  await w.handle.replan();
+  assert.equal(w.handle.getState().suite, null);
+  for (const id of PASS_IDS) assert.equal(passLines(w, id).length, 0, id);
+  assert.ok(singleLines(w).length >= 1, 'single plan back');
+  await w.handle.planSuite();
+  assert.equal(singleLines(w).length, 0);
+  w.handle.close();
+  assert.equal(globe(w).length, 0, 'close clears everything');
   w.handle.destroy();
 });

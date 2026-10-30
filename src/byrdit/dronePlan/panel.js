@@ -17,7 +17,7 @@ import { assembleAreaPlan, distanceToAreasM, planAreas } from './areas.js';
 import { initPolygonTool } from './polygonTool.js';
 import { validateDroneBox } from './limits.js';
 import { initPointTool } from './pointTool.js';
-import { createDronePlanPreview } from './preview.js';
+import { createDronePlanPreview, passStyle } from './preview.js';
 import { sampleGround } from './terrain.js';
 import {
   AGL_CAP_M,
@@ -106,6 +106,7 @@ export function initDronePlan({
     wpml: { droneEnumValue: null, droneSubEnumValue: null },
     result: null,
     suite: null,
+    suiteHidden: new Set(),
     suiteBusy: false,
     error: null,
     busy: false,
@@ -300,6 +301,18 @@ export function initDronePlan({
     return true;
   }
 
+  // The globe shows the all-passes plan when there is one, otherwise the
+  // single plan: a suite replaces the single plan while it exists.
+  function syncGlobe() {
+    if (state.suite) {
+      preview.showPlan(null);
+      preview.showSuite(state.suite.passes, state.suiteHidden);
+    } else {
+      preview.showSuite(null);
+      preview.showPlan(state.result);
+    }
+  }
+
   async function replan() {
     if (destroyed) return;
     // A voice call waits for this plan. Drop the pending timer so it cannot
@@ -309,8 +322,10 @@ export function initDronePlan({
     state.dirty = false;
     // Any change to the areas or settings makes the all-passes plan stale.
     suiteToken += 1;
+    const hadSuite = Boolean(state.suite);
     state.suite = null;
     state.suiteBusy = false;
+    if (hadSuite) syncGlobe();
     if (!state.areas.length) {
       state.result = null;
       state.error = null;
@@ -1038,6 +1053,7 @@ export function initDronePlan({
     const token = ++suiteToken;
     state.suiteBusy = true;
     state.suite = null;
+    syncGlobe();
     render();
     const provider =
       viewer.terrainProvider ?? viewer.scene?.globe?.terrainProvider;
@@ -1086,6 +1102,7 @@ export function initDronePlan({
       if (token === suiteToken) {
         state.suiteBusy = false;
         state.suite = null;
+        syncGlobe();
         status(t('Could not plan all passes'), 'warn');
         render();
       }
@@ -1093,7 +1110,9 @@ export function initDronePlan({
     }
     if (destroyed || token !== suiteToken) return;
     state.suite = { passes, when: new Date() };
+    state.suiteHidden = new Set();
     state.suiteBusy = false;
+    syncGlobe();
     panel.dataset.suiteNonce = String(
       (Number(panel.dataset.suiteNonce) || 0) + 1,
     );
@@ -1162,6 +1181,26 @@ export function initDronePlan({
           .filter(Boolean);
         if (bad.length) text += ` - ${bad.join('; ')}`;
       }
+      const toggle = el(doc, 'input', row, {
+        cls: 'gev-dp-pass-visible',
+        attrs: {
+          type: 'checkbox',
+          'data-pass-visible': pass.id,
+          'aria-label': `${t('Show on the globe')}: ${pass.label}`,
+        },
+      });
+      toggle.checked = Boolean(pass.result) && !state.suiteHidden.has(pass.id);
+      toggle.disabled = !pass.result;
+      toggle.addEventListener('change', () => {
+        if (toggle.checked) state.suiteHidden.delete(pass.id);
+        else state.suiteHidden.add(pass.id);
+        preview.setSuiteHidden(state.suiteHidden);
+      });
+      const swatch = el(doc, 'span', row, { cls: 'gev-dp-swatch' });
+      swatch.style.backgroundColor = passStyle(
+        pass.id,
+        suite.passes.indexOf(pass),
+      ).color;
       el(doc, 'span', row, { cls: 'gev-dp-mission-label', text });
     }
     const all = el(doc, 'button', ui.suite, {
@@ -1343,6 +1382,7 @@ export function initDronePlan({
     state.dirty = false;
     suiteToken += 1;
     state.suite = null;
+    state.suiteHidden = new Set();
     state.suiteBusy = false;
     state.ack = false;
     terrainCache.clear();

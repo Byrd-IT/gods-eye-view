@@ -3163,5 +3163,6 @@
   "{missions} missions, {photos} photos, {time}": "{missions} misiones, {photos} fotos, {time}",
   "DOWNLOAD ALL PASSES (.ZIP)": "DESCARGAR TODAS LAS PASADAS (.ZIP)",
   "Every pass in its own folder, plus a README, in one zip": "Cada pasada en su propia carpeta, más un README, en un zip",
-  "Could not plan all passes": "No se pudieron planificar todas las pasadas"
+  "Could not plan all passes": "No se pudieron planificar todas las pasadas",
+  "Show on the globe": "Mostrar en el globo"
 }
