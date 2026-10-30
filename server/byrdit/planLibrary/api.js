@@ -38,7 +38,13 @@ function readBody(req, limit) {
     let size = 0;
     let over = false;
     req.on('data', (chunk) => {
-      if (over) return; // drain, keep nothing, so the 413 can reach the client
+      if (over) {
+        // Drain (keep nothing) so the 413 can reach the client, but only up
+        // to one more limit's worth: an endless body is cut off.
+        size += chunk.length;
+        if (size > limit * 2) req.destroy();
+        return;
+      }
       size += chunk.length;
       if (size > limit) {
         over = true;
