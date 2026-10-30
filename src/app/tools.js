@@ -3,6 +3,7 @@ import { initAnnotations } from '../annotations/index.js';
 import { initDrawTool } from '../annotations/drawTool.js';
 import { initGeoFileImport } from '../ui/geoFileImport.js';
 import { initImageryBoxTool } from '../ui/imageryBoxTool.js';
+import { createBuildingFootprintProvider } from '../byrdit/dronePlan/buildingFootprints.js';
 import { initDronePlan } from '../byrdit/dronePlan/panel.js';
 import { createDronePlanVoice } from '../byrdit/dronePlan/dronePlanVoice.js';
 import { createRecentImageryPanel } from '../ui/recentImagery.js';
@@ -73,7 +74,10 @@ export function createApplicationTools({
   // DISPLAY ▸ Drone Flight Plan: draw a box, plan DJI Fly KMZ missions. Its
   // box and takeoff tools claim the pointer like Draw, so its teardown belongs
   // to the application lifetime too.
-  const dronePlan = initDronePlan({ viewer });
+  const dronePlan = initDronePlan({
+    viewer,
+    getBuildingFootprints: createBuildingFootprintProvider(),
+  });
   if (dronePlan) {
     dronePlan.voice = createDronePlanVoice(dronePlan);
     window.__gevDronePlan = dronePlan;
