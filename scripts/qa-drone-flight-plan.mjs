@@ -469,7 +469,11 @@ try {
         Boolean(n) && !n.hidden && n.getBoundingClientRect().height > 0;
       return {
         present: Boolean(adjust),
-        afterSuite: Boolean(adjust) && suite?.nextElementSibling === adjust,
+        afterSuite:
+          Boolean(adjust) &&
+          suite?.nextElementSibling?.getAttribute('data-role') ===
+            'plan-summary' &&
+          suite.nextElementSibling.nextElementSibling === adjust,
         hasZone: Boolean(
           adjust?.querySelector(
             '[data-role="3d-check"] input[data-check-slider="width"]',
@@ -506,14 +510,16 @@ try {
     const panel = document.querySelector('#drone-plan-panel');
     const node = panel.querySelector('[data-role="plan-summary"]');
     const r = node.getBoundingClientRect();
+    const pr = panel.getBoundingClientRect();
     const passes = window.__gevDronePlan.getState().suite?.passes ?? [];
     const planned = passes.filter((p) => p.result);
     const sec = planned.reduce((n, p) => n + p.result.totals.durationS, 0);
     const flights = planned.reduce((n, p) => n + p.result.totals.missionCount, 0);
     return {
       text: node.textContent,
-      top: r.top,
-      bottom: r.bottom,
+      top: Math.max(r.top, pr.top),
+      bottom: Math.min(r.bottom, pr.bottom),
+      inPanel: r.top >= pr.top - 1 && r.bottom <= pr.bottom + 1,
       vh: window.innerHeight,
       flights,
       sec,
@@ -523,6 +529,7 @@ try {
     'Summary: total flying time, flights and batteries are visible after PLAN ALL and match the suite',
     summaryInfo.text.includes(`${summaryInfo.flights} flights`) &&
       /flying/.test(summaryInfo.text) &&
+      summaryInfo.inPanel &&
       summaryInfo.top >= 0 &&
       summaryInfo.bottom <= summaryInfo.vh,
     JSON.stringify(summaryInfo),
