@@ -233,7 +233,9 @@ export function boxCentre(box) {
 
 /**
  * A square box centred on a pin, `sideKm` on the ground (the east–west extent
- * widens by 1/cos(lat)); null when the result would not validate.
+ * widens by 1/cos(lat)); null when the result would not validate. A pin whose
+ * box passes ±180 gets the short-arc box (west > east), the same convention
+ * as a dragged dateline box, with edges wrapped into ±180.
  * @param {number} lon Degrees.
  * @param {number} lat Degrees.
  * @param {number} [sideKm]
@@ -242,16 +244,21 @@ export function boxCentre(box) {
 export function boxFromPin(lon, lat, sideKm = PIN_BOX_SIDE_KM) {
   if (!finite(lon) || !finite(lat) || !finite(sideKm) || sideKm <= 0)
     return null;
+  if (Math.abs(lon) > 180) return null;
   const cosLat = Math.cos(toRadians(lat));
   if (cosLat <= 0) return null;
   const halfLat = sideKm / 2 / KM_PER_DEG_LAT;
   const halfLon = sideKm / 2 / (KM_PER_DEG_LAT * cosLat);
+  // A half-width of 90° or more is not a short arc; refuse rather than wrap.
+  if (halfLon >= 90) return null;
+  const wrapLon = (value) =>
+    value > 180 ? value - 360 : value < -180 ? value + 360 : value;
   const clampLat = (value) =>
     Math.max(-MERCATOR_LAT_LIMIT, Math.min(MERCATOR_LAT_LIMIT, value));
   const result = validateBox({
-    west: lon - halfLon,
+    west: wrapLon(lon - halfLon),
     south: clampLat(lat - halfLat),
-    east: lon + halfLon,
+    east: wrapLon(lon + halfLon),
     north: clampLat(lat + halfLat),
   });
   return result.ok ? result.box : null;

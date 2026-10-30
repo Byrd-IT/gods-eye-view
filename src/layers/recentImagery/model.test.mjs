@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   boxFromPin,
+  lonSpanDeg,
+  nonCrossingBoxes,
   boxFromRectangle,
   boxSideKm,
   coverageFor,
@@ -183,7 +185,12 @@ test('boxFromPin builds a 10 km square within 2% at any latitude and refuses wha
   assert.ok(Math.abs(boxSideKm(boxFromPin(10, 10, 50)).width - 50) < 1);
   assert.equal(boxFromPin(NaN, 0), null);
   assert.equal(boxFromPin(0, 0, 5000), null, 'over the cap');
-  assert.equal(boxFromPin(179.99, 0), null, 'would cross the dateline');
+  assert.equal(boxFromPin(181, 0), null, 'longitude out of range');
+  assert.equal(
+    boxFromPin(0, 0, 400000),
+    null,
+    'half-width of 90 degrees or more',
+  );
   assert.equal(boxFromPin(0, 89), null, 'clamped to a degenerate polar box');
   assert.equal(boxFromPin(0, 85.04).north, 85.0511, 'clamped, still valid');
 });
@@ -491,4 +498,49 @@ test('thumbnails load the focused card, then the visible cards outward, then the
   assert.deepEqual(thumbnailOrder(19, 17, 19, 20), [19, 18, 17, 16, 15]);
   assert.deepEqual(thumbnailOrder(50, 7, 3, 10), [7, 6, 5, 4, 3, 8, 2, 9, 1]);
   assert.deepEqual(thumbnailOrder(0, 0, 0, 0), []);
+});
+
+test('boxFromPin returns the short-arc box for a pin near the dateline', () => {
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  const half = 5 / 111.32; // 5 km in degrees at the equator, about 0.04492
+  const spanOk = (box) => {
+    const { width, height } = boxSideKm(box);
+    assert.ok(Math.abs(width - 10) < 0.2, `width ${width}`);
+    assert.ok(Math.abs(height - 10) < 0.2, `height ${height}`);
+    assert.ok(lonSpanDeg(box.west, box.east) < 1, 'never a ~360 degree span');
+  };
+  // 179.9 and -179.9 are 0.1 degrees from the line: a 10 km box stays on one side.
+  for (const lon of [179.9, -179.9]) {
+    const box = boxFromPin(lon, 0);
+    spanOk(box);
+    assert.ok(box.west < box.east, `no wrap needed at ${lon}`);
+    assert.ok(near((box.west + box.east) / 2, lon));
+  }
+  // A pin on the line, or close enough that the box passes it, wraps.
+  for (const lon of [180, -180, 179.99, -179.99]) {
+    const box = boxFromPin(lon, 0);
+    spanOk(box);
+    assert.ok(box.west > box.east, `crossing at ${lon}`);
+    assert.ok(box.west <= 180 && box.east >= -180, 'edges stay within +-180');
+    assert.ok(
+      near(
+        box.west,
+        (lon > 0 || lon === -180 ? Math.abs(lon) : 360 + lon) - half,
+      ),
+    );
+    assert.equal(nonCrossingBoxes(box).length, 2, 'splits for tiling and CMR');
+    assert.ok(
+      Math.abs(
+        Math.abs(boxCentre(box).lon) - Math.abs(lon === -180 ? 180 : lon),
+      ) < 1e-6,
+    );
+  }
+  // 0 is an ordinary box.
+  const mid = boxFromPin(0, 0);
+  spanOk(mid);
+  assert.ok(mid.west < mid.east && near(mid.west, -half));
+  // Off the equator the east-west extent widens but stays a short arc.
+  const high = boxFromPin(-179.99, 60);
+  spanOk(high);
+  assert.ok(high.west > high.east);
 });
