@@ -114,7 +114,8 @@ export function planSummary({ suite, result, batteryMin }) {
   } else {
     return null;
   }
-  const minutes = Math.max(1, Number(batteryMin) || 25);
+  // The planner clamps the battery time to 5-60 min: the totals must agree.
+  const minutes = Math.min(60, Math.max(5, Number(batteryMin) || 25));
   const batteries = Math.max(1, Math.ceil(durationS / (minutes * 60)));
   return {
     durationS,
@@ -2232,7 +2233,7 @@ export function initDronePlan({
   function renderSuite() {
     ui.suite.replaceChildren();
     ui.suiteButton.disabled =
-      !state.areas.length || state.suiteBusy || state.busy;
+      !state.areas.length || state.suiteBusy || state.busy || suiteSettling;
     if (state.suiteBusy) {
       el(doc, 'p', ui.suite, {
         cls: 'gev-dp-note',

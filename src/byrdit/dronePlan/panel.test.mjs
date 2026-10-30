@@ -1744,6 +1744,7 @@ test('summary: PLAN ALL shows the grand total over all passes, hidden ones inclu
 });
 
 test('summary math: ceil of air time over battery time, at least one battery', () => {
+  const r2 = (m) => planSummary({ suite: null, result: fakeResult(600, 1), batteryMin: m });
   const r = (s, n) => planSummary({ suite: null, result: fakeResult(s, n), batteryMin: 25 });
   assert.equal(r(26 * 60, 2).batteries, 2, '26 min on 25 min batteries');
   assert.equal(r(25 * 60, 1).batteries, 1);
@@ -1755,6 +1756,7 @@ test('summary math: ceil of air time over battery time, at least one battery', (
     25,
     'bad battery time falls back to 25',
   );
+  assert.equal(r2(600).minutes, 60, 'clamped to the planner range');
 });
 
 test('summary: more flights than batteries adds the shared-battery note', async () => {
@@ -1763,14 +1765,16 @@ test('summary: more flights than batteries adds the shared-battery note', async 
   assert.equal(sum.batteries, 1);
   assert.equal(sum.sharedBatteries, true);
   assert.equal(planSummary({ suite: null, result: fakeResult(40 * 60, 2), batteryMin: 25 }).sharedBatteries, false);
-  // A real plan with more flights than batteries: a long area at a tiny
-  // battery time gives several flights per battery-length of air time.
-  w.handle.applyOptions({ batteryMin: 600 });
-  w.handle.setBox(boxM(900, 700));
+  // A real plan with more flights than batteries: a low waypoint cap splits the plan into flights while the
+  // air time still fits one 60 min battery.
+  w.handle.applyOptions({ batteryMin: 60 });
+  w.handle.getState().options.maxWaypoints = 40;
+  w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   const { totals } = w.handle.getResult();
   assert.ok(totals.missionCount >= 2, `needs 2+ flights, got ${totals.missionCount}`);
-  assert.match(summaryText(w), /about 1 battery \(600 min each\)/);
+  assert.ok(totals.durationS <= 60 * 60, 'fits one battery');
+  assert.match(summaryText(w), /about 1 battery \(60 min each\)/);
   assert.match(summaryText(w), /200-waypoint limit/);
   w.handle.destroy();
 });
