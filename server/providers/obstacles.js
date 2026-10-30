@@ -59,6 +59,12 @@ export function parseBox(params) {
   return { west, south, east, north };
 }
 
+/** Guy wires spread out as a tower gets taller: keep the column wide. */
+function faaRadiusM(kind, heightM) {
+  if (kind !== 'tower') return 6;
+  return Math.max(6, Math.min(150, Math.round(0.6 * heightM)));
+}
+
 /** FAA Type_Code to a plan kind. */
 function faaKind(code) {
   return /^BLDG/.test(code) ? 'building' : 'tower';
@@ -96,7 +102,7 @@ export function parseFaa(payload) {
       source: 'faa',
       lon: x,
       lat: y,
-      radiusM: 6,
+      radiusM: faaRadiusM(faaKind(code), agl * FEET_M),
       estimatedHeightM: Math.round(agl * FEET_M * 10) / 10,
       heightM: Math.round(agl * FEET_M * 10) / 10,
       note: code.slice(0, 20),
@@ -190,7 +196,7 @@ export function parseTiffHeader(buf) {
   ) {
     throw new Error('unsupported_tiff');
   }
-  return {
+  const info = {
     width,
     height,
     stripOffsets: pointer(273),
@@ -198,6 +204,12 @@ export function parseTiffHeader(buf) {
     scaleAt: pointer(33550),
     tiepointAt: pointer(33922),
   };
+  // A missing tag must fail here, not as "Range: bytes=undefined-NaN".
+  for (const key of ['stripOffsets', 'stripBytes', 'scaleAt', 'tiepointAt']) {
+    if (!Number.isFinite(info[key]) || info[key] <= 0)
+      throw new Error('unsupported_tiff');
+  }
+  return info;
 }
 
 /** Undo the horizontal predictor on 8-bit samples, in place. */
@@ -445,6 +457,8 @@ export function obstaclesProxy({
         inSR: '4326',
         spatialRel: 'esriSpatialRelIntersects',
         outFields: 'OAS_Number,Type_Code,AGL',
+        // Tallest first, so the row limit drops the short ones.
+        orderByFields: 'AGL DESC',
         returnGeometry: 'true',
         outSR: '4326',
         resultRecordCount: '200',

@@ -377,6 +377,60 @@ test('no obstacle code reads heights or picks from the Google 3D tiles', () => {
   }
 });
 
+// The banned-call regexes above only catch what we thought of. This is the
+// other half: obstacleLayer.js may touch Cesium only through this list, so a
+// new call (a tileset read, a depth pick, a sampler) fails here until a human
+// decides it is not a Google 3D read.
+test('obstacleLayer.js uses only an allow-list of Cesium and viewer calls', () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const code = readFileSync(join(dir, 'obstacleLayer.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\?\./g, '.');
+  const allowed = new Set([
+    // Columns: our own geometry on our own data source.
+    'dataSource.entities.add',
+    'dataSource.entities.remove',
+    'cesium.Cartesian2',
+    'cesium.Cartesian3',
+    // Plain vector maths on our own points.
+    'cesium.Cartesian3.fromDegrees',
+    'cesium.Cartesian3.subtract',
+    'cesium.Cartesian3.dot',
+    'cesium.Ellipsoid.WGS84.geodeticSurfaceNormal',
+    'cesium.Cartographic.fromCartesian',
+    'cesium.Cartographic.fromDegrees',
+    'cesium.Color.fromCssColorString',
+    'cesium.Math.toDegrees',
+    'cesium.Ellipsoid',
+    'cesium.Ellipsoid.WGS84',
+    // Drag handle: window coordinates and pointer events only.
+    'cesium.SceneTransforms.worldToWindowCoordinates',
+    'cesium.ScreenSpaceEventHandler',
+    'cesium.ScreenSpaceEventType.LEFT_DOWN',
+    'cesium.ScreenSpaceEventType.LEFT_UP',
+    'cesium.ScreenSpaceEventType.MOUSE_MOVE',
+    'viewer.scene',
+    'viewer.scene.canvas',
+    'viewer.scene.screenSpaceCameraController',
+    // Terrain-only ground: the globe model and the raised ellipsoid. With
+    // Google 3D on the globe is hidden, so these never see the tileset.
+    'viewer.camera.getPickRay',
+    'viewer.camera.pickEllipsoid',
+    'viewer.scene.globe.getHeight',
+    'viewer.scene.globe.pick',
+  ]);
+  const used = new Set(
+    code.match(/\b(?:viewer|cesium|dataSource)(?:\.[A-Za-z_][A-Za-z0-9_]*)+/g) ?? [],
+  );
+  assert.ok(used.size >= 10, 'the scan found the calls');
+  const extra = [...used].filter((x) => !allowed.has(x));
+  assert.deepEqual(extra, [], 'not on the obstacleLayer.js allow-list');
+  // No other global or import may reach the tileset.
+  assert.ok(!/\bimport\s[^;]*\bCesium3DTileset\b/.test(code));
+  assert.ok(!/\bscene\.(primitives|pick|drillPick|pickPosition|sampleHeight)/.test(code));
+});
+
 test('store: estimates of a source that failed to load are kept, the others are replaced', () => {
   const store = createObstacleStore();
   store.replaceEstimates([

@@ -12,6 +12,7 @@ import { downtownPayload, okResponse } from './buildingFixtures.mjs';
 import { createDronePlanVoice } from './dronePlanVoice.js';
 import { metersPerDegree } from './geo.js';
 import { readZip } from './zip.js';
+import { MAX_OBSTACLES } from "./obstacles.js";
 
 // ---------------------------------------------------------------- DOM stub --
 class El {
@@ -1526,6 +1527,47 @@ test('obstacles: Reset and x still redraw the list while that button has focus',
   w.doc.activeElement = remove;
   remove.dispatch('click');
   assert.equal(w.button('data-remove-obstacle', 'chm-1'), undefined, 'the row is gone');
+  w.handle.destroy();
+});
+
+test('obstacles: Enter in a height box (change, box still focused) enables Reset', async () => {
+  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  const listNode = w.find((n) => n.className.includes('gev-dp-obstacle-list'))[0];
+  listNode.contains = (n) => all(listNode, (x) => x === n).length > 0;
+  const box = w.heightBox('faa-48-1');
+  w.doc.activeElement = box;
+  box.value = '90';
+  box.dispatch('input'); // typing: the box must not be rebuilt under the caret
+  assert.equal(w.heightBox('faa-48-1'), box, 'same node while typing');
+  assert.equal(w.button('data-reset-obstacle', 'faa-48-1').disabled, true, 'not drawn mid-typing');
+  box.dispatch('change'); // Enter or blur commits
+  const reset = w.button('data-reset-obstacle', 'faa-48-1');
+  assert.equal(reset.disabled, false, 'Reset follows the committed edit');
+  reset.dispatch('click');
+  assert.equal(w.heightBox('faa-48-1').value, '61');
+  w.handle.destroy();
+});
+
+test('obstacles: the status line shows THIS look-up\'s "not planned" count', async () => {
+  const many = Array.from({ length: MAX_OBSTACLES + 7 }, (_, i) => ({
+    id: `faa-48-${i}`,
+    kind: 'tower',
+    source: 'faa',
+    lon: -97.77 + i * 1e-5,
+    lat: 30.27,
+    radiusM: 6,
+    estimatedHeightM: 100 - i * 0.1,
+    heightM: 100 - i * 0.1,
+  }));
+  const w = obstacleWorld(async () => ({ obstacles: many, status: {} }));
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  const text = w.find((n) => n.className.includes('gev-dp-obstacle-status'))[0].textContent;
+  assert.ok(text.includes('7 more not planned'), text);
   w.handle.destroy();
 });
 

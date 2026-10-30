@@ -605,21 +605,6 @@ export function initDronePlan({
         const failed = Object.entries(open?.status ?? {})
           .filter(([, v]) => v === 'failed' || v === 'partial')
           .map(([k]) => t(SOURCE_NAMES[k] ?? k));
-        obstacleStatusText =
-          t(
-            'Open data: {towers} towers, {trees} tree patches, {buildings} buildings.',
-            {
-              towers: num(towers.length),
-              trees: num(trees.length),
-              buildings: num(osm.length),
-            },
-          ) +
-          (failed.length
-            ? ` ${t('Could not read: {names}. The plan uses the default height there.', { names: failed.join(', ') })}`
-            : '') +
-          (obstacleStore.dropped()
-            ? ` ${t('{count} more not planned (too many).', { count: num(obstacleStore.dropped()) })}`
-            : '');
         obstacleMuted = false;
         const unread = Object.entries(open?.status ?? {})
           .filter(([, v]) => v === 'failed' || v === 'partial')
@@ -637,6 +622,22 @@ export function initDronePlan({
                 o.lat <= area.north + 0.05
             : () => false,
         });
+        // After replaceEstimates, so the dropped count is this lookup's.
+        obstacleStatusText =
+          t(
+            'Open data: {towers} towers, {trees} tree patches, {buildings} buildings.',
+            {
+              towers: num(towers.length),
+              trees: num(trees.length),
+              buildings: num(osm.length),
+            },
+          ) +
+          (failed.length
+            ? ` ${t('Could not read: {names}. The plan uses the default height there.', { names: failed.join(', ') })}`
+            : '') +
+          (obstacleStore.dropped()
+            ? ` ${t('{count} more not planned (too many).', { count: num(obstacleStore.dropped()) })}`
+            : '');
         renderObstacleStatus();
       })
       .catch(() => {
@@ -683,16 +684,18 @@ export function initDronePlan({
     if (ui.obstacleStatus) ui.obstacleStatus.textContent = obstacleStatusText;
   }
 
-  function renderObstacles() {
+  function renderObstacles(force = false) {
     if (!ui.obstacleList) return;
     // Typing in a height box must not rebuild the box under the caret.
+    // A committed value ('change') is not typing: rebuild so the row's
+    // Reset button and source label follow the edit.
     const active = doc.activeElement;
     const typing =
       active &&
       ui.obstacleList.contains?.(active) &&
       active.getAttribute?.('data-obstacle-height') !== null &&
       active.getAttribute?.('data-obstacle-height') !== undefined;
-    if (obstacleTyping || typing) return;
+    if (!force && (obstacleTyping || typing)) return;
     ui.obstacleList.replaceChildren();
     const list = obstacleStore.list();
     if (!list.length) {
@@ -754,7 +757,7 @@ export function initDronePlan({
           obstacleTyping = false;
         }
       });
-      height.addEventListener('change', () => renderObstacles());
+      height.addEventListener('change', () => renderObstacles(true));
       el(doc, 'span', row, {
         cls: 'gev-dp-obstacle-source',
         text:
@@ -1156,7 +1159,7 @@ export function initDronePlan({
     el(doc, 'p', ui.obstaclesBox, {
       cls: 'gev-dp-note gev-dp-obstacle-disclaimer',
       text: t(
-        'Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.',
+        'Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines and guy wires are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.',
       ),
     });
     el(doc, 'p', ui.obstaclesBox, {

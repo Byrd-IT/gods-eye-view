@@ -481,6 +481,16 @@ _Walk the boneyard: rows of retired airframes, fully resolved in 3D._
 
 ---
 
+### 🌲 Drone Flight Plan: obstacle heights
+
+The Drone Flight Plan panel lists tree, tower and building columns for the area you plan, each with a height you can drag (the yellow dot) or type. The plan keeps 5 m above every column.
+
+- **Estimates, not a survey.** First guesses come from open data: the FAA obstacle file (towers), Meta and WRI canopy height (trees) and OpenStreetMap (buildings). You can change any of them; your number wins and survives a new look-up. A **Reset** button returns a row to its estimate.
+- **Trees grow**, and the canopy map is a snapshot: check the height by eye.
+- **Power lines and guy wires are in none of these sources.** Tall masts have guy wires that spread well past the base; keep clear of them yourself.
+- **A visual check, not flight-tested.** Compare the columns with the 3D view by eye. Nothing detects a collision, and no code reads heights from Google Photorealistic 3D Tiles (its terms forbid measuring it).
+- **Credit:** tree canopy height from Meta and World Resources Institute, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Buildings © OpenStreetMap contributors. See `DATA_SOURCES.md`.
+
 ## 🔧 Under the Hood
 
 How the globe handles live data:

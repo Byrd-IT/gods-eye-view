@@ -152,6 +152,61 @@ test('TIFF header: reads the layout, refuses anything else', () => {
   assert.throws(() => parseTiffHeader(Buffer.alloc(4)), /unsupported_tiff/);
 });
 
+test('TIFF header: a layout tag that is missing or not a positive number is refused', () => {
+  const good = makeTiff({ width: 4, rows: [[1, 2, 3, 4]] });
+  // Set the 8-byte value of one directory entry; entries start at byte 24.
+  const withTag = (tag, value) => {
+    const buf = Buffer.from(good);
+    for (let i = 0; i < 12; i += 1) {
+      const at = 24 + i * 20;
+      if (buf.readUInt16LE(at) === tag) buf.writeBigUInt64LE(value, at + 12);
+    }
+    return buf;
+  };
+  for (const tag of [273, 279, 33550, 33922]) {
+    assert.doesNotThrow(() => parseTiffHeader(good));
+    assert.throws(() => parseTiffHeader(withTag(tag, 0n)), /unsupported_tiff/, `tag ${tag} = 0`);
+  }
+  // A tag that is not in the directory at all.
+  const missing = Buffer.from(good);
+  for (let i = 0; i < 12; i += 1) {
+    const at = 24 + i * 20;
+    if (missing.readUInt16LE(at) === 33550) missing.writeUInt16LE(60000, at);
+  }
+  assert.throws(() => parseTiffHeader(missing), /unsupported_tiff/);
+});
+
+test('FAA: the query asks for the tallest first; tower columns widen with height', async () => {
+  const urls = [];
+  const proxy = obstaclesProxy({
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return new Response(
+        JSON.stringify({
+          features: [
+            { attributes: { OAS_Number: '48-200001', Type_Code: 'TOWER', AGL: 1500 }, geometry: { x: -95.05, y: 32.58 } },
+            { attributes: { OAS_Number: '48-200002', Type_Code: 'TOWER', AGL: 20 }, geometry: { x: -95.051, y: 32.58 } },
+            { attributes: { OAS_Number: '48-200003', Type_Code: 'BLDG', AGL: 1500 }, geometry: { x: -95.052, y: 32.58 } },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+  let handler;
+  proxy.configureServer({ middlewares: { use: (_p, f) => (handler = f) } });
+  let out;
+  await handler(
+    { method: 'GET', url: '/faa?west=-95.2&south=32.5&east=-95.16&north=32.54', socket: { remoteAddress: '8.8.1.1' }, headers: {} },
+    { writeHead() {}, setHeader() {}, end(b) { out = JSON.parse(b); } },
+  );
+  assert.equal(new URL(urls[0]).searchParams.get('orderByFields'), 'AGL DESC');
+  const byId = Object.fromEntries(out.obstacles.map((o) => [o.id, o]));
+  assert.equal(byId['faa-48-200001'].radiusM, 150, 'a 457 m mast is capped at 150 m');
+  assert.equal(byId['faa-48-200002'].radiusM, 6, 'a short tower keeps the 6 m floor');
+  assert.equal(byId['faa-48-200003'].radiusM, 6, 'buildings keep 6 m');
+});
+
 test('rows: the predictor is undone and a wrong-sized row is refused', () => {
   const row = [5, 6, 20, 19];
   const delta = Uint8Array.from(row, (v, i) => (v - (i ? row[i - 1] : 0)) & 255);
