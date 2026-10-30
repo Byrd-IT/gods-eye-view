@@ -7,6 +7,8 @@ import {
 } from '../../data/inputOwnership.js';
 import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
 import { initDronePlan } from './panel.js';
+import { createBuildingFootprintProvider } from './buildingFootprints.js';
+import { downtownPayload, okResponse } from './buildingFixtures.mjs';
 import { createDronePlanVoice } from './dronePlanVoice.js';
 import { metersPerDegree } from './geo.js';
 import { readZip } from './zip.js';
@@ -1174,4 +1176,68 @@ test('a replan or closing the panel removes the suite drawing and restores the s
   w.handle.close();
   assert.equal(globe(w).length, 0, 'close clears everything');
   w.handle.destroy();
+});
+
+// ------------------------------------------- OSM building lookup wiring --
+test('orbit: the Overpass provider feeds the panel; targets get sized orbits and roof-aware rings', async () => {
+  resetPointerOwnership();
+  const dom = makeDoc();
+  const world = makeWorld({ sample: (c) => flat(c) });
+  const calls = [];
+  const provider = createBuildingFootprintProvider({
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return okResponse(downtownPayload());
+    },
+  });
+  const handle = initDronePlan({
+    viewer: world.viewer,
+    cesium: world.cesium,
+    document: dom.doc,
+    downloadFile: () => {},
+    getBuildingFootprints: provider,
+  });
+  handle.setBox(boxM(300, 200));
+  handle.applyOptions({ pattern: 'orbit' });
+  await handle.replan();
+  await new Promise((r) => setTimeout(r, 10));
+  await handle.replan();
+  assert.equal(calls.length, 1, 'one lookup per area set');
+  assert.equal(calls[0].url, '/api/overpass');
+  const targets = handle.getState().options.orbitTargets;
+  assert.ok(targets.length >= 3 && targets.every((x) => x.source === 'building'));
+  assert.ok(targets.every((x) => x.radiusM >= 10 && x.radiusM <= 300));
+  const orbit = handle.getResult().plan.orbit;
+  const hall = orbit.targets.find((x) => x.label === 'Hall');
+  assert.equal(hall.roofHeightM, 12);
+  assert.equal(hall.heightM, 6);
+  assert.ok(hall.ringsAglM.every((h) => h >= 12 + 15 && h >= orbit.minAglM));
+  handle.destroy();
+});
+
+test('orbit: a failing or timed-out lookup falls back to the area centre', async () => {
+  for (const fetchImpl of [
+    async () => ({ ok: false, status: 500 }),
+    () => new Promise(() => {}),
+  ]) {
+    resetPointerOwnership();
+    const dom = makeDoc();
+    const world = makeWorld({ sample: (c) => flat(c) });
+    const handle = initDronePlan({
+      viewer: world.viewer,
+      cesium: world.cesium,
+      document: dom.doc,
+      downloadFile: () => {},
+      getBuildingFootprints: createBuildingFootprintProvider({ fetchImpl, timeoutMs: 15 }),
+    });
+    handle.setBox(boxM(300, 200));
+    handle.applyOptions({ pattern: 'orbit' });
+    await handle.replan();
+    await new Promise((r) => setTimeout(r, 50));
+    await handle.replan();
+    const targets = handle.getState().options.orbitTargets;
+    assert.deepEqual(targets.map((x) => x.source), ['area']);
+    assert.equal(handle.getResult().plan.orbit.targets[0].radiusM, handle.getResult().plan.options.orbitRadiusM);
+    handle.destroy();
+  }
 });

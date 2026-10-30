@@ -776,6 +776,12 @@ export function initDronePlan({
     ui.targetList = el(doc, 'div', ui.targetsBox, {
       cls: 'gev-dp-target-list',
     });
+    ui.buildingNote = el(doc, 'p', ui.targetsBox, {
+      cls: 'gev-dp-note gev-dp-building-note',
+      text: t(
+        'Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.',
+      ),
+    });
 
     ui.photoMode = select(
       [
@@ -1149,7 +1155,11 @@ export function initDronePlan({
       el(doc, 'span', row, {
         cls: 'gev-dp-area-kind',
         text: target.label || target.id,
-        attrs: { title: `${num(target.lat, 5)}, ${num(target.lon, 5)}` },
+        attrs: {
+          title:
+            `${num(target.lat, 5)}, ${num(target.lon, 5)}` +
+            (target.radiusM != null ? ` · r ${num(target.radiusM)} m` : ''),
+        },
       });
       const remove = el(doc, 'button', row, {
         cls: 'data-toggle-chip',

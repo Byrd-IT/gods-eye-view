@@ -3046,5 +3046,6 @@
   "{min} m min over {obstacle} m trees": "高于 {obstacle} 米树木至少 {min} 米",
   "Tree-free zone": "无树区域",
   "around each target": "每个目标周围",
-  "Show on the globe": "在地球上显示"
+  "Show on the globe": "在地球上显示",
+  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "建筑目标来自 OpenStreetMap。该数据不包含树木、塔架和电线：请自行确认净空。未经实飞测试。"
 }

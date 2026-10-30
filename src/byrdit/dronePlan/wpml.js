@@ -284,6 +284,12 @@ export function readmeText(result, when = new Date()) {
     'replace its KMZ with one of these (keep the file name DJI Fly gave it).',
     'Check airspace and local rules, keep the aircraft in sight, and fly the',
     'first mission short and supervised.',
+    ...(plan.orbit
+      ? [
+          'Building orbits use OpenStreetMap footprints. Trees, towers and power lines',
+          'are not in that data: check clearance yourself.',
+        ]
+      : []),
   ];
   if (warnings.length) {
     lines.push('', 'Warnings:');

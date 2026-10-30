@@ -3253,5 +3253,6 @@
   "{min} m min over {obstacle} m trees": "мин. {min} м над деревьями {obstacle} м",
   "Tree-free zone": "Зона без деревьев",
   "around each target": "вокруг каждой цели",
-  "Show on the globe": "Показать на глобусе"
+  "Show on the globe": "Показать на глобусе",
+  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "Цели-здания берутся из OpenStreetMap. Деревьев, вышек и линий электропередачи в этих данных нет: проверяйте свободное пространство сами. В полёте не проверено."
 }

@@ -3184,5 +3184,6 @@
   "{min} m min over {obstacle} m trees": "mín. {min} m sobre árboles de {obstacle} m",
   "Tree-free zone": "Zona libre de árboles",
   "around each target": "alrededor de cada objetivo",
-  "Show on the globe": "Mostrar en el globo"
+  "Show on the globe": "Mostrar en el globo",
+  "Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.": "Los objetivos de edificios vienen de OpenStreetMap. Árboles, torres y tendidos eléctricos no están en esos datos: comprueba tú mismo el margen libre. No probado en vuelo."
 }
