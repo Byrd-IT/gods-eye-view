@@ -56,7 +56,7 @@ function fakeCesium() {
         this.y = y;
       }
     },
-    CornerType: { MITERED: 'mitered' },
+    CornerType: { MITERED: 'mitered', BEVELED: 'beveled' },
     ClassificationType: { BOTH: 'both' },
     HeightReference: { CLAMP_TO_GROUND: 'clamp' },
   };
@@ -436,6 +436,7 @@ test('3D check: zone corridor half-width follows the slider and flies at the rea
   assert.ok(first.length >= 1);
   const shape = first[0].polylineVolume.shape;
   assert.equal(shape[1].x - shape[0].x, 20, 'default 10 m each side');
+  assert.equal(first[0].polylineVolume.cornerType, 'beveled');
   assert.equal(shape[2].y - shape[1].y, 20, 'above and below too');
   const heights = first[0].polylineVolume.positions.heights;
   const w0 = result(300, 200, { aglM: 80 }).missions[0].waypoints[0];

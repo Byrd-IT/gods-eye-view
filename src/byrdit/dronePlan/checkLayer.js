@@ -102,7 +102,8 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     const spacing = Math.max(1, Number(leg.photoSpacingM) || 1);
     const frame = makeFrame(wps[0].lon, wps[0].lat);
     const xy = wps.map((w) => frame.toXY(w.lon, w.lat));
-    let next = 0;
+    // A leg continued from a cut starts at the point the last mission ended on.
+    let next = leg.continued === true ? spacing : 0;
     let travelled = 0;
     for (let k = 1; k < wps.length; k += 1) {
       const seg = Math.hypot(xy[k].x - xy[k - 1].x, xy[k].y - xy[k - 1].y);

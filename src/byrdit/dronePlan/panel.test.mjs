@@ -173,7 +173,7 @@ function makeWorld({ sample }) {
         this.y = y;
       }
     },
-    CornerType: { MITERED: 'mitered' },
+    CornerType: { MITERED: 'mitered', BEVELED: 'beveled' },
     Cartesian3: {
       fromDegreesArray: (v) => v,
       fromDegreesArrayHeights: (v) => ({ heights: v }),
