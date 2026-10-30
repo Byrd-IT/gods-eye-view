@@ -61,6 +61,8 @@ export const PATTERNS = Object.freeze(['grid', 'double', 'orbit']);
 export const DEFAULT_OBSTACLE_HEIGHT_M = 15;
 /** Vertical margin kept above the obstacle while flying over it, metres. */
 export const OBSTACLE_MARGIN_M = 5;
+/** A building orbit flies at least this far above the roof, metres. */
+export const ROOF_CLEARANCE_M = 15;
 /** Most orbit targets one plan carries. */
 export const MAX_ORBIT_TARGETS = 12;
 
@@ -73,6 +75,31 @@ export function minOrbitAglM(obstacleHeightM) {
     ? Math.max(0, Number(obstacleHeightM))
     : DEFAULT_OBSTACLE_HEIGHT_M;
   return Math.min(AGL_CAP_M, Math.max(MIN_AGL_M, h + OBSTACLE_MARGIN_M));
+}
+
+/**
+ * Ring heights (m AGL) for one target. The shared rings are the starting
+ * point; a target with a known roof (`roofHeightM`) raises each ring to at
+ * least roof + ROOF_CLEARANCE_M. Every ring also keeps the obstacle floor
+ * (`minOrbitAglM`), so the result is max(requested, roof + 15, obstacle + 5),
+ * kept within MIN_AGL_M..AGL_CAP_M (duplicates dropped for roof targets).
+ * `belowRoofClearance` is true when the cap leaves under ROOF_CLEARANCE_M
+ * above the roof.
+ */
+export function targetRingHeights(target, ringsM, obstacleHeightM) {
+  const floor = minOrbitAglM(obstacleHeightM);
+  const roof = Number(target?.roofHeightM);
+  const hasRoof =
+    target?.roofHeightM != null && Number.isFinite(roof) && roof > 0;
+  const need = hasRoof ? roof + ROOF_CLEARANCE_M : 0;
+  const heights = [];
+  for (const h of ringsM) {
+    const v = round(clamp(Math.max(h, need, floor), MIN_AGL_M, AGL_CAP_M), 1);
+    // Rings the roof raised onto one height are flown once; targets without a
+    // roof keep the plan's rings as they are.
+    if (!hasRoof || !heights.includes(v)) heights.push(v);
+  }
+  return { heights, belowRoofClearance: need > AGL_CAP_M + 1e-9 };
 }
 
 /**
@@ -183,6 +210,8 @@ export function normalizeOrbitTargets(raw) {
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
     if (Math.abs(lon) > 180 || Math.abs(lat) > 90) continue;
     const h = Number(t.heightM);
+    const radius = Number(t.radiusM);
+    const roof = Number(t.roofHeightM);
     out.push({
       id: typeof t.id === 'string' && t.id ? t.id : `target-${out.length + 1}`,
       lon,
@@ -191,6 +220,14 @@ export function normalizeOrbitTargets(raw) {
       source: typeof t.source === 'string' ? t.source : 'custom',
       active: t.active !== false,
       heightM: Number.isFinite(h) ? clamp(h, 0, 100) : null,
+      // Building targets only: their own orbit radius and roof height.
+      ...(t.radiusM != null && Number.isFinite(radius)
+        ? { radiusM: clamp(radius, 10, 300) }
+        : {}),
+      ...(t.roofHeightM != null && Number.isFinite(roof) && roof > 0
+        ? { roofHeightM: clamp(roof, 0, 300) }
+        : {}),
+      ...(typeof t.osmId === 'string' ? { osmId: t.osmId } : {}),
     });
     if (out.length >= MAX_ORBIT_TARGETS) break;
   }
@@ -482,12 +519,20 @@ export function planFlight(box, rawOptions = {}) {
         message: 'Turn on at least one orbit target',
       };
     }
-    const radius = options.orbitRadiusM;
     const obstacle = options.obstacleHeightM;
     const floorAgl = minOrbitAglM(obstacle);
     // Between targets the drone climbs to this and crosses at it, so it
     // always passes over the trees at obstacle + margin or higher.
-    const transitAgl = Math.max(floorAgl, ...options.orbitHeightsM);
+    const stopRings = new Map(
+      stops.map((stop) => [
+        stop,
+        targetRingHeights(stop, options.orbitHeightsM, obstacle),
+      ]),
+    );
+    const transitAgl = Math.max(
+      floorAgl,
+      ...[...stopRings.values()].flatMap((r) => r.heights),
+    );
     const toTakeoff = frame.toXY(takeoff.lon, takeoff.lat);
     let tooLarge = false;
     let gsdMin = Infinity;
@@ -498,11 +543,15 @@ export function planFlight(box, rawOptions = {}) {
     for (const stop of stops) {
       if (tooLarge) break;
       const targetH = stop.heightM ?? options.orbitTargetHeightM;
+      // A building target brings its own radius and roof-aware rings; others
+      // use the plan's.
+      const radius = stop.radiusM ?? options.orbitRadiusM;
+      const { heights: ringHeights, belowRoofClearance } = stopRings.get(stop);
       const c = frame.toXY(stop.lon, stop.lat);
       const from = prevEnd ? prevEnd.p : toTakeoff;
       const startAngle = Math.atan2(from.y - c.y, from.x - c.x);
       const firstLeg = legs.length;
-      options.orbitHeightsM.forEach((ringAgl, ringIndex) => {
+      ringHeights.forEach((ringAgl, ringIndex) => {
         if (tooLarge) return;
         const dz = Math.max(1, ringAgl - targetH);
         const pitch = -clamp(toDeg(Math.atan2(dz, radius)), 5, 89);
@@ -607,8 +656,15 @@ export function planFlight(box, rawOptions = {}) {
             1,
           ),
         };
-        if (stop === stops[0]) {
+        // The first target's rings are the plan's headline; a building
+        // target with its own radius or rings adds its own entries.
+        if (
+          stop === stops[0] ||
+          stop.radiusM != null ||
+          stop.roofHeightM != null
+        ) {
           ringInfo.push({
+            targetId: stop.id,
             aglM: ringAgl,
             pitchDeg: round(pitch, 1),
             ...orbitClearance({
@@ -626,6 +682,14 @@ export function planFlight(box, rawOptions = {}) {
         lat: stop.lat,
         label: stop.label ?? '',
         heightM: targetH,
+        radiusM: radius,
+        ...(stop.roofHeightM != null
+          ? {
+              roofHeightM: stop.roofHeightM,
+              ringsAglM: ringHeights,
+              belowRoofClearance,
+            }
+          : {}),
         firstLeg,
       });
     }
