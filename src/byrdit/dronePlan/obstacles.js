@@ -148,6 +148,17 @@ export function createObstacleStore({ onChange } = {}) {
       replace([...list, o]);
       return o;
     },
+    /** Restore a saved list (a library plan being opened). */
+    load(saved) {
+      const next = normalizeObstacles(saved);
+      nextUser =
+        1 +
+        next.reduce(
+          (m, o) => Math.max(m, Number(/^user-(\d+)$/.exec(o.id)?.[1]) || 0),
+          0,
+        );
+      replace(next);
+    },
     remove(id) {
       if (!list.some((o) => o.id === id)) return false;
       replace(list.filter((o) => o.id !== id));

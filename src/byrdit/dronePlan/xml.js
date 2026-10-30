@@ -54,7 +54,8 @@ export function parseXml(text) {
       stack.at(-1).children.push(node);
       if (!selfClose) {
         stack.push(node);
-        if (stack.length > MAX_XML_DEPTH) throw new Error('XML is nested too deep');
+        if (stack.length > MAX_XML_DEPTH)
+          throw new Error('XML is nested too deep');
       }
     } else if (name && close) {
       const open = stack.pop();
@@ -80,4 +81,5 @@ export const textOf = (node, name) => {
   return found ? found.text.trim() : null;
 };
 /** Direct children called `name`. */
-export const kids = (node, name) => node.children.filter((c) => c.name === name);
+export const kids = (node, name) =>
+  node.children.filter((c) => c.name === name);

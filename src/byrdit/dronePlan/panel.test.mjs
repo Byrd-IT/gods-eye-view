@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import http from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createStore } from '../../../server/byrdit/planLibrary/store.js';
+import { createPlanLibraryHandler } from '../../../server/byrdit/planLibrary/api.js';
+import { createLibraryClient } from './libraryClient.js';
+import { warningText } from './libraryPanel.js';
 import {
   claimPointer,
   releasePointer,
@@ -210,7 +218,7 @@ const deferred = () => {
   return { promise, resolve };
 };
 
-function setup({ sample = async (cartos) => flat(cartos) } = {}) {
+function setup({ sample = async (cartos) => flat(cartos), libraryClient } = {}) {
   resetPointerOwnership();
   const dom = makeDoc();
   const world = makeWorld({ sample: (cartos) => sample(cartos) });
@@ -220,6 +228,7 @@ function setup({ sample = async (cartos) => flat(cartos) } = {}) {
     cesium: world.cesium,
     document: dom.doc,
     downloadFile: (name, bytes, type) => downloads.push({ name, bytes, type }),
+    libraryClient,
   });
   const find = (pred) => all(dom.body, pred);
   const control = (label) =>
@@ -1837,4 +1846,237 @@ test('Adjust: RECOMMEND after PLAN ALL keeps a grid pattern a grid', async () =>
   w.handle.recommendTargets();
   assert.equal(w.handle.getState().options.pattern, 'grid');
   w.handle.destroy();
+});
+
+// ----------------------------------------------------------- plan library --
+test('a saved plan reopens editable: areas, settings, takeoff, targets and mission ids', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 200));
+  await w.handle.replan();
+  w.handle.applyOptions({ aglM: 65, speedMs: 4, pattern: 'double' }, { planNow: true });
+  await w.handle.replan();
+  const state = w.handle.getState();
+  state.controllerIds = ['9560F7B3-DAA9-481A-B2F5-37CCF3B8B996'];
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  assert.equal(doc.schema, 'gevplan');
+  assert.equal(doc.options.aglM, 65);
+  assert.equal(doc.options.pattern, 'double');
+  assert.equal(doc.areas.length, 1);
+  assert.deepEqual(doc.controllerIds, ['9560F7B3-DAA9-481A-B2F5-37CCF3B8B996']);
+  // A different panel opens the stored plan.
+  const w2 = setup();
+  await w2.handle.loadPlan(doc);
+  const s2 = w2.handle.getState();
+  assert.equal(s2.options.aglM, 65);
+  assert.equal(s2.options.pattern, 'double');
+  assert.equal(s2.areas.length, 1);
+  assert.deepEqual(s2.areas[0].box, state.areas[0].box);
+  assert.deepEqual(s2.controllerIds, ['9560F7B3-DAA9-481A-B2F5-37CCF3B8B996']);
+  assert.equal(w2.panel.dataset.state, 'ready', 're-planned after opening');
+  assert.equal(w2.handle.getResult().totals.photoCount, w.handle.getResult().totals.photoCount);
+  w.handle.destroy();
+  w2.handle.destroy();
+});
+
+async function snapshotOf(w) {
+  const { serializePlan } = await import('./planDoc.js');
+  const s = w.handle.getState();
+  return serializePlan(s, { controllerIds: s.controllerIds, imports: s.imports });
+}
+
+test('a controller mission id names the exported KMZ <UUID>.kmz, in the zip too', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 200));
+  await w.handle.replan();
+  const id = '8A05BD5F-A9CE-4867-923F-7AACC02AF9A9';
+  w.handle.getState().controllerIds = [id];
+  w.buttons('data-mission')[0].click();
+  assert.equal(w.downloads[0].name, `${id}.kmz`);
+  w.buttons('data-download')[0].click();
+  const names = [...readZip(w.downloads[1].bytes).keys()];
+  assert.ok(names.includes(`${id}.kmz`), names.join(','));
+  const readme = new TextDecoder().decode(readZip(w.downloads[1].bytes).get('README.txt'));
+  assert.match(readme, /waypoint\/<UUID>\/<UUID>\.kmz/);
+  assert.match(readme, /NOT verified by a real file/);
+  w.handle.destroy();
+});
+
+test('opening a plan with a bad document is refused and changes nothing', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 200));
+  await w.handle.replan();
+  await assert.rejects(() => w.handle.loadPlan({ schema: 'nope' }), /not-a-plan/);
+  assert.equal(w.handle.getState().areas.length, 1);
+  w.handle.destroy();
+});
+
+test('importing a DJI Fly KMZ draws it, remembers the mission id and lists compatibility findings', async () => {
+  const { readFileSync } = await import('node:fs');
+  const w = setup();
+  const id = '8A05BD5F-A9CE-4867-923F-7AACC02AF9A9';
+  const bytes = new Uint8Array(
+    readFileSync(new URL(`./fixtures/djifly-mini5pro/${id}.kmz`, import.meta.url)),
+  );
+  const out = await w.handle.library().importBytes(bytes, `${id} (1).kmz`);
+  assert.equal(out.kind, 'mission');
+  const s = w.handle.getState();
+  assert.equal(s.imports.length, 1);
+  assert.equal(s.imports[0].waypoints.length, 2);
+  assert.deepEqual(s.controllerIds, [id]);
+  const source = w.viewer.dataSources.sources.find((x) => x.name === 'gev-drone-plan');
+  assert.ok(source.entities.values.some((e) => e.polyline), 'a line is on the map');
+  const findings = w.find((n) => n.attributes?.has?.('data-code'));
+  assert.deepEqual(findings.map((n) => n.getAttribute('data-code')), ['far-apart']);
+  // A bad file is reported, not thrown.
+  const bad = await w.handle.library().importBytes(new Uint8Array([1, 2, 3]), 'x.kmz');
+  assert.equal(bad.kind, 'error');
+  w.handle.destroy();
+});
+
+test('with no library (not signed in) the panel says so and import still works', async () => {
+  const w = setup();
+  await new Promise((r) => setTimeout(r, 10));
+  const note = w.find((n) => n.getAttribute?.('data-role') === 'library-note')[0];
+  assert.match(note.textContent, /Sign in through byrd-it\.com/);
+  w.handle.destroy();
+});
+
+// ------------------------------------------- library UI end to end --
+async function server() {
+  const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevui-'));
+  const handler = createPlanLibraryHandler({ store: createStore({ root }), env: { GEV_TRUSTED_PROXIES: '127.0.0.1' } });
+  const srv = http.createServer((req, res) => handler(req, res, () => { res.statusCode = 404; res.end(); }));
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  const clientFor = (user) =>
+    createLibraryClient({
+      base: `http://127.0.0.1:${port}/api/byrdit/plans`,
+      fetchImpl: (url, init) =>
+        fetch(url, { ...init, headers: { ...init.headers, ...(user ? { 'x-gev-user': user } : {}), host: `127.0.0.1:${port}` } }),
+    });
+  return { clientFor, close: async () => { await new Promise((r) => srv.close(r)); rmSync(root, { recursive: true, force: true }); } };
+}
+
+const settleUi = () => new Promise((r) => setTimeout(r, 60));
+const btn = (w, action) => w.find((n) => n.tagName === 'BUTTON' && n.getAttribute('data-action') === action);
+const field = (w, name) => w.find((n) => n.getAttribute?.('data-field') === name)[0];
+const rows = (w) => w.find((n) => n.getAttribute?.('data-plan'));
+
+test('save, list, reopen, rename, version restore, trash and restore through the panel', async () => {
+  const srv = await server();
+  try {
+    const w = setup({ libraryClient: srv.clientFor('alice') });
+    w.doc.defaultView = { prompt: () => 'Renamed', confirm: () => true };
+    await settleUi();
+    assert.match(w.find((n) => n.getAttribute?.('data-role') === 'library-note')[0].textContent, /Signed in as alice/);
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    field(w, 'name').value = 'Barn';
+    field(w, 'site').value = 'Farm';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    assert.equal(rows(w).length, 1);
+    assert.match(rows(w)[0].textContent, /Barn/);
+    assert.match(rows(w)[0].textContent, /v1/);
+    // change a setting and save again: version 2
+    w.handle.applyOptions({ aglM: 55 }, { planNow: true });
+    await w.handle.replan();
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    assert.match(rows(w)[0].textContent, /v2/);
+    // reopen into a fresh panel
+    const w2 = setup({ libraryClient: srv.clientFor('alice') });
+    w2.doc.defaultView = w.doc.defaultView;
+    await settleUi();
+    btn(w2, 'plan-open')[0].click();
+    await settleUi();
+    assert.equal(w2.handle.getState().options.aglM, 55);
+    assert.equal(field(w2, 'name').value, 'Barn');
+    assert.equal(w2.handle.getResult() !== null, true);
+    // versions: restore v1 (aglM was the default) = new save v3
+    btn(w2, 'plan-versions')[0].click();
+    await settleUi();
+    const restore = btn(w2, 'version-restore');
+    assert.ok(restore.length >= 1);
+    restore.at(-1).click();
+    await settleUi();
+    assert.match(rows(w2)[0].textContent, /v3/);
+    // rename, delete to trash, trash list, restore
+    btn(w2, 'plan-rename')[0].click();
+    await settleUi();
+    assert.match(rows(w2)[0].textContent, /Renamed/);
+    btn(w2, 'plan-delete')[0].click();
+    await settleUi();
+    assert.equal(rows(w2).length, 0);
+    btn(w2, 'library-trash-toggle')[0].click();
+    await settleUi();
+    assert.equal(rows(w2).length, 1);
+    btn(w2, 'plan-restore')[0].click();
+    await settleUi();
+    assert.equal(rows(w2).length, 0, 'it left the trash list');
+    btn(w2, 'library-trash-toggle')[0].click();
+    await settleUi();
+    assert.equal(rows(w2).length, 1);
+    w.handle.destroy();
+    w2.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
+test('another user sees nothing; the admin sees all users read-only', async () => {
+  const srv = await server();
+  try {
+    const a = setup({ libraryClient: srv.clientFor('alice') });
+    await settleUi();
+    a.handle.setBox(boxM(400, 200));
+    await a.handle.replan();
+    field(a, 'name').value = 'Alice plan';
+    btn(a, 'library-save')[0].click();
+    await settleUi();
+    const b = setup({ libraryClient: srv.clientFor('bob') });
+    await settleUi();
+    assert.equal(rows(b).length, 0);
+    const admin = setup({ libraryClient: srv.clientFor('byrdit') });
+    await settleUi();
+    assert.equal(rows(admin).length, 0, 'own plans only until the filter is switched');
+    const scope = admin.find((n) => n.getAttribute?.('data-role') === 'library-scope')[0];
+    assert.equal(scope.hidden, false);
+    scope.value = 'all';
+    scope.dispatch('change');
+    await settleUi();
+    assert.equal(rows(admin).length, 1);
+    assert.equal(rows(admin)[0].getAttribute('data-owner'), 'alice');
+    assert.equal(btn(admin, 'plan-delete').length, 0, 'no delete on others plans');
+    assert.equal(btn(admin, 'plan-rename').length, 0);
+    assert.equal(btn(admin, 'plan-open').length, 1);
+    btn(admin, 'plan-open')[0].click();
+    await settleUi();
+    assert.equal(admin.handle.getState().areas.length, 1);
+    assert.match(admin.find((n) => n.getAttribute?.('data-role') === 'library-note')[0].textContent, /read-only/);
+    assert.equal(btn(admin, 'library-save')[0].disabled, true, 'cannot save over it');
+    // non-admins never get the filter
+    assert.equal(b.find((n) => n.getAttribute?.('data-role') === 'library-scope')[0].hidden, true);
+    for (const w of [a, b, admin]) w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
+test('a request with no trusted identity gives the sign-in note and no list', async () => {
+  const srv = await server();
+  try {
+    const w = setup({ libraryClient: srv.clientFor(null) });
+    await settleUi();
+    assert.match(w.find((n) => n.getAttribute?.('data-role') === 'library-note')[0].textContent, /Sign in through byrd-it\.com/);
+    assert.equal(btn(w, 'library-save')[0].disabled, true);
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
+test('every compatibility code has a sentence', () => {
+  const codes = ['read-empty', 'read-not-a-kmz', 'namespace', 'no-waylines', 'template-fallback', 'template-shape', 'no-template', 'no-config', 'no-drone', 'drone-mismatch', 'no-waypoints', 'too-many', 'index-gap', 'bad-coordinates', 'height-mode', 'no-height', 'height-range', 'speed-range', 'poi-missing', 'group-mode', 'group-ids', 'action-ids', 'far-apart'];
+  for (const code of codes) assert.notEqual(warningText({ code, args: {} }), code, code);
 });

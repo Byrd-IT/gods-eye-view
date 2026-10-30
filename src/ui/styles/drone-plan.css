@@ -363,3 +363,52 @@ body.gev-drone-box .cesium-widget canvas {
 .gev-dp-obstacle-disclaimer {
   margin-top: 6px;
 }
+
+/* Plan library: save / open / import / compatibility check */
+.gev-dp-library {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+}
+.gev-dp-subtitle {
+  margin: 0;
+  font-size: 0.85em;
+  letter-spacing: 0.06em;
+}
+.gev-dp-library-form,
+.gev-dp-library-list,
+.gev-dp-library-imports,
+.gev-dp-library-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gev-dp-library-buttons,
+.gev-dp-library-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gev-dp-library-row {
+  flex-wrap: wrap;
+}
+.gev-dp-versions {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 22px;
+}
+.gev-dp-library textarea.gev-field {
+  width: 100%;
+  resize: vertical;
+}
+.gev-dp-warning[data-level='warn'] {
+  color: #ffd166;
+}
+.gev-dp-warning[data-level='info'] {
+  opacity: 0.8;
+}

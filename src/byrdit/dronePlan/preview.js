@@ -84,6 +84,7 @@ export function createDronePlanPreview({
   let areaEntities = [];
   let planEntities = [];
   let suiteEntities = [];
+  let importEntities = [];
   let suitePasses = null;
   const drop = (list) => {
     for (const entity of list) dataSource.entities.remove(entity);
@@ -401,6 +402,93 @@ export function createDronePlanPreview({
       }
       requestRender();
     },
+    /**
+     * Draw library plans and imported drone files, each in its own colour:
+     * items are { id, color, lines: [[{lon,lat}]], rings: [[{lon,lat}]],
+     * poi: [{lon,lat}] }. `hiddenIds` are left out. Separate from the plan
+     * being edited, so it never disturbs it.
+     */
+    showImports(items, hiddenIds = []) {
+      importEntities = drop(importEntities);
+      if (destroyed) return;
+      const hidden = new Set(hiddenIds);
+      const total = (items ?? []).reduce(
+        (n, i) => n + (i.lines ?? []).reduce((k, l) => k + l.length, 0),
+        0,
+      );
+      const step = Math.max(1, Math.ceil(total / MAX_MARKERS));
+      for (const item of items ?? []) {
+        if (hidden.has(item.id)) continue;
+        for (const line of item.lines ?? []) {
+          if (line.length >= 2) {
+            importEntities.push(
+              dataSource.entities.add({
+                name: item.id,
+                polyline: {
+                  positions: cesium.Cartesian3.fromDegreesArray(
+                    line.flatMap((w) => [w.lon, w.lat]),
+                  ),
+                  width: 3,
+                  ...ground,
+                  material: color(item.color, 0.95),
+                },
+              }),
+            );
+          }
+          line.forEach((w, i) => {
+            if (i % step && i !== line.length - 1) return;
+            importEntities.push(
+              dataSource.entities.add({
+                position: cesium.Cartesian3.fromDegrees(w.lon, w.lat),
+                point: {
+                  pixelSize: 5,
+                  color: color(item.color),
+                  outlineColor: color('#000000', 0.6),
+                  outlineWidth: 1,
+                  heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
+                  disableDepthTestDistance: 1500,
+                },
+              }),
+            );
+          });
+        }
+        for (const ring of item.rings ?? []) {
+          if (ring.length < 3) continue;
+          importEntities.push(
+            dataSource.entities.add({
+              name: item.id,
+              polyline: {
+                positions: cesium.Cartesian3.fromDegreesArray(
+                  [...ring, ring[0]].flatMap((p) => [p.lon, p.lat]),
+                ),
+                width: 2,
+                ...ground,
+                material: new cesium.PolylineDashMaterialProperty({
+                  color: color(item.color, 0.95),
+                  dashLength: 10,
+                }),
+              },
+            }),
+          );
+        }
+        for (const p of item.poi ?? []) {
+          importEntities.push(
+            dataSource.entities.add({
+              position: cesium.Cartesian3.fromDegrees(p.lon, p.lat),
+              point: {
+                pixelSize: 9,
+                color: color('#ffffff'),
+                outlineColor: color(item.color),
+                outlineWidth: 3,
+                heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
+                disableDepthTestDistance: 1500,
+              },
+            }),
+          );
+        }
+      }
+      requestRender();
+    },
     /** Redraw the current suite with only `hiddenIds` left out. */
     setSuiteHidden(hiddenIds = []) {
       if (suitePasses) this.showSuite(suitePasses, hiddenIds);
@@ -439,6 +527,7 @@ export function createDronePlanPreview({
       areaEntities = drop(areaEntities);
       planEntities = drop(planEntities);
       suiteEntities = drop(suiteEntities);
+      importEntities = drop(importEntities);
       suitePasses = null;
       requestRender();
     },

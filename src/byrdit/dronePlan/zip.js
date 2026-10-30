@@ -196,7 +196,11 @@ async function inflateRaw(data, limit) {
 export async function readZipAsync(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let end = -1;
-  for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 22 - 65535; i -= 1) {
+  for (
+    let i = bytes.length - 22;
+    i >= 0 && i >= bytes.length - 22 - 65535;
+    i -= 1
+  ) {
     if (view.getUint32(i, true) === 0x06054b50) {
       end = i;
       break;
@@ -220,11 +224,15 @@ export async function readZipAsync(bytes) {
     const commentLen = view.getUint16(at + 32, true);
     const localAt = view.getUint32(at + 42, true);
     const name = textDecoder.decode(bytes.subarray(at + 46, at + 46 + nameLen));
-    if (size > MAX_ZIP_ENTRY_BYTES) throw new Error(`ZIP entry ${name} is too large`);
+    if (size > MAX_ZIP_ENTRY_BYTES)
+      throw new Error(`ZIP entry ${name} is too large`);
     if (method !== 0 && method !== 8) {
       throw new Error(`Unsupported ZIP method for ${name}`);
     }
-    if (localAt + 30 > bytes.length || view.getUint32(localAt, true) !== 0x04034b50) {
+    if (
+      localAt + 30 > bytes.length ||
+      view.getUint32(localAt, true) !== 0x04034b50
+    ) {
       throw new Error('Corrupt ZIP local header');
     }
     const localName = view.getUint16(localAt + 26, true);

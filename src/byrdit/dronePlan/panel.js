@@ -62,6 +62,8 @@ import {
 } from './speed.js';
 import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
 import { buildSuiteZip, suiteOptions } from './suite.js';
+import { readPlan, serializePlan } from './planDoc.js';
+import { mountLibrary } from './libraryPanel.js';
 import {
   distanceText,
   durationText,
@@ -140,6 +142,7 @@ export function initDronePlan({
   cesium = Cesium,
   document: doc = globalThis.document,
   downloadFile = browserDownload,
+  libraryClient,
   getBuildingFootprints = null,
   fetchObstacles = null,
   overlay = {
@@ -187,6 +190,9 @@ export function initDronePlan({
     result: null,
     suite: null,
     suiteHidden: new Set(),
+    // Controller mission ids (one per flight) and imported drone files.
+    controllerIds: [],
+    imports: [],
     // The 3D check on the globe: a visual aid, it detects nothing.
     check: {
       enabled: true,
@@ -1038,6 +1044,7 @@ export function initDronePlan({
       attrs: { role: 'status', 'aria-live': 'polite' },
     });
     ui.areas = el(doc, 'div', body, { cls: 'gev-dp-areas' });
+    ui.library = el(doc, 'div', body, { cls: 'gev-dp-library-host' });
 
     const field = (label, control, { value } = {}) => {
       const row = el(doc, 'label', body, { cls: 'gev-dp-row' });
@@ -2325,10 +2332,22 @@ export function initDronePlan({
     const bytes = buildSuiteZip(state.suite.passes, {
       when,
       wpml: wpmlOverride(),
+      controllerIds: state.controllerIds,
     });
+    for (const pass of state.suite.passes)
+      if (pass.result) checkBuilt(pass.result);
     const stamp = kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
     downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
     return true;
+  }
+
+  /** Run the DJI compatibility check on the KMZ files of a result. */
+  function checkBuilt(result) {
+    const files = result.missions.slice(0, 12).map((mission, i) => ({
+      bytes: buildKmz(mission, result.plan, { wpml: wpmlOverride() }),
+      name: `mission-${i + 1}.kmz`,
+    }));
+    library?.checkExport(files, t('this export'));
   }
 
   const kmzOk = () =>
@@ -2381,25 +2400,31 @@ export function initDronePlan({
     const same = named
       ? result.missions.filter((item) => item.jobId === mission.jobId)
       : result.missions;
-    downloadFile(
-      kmzFileName(
-        same.indexOf(mission),
-        same.length,
-        when,
-        named ? mission.jobName : '',
-      ),
-      bytes,
-      'application/vnd.google-earth.kmz',
-    );
+    // A controller mission id names the file <UUID>.kmz, as DJI Fly does.
+    const fileName = state.controllerIds[index]
+      ? `${state.controllerIds[index]}.kmz`
+      : kmzFileName(
+          same.indexOf(mission),
+          same.length,
+          when,
+          named ? mission.jobName : '',
+        );
+    downloadFile(fileName, bytes, 'application/vnd.google-earth.kmz');
+    library?.checkExport([{ bytes, name: fileName }], fileName);
     return true;
   }
 
   function downloadAll(when = new Date()) {
     const result = state.result;
     if (!downloadsAllowed()) return false;
-    const bytes = buildBundleZip(result, { when, wpml: wpmlOverride() });
+    const bytes = buildBundleZip(result, {
+      when,
+      wpml: wpmlOverride(),
+      controllerIds: state.controllerIds,
+    });
     const stamp = kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
     downloadFile(`${stamp}-all.zip`, bytes, 'application/zip');
+    checkBuilt(result);
     return true;
   }
 
@@ -2480,10 +2505,13 @@ export function initDronePlan({
     suiteToken += 1;
     state.suite = null;
     state.suiteHidden = new Set();
+    state.controllerIds = [];
+    state.imports = [];
     state.suiteBusy = false;
     state.ack = false;
     terrainCache.clear();
     preview.clear();
+    library?.renderImports();
     // The card stays on the rail as a collapsed launcher.
     if (!panel.classList.contains('collapsed')) {
       // Through the rail's own button so its arrow and aria state follow.
@@ -2525,6 +2553,82 @@ export function initDronePlan({
 
   build();
   syncControls();
+
+  // ---------------------------------------------------------- plan library --
+  let library = null;
+
+  /** Restore a stored plan (already validated by readPlan) and plan again. */
+  async function loadPlanDocument(raw) {
+    const plan = readPlan(raw);
+    boxTool?.cancel('load');
+    polygonTool?.cancel('load');
+    takeoffTool?.cancel('load');
+    targetTool?.cancel('load');
+    obstacleTool?.cancel('load');
+    clearTimeout(timer);
+    planToken += 1;
+    suiteToken += 1;
+    state.open = true;
+    setPanelOpen(true);
+    state.areas = plan.areas;
+    state.nextArea = plan.nextArea;
+    state.box = plan.areas.at(-1)?.box ?? null;
+    state.jobGrouping = plan.jobGrouping;
+    state.takeoff = plan.takeoff;
+    Object.assign(state.options, plan.options);
+    state.options.orbitTargets = plan.orbitTargets;
+    state.orbitTargetsTouched = plan.orbitTargetsTouched;
+    state.orbitsPlanned = plan.suite.planned;
+    state.wpml = { ...plan.wpml };
+    state.controllerIds = plan.controllerIds;
+    state.imports = plan.imports.map((i) => ({ ...i, hidden: false }));
+    state.suite = null;
+    state.suiteBusy = false;
+    state.suiteHidden = new Set(plan.suite.hidden);
+    state.result = null;
+    state.error = null;
+    state.ack = false;
+    state.dirty = true;
+    footprintCache.clear();
+    footprintPromises.clear();
+    obstacleMuted = true;
+    obstacleStore.load(plan.obstacles);
+    obstacleMuted = false;
+    showCommitted();
+    syncControls();
+    render();
+    await replan();
+    if (plan.suite.planned && state.areas.length) await planSuite();
+    return true;
+  }
+
+  library = mountLibrary({
+    doc,
+    container: ui.library,
+    client: libraryClient,
+    status,
+    host: {
+      preset: () => getPreset(state.options.presetId),
+      droneEnum: () => state.wpml.droneEnumValue,
+      snapshot: () =>
+        serializePlan(state, {
+          controllerIds: state.controllerIds,
+          imports: state.imports,
+        }),
+      load: loadPlanDocument,
+      imports: () => state.imports,
+      addImport: (item) => state.imports.push({ ...item, hidden: false }),
+      removeImport: (id) => {
+        state.imports = state.imports.filter((i) => i.id !== id);
+      },
+      controllerIds: () => state.controllerIds,
+      setControllerIds: (ids) => {
+        state.controllerIds = ids;
+      },
+      showOnMap: (items) => preview.showImports(items),
+      download: (name, bytes, type) => downloadFile(name, bytes, type),
+    },
+  });
 
   function useRecommended(mode, { planNow = false } = {}) {
     const o = state.options;
@@ -2686,6 +2790,8 @@ export function initDronePlan({
     isOpen: () => state.open,
     getResult: () => state.result,
     getState: () => state,
+    library: () => library,
+    loadPlan: loadPlanDocument,
     setBox(box) {
       const checked = validateDroneBox(box);
       if (!checked.ok) {
@@ -2740,6 +2846,7 @@ export function initDronePlan({
       targetTool?.destroy();
       obstacleTool?.destroy();
       resetObstacles();
+      library?.destroy();
       preview.destroy();
       body.replaceChildren();
     },

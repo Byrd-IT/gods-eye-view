@@ -265,7 +265,7 @@ export function kmzFileName(index, total, when = new Date(), jobName = '') {
 }
 
 /** The text file that rides in the ZIP of all missions. */
-export function readmeText(result, when = new Date()) {
+export function readmeText(result, when = new Date(), opts = {}) {
   const { plan, missions, totals, warnings } = result;
   const t = plan.takeoff;
   const lines = [
@@ -285,6 +285,16 @@ export function readmeText(result, when = new Date()) {
     'NOT FLIGHT-TESTED. These files have not been validated on a real aircraft.',
     'Load one at a time: in DJI Fly make a dummy waypoint mission, save it, then',
     'replace its KMZ with one of these (keep the file name DJI Fly gave it).',
+    ...(opts.controllerIds?.some(Boolean)
+      ? [
+          'Files named <UUID>.kmz carry the mission id of a mission already on the',
+          "controller: copy each one over DJI Fly's own file, waypoint/<UUID>/<UUID>.kmz",
+          'in the DJI Fly data folder of the controller.',
+        ]
+      : []),
+    'Verified against real DJI Fly files: the file layout, namespace, aircraft code,',
+    'gimbal rotation actions. NOT verified by a real file: takePhoto actions,',
+    'distance-interval photos and smooth-transition orbit headings.',
     'Check airspace and local rules, keep the aircraft in sight, and fly the',
     'first mission short and supervised.',
     'The 3D check on the globe is a VISUAL aid only: it does not detect a',
@@ -309,7 +319,10 @@ export function readmeText(result, when = new Date()) {
       'Processing jobs:',
       'Process the images from one job together (ODM). Do not mix jobs.',
     );
-    if ((result.plan?.jobGrouping ?? 'per-area') !== 'whole' && jobs.length > 1) {
+    if (
+      (result.plan?.jobGrouping ?? 'per-area') !== 'whole' &&
+      jobs.length > 1
+    ) {
       lines.push(
         'Where areas overlap, photos of that ground are only in the first job.',
         'A later job has no photos there.',
@@ -335,20 +348,32 @@ export function bundleEntries(result, opts = {}) {
   const when = opts.when ? new Date(opts.when) : new Date();
   const jobs = result.jobs ?? [];
   const multi = jobs.length > 1;
+  // Flights are counted across the passes of a suite, so one counter is shared.
+  const counter = opts.flightCounter ?? { n: 0 };
   const entries = result.missions.map((mission) => {
     const same = multi
       ? result.missions.filter((item) => item.jobId === mission.jobId)
       : result.missions;
     const index = same.indexOf(mission);
     const job = jobs.find((item) => item.id === mission.jobId);
-    const file = kmzFileName(index, same.length, when, multi ? mission.jobName : '');
-    const folder = multi ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/` : '';
+    // A flight with a controller mission id is named <UUID>.kmz, the name DJI
+    // Fly gave it (waypoint/<UUID>/<UUID>.kmz on the controller).
+    const uuid = opts.controllerIds?.[counter.n++] ?? null;
+    const file = uuid
+      ? `${uuid}.kmz`
+      : kmzFileName(index, same.length, when, multi ? mission.jobName : '');
+    const folder = multi
+      ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/`
+      : '';
     return {
       name: `${folder}${file}`,
       data: buildKmz(mission, result.plan, { ...opts, when }),
     };
   });
-  entries.push({ name: 'README.txt', data: readmeText(result, when) });
+  entries.push({
+    name: 'README.txt',
+    data: readmeText(result, when, { controllerIds: opts.controllerIds }),
+  });
   return entries;
 }
 

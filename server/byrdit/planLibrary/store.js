@@ -84,7 +84,10 @@ export function cleanDetails(raw, { requireName = false } = {}) {
   }
   if (raw?.status !== undefined) {
     if (!STATUSES.includes(raw.status)) {
-      throw new LibraryError('bad-status', 'Status must be planned, flown or processed');
+      throw new LibraryError(
+        'bad-status',
+        'Status must be planned, flown or processed',
+      );
     }
     out.status = raw.status;
   }
@@ -109,7 +112,10 @@ function planText(plan) {
   return body;
 }
 
-export function createStore({ root = defaultRoot(), now = () => Date.now() } = {}) {
+export function createStore({
+  root = defaultRoot(),
+  now = () => Date.now(),
+} = {}) {
   const base = path.resolve(root);
 
   function userDir(user) {
@@ -206,7 +212,11 @@ export function createStore({ root = defaultRoot(), now = () => Date.now() } = {
       const clean = cleanDetails(details, { requireName: true });
       const body = planText(plan);
       if (ids(user).length >= MAX_PLANS_PER_USER) {
-        throw new LibraryError('too-many', 'Too many plans: delete some first', 409);
+        throw new LibraryError(
+          'too-many',
+          'Too many plans: delete some first',
+          409,
+        );
       }
       const id = `p_${randomBytes(8).toString('hex')}`;
       const t = now();
@@ -243,7 +253,11 @@ export function createStore({ root = defaultRoot(), now = () => Date.now() } = {
     save(user, id, plan, details = {}) {
       const meta = loadMeta(user, id);
       if (meta.deletedAt) {
-        throw new LibraryError('in-trash', 'Restore the plan before saving', 409);
+        throw new LibraryError(
+          'in-trash',
+          'Restore the plan before saving',
+          409,
+        );
       }
       const clean = cleanDetails(details);
       const body = planText(plan);
@@ -297,7 +311,11 @@ export function createStore({ root = defaultRoot(), now = () => Date.now() } = {
         .reverse()
         .map((n) => {
           const st = statSync(path.join(planDir(user, id), 'v', `${n}.json`));
-          return { version: n, savedAt: Math.round(st.mtimeMs), bytes: st.size };
+          return {
+            version: n,
+            savedAt: Math.round(st.mtimeMs),
+            bytes: st.size,
+          };
         });
     },
 
@@ -310,7 +328,9 @@ export function createStore({ root = defaultRoot(), now = () => Date.now() } = {
     /** User folders that exist, for the admin's "All users" filter. */
     users() {
       try {
-        return readdirSync(base).filter((n) => USER.test(n)).sort();
+        return readdirSync(base)
+          .filter((n) => USER.test(n))
+          .sort();
       } catch (error) {
         if (error?.code === 'ENOENT') return [];
         throw error;

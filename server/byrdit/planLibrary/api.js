@@ -57,7 +57,9 @@ function readBody(req, limit) {
         reject(new LibraryError('bad-json', 'The request body is not JSON'));
       }
     });
-    req.on('error', () => reject(new LibraryError('aborted', 'Request aborted')));
+    req.on('error', () =>
+      reject(new LibraryError('aborted', 'Request aborted')),
+    );
   });
 }
 
@@ -75,14 +77,24 @@ function sameOrigin(req) {
  * @param {{ store?: ReturnType<typeof createStore>, env?: object }} [deps]
  * @returns {(req, res, next) => void}
  */
-export function createPlanLibraryHandler({ store = createStore(), env = process.env } = {}) {
+export function createPlanLibraryHandler({
+  store = createStore(),
+  env = process.env,
+} = {}) {
   async function route(req, res, url, who) {
-    const parts = url.pathname.slice(API_PREFIX.length).split('/').filter(Boolean);
+    const parts = url.pathname
+      .slice(API_PREFIX.length)
+      .split('/')
+      .filter(Boolean);
     const method = req.method;
     const write = method !== 'GET' && method !== 'HEAD';
     if (write) {
       if (req.headers['x-requested-with'] !== 'gev' || !sameOrigin(req)) {
-        throw new LibraryError('csrf', 'Missing or foreign request origin', 403);
+        throw new LibraryError(
+          'csrf',
+          'Missing or foreign request origin',
+          403,
+        );
       }
     }
     // Whose plans: always the caller's own, unless the admin READS another's.
@@ -91,8 +103,14 @@ export function createPlanLibraryHandler({ store = createStore(), env = process.
     if (asked && asked !== who.user) {
       const other = cleanUserName(asked);
       if (!other) throw new LibraryError('bad-user', 'Bad user name');
-      if (!who.admin) throw new LibraryError('forbidden', 'Not your plans', 403);
-      if (write) throw new LibraryError('read-only', 'Other users\' plans are read-only', 403);
+      if (!who.admin)
+        throw new LibraryError('forbidden', 'Not your plans', 403);
+      if (write)
+        throw new LibraryError(
+          'read-only',
+          "Other users' plans are read-only",
+          403,
+        );
       owner = other;
     }
     const own = owner === who.user;
@@ -109,12 +127,11 @@ export function createPlanLibraryHandler({ store = createStore(), env = process.
       if (method === 'GET') {
         const trash = url.searchParams.get('trash') === '1';
         if (url.searchParams.get('scope') === 'all') {
-          if (!who.admin) throw new LibraryError('forbidden', 'Admin only', 403);
+          if (!who.admin)
+            throw new LibraryError('forbidden', 'Admin only', 403);
           const plans = store
             .users()
-            .flatMap((u) =>
-              store.list(u, { trash, purgeOld: false }),
-            )
+            .flatMap((u) => store.list(u, { trash, purgeOld: false }))
             .sort((a, b) => b.updatedAt - a.updatedAt);
           return send(res, 200, { plans });
         }
@@ -124,7 +141,9 @@ export function createPlanLibraryHandler({ store = createStore(), env = process.
       }
       if (method === 'POST') {
         const body = await readBody(req, MAX_PLAN_BYTES + 65_536);
-        return send(res, 201, { plan: store.create(who.user, body, body.plan) });
+        return send(res, 201, {
+          plan: store.create(who.user, body, body.plan),
+        });
       }
       throw new LibraryError('method', 'Method not allowed', 405);
     }
@@ -136,7 +155,9 @@ export function createPlanLibraryHandler({ store = createStore(), env = process.
       }
       if (method === 'PUT') {
         const body = await readBody(req, MAX_PLAN_BYTES + 65_536);
-        return send(res, 200, { plan: store.save(who.user, id, body.plan, body) });
+        return send(res, 200, {
+          plan: store.save(who.user, id, body.plan, body),
+        });
       }
       if (method === 'PATCH') {
         const body = await readBody(req, 65_536);
@@ -171,7 +192,10 @@ export function createPlanLibraryHandler({ store = createStore(), env = process.
 
   return function planLibraryHandler(req, res, next) {
     const url = new URL(req.url ?? '/', 'http://local');
-    if (url.pathname !== API_PREFIX && !url.pathname.startsWith(`${API_PREFIX}/`)) {
+    if (
+      url.pathname !== API_PREFIX &&
+      !url.pathname.startsWith(`${API_PREFIX}/`)
+    ) {
       return next();
     }
     const who = libraryIdentity(req, env);
@@ -184,7 +208,10 @@ export function createPlanLibraryHandler({ store = createStore(), env = process.
     }
     route(req, res, url, who).catch((error) => {
       if (error instanceof LibraryError) {
-        return send(res, error.status, { error: error.code, message: error.message });
+        return send(res, error.status, {
+          error: error.code,
+          message: error.message,
+        });
       }
       // Never echo internals (paths) to the caller.
       console.error('plan library error:', error?.code ?? error?.name);

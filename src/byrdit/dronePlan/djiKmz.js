@@ -12,7 +12,10 @@
  * Pure: no DOM, no Cesium, no network. Never throws on a mission that is merely
  * odd: the problems come back as `warnings` so the person sees them.
  */
-import { MAX_WAYPOINTS_PER_MISSION, DJI_DEFAULT_HEIGHT_LIMIT_M } from './planner.js';
+import {
+  MAX_WAYPOINTS_PER_MISSION,
+  DJI_DEFAULT_HEIGHT_LIMIT_M,
+} from './planner.js';
 import { readZipAsync } from './zip.js';
 import { findAll, findFirst, kids, parseXml, textOf } from './xml.js';
 import { WPML_NAMESPACE } from './wpml.js';
@@ -33,7 +36,10 @@ const num = (v) => {
  */
 export function missionIdFromFileName(fileName) {
   if (typeof fileName !== 'string') return null;
-  let base = fileName.split(/[\\/]/).pop().replace(/\.kmz$/i, '');
+  let base = fileName
+    .split(/[\\/]/)
+    .pop()
+    .replace(/\.kmz$/i, '');
   base = base.replace(/\s*(?:\(\d+\)|\[\d+\])\s*$/g, '').trim();
   return UUID.test(base) ? base.toUpperCase() : null;
 }
@@ -124,7 +130,11 @@ const decodeText = (bytes) => new TextDecoder('utf-8').decode(bytes);
  * @returns {Promise<object>} the mission; `.error` (a code) when it cannot be read at all
  */
 export async function parseDjiKmz(bytes, { fileName = '' } = {}) {
-  const base = { source: 'dji', fileName, uuid: missionIdFromFileName(fileName) };
+  const base = {
+    source: 'dji',
+    fileName,
+    uuid: missionIdFromFileName(fileName),
+  };
   if (!(bytes instanceof Uint8Array) || !bytes.length) {
     return { ...base, error: 'empty' };
   }
@@ -182,10 +192,14 @@ export async function parseDjiKmz(bytes, { fileName = '' } = {}) {
     hasWaylines: Boolean(way),
     usedTemplateFallback,
     wayline: {
-      executeHeightMode: folder ? textOf(folder, 'wpml:executeHeightMode') : null,
+      executeHeightMode: folder
+        ? textOf(folder, 'wpml:executeHeightMode')
+        : null,
       distanceM: folder ? num(textOf(folder, 'wpml:distance')) : null,
       durationS: folder ? num(textOf(folder, 'wpml:duration')) : null,
-      autoFlightSpeedMs: folder ? num(textOf(folder, 'wpml:autoFlightSpeed')) : null,
+      autoFlightSpeedMs: folder
+        ? num(textOf(folder, 'wpml:autoFlightSpeed'))
+        : null,
     },
     waypoints,
   };
@@ -211,20 +225,32 @@ export const FAR_LEG_M = 5000;
  * @param {{ preset?: object, droneEnumValue?: number|null }} [ctx] the selected aircraft
  * @returns {{ level: 'warn'|'info', code: string, args?: object }[]}
  */
-export function checkMission(mission, { preset = null, droneEnumValue = null } = {}) {
+export function checkMission(
+  mission,
+  { preset = null, droneEnumValue = null } = {},
+) {
   const out = [];
-  const add = (level, code, args) => out.push({ level, code, ...(args ? { args } : {}) });
+  const add = (level, code, args) =>
+    out.push({ level, code, ...(args ? { args } : {}) });
   if (mission.error) {
     add('warn', `read-${mission.error}`);
     return out;
   }
   if (mission.namespace !== WPML_NAMESPACE) {
-    add('warn', 'namespace', { found: mission.namespace ?? '(none)', expected: WPML_NAMESPACE });
+    add('warn', 'namespace', {
+      found: mission.namespace ?? '(none)',
+      expected: WPML_NAMESPACE,
+    });
   }
   if (!mission.hasWaylines) add('warn', 'no-waylines');
   else if (mission.usedTemplateFallback) add('info', 'template-fallback');
   if (mission.templateChildren) {
-    const want = ['wpml:author', 'wpml:createTime', 'wpml:updateTime', 'wpml:missionConfig'];
+    const want = [
+      'wpml:author',
+      'wpml:createTime',
+      'wpml:updateTime',
+      'wpml:missionConfig',
+    ];
     const same =
       mission.templateChildren.length === want.length &&
       want.every((n, i) => mission.templateChildren[i] === n);
@@ -239,7 +265,11 @@ export function checkMission(mission, { preset = null, droneEnumValue = null } =
     const expected = droneEnumValue ?? preset?.wpml?.droneEnumValue ?? null;
     const sub = preset?.wpml?.droneSubEnumValue ?? 0;
     if (cfg.droneEnumValue === null) add('warn', 'no-drone');
-    else if (expected !== null && (cfg.droneEnumValue !== expected || (droneEnumValue === null && (cfg.droneSubEnumValue ?? 0) !== sub))) {
+    else if (
+      expected !== null &&
+      (cfg.droneEnumValue !== expected ||
+        (droneEnumValue === null && (cfg.droneSubEnumValue ?? 0) !== sub))
+    ) {
       add('warn', 'drone-mismatch', {
         found: `${cfg.droneEnumValue}/${cfg.droneSubEnumValue ?? 0}`,
         expected: `${expected}/${droneEnumValue === null ? sub : '*'}`,
@@ -253,14 +283,27 @@ export function checkMission(mission, { preset = null, droneEnumValue = null } =
     return out;
   }
   if (wps.length > MAX_WAYPOINTS_PER_MISSION) {
-    add('warn', 'too-many', { count: wps.length, max: MAX_WAYPOINTS_PER_MISSION });
+    add('warn', 'too-many', {
+      count: wps.length,
+      max: MAX_WAYPOINTS_PER_MISSION,
+    });
   }
   if (wps.some((w, i) => w.index !== i)) add('warn', 'index-gap');
-  if (wps.some((w) => w.lon === null || w.lat === null || Math.abs(w.lat) > 90 || Math.abs(w.lon) > 180)) {
+  if (
+    wps.some(
+      (w) =>
+        w.lon === null ||
+        w.lat === null ||
+        Math.abs(w.lat) > 90 ||
+        Math.abs(w.lon) > 180,
+    )
+  ) {
     add('warn', 'bad-coordinates');
   }
   if (mission.wayline.executeHeightMode !== 'relativeToStartPoint') {
-    add('warn', 'height-mode', { found: mission.wayline.executeHeightMode ?? '(none)' });
+    add('warn', 'height-mode', {
+      found: mission.wayline.executeHeightMode ?? '(none)',
+    });
   }
   const heights = wps.map((w) => w.heightM);
   if (heights.some((h) => h === null)) add('warn', 'no-height');
@@ -273,7 +316,11 @@ export function checkMission(mission, { preset = null, droneEnumValue = null } =
     });
   }
   const maxSpeed = preset?.maxSpeedMs ?? 15;
-  if (wps.some((w) => w.speedMs === null || w.speedMs <= 0 || w.speedMs > maxSpeed)) {
+  if (
+    wps.some(
+      (w) => w.speedMs === null || w.speedMs <= 0 || w.speedMs > maxSpeed,
+    )
+  ) {
     add('warn', 'speed-range', { max: maxSpeed });
   }
   for (const w of wps) {
@@ -299,13 +346,18 @@ export function checkMission(mission, { preset = null, droneEnumValue = null } =
     add('warn', 'group-ids');
   }
   const aids = groups.flatMap((g) => g.actions.map((a) => a.id));
-  if (aids.length && (aids.some((a) => a === null) || new Set(aids).size !== aids.length)) {
+  if (
+    aids.length &&
+    (aids.some((a) => a === null) || new Set(aids).size !== aids.length)
+  ) {
     add('warn', 'action-ids');
   }
   const located = wps.filter((w) => w.lon !== null && w.lat !== null);
   for (let i = 1; i < located.length; i += 1) {
     if (distanceM(located[i - 1], located[i]) > FAR_LEG_M) {
-      add('warn', 'far-apart', { km: Math.round(distanceM(located[i - 1], located[i]) / 1000) });
+      add('warn', 'far-apart', {
+        km: Math.round(distanceM(located[i - 1], located[i]) / 1000),
+      });
       break;
     }
   }

@@ -18,14 +18,48 @@ import { bundleEntries } from './wpml.js';
 import { jobSlug } from './areas.js';
 
 export const SUITE_PASSES = Object.freeze([
-  Object.freeze({ id: 'nadir', label: 'Nadir grid (straight down)', mode: 'mapping-grid', pattern: 'grid' }),
-  Object.freeze({ id: 'oblique60', label: 'Oblique double grid, 60 deg', mode: 'mapping-grid', pattern: 'double', tiltPitchDeg: -60 }),
-  Object.freeze({ id: 'oblique45', label: 'Low oblique double grid, 45 deg', mode: 'mapping-grid', pattern: 'double', tiltPitchDeg: -45, aglM: 50 }),
-  Object.freeze({ id: 'orbit', label: 'Orbits (two heights)', mode: 'splat-orbit', pattern: 'orbit' }),
+  Object.freeze({
+    id: 'nadir',
+    label: 'Nadir grid (straight down)',
+    mode: 'mapping-grid',
+    pattern: 'grid',
+  }),
+  Object.freeze({
+    id: 'oblique60',
+    label: 'Oblique double grid, 60 deg',
+    mode: 'mapping-grid',
+    pattern: 'double',
+    tiltPitchDeg: -60,
+  }),
+  Object.freeze({
+    id: 'oblique45',
+    label: 'Low oblique double grid, 45 deg',
+    mode: 'mapping-grid',
+    pattern: 'double',
+    tiltPitchDeg: -45,
+    aglM: 50,
+  }),
+  Object.freeze({
+    id: 'orbit',
+    label: 'Orbits (two heights)',
+    mode: 'splat-orbit',
+    pattern: 'orbit',
+  }),
 ]);
 
 /** Planner options a pass keeps from the panel (everything but the recipe). */
-const KEEP = ['presetId', 'direction', 'batteryMin', 'maxWaypoints', 'orbitRadiusM', 'obstacleHeightM', 'orbitTargetHeightM', 'orbitTargets', 'takeoff', 'jobGrouping'];
+const KEEP = [
+  'presetId',
+  'direction',
+  'batteryMin',
+  'maxWaypoints',
+  'orbitRadiusM',
+  'obstacleHeightM',
+  'orbitTargetHeightM',
+  'orbitTargets',
+  'takeoff',
+  'jobGrouping',
+];
 
 /**
  * The planner options for every pass.
@@ -36,17 +70,22 @@ export function suiteOptions(base = {}) {
   const preset = getPreset(base.presetId);
   if (!preset) return [];
   return SUITE_PASSES.map((pass) => {
-    const rec = recommend(preset, pass.mode, { orbitRadiusM: base.orbitRadiusM ?? undefined });
+    const rec = recommend(preset, pass.mode, {
+      orbitRadiusM: base.orbitRadiusM ?? undefined,
+    });
     const options = { ...recommendedOptions(rec) };
-    for (const key of KEEP) if (base[key] !== undefined) options[key] = base[key];
+    for (const key of KEEP)
+      if (base[key] !== undefined) options[key] = base[key];
     options.pattern = pass.pattern;
-    if (pass.tiltPitchDeg !== undefined) options.tiltPitchDeg = pass.tiltPitchDeg;
+    if (pass.tiltPitchDeg !== undefined)
+      options.tiltPitchDeg = pass.tiltPitchDeg;
     if (pass.aglM !== undefined) options.aglM = pass.aglM;
     return { id: pass.id, label: pass.label, options };
   });
 }
 
-export const passFolder = (index, pass) => `pass-${index + 1}-${jobSlug(pass.id)}`;
+export const passFolder = (index, pass) =>
+  `pass-${index + 1}-${jobSlug(pass.id)}`;
 
 /** README for the all-passes ZIP. */
 export function suiteReadme(passes, when = new Date()) {
@@ -65,7 +104,9 @@ export function suiteReadme(passes, when = new Date()) {
   passes.forEach((pass, i) => {
     const r = pass.result;
     if (!r) {
-      lines.push(`${passFolder(i, pass)}: ${pass.label} - NOT PLANNED (${pass.error ?? 'no result'})`);
+      lines.push(
+        `${passFolder(i, pass)}: ${pass.label} - NOT PLANNED (${pass.error ?? 'no result'})`,
+      );
       return;
     }
     const t = r.totals;
@@ -80,10 +121,16 @@ export function suiteReadme(passes, when = new Date()) {
 export function buildSuiteZip(passes, opts = {}) {
   const when = opts.when ? new Date(opts.when) : new Date();
   const entries = [];
+  // Controller mission ids are handed out to the flights in order, across passes.
+  const flightCounter = { n: 0 };
   passes.forEach((pass, i) => {
     if (!pass.result) return;
     const folder = passFolder(i, pass);
-    for (const e of bundleEntries(pass.result, { ...opts, when })) {
+    for (const e of bundleEntries(pass.result, {
+      ...opts,
+      when,
+      flightCounter,
+    })) {
       entries.push({ name: `${folder}/${e.name}`, data: e.data });
     }
   });

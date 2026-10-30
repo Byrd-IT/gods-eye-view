@@ -108,8 +108,11 @@ test('root config retains existing named exports and standalone provider order',
   for (const [name, value] of Object.entries(providers))
     assert.equal(compatibility[name], value, name);
   const config = standaloneConfig({ mode: 'test' });
+  const names = config.plugins.map((plugin) => plugin.name);
+  // The plan library API comes first (before any provider) and is not one.
+  assert.equal(names[4], 'byrdit-plan-library');
   const standaloneProviders = config.plugins
-    .slice(4, -6)
+    .slice(5, -6)
     .map((plugin) => plugin.name);
   assert.equal(
     standaloneProviders.filter((name) => name === 'gemini-live-proxy').length,
