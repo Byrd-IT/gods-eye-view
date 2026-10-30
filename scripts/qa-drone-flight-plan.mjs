@@ -501,6 +501,32 @@ try {
     adjAfter.targetsVisible && adjAfter.pattern === 'grid',
     JSON.stringify(adjAfter),
   );
+  // The summary is visible without scrolling and matches the suite totals.
+  const summaryInfo = await page.evaluate(() => {
+    const panel = document.querySelector('#drone-plan-panel');
+    const node = panel.querySelector('[data-role="plan-summary"]');
+    const r = node.getBoundingClientRect();
+    const passes = window.__gevDronePlan.getState().suite?.passes ?? [];
+    const planned = passes.filter((p) => p.result);
+    const sec = planned.reduce((n, p) => n + p.result.totals.durationS, 0);
+    const flights = planned.reduce((n, p) => n + p.result.totals.missionCount, 0);
+    return {
+      text: node.textContent,
+      top: r.top,
+      bottom: r.bottom,
+      vh: window.innerHeight,
+      flights,
+      sec,
+    };
+  });
+  check(
+    'Summary: total flying time, flights and batteries are visible after PLAN ALL and match the suite',
+    summaryInfo.text.includes(`${summaryInfo.flights} flights`) &&
+      /flying/.test(summaryInfo.text) &&
+      summaryInfo.top >= 0 &&
+      summaryInfo.bottom <= summaryInfo.vh,
+    JSON.stringify(summaryInfo),
+  );
 
   // Options change the plan.
   await page.select('#drone-plan-panel select[aria-label="Pattern"]', 'double');

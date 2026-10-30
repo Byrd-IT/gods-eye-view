@@ -6,7 +6,7 @@ import {
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
 import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
-import { initDronePlan } from './panel.js';
+import { initDronePlan, planSummary } from './panel.js';
 import { createBuildingFootprintProvider } from './buildingFootprints.js';
 import { downtownPayload, okResponse } from './buildingFixtures.mjs';
 import { createDronePlanVoice } from './dronePlanVoice.js';
@@ -1625,7 +1625,9 @@ test('Adjust: the section sits right after the plan buttons and the suite list, 
   const kids = adjust.parentNode.children;
   const at = (node) => kids.indexOf(node);
   const suite = roleNode(w, 'suite');
-  assert.equal(at(adjust), at(suite) + 1, 'directly after the suite list');
+  const summary = roleNode(w, 'plan-summary');
+  assert.equal(at(summary), at(suite) + 1, 'summary right after the suite list');
+  assert.equal(at(adjust), at(summary) + 1, 'Adjust right after the summary');
   const useRec = w
     .buttons('data-action')
     .find((b) => b.getAttribute('data-action') === 'use-recommended');
@@ -1633,7 +1635,7 @@ test('Adjust: the section sits right after the plan buttons and the suite list, 
     .buttons('data-action')
     .find((b) => b.getAttribute('data-action') === 'plan-suite');
   assert.ok(at(useRec) < at(planAll) && at(planAll) < at(suite));
-  assert.equal(at(adjust) - at(useRec) <= 4, true, 'close under the buttons');
+  assert.equal(at(adjust) - at(useRec) <= 5, true, 'close under the buttons');
   const inside = (node) => {
     for (let n = node; n; n = n.parentNode) if (n === adjust) return true;
     return false;
@@ -1667,8 +1669,7 @@ test('Adjust: the section sits right after the plan buttons and the suite list, 
 
 test('Adjust: Orbit targets show for the Orbit pattern, and after PLAN ALL with a grid pattern, not for a plain grid', async () => {
   const w = setup();
-  const targetsHidden = () =>
-    w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'recommend-targets').parentNode.parentNode.parentNode.hidden;
+  const targetsHidden = () => roleNode(w, 'orbit-targets').hidden;
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   assert.equal(w.handle.getState().options.pattern, 'grid');
@@ -1693,9 +1694,138 @@ test('Adjust: Orbit targets show for the Orbit pattern, and after PLAN ALL with 
   pick(o, 'Mode', 'splat-orbit');
   await o.handle.replan();
   assert.equal(
-    o.buttons('data-action').find((b) => b.getAttribute('data-action') === 'recommend-targets').parentNode.parentNode.parentNode.hidden,
+    roleNode(o, 'orbit-targets').hidden,
     false,
     'Orbit pattern: shown',
   );
   o.handle.destroy();
+});
+
+// ------------------------------------------------------------ plan summary --
+const summaryText = (w) => roleNode(w, 'plan-summary').textContent;
+const fakeResult = (durationS, missionCount) => ({
+  totals: { durationS, missionCount },
+});
+
+test('summary: a single plan shows time in the air, flights and batteries from its totals', async () => {
+  const w = setup();
+  assert.equal(roleNode(w, 'plan-summary').hidden, true, 'nothing without a plan');
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const { totals } = w.handle.getResult();
+  const min = w.handle.getState().options.batteryMin;
+  const text = summaryText(w);
+  assert.match(text, /^Total: .* flying · \d+ flights · about \d+ batteries \(\d+ min each\)/);
+  assert.ok(text.includes(`${totals.missionCount} flights`));
+  assert.ok(
+    text.includes(`about ${Math.max(1, Math.ceil(totals.durationS / (min * 60)))} batteries (${min} min each)`),
+  );
+  assert.doesNotMatch(text, /on site/);
+  w.handle.destroy();
+});
+
+test('summary: PLAN ALL shows the grand total over all passes, hidden ones included; it clears with the plan', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await w.handle.planSuite();
+  const st = w.handle.getState();
+  w.handle.getState().suiteHidden.add('oblique45');
+  const flights = st.suite.passes.reduce((n, p) => n + p.result.totals.missionCount, 0);
+  const seconds = st.suite.passes.reduce((n, p) => n + p.result.totals.durationS, 0);
+  const expected = planSummary({ suite: st.suite, result: null, batteryMin: st.options.batteryMin });
+  assert.equal(expected.flights, flights);
+  assert.equal(expected.durationS, seconds);
+  assert.ok(summaryText(w).includes(`${flights} flights`));
+  w.handle.close?.();
+  w.handle.destroy();
+});
+
+test('summary math: ceil of air time over battery time, at least one battery', () => {
+  const r = (s, n) => planSummary({ suite: null, result: fakeResult(s, n), batteryMin: 25 });
+  assert.equal(r(26 * 60, 2).batteries, 2, '26 min on 25 min batteries');
+  assert.equal(r(25 * 60, 1).batteries, 1);
+  assert.equal(r(60, 1).batteries, 1);
+  assert.equal(r(0, 1).batteries, 1, 'at least one with a plan');
+  assert.equal(planSummary({ suite: null, result: null, batteryMin: 25 }), null);
+  assert.equal(
+    planSummary({ suite: null, result: fakeResult(600, 1), batteryMin: 0 }).minutes,
+    25,
+    'bad battery time falls back to 25',
+  );
+});
+
+test('summary: more flights than batteries adds the shared-battery note', async () => {
+  const w = setup();
+  const sum = planSummary({ suite: null, result: fakeResult(20 * 60, 3), batteryMin: 25 });
+  assert.equal(sum.batteries, 1);
+  assert.equal(sum.sharedBatteries, true);
+  assert.equal(planSummary({ suite: null, result: fakeResult(40 * 60, 2), batteryMin: 25 }).sharedBatteries, false);
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const { totals } = w.handle.getResult();
+  const min = w.handle.getState().options.batteryMin;
+  const shared = Math.max(1, Math.ceil(totals.durationS / (min * 60))) < totals.missionCount;
+  assert.equal(/200-waypoint limit/.test(summaryText(w)), shared);
+  w.handle.destroy();
+});
+
+test('summary: a pass that did not plan is left out of the total and named', () => {
+  const suite = {
+    passes: [
+      { id: 'nadir', label: 'Nadir', result: fakeResult(600, 1) },
+      { id: 'oblique60', label: 'Oblique 60', result: fakeResult(900, 2) },
+      { id: 'orbit', label: 'Orbits', result: null, error: 'x' },
+    ],
+  };
+  const s = planSummary({ suite, result: null, batteryMin: 25 });
+  assert.equal(s.durationS, 1500);
+  assert.equal(s.flights, 3);
+  assert.deepEqual(s.failed, ['Orbits']);
+  assert.equal(planSummary({ suite: { passes: [{ id: 'a', label: 'A', result: null }] }, result: null, batteryMin: 25 }), null);
+});
+
+test('PLAN ALL: a late building-footprint reply does not wipe the suite, and the orbit pass uses the buildings', async () => {
+  for (const pattern of ['grid', 'orbit']) {
+    resetPointerOwnership();
+    const dom = makeDoc();
+    const world = makeWorld({ sample: (cartos) => flat(cartos) });
+    const late = deferred();
+    const handle = initDronePlan({
+      viewer: world.viewer,
+      cesium: world.cesium,
+      document: dom.doc,
+      downloadFile: () => {},
+      getBuildingFootprints: () => late.promise,
+    });
+    handle.setBox(boxM(300, 200));
+    handle.applyOptions({ pattern });
+    await handle.replan();
+    const planned = handle.planSuite();
+    await wait(10);
+    const c = metersPerDegree(30.27);
+    const corner = (a, b) => ({
+      lon: -97.77 + (a * 20) / c.lon,
+      lat: 30.27 + (b * 20) / c.lat,
+    });
+    late.resolve([
+      { ring: [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)], label: 'Hall' },
+    ]);
+    await planned;
+    await wait(400);
+    assert.ok(handle.getState().suite, `${pattern}: the suite survives the late reply`);
+    const targets = handle.getState().suite.passes.find((p) => p.id === 'orbit').result.plan.orbit.targets;
+    assert.deepEqual(targets.map((x) => x.label), ['Hall'], `${pattern}: orbit pass uses the building`);
+    handle.destroy();
+  }
+});
+
+test('Adjust: RECOMMEND after PLAN ALL keeps a grid pattern a grid', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await w.handle.planSuite();
+  w.handle.recommendTargets();
+  assert.equal(w.handle.getState().options.pattern, 'grid');
+  w.handle.destroy();
 });

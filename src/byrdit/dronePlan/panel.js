@@ -89,6 +89,43 @@ const el = (doc, tag, parent, { text, cls, attrs } = {}) => {
   parent?.append(node);
   return node;
 };
+/**
+ * Totals for the one-line plan summary: a single plan, or the grand total
+ * over every pass that planned (hidden passes are still in the plan).
+ * Batteries = ceil(air time / battery time), at least 1. One KMZ = one flight.
+ * @returns {null | { durationS: number, flights: number, batteries: number,
+ *   minutes: number, failed: string[], sharedBatteries: boolean }}
+ */
+export function planSummary({ suite, result, batteryMin }) {
+  let durationS = 0;
+  let flights = 0;
+  let failed = [];
+  if (suite) {
+    const planned = suite.passes.filter((p) => p.result);
+    failed = suite.passes.filter((p) => !p.result).map((p) => p.label);
+    if (!planned.length) return null;
+    for (const pass of planned) {
+      durationS += pass.result.totals.durationS;
+      flights += pass.result.totals.missionCount;
+    }
+  } else if (result?.totals) {
+    durationS = result.totals.durationS;
+    flights = result.totals.missionCount;
+  } else {
+    return null;
+  }
+  const minutes = Math.max(1, Number(batteryMin) || 25);
+  const batteries = Math.max(1, Math.ceil(durationS / (minutes * 60)));
+  return {
+    durationS,
+    flights,
+    batteries,
+    minutes,
+    failed,
+    sharedBatteries: batteries < flights,
+  };
+}
+
 const num = (v, d = 0) =>
   formatNumber(v, { minimumFractionDigits: d, maximumFractionDigits: d });
 
@@ -183,6 +220,9 @@ export function initDronePlan({
   let obstacleMuted = false;
   let obstacleTyping = false;
   let obstacleKey = null;
+  // The look-up in flight: PLAN ALL waits for it (it feeds the planner).
+  let obstaclePending = null;
+  let suiteSettling = false;
   let obstacleToken = 0;
   let obstacleAbort = null;
   let groundHintM = 0;
@@ -402,16 +442,16 @@ export function initDronePlan({
     );
   }
 
-  /**
-   * Untouched targets follow the areas: building footprints when a source
-   * has them, otherwise each area's centre. Touched ones only lose targets
-   * that no longer lie inside an area.
-   */
   /** The plan has orbits: the Orbit pattern, or an all-passes plan (it has an orbit pass). */
   function orbitsShown() {
     return state.options.pattern === 'orbit' || state.orbitsPlanned;
   }
 
+  /**
+   * Untouched targets follow the areas: building footprints when a source
+   * has them, otherwise each area's centre. Touched ones only lose targets
+   * that no longer lie inside an area.
+   */
   function syncOrbitTargets() {
     const o = state.options;
     if (!orbitsShown()) return;
@@ -434,7 +474,14 @@ export function initDronePlan({
           .then((found) => {
             if (destroyed || !Array.isArray(found) || !found.length) return;
             footprintCache.set(key, found);
-            if (areasKey() === key && !state.orbitTargetsTouched) schedule(0);
+            // PLAN ALL settles the targets itself: a replan now would drop
+            // the suite it is building.
+            if (
+              areasKey() === key &&
+              !state.orbitTargetsTouched &&
+              !state.suiteBusy
+            )
+              schedule(0);
           })
           .catch(() => {});
       }
@@ -471,7 +518,7 @@ export function initDronePlan({
       status(t('Pick a spot inside the survey area'), 'warn');
       return false;
     }
-    if (state.options.pattern !== 'orbit') state.options.pattern = 'orbit';
+    if (!orbitsShown()) state.options.pattern = 'orbit';
     syncOrbitTargets();
     const list = touchTargets();
     if (list.length >= MAX_ORBIT_TARGETS) {
@@ -518,7 +565,7 @@ export function initDronePlan({
   /** Rebuild the list from the areas, dropping any hand edits. */
   function recommendTargets() {
     state.orbitTargetsTouched = false;
-    state.options.pattern = 'orbit';
+    if (!orbitsShown()) state.options.pattern = 'orbit';
     footprintCache.delete(areasKey());
     syncOrbitTargets();
     schedule(0);
@@ -597,7 +644,7 @@ export function initDronePlan({
     const token = ++obstacleToken;
     obstacleStatusText = t('Looking up open-data heights…');
     renderObstacleStatus();
-    Promise.resolve()
+    obstaclePending = Promise.resolve()
       .then(async () => {
         const [open, buildings] = await Promise.all([
           fetchObstacles
@@ -1186,7 +1233,10 @@ export function initDronePlan({
         'Data: tree canopy height by Meta and WRI (CC BY 4.0), towers from the FAA Digital Obstacle File, buildings from OpenStreetMap contributors.',
       ),
     });
-    ui.targetsBox = el(doc, 'div', body, { cls: 'gev-dp-targets' });
+    ui.targetsBox = el(doc, 'div', body, {
+      cls: 'gev-dp-targets',
+      attrs: { 'data-role': 'orbit-targets' },
+    });
     const targetBar = el(doc, 'div', ui.targetsBox, {
       cls: 'gev-dp-row gev-dp-target-bar',
     });
@@ -1395,7 +1445,13 @@ export function initDronePlan({
       ui.obstacleNote,
       ui.obstaclesBox,
     );
-    ui.suite.after(ui.adjust);
+    ui.summary = el(doc, 'div', null, {
+      cls: 'gev-dp-summary',
+      attrs: { 'data-role': 'plan-summary', 'aria-live': 'polite' },
+    });
+    ui.summary.hidden = true;
+    ui.suite.after(ui.summary);
+    ui.summary.after(ui.adjust);
 
     // ------------------------------------------------------ wiring --
     const o = state.options;
@@ -1854,6 +1910,7 @@ export function initDronePlan({
     ui.warnings.replaceChildren();
     ui.missions.replaceChildren();
     renderSuite();
+    renderSummary();
     panel.dataset.state = state.busy ? 'busy' : state.result ? 'ready' : 'idle';
     if (state.error) {
       status(planErrorText(state.error), 'warn');
@@ -1994,26 +2051,33 @@ export function initDronePlan({
   }
 
   async function planSuite() {
-    if (
+    const blocked = () =>
       destroyed ||
       !state.areas.length ||
       state.suiteBusy ||
       state.busy ||
-      state.dirty
-    )
-      return;
+      state.dirty;
+    if (blocked() || suiteSettling) return;
+    // Settle everything the planner reads before planning: building
+    // footprints (orbit targets, obstacles) and the open-data look-up. Their
+    // late answers would otherwise replan and silently drop the suite.
+    suiteSettling = true;
+    try {
+      if (!state.orbitTargetsTouched) await buildingsFor(areasKey());
+      await obstaclePending?.catch(() => {});
+      if (!destroyed && state.dirty) await replan();
+    } finally {
+      suiteSettling = false;
+    }
+    if (blocked()) return;
     const token = ++suiteToken;
     state.suiteBusy = true;
     state.suite = null;
-    // The orbit pass flies the orbit targets: settle them (building
-    // footprints included) before planning, so a late footprint answer cannot
-    // replan and wipe the suite.
+    // The orbit pass flies the orbit targets: keep the list in view and in
+    // step with the areas from here on.
     state.orbitsPlanned = true;
-    syncGlobe();
-    render();
-    if (!state.orbitTargetsTouched) await buildingsFor(areasKey());
-    if (destroyed || token !== suiteToken) return;
     syncOrbitTargets();
+    syncGlobe();
     render();
     const provider =
       viewer.terrainProvider ?? viewer.scene?.globe?.terrainProvider;
@@ -2105,6 +2169,53 @@ export function initDronePlan({
       passes.length > 0 &&
       passes.every((pass) => pass.result && resultAllowed(pass.result))
     );
+  }
+
+  /**
+   * One line for the whole plan: time in the air, flights and batteries.
+   * Single plan, or the grand total over every pass that planned (hidden
+   * passes are still in the plan). One KMZ is one flight.
+   */
+  function renderSummary() {
+    ui.summary.replaceChildren();
+    ui.summary.hidden = true;
+    if (state.suiteBusy) return;
+    const sum = planSummary({
+      suite: state.suite,
+      result: state.result,
+      batteryMin: state.options.batteryMin,
+    });
+    if (!sum) return;
+    const { durationS, flights, batteries, minutes, failed } = sum;
+    ui.summary.hidden = false;
+    el(doc, 'p', ui.summary, {
+      cls: 'gev-dp-summary-line',
+      text: t(
+        'Total: {time} flying · {flights} flights · about {batteries} batteries ({min} min each)',
+        {
+          time: durationText(durationS),
+          flights: num(flights),
+          batteries: num(batteries),
+          min: num(minutes),
+        },
+      ),
+    });
+    if (sum.sharedBatteries) {
+      el(doc, 'p', ui.summary, {
+        cls: 'gev-dp-note',
+        text: t(
+          'Some flights are split by the 200-waypoint limit and can share a battery.',
+        ),
+      });
+    }
+    if (failed.length) {
+      el(doc, 'p', ui.summary, {
+        cls: 'gev-dp-note',
+        text: t('Not in this total (not planned): {passes}', {
+          passes: failed.join(', '),
+        }),
+      });
+    }
   }
 
   function renderSuite() {

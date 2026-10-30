@@ -267,6 +267,16 @@ body.gev-drone-box .cesium-widget canvas {
   display: none;
 }
 
+.gev-dp-summary {
+  margin: 8px 0 0;
+}
+.gev-dp-summary[hidden] {
+  display: none;
+}
+.gev-dp-summary-line {
+  margin: 0;
+  font-weight: 600;
+}
 .gev-dp-adjust {
   margin: 10px 0 0;
   padding: 8px 0 0;
