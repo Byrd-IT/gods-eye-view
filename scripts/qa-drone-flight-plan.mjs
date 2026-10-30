@@ -193,23 +193,25 @@ try {
   });
   await page.waitForFunction(
     () =>
-      document.getElementById('drone-plan-button')?.getBoundingClientRect()
+      document.getElementById('drone-plan-panel')?.getBoundingClientRect()
         .width > 0,
     { timeout: 10_000 },
   );
   check(
-    'the Drone Flight Plan entry is on the DISPLAY rail and starts off',
+    'the Drone Flight Plan card is a collapsed launcher on the right rail',
     await page.evaluate(() => {
-      const b = document.getElementById('drone-plan-button');
+      const p = document.getElementById('drone-plan-panel');
       return (
-        b.getAttribute('aria-pressed') === 'false' &&
-        b.textContent.includes('Drone Flight Plan') &&
-        document.getElementById('drone-plan-panel').hidden === true
+        p.parentElement?.id === 'right-context-rail' &&
+        p.hidden === false &&
+        p.classList.contains('collapsed') &&
+        p.textContent.includes('DRONE FLIGHT PLAN') &&
+        !document.getElementById('drone-plan-button')
       );
     }),
   );
 
-  await page.click('#drone-plan-button');
+  await page.click('#drone-plan-panel .panel-collapse-btn');
   await wait(400);
   const opened = await page.evaluate(() => {
     const panel = document.getElementById('drone-plan-panel');
@@ -219,9 +221,6 @@ try {
       collapsed: panel.classList.contains('collapsed'),
       width: rect.width,
       boxCursor: document.body.classList.contains('gev-drone-box'),
-      pressed: document
-        .getElementById('drone-plan-button')
-        .getAttribute('aria-pressed'),
       drawArmed: document
         .querySelector('#drone-plan-panel .gev-dp-bar button[data-action="draw-box"]')
         ?.getAttribute('aria-pressed'),
@@ -635,7 +634,7 @@ try {
   await page.click('#drone-plan-panel .gev-dp-bar button[data-action="close"]');
   await wait(400);
   check(
-    'CLOSE hides the card and clears the plan from the globe',
+    'CLOSE collapses the card back to its launcher and clears the plan from the globe',
     await page.evaluate(() => {
       const ds = window.__godsEyeView.viewer.dataSources;
       let left = 0;
@@ -643,7 +642,10 @@ try {
         if (ds.get(i).name === 'gev-drone-plan')
           left = ds.get(i).entities.values.length;
       return (
-        document.getElementById('drone-plan-panel').hidden &&
+        !document.getElementById('drone-plan-panel').hidden &&
+        document
+          .getElementById('drone-plan-panel')
+          .classList.contains('collapsed') &&
         left === 0 &&
         !document.body.classList.contains('gev-drone-box')
       );

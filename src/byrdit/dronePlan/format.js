@@ -115,6 +115,11 @@ export function warningText(warning) {
         'Some areas are more than {limit} m from the takeoff point, so those flights are a longer transit',
         { limit: fixed(p.limitM) },
       );
+    case 'orbit-raised-for-obstacles':
+      return t(
+        'Orbit heights were raised to {min} m: the trees are {obstacle} m tall and the drone keeps a margin above them',
+        { min: fixed(p.minAglM), obstacle: fixed(p.obstacleHeightM) },
+      );
     default:
       // An unknown code is never echoed back into the page.
       return '';
@@ -127,6 +132,8 @@ export function planErrorText(code) {
     return t('Too many waypoints: shrink the box or lower the overlap');
   if (code === 'empty' || code === 'too-narrow')
     return t('The box is too small to plan a flight');
+  if (code === 'no-orbit-targets')
+    return t('Turn on at least one orbit target');
   if (code === 'self-intersecting')
     return t(
       'That polygon crosses itself. Remove a corner or draw it again.',

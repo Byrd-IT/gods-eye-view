@@ -56,6 +56,48 @@ export const STEEP_SEGMENT_M = 25;
 export const MAX_TAKEOFF_FROM_BOX_M = 1000;
 
 export const PATTERNS = Object.freeze(['grid', 'double', 'orbit']);
+
+/** Tallest tree / obstacle height an orbit assumes unless told otherwise, m. */
+export const DEFAULT_OBSTACLE_HEIGHT_M = 15;
+/** Vertical margin kept above the obstacle while flying over it, metres. */
+export const OBSTACLE_MARGIN_M = 5;
+/** Most orbit targets one plan carries. */
+export const MAX_ORBIT_TARGETS = 12;
+
+/**
+ * The lowest AGL an orbit may fly: obstacle height plus the safety margin,
+ * never below the planner's own minimum and never above the height cap.
+ */
+export function minOrbitAglM(obstacleHeightM) {
+  const h = Number.isFinite(Number(obstacleHeightM))
+    ? Math.max(0, Number(obstacleHeightM))
+    : DEFAULT_OBSTACLE_HEIGHT_M;
+  return Math.min(AGL_CAP_M, Math.max(MIN_AGL_M, h + OBSTACLE_MARGIN_M));
+}
+
+/**
+ * Sightline maths for one orbit ring. The camera sits `ringAglM` up and
+ * `radiusM` out, looking at the TOP of the target (`targetHeightM`). A tree
+ * of `obstacleHeightM` at ground distance d from the target blocks that line
+ * when the line is lower than the tree there. The line is at
+ * target + (ring - target) * d / radius, so it clears every tree standing at
+ * least `obstructionRadiusM` from the target; nearer trees are in the way.
+ * `flyoverClearM` is how far the drone passes above the obstacle top.
+ */
+export function orbitClearance({
+  ringAglM,
+  radiusM,
+  targetHeightM,
+  obstacleHeightM,
+}) {
+  const rise = Math.max(1e-6, ringAglM - targetHeightM);
+  const need = Math.max(0, obstacleHeightM - targetHeightM);
+  return {
+    flyoverClearM: round(ringAglM - obstacleHeightM, 1),
+    obstructionRadiusM: round(Math.min(radiusM, (radiusM * need) / rise), 1),
+    clearsFlyover: ringAglM >= obstacleHeightM + OBSTACLE_MARGIN_M - 1e-9,
+  };
+}
 export const PHOTO_MODES = Object.freeze(['waypoint', 'interval']);
 
 export const DEFAULT_OPTIONS = Object.freeze({
@@ -74,6 +116,8 @@ export const DEFAULT_OPTIONS = Object.freeze({
   orbitRadiusM: null,
   orbitHeightsM: null,
   orbitTargetHeightM: 3,
+  obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
+  orbitTargets: null,
   takeoff: null,
 });
 
@@ -123,6 +167,34 @@ export function spacing(fp, frontOverlap, sideOverlap) {
     lineM: fp.acrossM * (1 - sideOverlap / 100),
     photoM: fp.alongM * (1 - frontOverlap / 100),
   };
+}
+
+/**
+ * Keep the orbit targets that have a real position. A target is
+ * `{ lon, lat, id?, label?, active?, heightM? }`; `active: false` keeps it in
+ * the list but out of the flight.
+ */
+export function normalizeOrbitTargets(raw) {
+  if (!Array.isArray(raw)) return null;
+  const out = [];
+  for (const t of raw) {
+    const lon = Number(t?.lon);
+    const lat = Number(t?.lat);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+    if (Math.abs(lon) > 180 || Math.abs(lat) > 90) continue;
+    const h = Number(t.heightM);
+    out.push({
+      id: typeof t.id === 'string' && t.id ? t.id : `target-${out.length + 1}`,
+      lon,
+      lat,
+      label: typeof t.label === 'string' ? t.label : '',
+      source: typeof t.source === 'string' ? t.source : 'custom',
+      active: t.active !== false,
+      heightM: Number.isFinite(h) ? clamp(h, 0, 100) : null,
+    });
+    if (out.length >= MAX_ORBIT_TARGETS) break;
+  }
+  return out;
 }
 
 /**
@@ -183,6 +255,12 @@ export function normalizeOptions(raw = {}, box = null) {
     o.direction = Number.isFinite(deg) ? ((deg % 180) + 180) % 180 : 'auto';
   }
   o.orbitTargetHeightM = clamp(num(o.orbitTargetHeightM, 3), 0, 100);
+  o.obstacleHeightM = clamp(
+    num(o.obstacleHeightM, DEFAULT_OBSTACLE_HEIGHT_M),
+    0,
+    AGL_CAP_M - OBSTACLE_MARGIN_M,
+  );
+  o.orbitTargets = normalizeOrbitTargets(o.orbitTargets);
   if (box) {
     const m = metersPerDegree((box.south + box.north) / 2);
     const side = Math.max(
@@ -197,9 +275,22 @@ export function normalizeOptions(raw = {}, box = null) {
   const heights = Array.isArray(o.orbitHeightsM)
     ? o.orbitHeightsM.map(Number).filter(Number.isFinite)
     : [];
-  const rings = (heights.length ? heights : [o.aglM / 2, o.aglM])
+  // Every ring flies at least obstacle + margin above ground, so the drone
+  // passes over the trees; a ring asked for lower is raised and says so.
+  const floorAgl = minOrbitAglM(o.obstacleHeightM);
+  const requestedRings = (heights.length ? heights : [o.aglM / 2, o.aglM])
     .map((h) => clamp(h, MIN_AGL_M, AGL_CAP_M))
     .slice(0, 6);
+  const rings = requestedRings.map((h) => Math.max(h, floorAgl));
+  if (rings.some((h, i) => h !== requestedRings[i])) {
+    notes.push({
+      code: 'orbit-raised-for-obstacles',
+      params: {
+        minAglM: Math.round(floorAgl),
+        obstacleHeightM: Math.round(o.obstacleHeightM),
+      },
+    });
+  }
   o.orbitHeightsM = rings;
   return { options: o, preset, notes };
 }
@@ -378,63 +469,166 @@ export function planFlight(box, rawOptions = {}) {
   let photoSpacingM;
   let passCount = 0;
 
+  let orbitInfo = null;
   if (options.pattern === 'orbit') {
-    const target = options.orbitTargetHeightM;
+    // No target list: one orbit on the centre of the box, as before.
+    const active = (options.orbitTargets ?? []).filter((t) => t.active);
+    const stops = options.orbitTargets?.length
+      ? active
+      : [{ id: 'centre', ...center, heightM: null, label: '' }];
+    if (!stops.length) {
+      return {
+        error: 'no-orbit-targets',
+        message: 'Turn on at least one orbit target',
+      };
+    }
+    const radius = options.orbitRadiusM;
+    const obstacle = options.obstacleHeightM;
+    const floorAgl = minOrbitAglM(obstacle);
+    // Between targets the drone climbs to this and crosses at it, so it
+    // always passes over the trees at obstacle + margin or higher.
+    const transitAgl = Math.max(floorAgl, ...options.orbitHeightsM);
+    const toTakeoff = frame.toXY(takeoff.lon, takeoff.lat);
     let tooLarge = false;
     let gsdMin = Infinity;
     let arcMax = Infinity;
-    options.orbitHeightsM.forEach((ringAgl, ringIndex) => {
-      const radius = options.orbitRadiusM;
-      const dz = Math.max(1, ringAgl - target);
-      const pitch = -clamp(toDeg(Math.atan2(dz, radius)), 5, 89);
-      const range = Math.hypot(radius, dz);
-      const acrossM = (range * preset.sensorWidthMm) / preset.focalMm;
-      const arcM = acrossM * (1 - options.frontOverlap / 100);
-      const gsd =
-        (range * (preset.sensorWidthMm / preset.imageWidthPx) * 100) /
-        preset.focalMm;
-      gsdMin = Math.min(gsdMin, gsd);
-      arcMax = Math.min(arcMax, arcM);
-      const n = Math.max(12, Math.ceil((2 * Math.PI * radius) / arcM));
-      const toTakeoff = frame.toXY(takeoff.lon, takeoff.lat);
-      const startAngle = Math.atan2(toTakeoff.y, toTakeoff.x);
-      const sign = ringIndex % 2 === 0 ? 1 : -1;
-      const points = [];
-      for (let k = 0; k < n; k += 1) {
-        const a = startAngle + sign * ((2 * Math.PI * k) / n);
-        points.push({ x: radius * Math.cos(a), y: radius * Math.sin(a) });
-      }
-      if (waypointCount + n > MAX_WAYPOINTS_TOTAL) {
-        tooLarge = true;
-        return;
-      }
-      const waypoints = points.map((p) => {
-        const heading = wrapHeading(toDeg(Math.atan2(-p.x, -p.y)));
-        return toWaypoint(p, {
+    const ringInfo = [];
+    let prevEnd = null;
+    const targetInfo = [];
+    for (const stop of stops) {
+      if (tooLarge) break;
+      const targetH = stop.heightM ?? options.orbitTargetHeightM;
+      const c = frame.toXY(stop.lon, stop.lat);
+      const from = prevEnd ? prevEnd.p : toTakeoff;
+      const startAngle = Math.atan2(from.y - c.y, from.x - c.x);
+      const firstLeg = legs.length;
+      options.orbitHeightsM.forEach((ringAgl, ringIndex) => {
+        if (tooLarge) return;
+        const dz = Math.max(1, ringAgl - targetH);
+        const pitch = -clamp(toDeg(Math.atan2(dz, radius)), 5, 89);
+        const range = Math.hypot(radius, dz);
+        const acrossM = (range * preset.sensorWidthMm) / preset.focalMm;
+        const arcM = acrossM * (1 - options.frontOverlap / 100);
+        const gsd =
+          (range * (preset.sensorWidthMm / preset.imageWidthPx) * 100) /
+          preset.focalMm;
+        gsdMin = Math.min(gsdMin, gsd);
+        arcMax = Math.min(arcMax, arcM);
+        const n = Math.max(12, Math.ceil((2 * Math.PI * radius) / arcM));
+        const sign = ringIndex % 2 === 0 ? 1 : -1;
+        const points = [];
+        for (let k = 0; k < n; k += 1) {
+          const a = startAngle + sign * ((2 * Math.PI * k) / n);
+          points.push({
+            x: c.x + radius * Math.cos(a),
+            y: c.y + radius * Math.sin(a),
+          });
+        }
+        if (waypointCount + n > MAX_WAYPOINTS_TOTAL) {
+          tooLarge = true;
+          return;
+        }
+        if (ringIndex === 0 && prevEnd) {
+          // Climb where the last orbit ended, cross at transit height and
+          // come down on the first point of this one.
+          const hop = [];
+          if (prevEnd.aglM < transitAgl - 0.5) {
+            hop.push(
+              toWaypoint(prevEnd.p, {
+                aglM: transitAgl,
+                pitchDeg: prevEnd.pitchDeg,
+                headingDeg: prevEnd.headingDeg,
+                photo: false,
+              }),
+            );
+          }
+          hop.push(
+            toWaypoint(points[0], {
+              aglM: transitAgl,
+              pitchDeg: round(pitch, 1),
+              headingDeg: round(
+                wrapHeading(
+                  toDeg(Math.atan2(c.x - points[0].x, c.y - points[0].y)),
+                ),
+                1,
+              ),
+              photo: false,
+            }),
+          );
+          const hopLen = Math.hypot(
+            points[0].x - prevEnd.p.x,
+            points[0].y - prevEnd.p.y,
+          );
+          addLeg({
+            id: legs.length,
+            passId: 0,
+            kind: 'transit',
+            pitchDeg: round(pitch, 1),
+            photoMode: 'waypoint',
+            waypoints: hop,
+            lengthM: hopLen,
+            photoCount: 0,
+          });
+        }
+        const waypoints = points.map((p) => {
+          const heading = wrapHeading(toDeg(Math.atan2(c.x - p.x, c.y - p.y)));
+          return toWaypoint(p, {
+            aglM: ringAgl,
+            pitchDeg: round(pitch, 1),
+            headingDeg: round(heading, 1),
+            photo: true,
+          });
+        });
+        let length = 0;
+        for (let k = 1; k < points.length; k += 1) {
+          length += Math.hypot(
+            points[k].x - points[k - 1].x,
+            points[k].y - points[k - 1].y,
+          );
+        }
+        addLeg({
+          id: legs.length,
+          passId: 0,
+          kind: 'orbit',
+          targetId: stop.id,
+          pitchDeg: round(pitch, 1),
+          photoMode: 'waypoint',
+          waypoints,
+          lengthM: length,
+          photoCount: waypoints.length,
+        });
+        const last = points[points.length - 1];
+        prevEnd = {
+          p: last,
           aglM: ringAgl,
           pitchDeg: round(pitch, 1),
-          headingDeg: round(heading, 1),
-          photo: true,
-        });
+          headingDeg: round(
+            wrapHeading(toDeg(Math.atan2(c.x - last.x, c.y - last.y))),
+            1,
+          ),
+        };
+        if (stop === stops[0]) {
+          ringInfo.push({
+            aglM: ringAgl,
+            pitchDeg: round(pitch, 1),
+            ...orbitClearance({
+              ringAglM: ringAgl,
+              radiusM: radius,
+              targetHeightM: targetH,
+              obstacleHeightM: obstacle,
+            }),
+          });
+        }
       });
-      let length = 0;
-      for (let k = 1; k < points.length; k += 1) {
-        length += Math.hypot(
-          points[k].x - points[k - 1].x,
-          points[k].y - points[k - 1].y,
-        );
-      }
-      addLeg({
-        id: legs.length,
-        passId: 0,
-        kind: 'orbit',
-        pitchDeg: round(pitch, 1),
-        photoMode: 'waypoint',
-        waypoints,
-        lengthM: length,
-        photoCount: waypoints.length,
+      targetInfo.push({
+        id: stop.id,
+        lon: stop.lon,
+        lat: stop.lat,
+        label: stop.label ?? '',
+        heightM: targetH,
+        firstLeg,
       });
-    });
+    }
     if (tooLarge) {
       return { error: 'too-large', message: 'Plan needs too many waypoints' };
     }
@@ -445,6 +639,14 @@ export function planFlight(box, rawOptions = {}) {
     };
     photoSpacingM = Number.isFinite(arcMax) ? arcMax : 0;
     passCount = 1;
+    orbitInfo = {
+      obstacleHeightM: obstacle,
+      marginM: OBSTACLE_MARGIN_M,
+      minAglM: floorAgl,
+      transitAglM: transitAgl,
+      rings: ringInfo,
+      targets: targetInfo,
+    };
   } else {
     const passes =
       options.pattern === 'double'
@@ -577,6 +779,7 @@ export function planFlight(box, rawOptions = {}) {
     legs,
     waypointCount,
     footprint: fpInfo,
+    orbit: orbitInfo,
     spacing: spacingInfo,
     passCount,
     speedMs,

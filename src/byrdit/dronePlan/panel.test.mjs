@@ -110,14 +110,19 @@ const all = (node, pred, out = []) => {
 
 function makeDoc() {
   const panel = new El('div');
-  panel.hidden = true;
   panel.classList.add('collapsed');
   const body = new El('div');
+  // The card's own collapse button is the launcher; the rail's chrome flips
+  // `collapsed` when it is pressed, which this stub does the same way.
   const entry = new El('button');
+  entry.addEventListener('click', () => {
+    panel.classList.toggle('collapsed');
+  });
+  panel.querySelector = (sel) =>
+    sel === '.panel-collapse-btn' ? entry : null;
   const byId = new Map([
     ['drone-plan-panel', panel],
     ['drone-plan-panel-body', body],
-    ['drone-plan-button', entry],
   ]);
   return {
     panel,
@@ -296,7 +301,8 @@ test('a plan overtaken by a newer one does not bump the nonce', async () => {
 test('a drawn box becomes stats, a path on the globe and downloadable missions', async () => {
   const w = setup();
   assert.ok(w.handle);
-  assert.equal(w.panel.hidden, true, 'the card starts hidden');
+  assert.equal(w.panel.hidden, false, 'the card is always on the rail');
+  assert.equal(w.panel.classList.contains('collapsed'), true, 'and starts collapsed');
   assert.equal(w.handle.setBox(boxM(400, 200)), true);
   await w.handle.replan();
   const stats = w.stats();
@@ -501,14 +507,16 @@ test('picking a takeoff point says so when another tool holds the pointer', asyn
 
 test('close and destroy return the pointer, the globe and the entry state', async () => {
   const w = setup();
-  w.entry.click();
-  assert.equal(w.panel.hidden, false);
-  assert.equal(w.entry.getAttribute('aria-pressed'), 'true');
+  w.entry.click(); // expand the rail card
+  await Promise.resolve();
+  assert.equal(w.panel.classList.contains('collapsed'), false);
+  assert.equal(w.handle.isOpen(), true);
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
-  w.entry.click();
-  assert.equal(w.panel.hidden, true);
-  assert.equal(w.entry.getAttribute('aria-pressed'), 'false');
+  w.handle.close();
+  assert.equal(w.panel.classList.contains('collapsed'), true);
+  assert.equal(w.panel.hidden, false, 'a closed card stays on the rail');
+  assert.equal(w.handle.isOpen(), false);
   assert.equal(w.handle.getResult(), null);
   const source = w.viewer.dataSources.sources.find(
     (s) => s.name === 'gev-drone-plan',
@@ -889,5 +897,129 @@ test('close drops the all-passes plan so voice cannot download it', async () => 
   assert.equal(w.handle.suiteAllowed(), false);
   const result = await voice.download({ which: 'suite' });
   assert.equal(result.ok, false);
+  w.handle.destroy();
+});
+
+// ------------------------------------------------- orbit targets + clearance --
+const targetIds = (w) =>
+  (w.handle.getState().options.orbitTargets ?? []).map((x) => x.id);
+
+test('orbit: targets are recommended from the area and listed with a remove button', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  await w.handle.replan();
+  const list = w.handle.getState().options.orbitTargets;
+  assert.equal(list.length, 1);
+  assert.equal(list[0].source, 'area', 'no footprints: the area centre');
+  assert.equal(w.buttons('data-remove-target').length, 1);
+  assert.equal(w.handle.getResult().plan.orbit.targets.length, 1);
+  assert.ok(w.control('Tree / obstacle height'));
+  assert.equal(w.handle.getState().options.obstacleHeightM, 15);
+  w.handle.destroy();
+});
+
+test('orbit: building footprints from the provider become the recommended targets', async () => {
+  resetPointerOwnership();
+  const dom = makeDoc();
+  const world = makeWorld({ sample: (c) => flat(c) });
+  const m = metersPerDegree(30.27);
+  const sq = (dx, dy, s) =>
+    [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => ({
+      lon: -97.77 + (dx + (a * s) / 2) / m.lon,
+      lat: 30.27 + (dy + (b * s) / 2) / m.lat,
+    }));
+  const handle = initDronePlan({
+    viewer: world.viewer,
+    cesium: world.cesium,
+    document: dom.doc,
+    downloadFile: () => {},
+    getBuildingFootprints: async () => [
+      { ring: sq(-50, 0, 20), label: 'House' },
+      { ring: sq(60, 20, 40), label: 'Barn' },
+    ],
+  });
+  handle.setBox(boxM(300, 200));
+  handle.applyOptions({ pattern: 'orbit' });
+  await handle.replan();
+  await new Promise((r) => setTimeout(r, 5));
+  await handle.replan();
+  assert.deepEqual(
+    handle.getState().options.orbitTargets.map((x) => x.label),
+    ['Barn', 'House'],
+  );
+  handle.destroy();
+});
+
+test('orbit: map clicks add custom targets inside the area only; targets can be removed', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  await w.handle.replan();
+  const m = metersPerDegree(30.27);
+  const inside = { lon: -97.77 + 50 / m.lon, lat: 30.27 };
+  const outside = { lon: -97.77 + 900 / m.lon, lat: 30.27 };
+  assert.equal(w.handle.addOrbitTarget(outside), false);
+  assert.equal(w.handle.addOrbitTarget(inside), true);
+  await w.handle.replan();
+  assert.equal(targetIds(w).length, 2);
+  assert.equal(w.handle.getResult().plan.orbit.targets.length, 2);
+  assert.ok(
+    w.handle.getResult().plan.legs.some((l) => l.kind === 'transit'),
+    'the two targets are joined by a transit above the trees',
+  );
+  // The list is now the user's: a replan does not rebuild it.
+  await w.handle.replan();
+  assert.equal(targetIds(w).length, 2);
+  const custom = w.handle
+    .getState()
+    .options.orbitTargets.find((x) => x.source === 'custom');
+  assert.equal(w.handle.setOrbitTargetActive(custom.id, false), true);
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.orbit.targets.length, 1);
+  assert.equal(w.handle.removeOrbitTarget(custom.id), true);
+  assert.equal(w.handle.removeOrbitTarget('nope'), false);
+  assert.equal(targetIds(w).length, 1);
+  w.handle.recommendTargets();
+  assert.equal(
+    w.handle.getState().options.orbitTargets[0].source,
+    'area',
+    'RECOMMEND drops the hand edits',
+  );
+  w.handle.destroy();
+});
+
+test('orbit: removing every target falls back to the area centre', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  await w.handle.replan();
+  const only = targetIds(w)[0];
+  w.handle.removeOrbitTarget(only);
+  await w.handle.replan();
+  // An empty touched list falls back to the area centre rather than failing.
+  assert.equal(w.handle.getResult().plan.orbit.targets.length, 1);
+  w.handle.destroy();
+});
+
+test('orbit: obstacle height raises the orbit and shows the fly-over height', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  w.handle.applyOptions({ obstacleHeightM: 45, orbitHeightsM: [20, 30] });
+  await w.handle.replan();
+  const plan = w.handle.getResult().plan;
+  assert.equal(plan.orbit.minAglM, 50);
+  assert.ok(
+    plan.legs
+      .flatMap((l) => l.waypoints)
+      .every((wp) => wp.aglM >= 50),
+  );
+  assert.ok(
+    w.handle.getResult().warnings.some(
+      (x) => x.code === 'orbit-raised-for-obstacles',
+    ),
+  );
+  assert.ok(w.stats()['Fly-over height']);
   w.handle.destroy();
 });

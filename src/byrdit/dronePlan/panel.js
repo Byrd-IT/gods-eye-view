@@ -20,10 +20,17 @@ import { initPointTool } from './pointTool.js';
 import { createDronePlanPreview } from './preview.js';
 import { sampleGround } from './terrain.js';
 import {
+  recommendOrbitTargets,
+  targetInsideAreas,
+} from './orbitTargets.js';
+import {
   AGL_CAP_M,
+  DEFAULT_OBSTACLE_HEIGHT_M,
   FT_PER_M,
+  MAX_ORBIT_TARGETS,
   MAX_TAKEOFF_FROM_BOX_M,
   MIN_AGL_M,
+  OBSTACLE_MARGIN_M,
   takeoffDistanceFromBoxM,
 } from './planner.js';
 import {
@@ -50,7 +57,9 @@ import {
 
 export const PANEL_ID = 'drone-plan-panel';
 export const BODY_ID = 'drone-plan-panel-body';
-export const ENTRY_ID = 'drone-plan-button';
+/** The card's own header button is the launcher: there is no DISPLAY entry. */
+export const ENTRY_SELECTOR = '.panel-collapse-btn';
+export const TARGET_POINTER_OWNER = 'drone-plan-orbit-target';
 const BOX_OWNER = 'drone-plan-box';
 const REPLAN_DELAY_MS = 160;
 const MAX_TERRAIN_CACHE = 30000;
@@ -76,11 +85,12 @@ export function initDronePlan({
   cesium = Cesium,
   document: doc = globalThis.document,
   downloadFile = browserDownload,
+  getBuildingFootprints = null,
 } = {}) {
   const panel = doc?.getElementById?.(PANEL_ID);
   const body = doc?.getElementById?.(BODY_ID);
   if (!viewer?.scene || !panel || !body) return null;
-  const entry = doc.getElementById(ENTRY_ID);
+  const entry = panel.querySelector?.(ENTRY_SELECTOR) ?? null;
 
   const state = {
     box: null,
@@ -102,7 +112,13 @@ export function initDronePlan({
       batteryMin: 25,
       orbitRadiusM: null,
       orbitHeightsM: null,
+      orbitTargetHeightM: 3,
+      obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
+      orbitTargets: [],
     },
+    // True once the person adds, removes or switches a target: from then on
+    // the list is theirs and is no longer rebuilt from the areas.
+    orbitTargetsTouched: false,
     wpml: { droneEnumValue: null, droneSubEnumValue: null },
     result: null,
     suite: null,
@@ -167,6 +183,24 @@ export function initDronePlan({
     onActive: (active) => {
       ui.takeoffButton.setAttribute('aria-pressed', String(active));
       if (active) status(t('Click the ground where you will take off'), 'info');
+    },
+  });
+
+  const targetTool = initPointTool({
+    viewer,
+    cesium,
+    owner: TARGET_POINTER_OWNER,
+    onPoint: (point) => addOrbitTarget(point),
+    onCancel: (reason) => {
+      if (reason === 'sky')
+        status(t('Click on the ground, not the sky'), 'warn');
+      else if (reason === 'escape') status(t('Target pick cancelled'));
+      else if (reason === 'pointer-busy')
+        status(t('Another tool is using the pointer. Close it first'), 'warn');
+    },
+    onActive: (active) => {
+      ui.targetAdd?.setAttribute('aria-pressed', String(active));
+      if (active) status(t('Click the structure or tree you want to orbit'), 'info');
     },
   });
 
@@ -265,6 +299,146 @@ export function initDronePlan({
   });
 
   // ------------------------------------------------------------- planning --
+  // ------------------------------------------------------ orbit targets --
+  const footprintCache = new Map();
+
+  function areasKey() {
+    return JSON.stringify(
+      state.areas.map((a) => (a.kind === 'polygon' ? a.ring : a.box)),
+    );
+  }
+
+  /**
+   * Untouched targets follow the areas: building footprints when a source
+   * has them, otherwise each area's centre. Touched ones only lose targets
+   * that no longer lie inside an area.
+   */
+  function syncOrbitTargets() {
+    const o = state.options;
+    if (o.pattern !== 'orbit') return;
+    if (!state.areas.length) {
+      o.orbitTargets = [];
+      return;
+    }
+    if (!state.orbitTargetsTouched) {
+      const key = areasKey();
+      o.orbitTargets = recommendOrbitTargets(state.areas, {
+        footprints: footprintCache.get(key) ?? [],
+      });
+      if (getBuildingFootprints && !footprintCache.has(key)) {
+        footprintCache.set(key, []);
+        Promise.resolve()
+          .then(() => getBuildingFootprints(state.areas))
+          .then((found) => {
+            if (destroyed || !Array.isArray(found) || !found.length) return;
+            footprintCache.set(key, found);
+            if (areasKey() === key && !state.orbitTargetsTouched) schedule(0);
+          })
+          .catch(() => {});
+      }
+      return;
+    }
+    o.orbitTargets = (o.orbitTargets ?? []).filter((target) =>
+      targetInsideAreas(state.areas, target.lon, target.lat),
+    );
+  }
+
+  function touchTargets() {
+    state.orbitTargetsTouched = true;
+    state.options.orbitTargets = [...(state.options.orbitTargets ?? [])];
+    return state.options.orbitTargets;
+  }
+
+  function nextTargetId() {
+    const taken = new Set((state.options.orbitTargets ?? []).map((x) => x.id));
+    let n = (state.options.orbitTargets ?? []).length + 1;
+    while (taken.has(`target-${n}`)) n += 1;
+    return `target-${n}`;
+  }
+
+  /** Add a custom orbit target (a map click), inside the survey areas. */
+  function addOrbitTarget(point) {
+    const lon = Number(point?.lon);
+    const lat = Number(point?.lat);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return false;
+    if (!state.areas.length) {
+      status(t('Draw a box on the globe first'), 'warn');
+      return false;
+    }
+    if (!targetInsideAreas(state.areas, lon, lat)) {
+      status(t('Pick a spot inside the survey area'), 'warn');
+      return false;
+    }
+    if (state.options.pattern !== 'orbit') state.options.pattern = 'orbit';
+    syncOrbitTargets();
+    const list = touchTargets();
+    if (list.length >= MAX_ORBIT_TARGETS) {
+      status(
+        t('At most {count} orbit targets', { count: MAX_ORBIT_TARGETS }),
+        'warn',
+      );
+      return false;
+    }
+    list.push({
+      id: nextTargetId(),
+      lon,
+      lat,
+      label: `${t('Target')} ${list.length + 1}`,
+      source: 'custom',
+      active: true,
+      heightM: null,
+    });
+    status('');
+    schedule(0);
+    return true;
+  }
+
+  function removeOrbitTarget(id) {
+    const list = state.options.orbitTargets ?? [];
+    if (!list.some((x) => x.id === id)) return false;
+    touchTargets();
+    state.options.orbitTargets = list.filter((x) => x.id !== id);
+    schedule(0);
+    return true;
+  }
+
+  function setOrbitTargetActive(id, active) {
+    const target = (state.options.orbitTargets ?? []).find((x) => x.id === id);
+    if (!target) return false;
+    touchTargets();
+    state.options.orbitTargets = state.options.orbitTargets.map((x) =>
+      x.id === id ? { ...x, active: active !== false } : x,
+    );
+    schedule(0);
+    return true;
+  }
+
+  /** Rebuild the list from the areas, dropping any hand edits. */
+  function recommendTargets() {
+    state.orbitTargetsTouched = false;
+    state.options.pattern = 'orbit';
+    footprintCache.delete(areasKey());
+    syncOrbitTargets();
+    schedule(0);
+    return state.options.orbitTargets.length;
+  }
+
+  function startTargetPick({ toggle = true } = {}) {
+    if (!state.areas.length) {
+      status(t('Draw a box on the globe first'), 'warn');
+      return false;
+    }
+    boxTool?.cancel('switch');
+    polygonTool?.cancel('switch');
+    takeoffTool?.cancel('switch');
+    if (targetTool?.isActive()) {
+      if (!toggle) return true;
+      targetTool.cancel('cancel');
+      return false;
+    }
+    return Boolean(targetTool?.start());
+  }
+
   function schedule(delay = REPLAN_DELAY_MS) {
     // The plan on screen is out of date from this moment: no file may come
     // from it while the new one is waiting to be built.
@@ -320,6 +494,7 @@ export function initDronePlan({
       return;
     }
     state.ack = false;
+    syncOrbitTargets();
     const options = {
       ...state.options,
       takeoff: state.takeoff,
@@ -540,6 +715,52 @@ export function initDronePlan({
     ({ row: ui.ringsRow } = field(t('Orbit heights (m)'), ui.rings, {
       value: false,
     }));
+    ui.targetHeight = slider(t('Target height'), 0, 60, 1);
+    ({ row: ui.targetHeightRow, out: ui.targetHeightOut } = field(
+      t('Target height'),
+      ui.targetHeight,
+    ));
+    ui.obstacle = slider(t('Tree / obstacle height'), 0, 60, 1);
+    ({ row: ui.obstacleRow, out: ui.obstacleOut } = field(
+      t('Tree / obstacle height'),
+      ui.obstacle,
+    ));
+    ui.obstacleNote = el(doc, 'p', body, {
+      cls: 'gev-dp-note gev-dp-obstacle-note',
+    });
+    ui.targetsBox = el(doc, 'div', body, { cls: 'gev-dp-targets' });
+    const targetBar = el(doc, 'div', ui.targetsBox, {
+      cls: 'gev-dp-row gev-dp-target-bar',
+    });
+    el(doc, 'span', targetBar, {
+      cls: 'gev-dp-label',
+      text: t('Orbit targets'),
+    });
+    const targetWrap = el(doc, 'span', targetBar, { cls: 'gev-dp-control' });
+    ui.targetRecommend = el(doc, 'button', targetWrap, {
+      cls: 'data-toggle-chip',
+      text: t('RECOMMEND'),
+      attrs: {
+        type: 'button',
+        'data-action': 'recommend-targets',
+        title: t(
+          'Pick the biggest buildings in the survey area, or the area centre when none are known',
+        ),
+      },
+    });
+    ui.targetAdd = el(doc, 'button', targetWrap, {
+      cls: 'data-toggle-chip',
+      text: t('ADD'),
+      attrs: {
+        type: 'button',
+        'aria-pressed': 'false',
+        'data-action': 'add-target',
+        title: t('Click the globe to add an orbit target'),
+      },
+    });
+    ui.targetList = el(doc, 'div', ui.targetsBox, {
+      cls: 'gev-dp-target-list',
+    });
 
     ui.photoMode = select(
       [
@@ -685,6 +906,16 @@ export function initDronePlan({
     });
     onInput(ui.tilt, () => (o.tiltPitchDeg = Number(ui.tilt.value)));
     onInput(ui.radius, () => (o.orbitRadiusM = Number(ui.radius.value)));
+    onInput(
+      ui.targetHeight,
+      () => (o.orbitTargetHeightM = Number(ui.targetHeight.value)),
+    );
+    onInput(
+      ui.obstacle,
+      () => (o.obstacleHeightM = Number(ui.obstacle.value)),
+    );
+    ui.targetRecommend.addEventListener('click', () => recommendTargets());
+    ui.targetAdd.addEventListener('click', () => startTargetPick());
     ui.rings.addEventListener('change', () => {
       const list = ui.rings.value
         .split(/[\s,;]+/)
@@ -816,6 +1047,10 @@ export function initDronePlan({
     ui.radius.value = String(radius);
     ui.radiusOut.textContent = `${num(radius)} m`;
     ui.rings.value = (o.orbitHeightsM ?? []).join(', ');
+    ui.targetHeight.value = String(o.orbitTargetHeightM);
+    ui.targetHeightOut.textContent = `${num(o.orbitTargetHeightM)} m`;
+    ui.obstacle.value = String(o.obstacleHeightM);
+    ui.obstacleOut.textContent = `${num(o.obstacleHeightM)} m`;
     ui.photoMode.value = o.photoMode;
     ui.speed.value = String(o.speedMs);
     ui.speedOut.textContent = `${num(o.speedMs, 1)} m/s`;
@@ -831,6 +1066,19 @@ export function initDronePlan({
     ui.tiltRow.hidden = o.pattern !== 'double';
     ui.radiusRow.hidden = !orbit;
     ui.ringsRow.hidden = !orbit;
+    ui.targetHeightRow.hidden = !orbit;
+    ui.obstacleRow.hidden = !orbit;
+    ui.obstacleNote.hidden = !orbit;
+    ui.targetsBox.hidden = !orbit;
+    if (orbit) {
+      ui.obstacleNote.textContent = t(
+        'Orbits fly at least {min} m above ground: tree height plus {margin} m, so the drone clears the trees.',
+        {
+          min: num(Math.max(MIN_AGL_M, o.obstacleHeightM + OBSTACLE_MARGIN_M)),
+          margin: OBSTACLE_MARGIN_M,
+        },
+      );
+    }
     const t0 = state.result?.plan?.takeoff ?? state.takeoff;
     const where = state.takeoff ? '' : ` · ${t('centre')}`;
     ui.takeoffText.textContent = t0
@@ -840,7 +1088,7 @@ export function initDronePlan({
     ui.jobs.value = state.jobGrouping;
     const jobNote = orbit
       ? t(
-          'Orbit stays on the centre of each area. It is not merged with other areas.',
+          'Orbit flies every active target in one mission, climbing above the trees between targets.',
         )
       : state.jobGrouping === 'whole'
         ? t(
@@ -851,6 +1099,52 @@ export function initDronePlan({
           );
     ui.jobNote.textContent = jobNote;
     renderAreas();
+    renderTargets();
+  }
+
+  function renderTargets() {
+    ui.targetList.replaceChildren();
+    if (state.options.pattern !== 'orbit') return;
+    const list = state.options.orbitTargets ?? [];
+    if (!list.length) {
+      el(doc, 'p', ui.targetList, {
+        cls: 'gev-dp-note',
+        text: state.areas.length
+          ? t('No orbit targets. RECOMMEND picks some, ADD places one.')
+          : t('Draw a box on the globe first'),
+      });
+      return;
+    }
+    for (const target of list) {
+      const row = el(doc, 'div', ui.targetList, {
+        cls: 'gev-dp-area gev-dp-target',
+        attrs: { 'data-target': target.id },
+      });
+      const on = el(doc, 'input', row, {
+        attrs: {
+          type: 'checkbox',
+          'aria-label': t('Orbit this target'),
+          'data-toggle-target': target.id,
+        },
+      });
+      on.checked = target.active !== false;
+      on.addEventListener('change', () => {
+        setOrbitTargetActive(target.id, on.checked);
+      });
+      el(doc, 'span', row, {
+        cls: 'gev-dp-area-kind',
+        text: target.label || target.id,
+        attrs: { title: `${num(target.lat, 5)}, ${num(target.lon, 5)}` },
+      });
+      const remove = el(doc, 'button', row, {
+        cls: 'data-toggle-chip',
+        text: t('Remove'),
+        attrs: { type: 'button', 'data-remove-target': target.id },
+      });
+      remove.addEventListener('click', () => {
+        removeOrbitTarget(target.id);
+      });
+    }
   }
 
   function renderAreas() {
@@ -938,6 +1232,21 @@ export function initDronePlan({
           }),
         );
       }
+    }
+    if (plan.orbit) {
+      const worst = Math.max(
+        0,
+        ...plan.orbit.rings.map((r) => r.obstructionRadiusM),
+      );
+      stat(
+        t('Fly-over height'),
+        t('{min} m min over {obstacle} m trees', {
+          min: num(plan.orbit.minAglM),
+          obstacle: num(plan.orbit.obstacleHeightM),
+        }),
+      );
+      stat(t('Tree-free zone'), `${num(worst)} m ${t('around each target')}`);
+      stat(t('Orbit targets'), num(plan.orbit.targets.length));
     }
     stat(t('Waypoints'), missions.map((m) => num(m.waypointCount)).join(' / '));
     stat(t('Speed'), `${num(plan.speedMs, 1)} m/s`);
@@ -1276,8 +1585,8 @@ export function initDronePlan({
 
   // --------------------------------------------------------- open/close --
   function setPanelOpen(open) {
-    panel.hidden = !open;
     if (!open) return;
+    panel.hidden = false;
     if (panel.classList.contains('collapsed')) {
       panel.querySelector('.panel-collapse-btn')?.click();
       if (panel.classList.contains('collapsed'))
@@ -1321,7 +1630,6 @@ export function initDronePlan({
   function open({ draw = true } = {}) {
     state.open = true;
     setPanelOpen(true);
-    entry?.setAttribute('aria-pressed', 'true');
     render();
     if (draw && !state.box) drawBox();
   }
@@ -1333,10 +1641,14 @@ export function initDronePlan({
     boxTool?.cancel('close');
     polygonTool?.cancel('close');
     takeoffTool?.cancel('close');
+    targetTool?.cancel('close');
     state.box = null;
     state.areas = [];
     state.nextArea = 1;
     state.takeoff = null;
+    state.options.orbitTargets = [];
+    state.orbitTargetsTouched = false;
+    footprintCache.clear();
     state.result = null;
     state.error = null;
     state.busy = false;
@@ -1347,17 +1659,43 @@ export function initDronePlan({
     state.ack = false;
     terrainCache.clear();
     preview.clear();
-    panel.hidden = true;
-    entry?.setAttribute('aria-pressed', 'false');
+    // The card stays on the rail as a collapsed launcher.
+    if (!panel.classList.contains('collapsed')) {
+      // Through the rail's own button so its arrow and aria state follow.
+      entry?.click?.();
+      panel.classList.add('collapsed');
+    }
     status('');
   }
 
-  const onEntry = () => (state.open ? close() : open());
+  // The rail's own collapse button is the launcher: expanding the card opens
+  // the planner (and starts a box), collapsing it only puts the tools down.
+  // The plan is kept so a collapse forced by the rail layout loses nothing.
+  const syncOpenToCard = () => {
+    if (destroyed) return;
+    const expanded = !panel.classList.contains('collapsed');
+    if (expanded && !state.open) {
+      state.open = true;
+      render();
+      if (!state.box) drawBox();
+    } else if (!expanded && state.open) {
+      state.open = false;
+      boxTool?.cancel('close');
+      polygonTool?.cancel('close');
+      takeoffTool?.cancel('close');
+      targetTool?.cancel('close');
+    }
+  };
+  const onEntry = () => queueMicrotask(syncOpenToCard);
   entry?.addEventListener('click', onEntry);
+  const cardObserver =
+    typeof globalThis.MutationObserver === 'function'
+      ? new globalThis.MutationObserver(syncOpenToCard)
+      : null;
+  cardObserver?.observe(panel, { attributes: true, attributeFilter: ['class'] });
 
   build();
   syncControls();
-  panel.hidden = true;
 
   function useRecommended(mode, { planNow = false } = {}) {
     const o = state.options;
@@ -1434,6 +1772,14 @@ export function initDronePlan({
     }
     if (Object.hasOwn(patch, 'orbitHeightsM')) {
       o.orbitHeightsM = patch.orbitHeightsM;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'obstacleHeightM')) {
+      o.obstacleHeightM = patch.obstacleHeightM;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'orbitTargetHeightM')) {
+      o.orbitTargetHeightM = patch.orbitTargetHeightM;
       plan = true;
     }
     if (Object.hasOwn(patch, 'speedMs')) {
@@ -1535,6 +1881,11 @@ export function initDronePlan({
     applyOptions,
     clearTakeoff,
     startTakeoffPick,
+    startTargetPick,
+    addOrbitTarget,
+    removeOrbitTarget,
+    setOrbitTargetActive,
+    recommendTargets,
     removeArea,
     downloadsAllowed,
     suiteAllowed,
@@ -1543,13 +1894,13 @@ export function initDronePlan({
       destroyed = true;
       clearTimeout(timer);
       entry?.removeEventListener('click', onEntry);
+      cardObserver?.disconnect();
       boxTool?.destroy();
       polygonTool?.destroy();
       takeoffTool?.destroy();
+      targetTool?.destroy();
       preview.destroy();
-      panel.hidden = true;
       body.replaceChildren();
-      entry?.setAttribute('aria-pressed', 'false');
     },
   };
   return handle;

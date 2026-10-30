@@ -6,22 +6,34 @@ const read = (file) =>
   readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
 const count = (text, needle) => text.split(needle).length - 1;
 
-test('the Drone Flight Plan card and its DISPLAY entry exist in the templates', () => {
+test('the Drone Flight Plan card is a collapsed top-level rail launcher', () => {
   const context = read('src/ui/templates/context.html');
+  const tag = context.match(/<div id="drone-plan-panel"[^>]*>/)?.[0] ?? '';
+  assert.match(tag, /data-panel-id="drone-plan-panel"/);
+  assert.match(tag, /class="panel-collapsible collapsed"/);
+  assert.doesNotMatch(tag, /\bhidden\b/, 'always present on the rail');
+  assert.match(context, /id="drone-plan-panel-body"/);
+  const rail = context.indexOf('<aside id="right-context-rail">');
+  assert.ok(rail >= 0 && rail < context.indexOf('id="drone-plan-panel"'));
+  assert.ok(
+    context.indexOf('id="time-travel-panel"') <
+      context.indexOf('id="drone-plan-panel"') &&
+      context.indexOf('id="drone-plan-panel"') <
+        context.indexOf('id="global-context-panel"'),
+    'the card sits between TIME TRAVEL and CONTEXT in the rail',
+  );
   assert.match(
     context,
-    /id="drone-plan-panel"[^>]*data-panel-id="drone-plan-panel"[^>]*hidden/,
+    /data-collapse-target="drone-plan-panel"/,
+    'it collapses like the other cards',
   );
-  assert.match(context, /id="drone-plan-panel-body"/);
-  assert.ok(
-    context.indexOf('id="drone-plan-panel"') <
-      context.indexOf('id="global-context-panel"'),
-    'the card sits ahead of CONTEXT in the rail',
-  );
-  assert.match(
-    read('src/ui/templates/display-controls.html'),
-    /id="drone-plan-button"/,
-  );
+});
+
+test('DISPLAY no longer carries a Drone Flight Plan entry', () => {
+  const display = read('src/ui/templates/display-controls.html');
+  assert.doesNotMatch(display, /drone-plan-button/);
+  assert.doesNotMatch(display, /drone-plan-group/);
+  assert.doesNotMatch(display, /Drone Flight Plan/);
 });
 
 test('panel chrome and the rail layout know the card', () => {

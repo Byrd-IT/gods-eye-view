@@ -4,11 +4,15 @@ import {
   AGL_CAP_FT,
   AGL_CAP_M,
   FT_PER_M,
+  MAX_ORBIT_TARGETS,
   MAX_WAYPOINTS_PER_MISSION,
   assembleMissions,
   estimateMission,
   footprint,
+  minOrbitAglM,
   normalizeOptions,
+  normalizeOrbitTargets,
+  orbitClearance,
   planFlight,
   spacing,
   takeoffDistanceFromBoxM,
@@ -690,4 +694,133 @@ test('interval mode: a cut leg is not counted twice at the cut', () => {
     continued.length >= 1,
     'later pieces are marked as continuing a leg',
   );
+});
+
+// ------------------------------------------------ obstacle / tree clearance --
+test('orbit: rings are raised to obstacle + 5 m and the plan says so', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 100, 100);
+  const plan = planFlight(box, {
+    pattern: 'orbit',
+    orbitRadiusM: 40,
+    orbitHeightsM: [12, 20],
+    obstacleHeightM: 25,
+  });
+  assert.equal(plan.error, undefined);
+  const aglOf = (leg) => new Set(leg.waypoints.map((w) => w.aglM));
+  assert.deepEqual([...aglOf(plan.legs[0])], [30]);
+  assert.deepEqual([...aglOf(plan.legs[1])], [30]);
+  assert.equal(plan.orbit.minAglM, 30);
+  assert.ok(plan.notes.some((n) => n.code === 'orbit-raised-for-obstacles'));
+});
+
+test('orbit: the default obstacle is 15 m, so no ring flies under 20 m', () => {
+  assert.equal(normalizeOptions({}).options.obstacleHeightM, 15);
+  const { options } = normalizeOptions({
+    pattern: 'orbit',
+    orbitHeightsM: [10, 60],
+  });
+  assert.deepEqual(options.orbitHeightsM, [20, 60]);
+  assert.equal(minOrbitAglM(15), 20);
+  assert.equal(minOrbitAglM(0), 10);
+  assert.equal(minOrbitAglM(500), AGL_CAP_M);
+});
+
+test('orbit: rings already above the fly-over floor are left alone', () => {
+  const { options, notes } = normalizeOptions({
+    pattern: 'orbit',
+    orbitHeightsM: [40, 80],
+    obstacleHeightM: 15,
+  });
+  assert.deepEqual(options.orbitHeightsM, [40, 80]);
+  assert.ok(!notes.some((n) => n.code === 'orbit-raised-for-obstacles'));
+});
+
+test('orbitClearance: the sightline clears trees beyond the reported zone', () => {
+  const c = orbitClearance({
+    ringAglM: 40,
+    radiusM: 30,
+    targetHeightM: 3,
+    obstacleHeightM: 15,
+  });
+  // The line from the camera to the target top: height 3 + 37 * d / 30.
+  near(c.obstructionRadiusM, (30 * 12) / 37, 0.1, 'obstruction radius');
+  assert.equal(c.flyoverClearM, 25);
+  assert.equal(c.clearsFlyover, true);
+  const d = c.obstructionRadiusM + 0.5;
+  assert.ok(3 + (37 * d) / 30 > 15, 'a tree just past the zone is cleared');
+  const lowTree = orbitClearance({
+    ringAglM: 20,
+    radiusM: 30,
+    targetHeightM: 15,
+    obstacleHeightM: 15,
+  });
+  assert.equal(lowTree.obstructionRadiusM, 0, 'target as tall as the trees');
+});
+
+test('orbit targets: one orbit per active target, hopping above the trees', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 400, 300);
+  const m = metersPerDegree(CENTER.lat);
+  const t1 = { lon: CENTER.lon - 100 / m.lon, lat: CENTER.lat, id: 'a' };
+  const t2 = { lon: CENTER.lon + 100 / m.lon, lat: CENTER.lat, id: 'b' };
+  const off = { lon: CENTER.lon, lat: CENTER.lat + 80 / m.lat, id: 'c', active: false };
+  const plan = planFlight(box, {
+    pattern: 'orbit',
+    orbitRadiusM: 30,
+    orbitHeightsM: [30, 50],
+    obstacleHeightM: 20,
+    orbitTargets: [t1, off, t2],
+  });
+  assert.equal(plan.error, undefined);
+  const kinds = plan.legs.map((l) => l.kind);
+  assert.deepEqual(kinds, ['orbit', 'orbit', 'transit', 'orbit', 'orbit']);
+  assert.deepEqual(
+    plan.orbit.targets.map((t) => t.id),
+    ['a', 'b'],
+    'the switched-off target is not flown',
+  );
+  const frame = makeFrame(CENTER.lon, CENTER.lat);
+  for (const [legIndex, target] of [[0, t1], [3, t2]]) {
+    const c = frame.toXY(target.lon, target.lat);
+    for (const w of plan.legs[legIndex].waypoints) {
+      const p = frame.toXY(w.lon, w.lat);
+      near(Math.hypot(p.x - c.x, p.y - c.y), 30, 0.5, 'on the target ring');
+    }
+  }
+  // Nothing is ever flown below obstacle + margin, hop or ring.
+  for (const w of plan.legs.flatMap((l) => l.waypoints)) {
+    assert.ok(w.aglM >= 25, `waypoint at ${w.aglM} m is under the trees + margin`);
+  }
+  const hop = plan.legs[2];
+  assert.ok(hop.waypoints.every((w) => w.aglM >= 50 && !w.photo));
+  assert.equal(hop.photoCount, 0);
+  const missions = assembleMissions(plan, flatGround(plan));
+  assert.ok(missions.missions.length >= 1);
+  assert.equal(
+    missions.totals.photoCount,
+    plan.legs.reduce((s, l) => s + l.photoCount, 0),
+  );
+});
+
+test('orbit targets: all switched off is an error, an empty list means the centre', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 200, 200);
+  const none = planFlight(box, {
+    pattern: 'orbit',
+    orbitTargets: [{ lon: CENTER.lon, lat: CENTER.lat, active: false }],
+  });
+  assert.equal(none.error, 'no-orbit-targets');
+  const centre = planFlight(box, { pattern: 'orbit', orbitTargets: [] });
+  assert.equal(centre.error, undefined);
+  assert.equal(centre.orbit.targets.length, 1);
+  near(centre.orbit.targets[0].lon, CENTER.lon, 1e-6, 'centre lon');
+});
+
+test('orbit targets: bad entries are dropped and the list is capped', () => {
+  const list = normalizeOrbitTargets([
+    { lon: 'x', lat: 1 },
+    { lon: 200, lat: 1 },
+    ...Array.from({ length: 30 }, (_, i) => ({ lon: i / 100, lat: 1 })),
+  ]);
+  assert.equal(list.length, MAX_ORBIT_TARGETS);
+  assert.equal(list[0].active, true);
+  assert.equal(normalizeOrbitTargets(null), null);
 });

@@ -25,7 +25,7 @@ export const SUITE_PASSES = Object.freeze([
 ]);
 
 /** Planner options a pass keeps from the panel (everything but the recipe). */
-const KEEP = ['presetId', 'direction', 'batteryMin', 'maxWaypoints', 'orbitRadiusM', 'takeoff', 'jobGrouping'];
+const KEEP = ['presetId', 'direction', 'batteryMin', 'maxWaypoints', 'orbitRadiusM', 'obstacleHeightM', 'orbitTargetHeightM', 'orbitTargets', 'takeoff', 'jobGrouping'];
 
 /**
  * The planner options for every pass.

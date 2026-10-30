@@ -1,7 +1,7 @@
 /* Drone Flight Plan: a right-rail card laid out by the rail like TIME TRAVEL
    and CONTEXT (position, width and the collapsed size come from layers.css).
-   It stays `hidden` until DISPLAY > Drone Flight Plan opens it
-   (src/byrdit/dronePlan/panel.js). */
+   It is always on the rail as a collapsed launcher (like TIME TRAVEL);
+   expanding it opens the planner (src/byrdit/dronePlan/panel.js). */
 .drone-plan-panel-inner {
   position: relative;
   display: flex;
@@ -235,4 +235,22 @@ body.gev-drone-box .cesium-widget canvas {
   #drone-plan-panel * {
     transition: none !important;
   }
+}
+
+.gev-dp-target {
+  align-items: center;
+}
+.gev-dp-target input[type='checkbox'] {
+  flex: 0 0 auto;
+  margin: 0 6px 0 0;
+}
+.gev-dp-target .gev-dp-area-kind {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gev-dp-targets[hidden] {
+  display: none;
 }

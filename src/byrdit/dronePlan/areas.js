@@ -568,6 +568,18 @@ export function planAreas(areas, rawOptions = {}) {
     if (bad) return bad;
   }
   const grouping = rawOptions.jobGrouping === 'whole' ? 'whole' : 'per-area';
+  const hasTargets =
+    rawOptions.pattern === 'orbit' && rawOptions.orbitTargets?.length > 0;
+  if (hasTargets && !(list.length === 1 && list[0].kind === 'rect')) {
+    // Listed targets drive an orbit mission across the whole survey: one
+    // box around the areas, one plan, hops between targets above the trees.
+    const plan = planFlight(
+      bboxOfPoints(list.flatMap((area) => areaRing(area))),
+      rawOptions,
+    );
+    if (plan.error) return plan;
+    return withJob(plan, list, 'whole');
+  }
   if (list.length === 1 && list[0].kind === 'rect') {
     const plan = planFlight(list[0].box, rawOptions);
     if (plan.error) return plan;
