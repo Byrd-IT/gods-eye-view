@@ -350,7 +350,7 @@ export function obstaclesProxy({
     const at = (row - tables.first) * 8;
     const off = Number(tables.offs.getBigUint64(at, true));
     const len = Number(tables.counts.getBigUint64(at, true));
-    if (!(len > 0) || len > 4 * MIB) throw new Error('bad_row');
+    if (!(len > 0) || len > 256 * 1024) throw new Error('bad_row');
     const bytes = await ranged(tile.url, off, off + len - 1, len + 16);
     return decodeRow(bytes, tile.width);
   }
@@ -442,7 +442,11 @@ export function obstaclesProxy({
     const payload = await readResponseJsonCapped(response, 2 * MIB, signal);
     if (payload?.error || !Array.isArray(payload?.features))
       throw new Error('invalid_payload');
-    return { obstacles: parseFaaPayload(payload), partial: false };
+    return {
+      obstacles: parseFaaPayload(payload),
+      // The query stops at its row limit: say so, the rest is not shown.
+      partial: payload.exceededTransferLimit === true,
+    };
   }
 
   async function handler(req, res) {

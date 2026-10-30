@@ -308,3 +308,37 @@ test('parseTiffHeader reads the layout of a REAL Meta/WRI canopy tile', () => {
   assert.ok(info.stripOffsets > 0 && info.stripBytes > 0);
   assert.ok(info.scaleAt > 0 && info.tiepointAt > 0);
 });
+
+test('parseFaaPayload reads a REAL recorded ArcGIS response (padded Type_Code, feet)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const real = JSON.parse(
+    readFileSync(new URL('./obstacles.faa-real.fixture.json', import.meta.url), 'utf8'),
+  );
+  const rows = parseFaaPayload(real);
+  assert.equal(rows.length, real.features.length);
+  for (const [i, f] of real.features.entries()) {
+    assert.equal(rows[i].id, `faa-${f.attributes.OAS_Number}`);
+    assert.equal(rows[i].kind, 'tower');
+    assert.ok(Math.abs(rows[i].heightM - f.attributes.AGL * 0.3048) < 0.06);
+    assert.ok(Math.abs(rows[i].lon - f.geometry.x) < 1e-6);
+  }
+});
+
+test('the FAA route says partial when the query hit its row limit', async () => {
+  const real = JSON.parse(
+    (await import('node:fs')).readFileSync(new URL('./obstacles.faa-real.fixture.json', import.meta.url), 'utf8'),
+  );
+  const body = { ...real, exceededTransferLimit: true };
+  const proxy = obstaclesProxy({
+    fetchImpl: async () =>
+      new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
+  let handler;
+  proxy.configureServer({ middlewares: { use: (_p, f) => (handler = f) } });
+  let out;
+  await handler(
+    { method: 'GET', url: '/faa?west=-95.1&south=32.55&east=-95.06&north=32.59', socket: { remoteAddress: '8.8.8.8' }, headers: {} },
+    { writeHead() {}, setHeader() {}, end(b) { out = JSON.parse(b); } },
+  );
+  assert.equal(out.partial, true);
+});

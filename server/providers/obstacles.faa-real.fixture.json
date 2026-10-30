@@ -1,0 +1,45 @@
+{
+ "objectIdFieldName": "OBJECTID",
+ "globalIdFieldName": "",
+ "geometryType": "esriGeometryPoint",
+ "spatialReference": {
+  "wkid": 4326,
+  "latestWkid": 4326
+ },
+ "exceededTransferLimit": true,
+ "features": [
+  {
+   "attributes": {
+    "OAS_Number": "48-009717",
+    "Type_Code": "TOWER             ",
+    "AGL": 198
+   },
+   "geometry": {
+    "x": -94.95389592790413,
+    "y": 32.55750577222039
+   }
+  },
+  {
+   "attributes": {
+    "OAS_Number": "48-197295",
+    "Type_Code": "TOWER             ",
+    "AGL": 346
+   },
+   "geometry": {
+    "x": -95.05249317629118,
+    "y": 32.57221688200445
+   }
+  },
+  {
+   "attributes": {
+    "OAS_Number": "48-008550",
+    "Type_Code": "TOWER             ",
+    "AGL": 165
+   },
+   "geometry": {
+    "x": -94.99778482917361,
+    "y": 32.57306132943695
+   }
+  }
+ ]
+}

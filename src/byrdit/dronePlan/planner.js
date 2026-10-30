@@ -8,7 +8,11 @@
  *                                          <= battery time) with heights
  *                                          relative to the takeoff point
  */
-import { applyObstacleClearance, normalizeObstacles } from './obstacles.js';
+import {
+  applyObstacleClearance,
+  normalizeObstacles,
+  transitNeeds,
+} from './obstacles.js';
 import { DEFAULT_PRESET_ID, getPreset } from './presets.js';
 import {
   DEFAULT_SHUTTER_DENOMINATOR,
@@ -904,7 +908,6 @@ export function assembleMissions(plan, ground) {
   const readM = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const cleared = applyObstacleClearance(plan.legs, options.obstacles, {
     capM: AGL_CAP_M,
-    takeoff,
     // Ground under each waypoint and under each column, from the terrain
     // read (never from the 3D tiles): a column on higher ground needs the
     // difference added on top.
@@ -1081,7 +1084,60 @@ export function assembleMissions(plan, ground) {
     missions.length = MAX_MISSIONS;
   }
 
-  const built = missions.map((missionLegs, index) => {
+  // Each mission flies its own way out from the takeoff point to its first
+  // waypoint and its own way home from its last one, so those two stretches
+  // are checked per mission, after the split.
+  let transitBlocked = 0;
+  let transitNeedM = 0;
+  const withTransit = (missionLegs) => {
+    const wps = missionLegs.flatMap((leg) => leg.waypoints);
+    if (!wps.length || !options.obstacles?.length) return missionLegs;
+    const need = transitNeeds(
+      options.obstacles,
+      takeoff,
+      wps[0],
+      wps[wps.length - 1],
+      {
+        groundOf: known ? (w) => readM(ground.wpM?.[w.id]) : null,
+        obstacleGroundOf: known ? (o) => readM(ground.obstacleM?.[o.id]) : null,
+      },
+    );
+    const lifts = new Map();
+    const want = (w, n) => {
+      if (!n) return;
+      lifts.set(w, Math.max(lifts.get(w) ?? 0, n.needAglM));
+    };
+    want(wps[0], need.first);
+    want(wps[wps.length - 1], need.last);
+    if (!lifts.size) return missionLegs;
+    return missionLegs.map((leg) => {
+      let blocked = false;
+      const waypoints = leg.waypoints.map((w) => {
+        const n = lifts.get(w);
+        if (n === undefined || w.aglM >= n - 1e-9) return w;
+        const to = Math.min(n, AGL_CAP_M);
+        const capped = n > AGL_CAP_M + 1e-9;
+        if (capped) {
+          blocked = true;
+          transitBlocked += 1;
+          transitNeedM = Math.max(transitNeedM, n);
+        }
+        return {
+          ...w,
+          aglM: Math.max(w.aglM, to),
+          relHeightM: round(w.relHeightM + Math.max(0, to - w.aglM), 1),
+          ...(capped ? { obstacleBlocked: true } : {}),
+        };
+      });
+      return {
+        ...leg,
+        waypoints,
+        ...(blocked ? { obstacleBlocked: true } : {}),
+      };
+    });
+  };
+  const built = missions.map((rawLegs, index) => {
+    const missionLegs = withTransit(rawLegs);
     // Reindex the waypoints from 0 inside each mission.
     let next = 0;
     const reindexed = missionLegs.map((leg) => ({
@@ -1101,6 +1157,17 @@ export function assembleMissions(plan, ground) {
       durationS: est.durationS,
     };
   });
+
+  if (transitBlocked) {
+    warnings.push({
+      code: 'obstacle-blocked',
+      params: {
+        count: transitBlocked,
+        needM: Math.round(transitNeedM),
+        capM: AGL_CAP_M,
+      },
+    });
+  }
 
   const totals = {
     photoCount: built.reduce((s, m) => s + m.photoCount, 0),

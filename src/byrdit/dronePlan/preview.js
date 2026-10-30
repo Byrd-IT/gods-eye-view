@@ -212,23 +212,39 @@ export function createDronePlanPreview({
               }),
             );
           }
-          // Legs the height cap cannot lift over an obstacle: red.
-          for (const leg of mission.legs ?? []) {
-            if (!leg.obstacleBlocked) continue;
-            const hot = leg.waypoints.flatMap((w) => [w.lon, w.lat]);
-            if (hot.length >= 4) {
-              planEntities.push(
-                dataSource.entities.add({
-                  name: 'Blocked by obstacle',
-                  polyline: {
-                    positions: cesium.Cartesian3.fromDegreesArray(hot),
-                    width: 6,
-                    ...ground,
-                    material: color('#ff2d2d', 0.95),
-                  },
-                }),
-              );
+          // Stretches the height cap cannot lift over an obstacle: red. Each
+          // stretch is drawn on its own, so a blocked turn between two grid
+          // lines or a blocked way out from takeoff shows where it is.
+          const wps = mission.waypoints;
+          const stretches = [];
+          for (let i = 1; i < wps.length; i += 1) {
+            if (wps[i - 1].obstacleBlocked || wps[i].obstacleBlocked) {
+              stretches.push([wps[i - 1], wps[i]]);
             }
+          }
+          const takeoffAt = result.plan?.takeoff;
+          if (takeoffAt && wps.length) {
+            if (wps[0].obstacleBlocked) stretches.push([takeoffAt, wps[0]]);
+            const end = wps[wps.length - 1];
+            if (end.obstacleBlocked) stretches.push([end, takeoffAt]);
+          }
+          for (const [a, b] of stretches) {
+            planEntities.push(
+              dataSource.entities.add({
+                name: 'Blocked by obstacle',
+                polyline: {
+                  positions: cesium.Cartesian3.fromDegreesArray([
+                    a.lon,
+                    a.lat,
+                    b.lon,
+                    b.lat,
+                  ]),
+                  width: 6,
+                  ...ground,
+                  material: color('#ff2d2d', 0.95),
+                },
+              }),
+            );
           }
           mission.waypoints.forEach((w, i) => {
             if (i % step && i !== mission.waypoints.length - 1) return;

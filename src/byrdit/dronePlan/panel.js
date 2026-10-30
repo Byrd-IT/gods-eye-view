@@ -27,6 +27,7 @@ import {
   clearOverlaySource,
   setOverlayEntries,
 } from '../../overlays/worldOverlay.js';
+import { areasBox } from './buildingFootprints.js';
 import { OBSTACLE_OVERLAY_SOURCE, pickTerrainLonLat } from './obstacleLayer.js';
 import { buildingObstacles, SOURCE_NAMES } from './obstacleData.js';
 import {
@@ -619,8 +620,18 @@ export function initDronePlan({
         const unread = Object.entries(open?.status ?? {})
           .filter(([, v]) => v === 'failed' || v === 'partial')
           .map(([k]) => k);
+        const area = areasBox(state.areas);
         obstacleStore.replaceEstimates([...towers, ...osm, ...trees], {
           keepSources: unread,
+          // Old rows from a source that failed only stay when they are still
+          // inside the area being planned.
+          within: area
+            ? (o) =>
+                o.lon >= area.west - 0.05 &&
+                o.lon <= area.east + 0.05 &&
+                o.lat >= area.south - 0.05 &&
+                o.lat <= area.north + 0.05
+            : () => false,
         });
         renderObstacleStatus();
       })

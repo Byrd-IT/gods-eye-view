@@ -2,8 +2,8 @@
  * Per-obstacle heights for the Drone Flight Plan.
  *
  * An obstacle is a column on the ground: a tree patch, a tower, a building.
- * Its height is an ESTIMATE from open data (USGS-style lidar canopy models,
- * FAA obstacle file, OpenStreetMap) or a number the operator typed or
+ * Its height is an ESTIMATE from open data (the Meta/WRI canopy height
+ * model, FAA obstacle file, OpenStreetMap) or a number the operator typed or
  * dragged. It is never read from the Google 3D tiles: Google's terms forbid
  * measuring them in code, so they are only a backdrop to compare by eye.
  *
@@ -17,6 +17,7 @@ export const OBSTACLE_KINDS = Object.freeze([
   'building',
   'other',
 ]);
+/** `lidar` and `overture` are reserved for sources not wired yet. */
 export const OBSTACLE_SOURCES = Object.freeze([
   'lidar',
   'canopy',
@@ -200,7 +201,7 @@ export function createObstacleStore({ onChange } = {}) {
      * dropped, except those of `keepSources` (sources that failed to load); an obstacle the operator edited keeps their height (its
      * estimate is refreshed); user-added ones are untouched.
      */
-    replaceEstimates(found, { keepSources = [] } = {}) {
+    replaceEstimates(found, { keepSources = [], within = null } = {}) {
       const fresh = normalizeObstacles(found).filter(
         (o) => o.source !== 'user',
       );
@@ -209,9 +210,13 @@ export function createObstacleStore({ onChange } = {}) {
       // what is there: what it gave before stays. An edited obstacle is never
       // dropped: the operator corrected it, and ids can change when the area
       // moves, so a fresh row is matched to it by position as well as by id.
+      // Rows kept only because their source failed must still lie in the
+      // area now being planned, or old areas would pile up for ever.
       const kept = list.filter(
         (o) =>
-          o.source === 'user' || o.userEdited || keepSources.includes(o.source),
+          o.source === 'user' ||
+          o.userEdited ||
+          (keepSources.includes(o.source) && (!within || within(o))),
       );
       const near = (a, b) => {
         const m = metersPerDegree(a.lat);
@@ -233,15 +238,21 @@ export function createObstacleStore({ onChange } = {}) {
           ? { ...o, estimatedHeightM: f.estimatedHeightM }
           : o;
       });
-      for (const o of fresh) {
-        if (taken.has(o.id)) continue;
-        // A kept row (failed source) stands in for the same fresh row.
-        if (merged.some((k) => k.id === o.id)) continue;
-        if (merged.length >= MAX_OBSTACLES) break;
-        merged.push(o);
+      // When the cap bites: the operator's own rows win, then fresh open-data
+      // rows (towers first, they are the rare ones), then rows kept from a
+      // source that could not be read.
+      const mine = (o) => o.source === 'user' || o.userEdited;
+      const seen = new Set(merged.map((o) => o.id));
+      const added = fresh
+        .filter((o) => !taken.has(o.id) && !seen.has(o.id))
+        .sort((a, b) => (b.kind === 'tower') - (a.kind === 'tower'));
+      const final = merged.filter(mine);
+      for (const o of [...added, ...merged.filter((o) => !mine(o))]) {
+        if (final.length >= MAX_OBSTACLES) break;
+        final.push(o);
       }
-      replace(merged);
-      return merged.length;
+      replace(final);
+      return final.length;
     },
   };
 }
@@ -285,7 +296,7 @@ export function requiredAglM(obstacle) {
 export function applyObstacleClearance(
   legs,
   obstacles,
-  { capM, takeoff = null, groundOf = null, obstacleGroundOf = null },
+  { capM, groundOf = null, obstacleGroundOf = null },
 ) {
   const list = normalizeObstacles(obstacles);
   if (!list.length || !legs?.length) {
@@ -343,13 +354,6 @@ export function applyObstacleClearance(
         start = i;
       }
     }
-    // Out from the takeoff point to the first waypoint and back home: the
-    // takeoff end stays on the ground, so the waypoint end is lifted.
-    if (takeoff) {
-      const t = xy(ob, m, takeoff.lon, takeoff.lat);
-      if (distToSegment(t, pts[0]) <= reach) lift(0);
-      if (distToSegment(pts[pts.length - 1], t) <= reach) lift(pts.length - 1);
-    }
   }
   let raised = 0;
   const blocked = [];
@@ -392,4 +396,51 @@ export function applyObstacleClearance(
 /** Label for the globe column: "<kind> <h> m". */
 export function obstacleLabel(o, kindText = (k) => k) {
   return `${kindText(o.kind)} ${Math.round(o.heightM)} m`;
+}
+
+/**
+ * What the way out from the takeoff point to a mission's first waypoint and
+ * the way home from its last waypoint need. Each mission flies its own, so
+ * this runs per mission after the route is split into batteries. The takeoff
+ * end stays on the ground, so only the waypoint end can be lifted.
+ * @returns {{ first: {needAglM:number, obstacleId:string}|null,
+ *   last: {needAglM:number, obstacleId:string}|null }}
+ */
+export function transitNeeds(
+  obstacles,
+  takeoff,
+  first,
+  last,
+  { groundOf = null, obstacleGroundOf = null } = {},
+) {
+  const out = { first: null, last: null };
+  const list = normalizeObstacles(obstacles);
+  if (!takeoff || !first || !last || !list.length) return out;
+  for (const ob of list) {
+    const m = metersPerDegree(ob.lat);
+    const reach = ob.radiusM + OBSTACLE_HORIZONTAL_MARGIN_M;
+    const t = xy(ob, m, takeoff.lon, takeoff.lat);
+    const obGround = obstacleGroundOf ? obstacleGroundOf(ob) : null;
+    const need = (w) => {
+      const wg = groundOf ? groundOf(w) : null;
+      const extra =
+        Number.isFinite(obGround) && Number.isFinite(wg)
+          ? Math.max(0, obGround - wg)
+          : 0;
+      return requiredAglM(ob) + extra;
+    };
+    const note = (key, w) => {
+      const n = need(w);
+      if (!out[key] || n > out[key].needAglM) {
+        out[key] = { needAglM: n, obstacleId: ob.id };
+      }
+    };
+    if (distToSegment(t, xy(ob, m, first.lon, first.lat)) <= reach) {
+      note('first', first);
+    }
+    if (distToSegment(xy(ob, m, last.lon, last.lat), t) <= reach) {
+      note('last', last);
+    }
+  }
+  return out;
 }

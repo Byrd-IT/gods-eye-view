@@ -8,6 +8,7 @@ import {
   OBSTACLE_CLEARANCE_MARGIN_M,
   OBSTACLE_HORIZONTAL_MARGIN_M,
   applyObstacleClearance,
+  transitNeeds,
   createObstacleStore,
   normalizeObstacle,
   normalizeObstacles,
@@ -456,14 +457,35 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
     assert.equal(out.legs[0].waypoints[0].aglM, 30, 'far ends stay put');
   });
 
-  test('clearance: the way out from takeoff and the way home are checked', () => {
-    const legs = [{ id: 'l1', kind: 'path', waypoints: [at('a', 200, 0), at('b', 300, 0)] }];
+  test('transit: the way out and the way home are checked against the mission ends', () => {
     const takeoff = { lon: CENTER.lon, lat: CENTER.lat };
-    const out = applyObstacleClearance(legs, [col(100, 0)], { capM: 120, takeoff });
-    assert.equal(out.legs[0].waypoints[0].aglM, 85);
-    assert.equal(out.legs[0].waypoints[1].aglM, 85, 'the way home passes it too');
-    const none = applyObstacleClearance(legs, [col(100, 0)], { capM: 120 });
-    assert.equal(none.legs[0].waypoints[0].aglM, 30, 'no takeoff given: not checked');
+    const need = transitNeeds([col(100, 0)], takeoff, at('a', 200, 0), at('b', 300, 0));
+    assert.equal(need.first.needAglM, 85);
+    assert.equal(need.last.needAglM, 85, 'the way home passes it too');
+    assert.equal(transitNeeds([col(100, 0)], null, at('a', 200, 0), at('b', 300, 0)).first, null);
+    assert.equal(transitNeeds([col(100, 90)], takeoff, at('a', 200, 0), at('b', 300, 0)).first, null);
+  });
+
+  test('planner: every battery mission checks its OWN way out from takeoff', () => {
+    const box = boxAround(900, 300);
+    const wide = { aglM: 40, batteryMin: 3, obstacles: [] };
+    const base = planFlight(box, wide);
+    assert.ok(!base.error, base.error);
+    const m0 = assembleMissions(base, { known: false });
+    assert.ok(m0.missions.length >= 2, `needs 2+ missions, got ${m0.missions.length}`);
+    const second = m0.missions[1].waypoints[0];
+    const mid = {
+      lon: (base.takeoff.lon + second.lon) / 2,
+      lat: (base.takeoff.lat + second.lat) / 2,
+    };
+    const tower = { id: 'mid', kind: 'tower', source: 'user', lon: mid.lon, lat: mid.lat, radiusM: 3, heightM: 60 };
+    const plan = planFlight(box, { ...wide, obstacles: [tower] });
+    const out = assembleMissions(plan, { known: false });
+    assert.ok(out.missions[1].waypoints[0].aglM >= 65, `lifted: ${out.missions[1].waypoints[0].aglM}`);
+    const tall = planFlight(box, { ...wide, obstacles: [{ ...tower, heightM: 200 }] });
+    const blocked = assembleMissions(tall, { known: false });
+    assert.ok(blocked.warnings.some((w) => w.code === 'obstacle-blocked'));
+    assert.equal(blocked.missions[1].waypoints[0].obstacleBlocked, true);
   });
 
   test('clearance: a column on higher ground than the waypoint needs the difference on top', () => {
@@ -506,3 +528,19 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
     assert.equal(maxAgl(hill), 95, '30 m column + 5 m margin + 60 m higher ground');
   });
 }
+
+test('store: when the cap bites, new towers beat old rows kept from a failed source', () => {
+  const store = createObstacleStore();
+  const old = Array.from({ length: MAX_OBSTACLES }, (_, i) => ({
+    id: `chm-old-${i}`, kind: 'tree', source: 'canopy', lon: -90 + i * 0.0001, lat: 30, radiusM: 20, estimatedHeightM: 10, heightM: 10,
+  }));
+  store.replaceEstimates(old);
+  assert.equal(store.list().length, MAX_OBSTACLES);
+  const tower = { id: 'faa-new', kind: 'tower', source: 'faa', lon: -97, lat: 30, radiusM: 6, estimatedHeightM: 70, heightM: 70 };
+  store.replaceEstimates([tower], { keepSources: ['canopy'], within: () => true });
+  const ids = store.list().map((o) => o.id);
+  assert.ok(ids.includes('faa-new'));
+  assert.equal(ids.length, MAX_OBSTACLES);
+  store.replaceEstimates([tower], { keepSources: ['canopy'], within: (o) => o.lon > -50 });
+  assert.deepEqual(store.list().map((o) => o.id), ['faa-new']);
+});
