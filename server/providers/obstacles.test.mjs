@@ -186,6 +186,7 @@ test('FAA: the query asks for the tallest first; tower columns widen with height
           features: [
             { attributes: { OAS_Number: '48-200001', Type_Code: 'TOWER', AGL: 1500 }, geometry: { x: -95.05, y: 32.58 } },
             { attributes: { OAS_Number: '48-200002', Type_Code: 'TOWER', AGL: 20 }, geometry: { x: -95.051, y: 32.58 } },
+            { attributes: { OAS_Number: '48-200004', Type_Code: 'TOWER', AGL: 300 }, geometry: { x: -95.053, y: 32.58 } },
             { attributes: { OAS_Number: '48-200003', Type_Code: 'BLDG', AGL: 1500 }, geometry: { x: -95.052, y: 32.58 } },
           ],
         }),
@@ -203,6 +204,7 @@ test('FAA: the query asks for the tallest first; tower columns widen with height
   assert.equal(new URL(urls[0]).searchParams.get('orderByFields'), 'AGL DESC');
   const byId = Object.fromEntries(out.obstacles.map((o) => [o.id, o]));
   assert.equal(byId['faa-48-200001'].radiusM, 150, 'a 457 m mast is capped at 150 m');
+  assert.equal(byId['faa-48-200004'].radiusM, 55, '300 ft = 91.4 m: 0.6 x 91.4 = 55');
   assert.equal(byId['faa-48-200002'].radiusM, 6, 'a short tower keeps the 6 m floor');
   assert.equal(byId['faa-48-200003'].radiusM, 6, 'buildings keep 6 m');
 });

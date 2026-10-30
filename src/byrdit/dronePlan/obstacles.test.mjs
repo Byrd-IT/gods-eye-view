@@ -424,6 +424,10 @@ test('obstacleLayer.js uses only an allow-list of Cesium and viewer calls', () =
     code.match(/\b(?:viewer|cesium|dataSource)(?:\.[A-Za-z_][A-Za-z0-9_]*)+/g) ?? [],
   );
   assert.ok(used.size >= 10, 'the scan found the calls');
+  // Bracket access gets past a dotted-path scan, so it is not allowed here.
+  // Aliases (const s = viewer.scene) do too: only a reader catches those.
+  assert.ok(!/\b(?:viewer|cesium|dataSource)\s*\[/.test(code), 'no bracket access');
+  // This is a tripwire for reviewers, not proof: a human still reads the diff.
   const extra = [...used].filter((x) => !allowed.has(x));
   assert.deepEqual(extra, [], 'not on the obstacleLayer.js allow-list');
   // No other global or import may reach the tileset.

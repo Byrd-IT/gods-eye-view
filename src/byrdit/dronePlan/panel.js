@@ -684,18 +684,16 @@ export function initDronePlan({
     if (ui.obstacleStatus) ui.obstacleStatus.textContent = obstacleStatusText;
   }
 
-  function renderObstacles(force = false) {
+  function renderObstacles() {
     if (!ui.obstacleList) return;
     // Typing in a height box must not rebuild the box under the caret.
-    // A committed value ('change') is not typing: rebuild so the row's
-    // Reset button and source label follow the edit.
     const active = doc.activeElement;
     const typing =
       active &&
       ui.obstacleList.contains?.(active) &&
       active.getAttribute?.('data-obstacle-height') !== null &&
       active.getAttribute?.('data-obstacle-height') !== undefined;
-    if (!force && (obstacleTyping || typing)) return;
+    if (obstacleTyping || typing) return;
     ui.obstacleList.replaceChildren();
     const list = obstacleStore.list();
     if (!list.length) {
@@ -749,15 +747,6 @@ export function initDronePlan({
         },
       });
       height.value = String(Math.round(o.heightM * 10) / 10);
-      height.addEventListener('input', () => {
-        obstacleTyping = true;
-        try {
-          obstacleStore.setHeight(o.id, height.value);
-        } finally {
-          obstacleTyping = false;
-        }
-      });
-      height.addEventListener('change', () => renderObstacles(true));
       el(doc, 'span', row, {
         cls: 'gev-dp-obstacle-source',
         text:
@@ -776,6 +765,26 @@ export function initDronePlan({
       });
       reset.disabled = !(o.userEdited && o.estimatedHeightM !== null);
       reset.addEventListener('click', () => obstacleStore.reset(o.id));
+      // The list is not rebuilt while this box has focus (the caret, the
+      // keyboard focus and a click on Reset or x would be lost). So the row
+      // follows an edit in place: Reset wakes up as soon as the value is
+      // an edit, and the box shows the stored (clamped) number once committed.
+      const syncRow = (commit) => {
+        const now = obstacleStore.list().find((x) => x.id === o.id);
+        if (!now) return;
+        reset.disabled = !(now.userEdited && now.estimatedHeightM !== null);
+        if (commit) height.value = String(Math.round(now.heightM * 10) / 10);
+      };
+      height.addEventListener('input', () => {
+        obstacleTyping = true;
+        try {
+          obstacleStore.setHeight(o.id, height.value);
+        } finally {
+          obstacleTyping = false;
+        }
+        syncRow(false);
+      });
+      height.addEventListener('change', () => syncRow(true));
       const remove = el(doc, 'button', row, {
         cls: 'data-toggle-chip',
         text: '×',
