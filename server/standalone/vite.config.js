@@ -10,6 +10,7 @@ import { standaloneVoiceTools } from './voiceTools.js';
 import { historyPlugins } from '../byrdit/history.js';
 import { basemapPlugins } from '../byrdit/basemap.js';
 import { waybackPlugins } from '../byrdit/wayback/index.js';
+import { planLibraryPlugins } from '../byrdit/planLibrary/api.js';
 import { unwatchedRuntimeDirsPlugin } from './unwatched-cache.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -23,6 +24,7 @@ export default defineConfig(({ command, mode }) => {
   const tools = standaloneVoiceTools();
   return createBrowserViteConfig({
     plugins: [
+      ...planLibraryPlugins(),
       ...historyPlugins(),
       ...basemapPlugins(),
       ...waybackPlugins(),
