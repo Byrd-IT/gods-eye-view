@@ -1613,3 +1613,89 @@ test('obstacles: an obstacle the operator added can be set to a tower, and the c
   );
   w.handle.destroy();
 });
+
+// ------------------------------------------------------------------ Adjust --
+const roleNode = (w, role) =>
+  w.find((n) => n.getAttribute('data-role') === role)[0];
+
+test('Adjust: the section sits right after the plan buttons and the suite list, and holds the safety zone, orbit targets and obstacle heights', () => {
+  const w = setup();
+  const adjust = roleNode(w, 'adjust');
+  assert.ok(adjust, 'Adjust section exists');
+  const kids = adjust.parentNode.children;
+  const at = (node) => kids.indexOf(node);
+  const suite = roleNode(w, 'suite');
+  assert.equal(at(adjust), at(suite) + 1, 'directly after the suite list');
+  const useRec = w
+    .buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'use-recommended');
+  const planAll = w
+    .buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'plan-suite');
+  assert.ok(at(useRec) < at(planAll) && at(planAll) < at(suite));
+  assert.equal(at(adjust) - at(useRec) <= 4, true, 'close under the buttons');
+  const inside = (node) => {
+    for (let n = node; n; n = n.parentNode) if (n === adjust) return true;
+    return false;
+  };
+  assert.ok(inside(roleNode(w, '3d-check')), 'safety zone (3D check)');
+  assert.ok(inside(checkSlider(w, 'width')), 'zone half-width slider');
+  assert.ok(inside(checkSlider(w, 'photo')), 'photo stepper');
+  assert.ok(inside(roleNode(w, 'check-readout')), 'readout');
+  assert.ok(
+    inside(w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'recommend-targets')),
+    'orbit targets',
+  );
+  assert.ok(
+    inside(w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'add-obstacle')),
+    'obstacle heights',
+  );
+  // Order inside: safety zone, orbit targets, obstacle heights.
+  const order = [
+    roleNode(w, '3d-check'),
+    w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'recommend-targets'),
+    w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'add-obstacle'),
+  ].map((n) => {
+    let top = n;
+    while (top.parentNode !== adjust) top = top.parentNode;
+    return adjust.children.indexOf(top);
+  });
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
+  assert.equal(new Set(order).size, 3);
+  w.handle.destroy();
+});
+
+test('Adjust: Orbit targets show for the Orbit pattern, and after PLAN ALL with a grid pattern, not for a plain grid', async () => {
+  const w = setup();
+  const targetsHidden = () =>
+    w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'recommend-targets').parentNode.parentNode.parentNode.hidden;
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.pattern, 'grid');
+  assert.equal(targetsHidden(), true, 'plain grid: hidden');
+  await w.handle.planSuite();
+  assert.ok(w.handle.getState().suite, 'suite planned');
+  assert.equal(w.handle.getState().options.pattern, 'grid');
+  assert.equal(targetsHidden(), false, 'after PLAN ALL: shown');
+  assert.equal(w.buttons('data-remove-target').length, 1, 'a target is listed');
+  assert.equal(
+    w.handle.getState().suite.passes.find((p) => p.id === 'orbit').result.plan.orbit.targets.length,
+    1,
+  );
+  // Removing a target replans (the suite goes stale) but the list stays.
+  w.buttons('data-remove-target')[0].click();
+  await w.handle.replan();
+  assert.equal(w.handle.getState().suite, null);
+  assert.equal(targetsHidden(), false, 'still shown after an edit');
+  w.handle.destroy();
+  const o = setup();
+  o.handle.setBox(boxM(300, 200));
+  pick(o, 'Mode', 'splat-orbit');
+  await o.handle.replan();
+  assert.equal(
+    o.buttons('data-action').find((b) => b.getAttribute('data-action') === 'recommend-targets').parentNode.parentNode.parentNode.hidden,
+    false,
+    'Orbit pattern: shown',
+  );
+  o.handle.destroy();
+});

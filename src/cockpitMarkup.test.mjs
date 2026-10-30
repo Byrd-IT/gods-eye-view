@@ -927,6 +927,11 @@ test('Cockpit panel corridors reserve the owned topline readouts', () => {
   );
   assert.match(leftObstacles[1], /#cockpit-hud \.cockpit-topline/);
   assert.match(rightObstacles[1], /#cockpit-hud \.cockpit-topline/);
+  assert.match(
+    rightObstacles[1],
+    /#gev-nav-control/,
+    "right panels must stop above the zoom/rotate/tilt control",
+  );
   assert.match(leftObstacles[1], /#cockpit-hud \.cockpit-topline > div/);
   assert.match(rightObstacles[1], /#cockpit-hud \.cockpit-topline > div/);
   const leftLayout = fs.readFileSync(

@@ -66,6 +66,7 @@ const RIGHT_STACK_OBSTACLE_SELECTOR = [
   '#cesium-credits .cesium-credit-textContainer',
   '#command-dock',
   '#gev-voice-control',
+  '#gev-nav-control',
 ].join(', ');
 /** Is a CSS transition (the chrome fading back in) still running? */
 function chromeTransitionRunning() {

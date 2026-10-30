@@ -142,6 +142,9 @@ export function initDronePlan({
     // True once the person adds, removes or switches a target: from then on
     // the list is theirs and is no longer rebuilt from the areas.
     orbitTargetsTouched: false,
+    // True once PLAN ALL ran: its orbit pass uses the orbit targets, so the
+    // list stays in view (and in step with the areas) even for a grid pattern.
+    orbitsPlanned: false,
     wpml: { droneEnumValue: null, droneSubEnumValue: null },
     result: null,
     suite: null,
@@ -404,9 +407,14 @@ export function initDronePlan({
    * has them, otherwise each area's centre. Touched ones only lose targets
    * that no longer lie inside an area.
    */
+  /** The plan has orbits: the Orbit pattern, or an all-passes plan (it has an orbit pass). */
+  function orbitsShown() {
+    return state.options.pattern === 'orbit' || state.orbitsPlanned;
+  }
+
   function syncOrbitTargets() {
     const o = state.options;
-    if (o.pattern !== 'orbit') return;
+    if (!orbitsShown()) return;
     if (!state.areas.length) {
       o.orbitTargets = [];
       return;
@@ -876,6 +884,7 @@ export function initDronePlan({
     state.suiteBusy = false;
     if (hadSuite) syncGlobe();
     if (!state.areas.length) {
+      state.orbitsPlanned = false;
       state.result = null;
       state.error = null;
       state.busy = false;
@@ -1275,7 +1284,7 @@ export function initDronePlan({
       cls: 'gev-dp-check',
       attrs: { open: '', 'data-role': '3d-check' },
     });
-    el(doc, 'summary', ui.check, { text: t('3D check') });
+    el(doc, 'summary', ui.check, { text: t('Safety zone') });
     el(doc, 'p', ui.check, {
       cls: 'gev-dp-note gev-dp-check-note',
       text: t(
@@ -1370,6 +1379,23 @@ export function initDronePlan({
     // The answer comes first: stats, warnings and downloads sit right under
     // the status line, so they stay in view while the options scroll below.
     ui.status.after(ui.areas, ui.stats, ui.warnings, ui.missions);
+
+    // Adjust: the controls people look for after planning sit right under the
+    // plan buttons and the all-passes list, not at the foot of a long panel:
+    // the safety zone (3D check), the orbit targets and the obstacle heights.
+    ui.adjust = el(doc, 'section', null, {
+      cls: 'gev-dp-adjust',
+      attrs: { 'data-role': 'adjust' },
+    });
+    el(doc, 'h4', ui.adjust, { cls: 'gev-dp-adjust-title', text: t('Adjust') });
+    ui.adjust.append(
+      ui.check,
+      ui.targetsBox,
+      ui.obstacleRow,
+      ui.obstacleNote,
+      ui.obstaclesBox,
+    );
+    ui.suite.after(ui.adjust);
 
     // ------------------------------------------------------ wiring --
     const o = state.options;
@@ -1690,10 +1716,11 @@ export function initDronePlan({
     ui.radiusRow.hidden = !orbit;
     ui.ringsRow.hidden = !orbit;
     ui.targetHeightRow.hidden = !orbit;
-    ui.obstacleRow.hidden = !orbit;
-    ui.obstacleNote.hidden = !orbit;
-    ui.targetsBox.hidden = !orbit;
-    if (orbit) {
+    const orbits = orbitsShown();
+    ui.obstacleRow.hidden = !orbits;
+    ui.obstacleNote.hidden = !orbits;
+    ui.targetsBox.hidden = !orbits;
+    if (orbits) {
       ui.obstacleNote.textContent = t(
         'Orbits fly at least {min} m above ground: tree height plus {margin} m, so the drone clears the trees.',
         {
@@ -1729,7 +1756,7 @@ export function initDronePlan({
 
   function renderTargets() {
     ui.targetList.replaceChildren();
-    if (state.options.pattern !== 'orbit') return;
+    if (!orbitsShown()) return;
     const list = state.options.orbitTargets ?? [];
     if (!list.length) {
       el(doc, 'p', ui.targetList, {
@@ -1978,7 +2005,15 @@ export function initDronePlan({
     const token = ++suiteToken;
     state.suiteBusy = true;
     state.suite = null;
+    // The orbit pass flies the orbit targets: settle them (building
+    // footprints included) before planning, so a late footprint answer cannot
+    // replan and wipe the suite.
+    state.orbitsPlanned = true;
     syncGlobe();
+    render();
+    if (!state.orbitTargetsTouched) await buildingsFor(areasKey());
+    if (destroyed || token !== suiteToken) return;
+    syncOrbitTargets();
     render();
     const provider =
       viewer.terrainProvider ?? viewer.scene?.globe?.terrainProvider;
@@ -2306,6 +2341,7 @@ export function initDronePlan({
     state.areas = [];
     state.nextArea = 1;
     state.takeoff = null;
+    state.orbitsPlanned = false;
     state.options.orbitTargets = [];
     state.orbitTargetsTouched = false;
     footprintCache.clear();

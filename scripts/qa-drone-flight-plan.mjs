@@ -455,6 +455,53 @@ try {
     quality: 85,
   });
 
+  // Adjust: safety zone, orbit targets and obstacle heights sit right under
+  // the plan buttons; Orbit targets show after PLAN ALL even for a grid.
+  const adjustLayout = () =>
+    page.evaluate(() => {
+      const panel = document.querySelector('#drone-plan-panel');
+      const adjust = panel.querySelector('[data-role="adjust"]');
+      const suite = panel.querySelector('[data-role="suite"]');
+      const targets = adjust
+        ?.querySelector('[data-action="recommend-targets"]')
+        ?.closest('.gev-dp-targets');
+      const visible = (n) =>
+        Boolean(n) && !n.hidden && n.getBoundingClientRect().height > 0;
+      return {
+        present: Boolean(adjust),
+        afterSuite: Boolean(adjust) && suite?.nextElementSibling === adjust,
+        hasZone: Boolean(
+          adjust?.querySelector(
+            '[data-role="3d-check"] input[data-check-slider="width"]',
+          ),
+        ),
+        hasObstacles: Boolean(
+          adjust?.querySelector('[data-action="add-obstacle"]'),
+        ),
+        targetsVisible: visible(targets),
+        pattern: panel.querySelector('select[aria-label="Pattern"]')?.value,
+      };
+    });
+  const adjBefore = await adjustLayout();
+  check(
+    'Adjust: right after the suite list, holds the safety zone and obstacle heights; no orbit targets for a plain grid',
+    adjBefore.present &&
+      adjBefore.afterSuite &&
+      adjBefore.hasZone &&
+      adjBefore.hasObstacles &&
+      adjBefore.pattern === 'grid' &&
+      !adjBefore.targetsVisible,
+    JSON.stringify(adjBefore),
+  );
+  await page.evaluate(() => window.__gevDronePlan.planSuite());
+  await wait(500);
+  const adjAfter = await adjustLayout();
+  check(
+    'Adjust: Orbit targets are visible after PLAN ALL with a grid pattern',
+    adjAfter.targetsVisible && adjAfter.pattern === 'grid',
+    JSON.stringify(adjAfter),
+  );
+
   // Options change the plan.
   await page.select('#drone-plan-panel select[aria-label="Pattern"]', 'double');
   await wait(1200);

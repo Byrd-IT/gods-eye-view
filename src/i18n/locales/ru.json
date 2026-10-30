@@ -3258,6 +3258,7 @@
   "3D check": "3D-проверка",
   "Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.": "Только визуальная проверка: ничто здесь не обнаруживает столкновения. Смотрите её поверх Google Photorealistic 3D, где видны деревья. В зданиях OpenStreetMap нет деревьев и линий электропередачи.",
   "Show 3D check": "Показать 3D-проверку",
+  "Adjust": "Настроить",
   "Safety zone": "Зона безопасности",
   "Zone half-width": "Полуширина зоны",
   "Height curtain": "Высотная завеса",
