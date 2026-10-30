@@ -2195,18 +2195,21 @@ export function initDronePlan({
     ui.summary.hidden = false;
     el(doc, 'p', ui.summary, {
       cls: 'gev-dp-summary-line',
-      text: t('Total: {time} flying · {flights} · {batteries} ({min} min each)', {
-        time: durationText(durationS),
-        flights:
-          flights === 1
-            ? t('{count} flight', { count: num(flights) })
-            : t('{count} flights', { count: num(flights) }),
-        batteries:
-          batteries === 1
-            ? t('about {count} battery', { count: num(batteries) })
-            : t('about {count} batteries', { count: num(batteries) }),
-        min: num(minutes),
-      }),
+      text: t(
+        'Total: {time} flying · {flights} · {batteries} ({min} min each)',
+        {
+          time: durationText(durationS),
+          flights:
+            flights === 1
+              ? t('{count} flight', { count: num(flights) })
+              : t('{count} flights', { count: num(flights) }),
+          batteries:
+            batteries === 1
+              ? t('about {count} battery', { count: num(batteries) })
+              : t('about {count} batteries', { count: num(batteries) }),
+          min: num(minutes),
+        },
+      ),
     });
     if (sum.sharedBatteries) {
       el(doc, 'p', ui.summary, {
