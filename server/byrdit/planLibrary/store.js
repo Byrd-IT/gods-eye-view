@@ -387,16 +387,20 @@ export function createStore({
 
     versions(user, id) {
       loadMeta(user, id);
-      return versionNumbers(user, id)
-        .reverse()
-        .map((n) => {
+      const out = [];
+      for (const n of versionNumbers(user, id).reverse()) {
+        try {
           const st = statSync(path.join(planDir(user, id), 'v', `${n}.json`));
-          return {
+          out.push({
             version: n,
             savedAt: Math.round(st.mtimeMs),
             bytes: st.size,
-          };
-        });
+          });
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error; // pruned meanwhile
+        }
+      }
+      return out;
     },
 
     /** Restoring an old version is a NEW save carrying that version's plan. */

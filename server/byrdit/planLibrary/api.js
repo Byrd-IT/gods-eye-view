@@ -36,11 +36,14 @@ function readBody(req, limit) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let over = false;
     req.on('data', (chunk) => {
+      if (over) return; // drain, keep nothing, so the 413 can reach the client
       size += chunk.length;
       if (size > limit) {
+        over = true;
+        chunks.length = 0;
         reject(new LibraryError('too-large', 'The request is too large', 413));
-        req.destroy();
         return;
       }
       chunks.push(chunk);
@@ -100,9 +103,9 @@ export function createPlanLibraryHandler({
     // Whose plans: always the caller's own, unless the admin READS another's.
     const asked = url.searchParams.get('owner');
     let owner = who.user;
-    if (asked && asked !== who.user) {
-      const other = cleanUserName(asked);
-      if (!other) throw new LibraryError('bad-user', 'Bad user name');
+    const other = asked ? cleanUserName(asked) : null;
+    if (asked && !other) throw new LibraryError('bad-user', 'Bad user name');
+    if (other && other !== who.user) {
       if (!who.admin)
         throw new LibraryError('forbidden', 'Not your plans', 403);
       if (write)

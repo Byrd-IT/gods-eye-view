@@ -275,7 +275,7 @@ test('size limit, plan count limit, atomic files', async () => {
   try {
     const huge = { schema: 'gevplan', blob: 'x'.repeat(26 * 1024 * 1024) };
     const r = await s.call('POST', '', { user: 'alice', body: { name: 'big', plan: huge } }).catch((e) => ({ status: 'closed', e }));
-    assert.ok(r.status === 413 || r.status === 'closed', String(r.status));
+    assert.equal(r.status, 413, 'the client sees too large, not a dropped connection');
     assert.deepEqual(s.store.list('alice'), []);
     const store = createStore({ root: s.root });
     const small = createStore({ root: s.root, limits: { maxPlans: 5 } });
@@ -338,6 +338,19 @@ test('no identity: 401 and the store root is not even created', async () => {
     const r = await s.call('GET', '/');
     assert.equal(r.status, 401);
     assert.equal(existsSync(s.root), false);
+  } finally {
+    await s.close();
+  }
+});
+
+test('?owner= naming yourself (any case) is your own plans, not a foreign owner', async () => {
+  const s = await boot();
+  try {
+    s.store.create('alice', { name: 'mine' }, { a: 1 });
+    const r = await s.call('GET', '/?owner=Alice', { user: 'alice' });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.plans.length, 1);
+    assert.equal((await s.call('GET', '/?owner=bob', { user: 'alice' })).status, 403);
   } finally {
     await s.close();
   }
