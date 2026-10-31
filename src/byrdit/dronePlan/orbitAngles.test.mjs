@@ -450,3 +450,18 @@ test('saved plans keep the new options and paths', () => {
   assert.deepEqual(back.orbitTargets[0].blocked, { fromDeg: 10, toDeg: 80 });
   assert.equal(back.lookAtPaths[0].points.length, 2);
 });
+
+test('heading: each plain orbit photo sets its planned heading first, then shoots', () => {
+  const targets = flightTargets({ radiusM: 30 }).slice(0, 1);
+  const p = plan({ orbitTargets: targets, orbitOutward: false });
+  const ids = p.legs.flatMap((l) => l.waypoints.map((w) => w.id));
+  const result = assembleMissions(p, { known: true, takeoffM: 100, wpM: ids.map(() => 100) });
+  const { waylinesWpml } = buildMissionFiles(result.missions[0], result.plan);
+  const groups = waylinesWpml.split('<wpml:actionGroup>').slice(1);
+  const seq = groups.filter((g) => g.includes('<wpml:actionActuatorFunc>rotateYaw<'));
+  assert.ok(seq.length >= 36);
+  for (const g of seq) {
+    const funcs = [...g.matchAll(/<wpml:actionActuatorFunc>(\w+)</g)].map((m) => m[1]);
+    assert.ok(funcs.indexOf('rotateYaw') < funcs.indexOf('takePhoto'));
+  }
+});

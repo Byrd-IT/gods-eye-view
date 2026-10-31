@@ -234,6 +234,22 @@ function placemarks(mission, speedMs) {
               gimbalAction(actionId++, wp.pitchDeg),
             ],
           });
+        } else if (wp.photo && wp.headingDeg != null) {
+          // Orbit photo: smoothTransition blends the heading towards the
+          // next point while the aircraft flies the curve, which left the
+          // camera yawed off the target (2026-10-30 flight: +4 to +11
+          // degrees). Set the planned heading explicitly, then shoot.
+          groups += actionGroup({
+            id: groupId++,
+            start: wp.index,
+            end: wp.index,
+            trigger: 'reachPoint',
+            mode: 'sequence',
+            actions: [
+              yawAction(actionId++, wp.headingDeg, wp.headingDeg),
+              photoAction(actionId++),
+            ],
+          });
         } else if (wp.photo) {
           groups += actionGroup({
             id: groupId++,
