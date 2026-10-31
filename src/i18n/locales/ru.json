@@ -3403,7 +3403,6 @@
   "Grid": "Сетка",
   "Double grid": "Двойная сетка",
   "Orbit": "Облёт",
-  "{n} areas": "Областей: {n}",
   "Nothing drawn yet": "Пока ничего не нарисовано",
   "takeoff set": "взлёт задан",
   "takeoff at the centre": "взлёт из центра",
@@ -3414,8 +3413,6 @@
   "{n} min battery": "батарея {n} мин",
   "one job": "одна задача",
   "job per area": "задача на область",
-  "{n} photos": "Фото: {n}",
-  "{n} missions": "Миссий: {n}",
   "Not planned yet": "Ещё не спланировано",
   "on": "вкл.",
   "zone": "зона",
@@ -3427,5 +3424,8 @@
   "Hard cap {cap} above ground": "Жёсткий предел {cap} над землёй",
   "Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines and guy wires are in none of these sources. The plan keeps {margin} above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.": "Высоты — оценки по открытым данным или числа, которые вы задали, а не съёмка. Деревья растут. Линий электропередачи и растяжек нет ни в одном из источников. План держит {margin} над каждой колонной. Перетащите жёлтую точку на колонне или введите высоту. Сравните колонны с 3D-видом на глаз. Это визуальная проверка, в полёте не проверялась.",
   "Orbits fly at least {min} above ground: tree height plus {margin}, so the drone clears the trees.": "Облёты идут не ниже {min} над землёй: высота деревьев плюс {margin}, чтобы дрон прошёл над деревьями.",
-  "{min} min over {obstacle} trees": "{min} минимум над деревьями {obstacle}"
+  "{min} min over {obstacle} trees": "{min} минимум над деревьями {obstacle}",
+  "areas: {n}": "областей: {n}",
+  "photos: {n}": "фото: {n}",
+  "missions: {n}": "миссий: {n}"
 }

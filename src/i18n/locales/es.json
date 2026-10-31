@@ -3334,7 +3334,6 @@
   "Grid": "Cuadrícula",
   "Double grid": "Cuadrícula doble",
   "Orbit": "Órbita",
-  "{n} areas": "{n} áreas",
   "Nothing drawn yet": "Aún no hay nada dibujado",
   "takeoff set": "despegue fijado",
   "takeoff at the centre": "despegue en el centro",
@@ -3345,8 +3344,6 @@
   "{n} min battery": "batería {n} min",
   "one job": "un trabajo",
   "job per area": "un trabajo por área",
-  "{n} photos": "{n} fotos",
-  "{n} missions": "{n} misiones",
   "Not planned yet": "Aún sin planificar",
   "on": "activado",
   "zone": "zona",
@@ -3358,5 +3355,8 @@
   "Hard cap {cap} above ground": "Límite máximo {cap} sobre el suelo",
   "Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines and guy wires are in none of these sources. The plan keeps {margin} above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.": "Las alturas son estimaciones de datos abiertos o cifras que tú pones, no un levantamiento. Los árboles crecen. Líneas eléctricas y tensores no están en ninguna de estas fuentes. El plan mantiene {margin} sobre cada columna. Arrastra el punto amarillo de una columna o escribe una altura. Compara las columnas con la vista 3D a ojo. Es una revisión visual, no probada en vuelo.",
   "Orbits fly at least {min} above ground: tree height plus {margin}, so the drone clears the trees.": "Las órbitas vuelan al menos a {min} sobre el suelo: altura de los árboles más {margin}, para que el dron libre los árboles.",
-  "{min} min over {obstacle} trees": "{min} mín. sobre árboles de {obstacle}"
+  "{min} min over {obstacle} trees": "{min} mín. sobre árboles de {obstacle}",
+  "areas: {n}": "áreas: {n}",
+  "photos: {n}": "fotos: {n}",
+  "missions: {n}": "misiones: {n}"
 }

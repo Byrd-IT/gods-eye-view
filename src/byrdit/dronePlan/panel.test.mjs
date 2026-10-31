@@ -1262,7 +1262,6 @@ test('orbit: a failing or timed-out lookup falls back to the area centre', async
     const dom = makeDoc();
     const world = makeWorld({ sample: (c) => flat(c) });
     const handle = initDronePlan({
-      unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
     unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
       viewer: world.viewer,
       cesium: world.cesium,
@@ -1724,8 +1723,8 @@ test('Steps: each header carries a one-line summary of its current values', asyn
   assert.match(line('plan'), /Not planned yet/);
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
-  assert.match(line('area'), /1 areas/);
-  assert.match(line('plan'), /\d+ photos.*1 missions/);
+  assert.match(line('area'), /areas: 1/);
+  assert.match(line('plan'), /photos: \d+.*missions: 1/);
   assert.match(line('check'), /on.*zone.*curtain.*footprints/);
   w.handle.destroy();
 });
@@ -1895,7 +1894,6 @@ test('PLAN ALL: a late building-footprint reply does not wipe the suite, and the
     const world = makeWorld({ sample: (cartos) => flat(cartos) });
     const late = deferred();
     const handle = initDronePlan({
-      unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
     unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
       viewer: world.viewer,
       cesium: world.cesium,
@@ -2266,17 +2264,16 @@ test('units: what is typed or slid in feet is stored in metres', async () => {
 test('units: an obstacle height box takes feet and the plan gets metres', async () => {
   const w = setup({ storage: memoryStorage() });
   w.handle.setBox(boxM(300, 200));
-  w.handle.addObstacle?.({ lon: -97.77, lat: 30.27 });
   await w.handle.replan();
-  const box = w.find((n) => n.getAttribute('data-obstacle-height'))[0];
-  if (!box) {
-    w.handle.destroy();
-    return;
-  }
+  w.handle.obstacles.add({ lon: -97.77, lat: 30.27, heightM: 20 });
+  const [added] = w.handle.obstacles.list();
+  assert.ok(added, 'the obstacle row exists');
+  const box = w.find((n) => n.getAttribute('data-obstacle-height') !== null && n.getAttribute('data-obstacle-height') !== undefined)[0];
+  assert.ok(box, 'its height box is on screen');
+  assert.equal(box.value, '65.6', '20 m shows as feet');
   box.value = '100';
   box.dispatch('input');
-  const stored = w.handle.getState().options.obstacles[0].heightM;
-  assert.equal(stored, 30.48);
+  assert.equal(w.handle.obstacles.list()[0].heightM, 30.5);
   w.handle.destroy();
 });
 
@@ -2374,4 +2371,20 @@ test('transparency: four sliders, defaults are today\'s values, remembered per b
   assert.equal(checkSlider(again, 'alpha-footprint').value, '5');
   assert.equal(JSON.parse(storage.getItem('gev.dronePlan.alpha')).footprint, 0.05);
   again.handle.destroy();
+});
+
+test('units: editing one orbit height in feet leaves the others at their exact metres', () => {
+  const w = setup({ storage: memoryStorage() });
+  const rings = w.control('Orbit heights');
+  rings.value = '131, 262';
+  rings.dispatch('change');
+  const [a, b] = w.handle.getState().options.orbitHeightsM;
+  assert.equal(a, 39.93);
+  rings.value = '131, 300';
+  rings.dispatch('change');
+  const after = w.handle.getState().options.orbitHeightsM;
+  assert.equal(after[0], a, 'the untouched entry did not move');
+  assert.notEqual(after[1], b);
+  assert.equal(after[1], 91.44);
+  w.handle.destroy();
 });

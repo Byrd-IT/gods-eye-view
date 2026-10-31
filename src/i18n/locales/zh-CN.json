@@ -3196,7 +3196,6 @@
   "Grid": "网格",
   "Double grid": "双网格",
   "Orbit": "环绕",
-  "{n} areas": "{n} 个区域",
   "Nothing drawn yet": "尚未绘制",
   "takeoff set": "已设起飞点",
   "takeoff at the centre": "从中心起飞",
@@ -3207,8 +3206,6 @@
   "{n} min battery": "电池 {n} 分钟",
   "one job": "一个任务",
   "job per area": "每区域一个任务",
-  "{n} photos": "{n} 张照片",
-  "{n} missions": "{n} 个任务",
   "Not planned yet": "尚未规划",
   "on": "开",
   "zone": "区域",
@@ -3220,5 +3217,8 @@
   "Hard cap {cap} above ground": "硬性上限:离地 {cap}",
   "Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines and guy wires are in none of these sources. The plan keeps {margin} above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.": "高度是来自开放数据的估计值或您设置的数字,不是测绘结果。树木会生长。这些来源都不包含电线和拉线。计划在每根障碍柱上方保持 {margin}。拖动障碍柱上的黄点,或输入高度。请用肉眼将障碍柱与 3D 视图对照。这只是目视检查,未经飞行测试。",
   "Orbits fly at least {min} above ground: tree height plus {margin}, so the drone clears the trees.": "环绕飞行至少离地 {min}:树高加 {margin},以便无人机避开树木。",
-  "{min} min over {obstacle} trees": "在 {obstacle} 的树上方至少 {min}"
+  "{min} min over {obstacle} trees": "在 {obstacle} 的树上方至少 {min}",
+  "areas: {n}": "区域:{n}",
+  "photos: {n}": "照片:{n}",
+  "missions: {n}": "任务:{n}"
 }

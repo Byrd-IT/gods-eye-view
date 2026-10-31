@@ -1775,11 +1775,19 @@ export function initDronePlan({
     ui.obstacleAdd.addEventListener('click', () => startObstaclePick());
     ui.targetAdd.addEventListener('click', () => startTargetPick());
     ui.rings.addEventListener('change', () => {
+      // An entry whose text is unchanged keeps its exact metre value, so
+      // editing one height never nudges the others through foot rounding.
+      const kept = new Map(
+        (o.orbitHeightsM ?? []).map((m) => [lengthField(m), m]),
+      );
       const list = ui.rings.value
         .split(/[\s,;]+/)
-        .map(Number)
-        .filter((n) => Number.isFinite(n) && n > 0)
-        .map((n) => lengthToM(n));
+        .filter((text) => Number(text) > 0 && Number.isFinite(Number(text)))
+        .map((text) =>
+          kept.has(String(Number(text)))
+            ? kept.get(String(Number(text)))
+            : lengthToM(Number(text)),
+        );
       o.orbitHeightsM = list.length ? list : null;
       syncControls();
       schedule();
@@ -1832,7 +1840,7 @@ export function initDronePlan({
     const targets = (o.orbitTargets ?? []).filter((x) => x.active !== false);
     const lines = {
       area: [
-        count ? t('{n} areas', { n: num(count) }) : t('Nothing drawn yet'),
+        count ? t('areas: {n}', { n: num(count) }) : t('Nothing drawn yet'),
         state.takeoff ? t('takeoff set') : t('takeoff at the centre'),
       ],
       aircraft: [preset.name, `1/${num(o.shutterDenominator)} s`],
@@ -1858,9 +1866,9 @@ export function initDronePlan({
       ],
       plan: result
         ? [
-            t('{n} photos', { n: num(result.totals.photoCount) }),
+            t('photos: {n}', { n: num(result.totals.photoCount) }),
             durationText(result.totals.durationS),
-            t('{n} missions', { n: num(result.totals.missionCount) }),
+            t('missions: {n}', { n: num(result.totals.missionCount) }),
           ]
         : [t('Not planned yet')],
       check: state.check.enabled
@@ -1876,7 +1884,7 @@ export function initDronePlan({
           ]
         : [t('off')],
       export: result
-        ? [t('{n} missions', { n: num(result.totals.missionCount) })]
+        ? [t('missions: {n}', { n: num(result.totals.missionCount) })]
         : [t('Nothing to save yet')],
     };
     for (const key of STEP_KEYS) {
