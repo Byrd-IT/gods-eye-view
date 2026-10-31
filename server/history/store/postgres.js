@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { HistoryStoreError } from './common.js';
 import { createSqlStore } from './sqlStore.js';
 
-const dialect = Object.freeze({
+export const postgresDialect = Object.freeze({
   placeholder: (i) => `$${i}`,
   begin: 'BEGIN',
   insertChunk: 5000, // six parameters a row; the protocol allows 65535
@@ -48,7 +48,7 @@ function loadDriver(load = createRequire(import.meta.url)) {
  * PostgreSQL history backend. The connection string comes from the caller and is
  * never logged or put in an error.
  *
- * @param {{ url: string, tablePrefix?: string, driver?: object, load?: Function, poolSize?: number }} options
+ * @param {{ url: string, tablePrefix?: string, driver?: object, load?: Function, poolSize?: number, dialectOverrides?: object }} options
  */
 export function createPostgresStore({
   url,
@@ -56,6 +56,7 @@ export function createPostgresStore({
   driver,
   load,
   poolSize = 4,
+  dialectOverrides,
 }) {
   if (typeof url !== 'string' || url.trim() === '')
     throw new HistoryStoreError(
@@ -77,22 +78,28 @@ export function createPostgresStore({
   const adapter = {
     async withConnection(fn) {
       const client = await pool.connect();
+      let discarded = false;
       try {
         return await fn({
+          discard: () => {
+            discarded = true;
+          },
           query: async (sql, params) => {
             const result = await client.query(sql, params);
             return { rows: result.rows ?? [], affected: result.rowCount ?? 0 };
           },
         });
       } finally {
-        client.release();
+        client.release(discarded);
       }
     },
     end: () => pool.end(),
   };
   return createSqlStore({
     backend: 'postgres',
-    dialect,
+    dialect: dialectOverrides
+      ? { ...postgresDialect, ...dialectOverrides }
+      : postgresDialect,
     adapter,
     tablePrefix,
   });

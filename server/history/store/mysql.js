@@ -2,20 +2,23 @@ import { createRequire } from 'node:module';
 import { HistoryStoreError } from './common.js';
 import { createSqlStore } from './sqlStore.js';
 
-const dialect = Object.freeze({
+export const mysqlDialect = Object.freeze({
   placeholder: () => '?',
   begin: 'START TRANSACTION',
   insertChunk: 2000,
   // GET_LOCK is per connection and is released with it; init holds one connection.
+  lockAcquired: (rows) => Number(Object.values(rows[0] ?? {})[0]) === 1,
   lock: (prefix) => `SELECT GET_LOCK('gev_history_schema_${prefix}', 30)`,
   unlock: (prefix) => `SELECT RELEASE_LOCK('gev_history_schema_${prefix}')`,
   schema: ({ obs, feedsTable, metaTable }) => [
-    // utf8mb4_bin compares keys by code point, which is the byte order SQLite and
-    // PostgreSQL ("C") use, so slice orders alike everywhere.
+    // The key is VARBINARY: utf8mb4_bin and the other _bin collations pad with
+    // spaces when comparing ('abc' equals 'abc '), VARBINARY does not, and its
+    // byte order is the one SQLite and PostgreSQL ("C") use. 1024 bytes holds 256
+    // characters of any width. Read keys back with decodeKey.
     `CREATE TABLE IF NOT EXISTS ${obs} (
        feed VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
        t BIGINT NOT NULL,
-       obs_key VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+       obs_key VARBINARY(1024) NOT NULL,
        lat DOUBLE NULL,
        lon DOUBLE NULL,
        data MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
@@ -56,7 +59,7 @@ function loadDriver(load = createRequire(import.meta.url)) {
  * The connection string comes from the caller and is never logged or put in an
  * error.
  *
- * @param {{ url: string, tablePrefix?: string, driver?: object, load?: Function, poolSize?: number }} options
+ * @param {{ url: string, tablePrefix?: string, driver?: object, load?: Function, poolSize?: number, dialectOverrides?: object }} options
  */
 export function createMysqlStore({
   url,
@@ -64,6 +67,7 @@ export function createMysqlStore({
   driver,
   load,
   poolSize = 4,
+  dialectOverrides,
 }) {
   if (typeof url !== 'string' || url.trim() === '')
     throw new HistoryStoreError(
@@ -83,8 +87,12 @@ export function createMysqlStore({
   const adapter = {
     async withConnection(fn) {
       const connection = await pool.getConnection();
+      let discarded = false;
       try {
         return await fn({
+          discard: () => {
+            discarded = true;
+          },
           query: async (sql, params) => {
             const [result] = await connection.query(sql, params);
             return Array.isArray(result)
@@ -93,10 +101,18 @@ export function createMysqlStore({
           },
         });
       } finally {
-        connection.release();
+        if (discarded) connection.destroy();
+        else connection.release();
       }
     },
     end: () => pool.end(),
   };
-  return createSqlStore({ backend: 'mysql', dialect, adapter, tablePrefix });
+  return createSqlStore({
+    backend: 'mysql',
+    dialect: dialectOverrides
+      ? { ...mysqlDialect, ...dialectOverrides }
+      : mysqlDialect,
+    adapter,
+    tablePrefix,
+  });
 }

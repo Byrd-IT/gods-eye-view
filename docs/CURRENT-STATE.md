@@ -1273,7 +1273,10 @@ field of the loaded config. `store.ready()` (and the router's) opens the connect
 and creates the tables at boot rather than at the first write. The contract suite
 runs against all three servers in CI (`GEV_TEST_POSTGRES_URL`,
 `GEV_TEST_MYSQL_URL`, `GEV_TEST_MARIADB_URL`; `GEV_REQUIRE_SQL_BACKENDS=1` makes a
-missing server a failure instead of a skip).
+missing server a failure instead of a skip). Keys are compared byte-wise on every
+backend (MySQL stores them as `VARBINARY`, which does not ignore trailing spaces);
+a key may not contain a NUL character, which PostgreSQL text cannot hold. A
+PostgreSQL socket directory is given as `postgres://user@localhost/db?host=%2Fvar%2Frun%2Fpostgresql`.
 
 ## UI disposal
 

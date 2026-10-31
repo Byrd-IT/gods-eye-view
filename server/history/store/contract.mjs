@@ -128,6 +128,14 @@ export function defineHistoryStoreContract(label, makeStore) {
               obs(T0, 'a', 0, 0, { blob: 'x'.repeat(70_000) }),
             ]),
         ],
+        [
+          'a key with a NUL character',
+          () => store.append('aircraft', [obs(T0, 'a\0b', 0, 0)]),
+        ],
+        [
+          'latestBefore with a NUL key',
+          () => store.latestBefore('aircraft', { t: T0, key: 'a\0' }),
+        ],
         ['slice without t', () => store.slice('aircraft', {})],
         [
           'slice limit of zero',
@@ -174,6 +182,50 @@ export function defineHistoryStoreContract(label, makeStore) {
         assert.equal(error.code, 'INVALID_ARGUMENT');
         assert.ok(!error.message.includes('synthetic-token'), error.message);
         assert.ok(!String(error.stack).includes('synthetic-token'));
+      });
+    });
+
+    describe('keys', () => {
+      it('tells keys apart by every character, including trailing spaces and case', async () => {
+        const keys = ['abc', 'abc ', 'abc\t', 'ABC', 'abc  '];
+        await store.append(
+          'aircraft',
+          keys.map((key, i) => obs(T0, key, 0, 0, { i })),
+        );
+        const { observations } = await store.slice('aircraft', { t: T0 });
+        assert.equal(observations.length, keys.length);
+        for (const key of keys) {
+          const found = await store.latestBefore('aircraft', { t: T0, key });
+          assert.equal(found.key, key);
+          assert.equal(found.data.i, keys.indexOf(key));
+        }
+        assert.equal((await store.coverage('aircraft')).count, keys.length);
+      });
+
+      it('orders keys by their UTF-8 bytes', async () => {
+        const keys = [
+          'a',
+          'a\t',
+          'a ',
+          'a!',
+          'B',
+          'Z',
+          'a\u00e9',
+          'a\u{1F600}',
+          'a\u6771',
+          '\u00e9',
+        ];
+        await store.append(
+          'aircraft',
+          keys.map((key) => obs(T0, key, 0, 0)),
+        );
+        const { observations } = await store.slice('aircraft', { t: T0 });
+        assert.deepEqual(
+          observations.map((row) => row.key),
+          [...keys].sort((a, b) =>
+            Buffer.compare(Buffer.from(a), Buffer.from(b)),
+          ),
+        );
       });
     });
 

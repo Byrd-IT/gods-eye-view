@@ -65,6 +65,16 @@ function positiveInt(value, name, fallback, max) {
 }
 
 /** Validate and normalise one observation. Returns a fresh plain object. */
+/** Keys are text in every backend; PostgreSQL text cannot hold U+0000, so none may. */
+function validKey(key) {
+  return (
+    typeof key === 'string' &&
+    key.length > 0 &&
+    key.length <= MAX_KEY_LENGTH &&
+    !key.includes('\0')
+  );
+}
+
 export function normalizeObservation(raw, index = 0) {
   const where = `observations[${index}]`;
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -72,13 +82,9 @@ export function normalizeObservation(raw, index = 0) {
   }
   const t = assertTime(raw.t, `${where}.t`);
   const key = raw.key;
-  if (
-    typeof key !== 'string' ||
-    key.length === 0 ||
-    key.length > MAX_KEY_LENGTH
-  ) {
+  if (!validKey(key)) {
     throw invalid(
-      `${where}.key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`,
+      `${where}.key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters without a NUL character`,
     );
   }
   const hasLat = raw.lat !== undefined && raw.lat !== null;
@@ -208,13 +214,9 @@ export function normalizeLatestBefore(options) {
     throw invalid('latestBefore options must be an object');
   const t = assertTime(options.t, 't');
   const key = options.key;
-  if (
-    typeof key !== 'string' ||
-    key.length === 0 ||
-    key.length > MAX_KEY_LENGTH
-  ) {
+  if (!validKey(key)) {
     throw invalid(
-      `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`,
+      `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters without a NUL character`,
     );
   }
   return { t, key };

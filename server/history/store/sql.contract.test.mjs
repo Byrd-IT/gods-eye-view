@@ -10,8 +10,8 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { describe, it } from 'node:test';
 import { defineHistoryStoreContract } from './contract.mjs';
-import { createMysqlStore } from './mysql.js';
-import { createPostgresStore } from './postgres.js';
+import { createMysqlStore, mysqlDialect } from './mysql.js';
+import { createPostgresStore, postgresDialect } from './postgres.js';
 import { SQL_SCHEMA_VERSION } from './sqlStore.js';
 
 const require = createRequire(import.meta.url);
@@ -164,38 +164,6 @@ for (const backend of BACKENDS) {
       }
     });
 
-    it('round-trips four-byte characters and keeps byte order of keys', async () => {
-      const store = makeStore();
-      try {
-        const keys = ['Z', 'a', 'é', '😀', '東'];
-        await store.append(
-          'aircraft',
-          keys.map((key) => ({ t: T0, key, lat: 0, lon: 0, data: { key } })),
-        );
-        const { observations } = await store.slice('aircraft', { t: T0 });
-        assert.deepEqual(
-          observations.map((row) => row.key),
-          [...keys].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))),
-        );
-        for (const row of observations) assert.equal(row.data.key, row.key);
-      } finally {
-        await store.close();
-      }
-    });
-
-    it('treats keys that differ only in case as different keys', async () => {
-      const store = makeStore();
-      try {
-        await store.append('aircraft', [
-          { t: T0, key: 'abc', lat: 0, lon: 0 },
-          { t: T0, key: 'ABC', lat: 0, lon: 0 },
-        ]);
-        assert.equal((await store.slice('aircraft', { t: T0 })).observations.length, 2);
-      } finally {
-        await store.close();
-      }
-    });
-
     it('collapses a repeated time and key inside one batch to the last one', async () => {
       const store = makeStore();
       try {
@@ -227,19 +195,53 @@ for (const backend of BACKENDS) {
       }
     });
 
-    it('a rejected batch leaves nothing behind (rolls back)', async () => {
-      const store = makeStore();
+    it('rolls a batch back when the server fails part-way through it', async () => {
+      const prefix = unique();
+      let statements = 0;
+      const store = makeStore(prefix, {
+        // Two rows a statement; the second statement is one the server rejects.
+        dialectOverrides: {
+          insertChunk: 2,
+          upsertObservations(table, tuples) {
+            statements += 1;
+            const real = (backend.create === createPostgresStore ? postgresDialect : mysqlDialect).upsertObservations;
+            return statements === 2
+              ? `INSERT INTO ${table}_no_such_table (feed) VALUES ('x')`
+              : real(table, tuples);
+          },
+        },
+      });
       try {
         await store.append('aircraft', [{ t: T0, key: 'keep', lat: 0, lon: 0 }]);
-        const oversized = 'x'.repeat(300);
-        await assert.rejects(
-          store.append('aircraft', [
-            { t: T0 + 1, key: 'good', lat: 0, lon: 0 },
-            { t: T0 + 1, key: oversized, lat: 0, lon: 0 },
-          ]),
-          (error) => error.code === 'INVALID_ARGUMENT',
-        );
-        assert.equal((await store.coverage('aircraft')).count, 1);
+        statements = 0;
+        const batch = ['a', 'b', 'c', 'd', 'e'].map((key) => ({
+          t: T0 + 1,
+          key,
+          lat: 0,
+          lon: 0,
+        }));
+        await assert.rejects(store.append('aircraft', batch), (error) => {
+          assert.equal(error.code, 'BACKEND');
+          return true;
+        });
+        assert.equal(statements, 2, 'the first chunk was written before the failure');
+        const { count } = await store.coverage('aircraft');
+        assert.equal(count, 1, 'the first chunk must not survive');
+        // The connection went back to the pool in a usable state.
+        assert.deepEqual(await store.append('aircraft', [batch[0]]), { written: 1 });
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('accepts a mariadb:// connection string for the mysql driver', async () => {
+      if (backend.create !== createMysqlStore) return;
+      const parsed = new URL(url);
+      parsed.protocol = 'mariadb:';
+      const store = makeStore(unique(), { url: parsed.href });
+      try {
+        await store.ready();
+        assert.equal((await store.health()).ok, true);
       } finally {
         await store.close();
       }

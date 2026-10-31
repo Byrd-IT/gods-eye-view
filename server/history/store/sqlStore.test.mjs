@@ -194,3 +194,129 @@ describe('sql backend errors never carry connection details', () => {
     assert.equal((await store.health()).ok, false);
   });
 });
+
+describe('sql backend schema lock', () => {
+  /** A MySQL driver scripted by statement; records how each connection ends. */
+  function scriptedMysql(reply) {
+    const ended = [];
+    const driver = {
+      createPool: () => ({
+        async getConnection() {
+          return {
+            async query(sql) {
+              const answer = reply(sql);
+              if (answer instanceof Error) throw answer;
+              return [answer];
+            },
+            release: () => ended.push('release'),
+            destroy: () => ended.push('destroy'),
+          };
+        },
+        async end() {},
+      }),
+    };
+    return { driver, ended };
+  }
+
+  it('fails the start when MySQL does not grant the schema lock', async () => {
+    for (const granted of [0, null]) {
+      const { driver, ended } = scriptedMysql((sql) =>
+        /GET_LOCK/.test(sql) ? [{ 'GET_LOCK(...)': granted }] : [],
+      );
+      const store = createMysqlStore({ url: MY, driver });
+      await assert.rejects(store.ready(), (error) => {
+        assert.equal(error.code, 'BACKEND');
+        assert.match(error.message, /could not take the schema lock/);
+        return true;
+      });
+      assert.deepEqual(ended, ['release']);
+      await store.close();
+    }
+  });
+
+  it('creates the tables when the lock is granted', async () => {
+    const seen = [];
+    const { driver } = scriptedMysql((sql) => {
+      seen.push(sql.trim().split(/\s+/).slice(0, 3).join(' '));
+      if (/GET_LOCK/.test(sql)) return [{ lock: 1 }];
+      if (/SELECT value/.test(sql)) return [];
+      return { affectedRows: 0 };
+    });
+    const store = createMysqlStore({ url: MY, driver });
+    await store.ready();
+    assert.ok(seen.some((sql) => sql.startsWith('CREATE TABLE IF')));
+    assert.ok(seen.at(-1).includes('RELEASE_LOCK'));
+    await store.close();
+  });
+
+  it('destroys, rather than pools, a MySQL connection whose lock cannot be released', async () => {
+    const { driver, ended } = scriptedMysql((sql) => {
+      if (/RELEASE_LOCK/.test(sql)) return new Error('connection lost');
+      if (/GET_LOCK/.test(sql)) return [{ lock: 1 }];
+      if (/SELECT value/.test(sql)) return [];
+      return { affectedRows: 0 };
+    });
+    const store = createMysqlStore({ url: MY, driver });
+    await store.ready();
+    assert.deepEqual(ended, ['destroy']);
+    await store.close();
+  });
+
+  it('destroys a PostgreSQL connection whose lock cannot be released', async () => {
+    const released = [];
+    const driver = {
+      Pool: class {
+        on() {}
+        async connect() {
+          return {
+            async query(sql) {
+              if (/pg_advisory_unlock/.test(sql)) throw new Error('connection lost');
+              return { rows: /SELECT value/.test(sql) ? [] : [{}], rowCount: 0 };
+            },
+            release: (destroy) => released.push(destroy),
+          };
+        }
+        async end() {}
+      },
+    };
+    const store = createPostgresStore({ url: PG, driver });
+    await store.ready();
+    assert.deepEqual(released, [true]);
+    await store.close();
+  });
+
+  it('returns a healthy PostgreSQL connection to the pool', async () => {
+    const released = [];
+    const driver = {
+      Pool: class {
+        on() {}
+        async connect() {
+          return {
+            async query(sql) {
+              return { rows: /SELECT value/.test(sql) ? [] : [{}], rowCount: 0 };
+            },
+            release: (destroy) => released.push(destroy),
+          };
+        }
+        async end() {}
+      },
+    };
+    const store = createPostgresStore({ url: PG, driver });
+    await store.ready();
+    assert.deepEqual(released, [false]);
+    await store.close();
+  });
+});
+
+describe('sql backend settings: sockets', () => {
+  it('accepts a PostgreSQL socket directory through the host parameter', () => {
+    const config = loadHistoryConfig(
+      {
+        HISTORY_STORE: 'postgres',
+        HISTORY_POSTGRES_URL: 'postgres://history@localhost/gev?host=%2Frun%2Fpostgresql',
+      },
+      { available },
+    );
+    assert.equal(config.feeds.aircraft.store, 'postgres');
+  });
+});

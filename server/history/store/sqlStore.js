@@ -99,7 +99,15 @@ export function createSqlStore({
 
   async function initialise() {
     await adapter.withConnection(async (connection) => {
-      await connection.query(dialect.lock(tablePrefix), []);
+      const locked = await connection.query(dialect.lock(tablePrefix), []);
+      // A timed-out or failed lock request raises nothing in MySQL; without the
+      // lock two starting processes could race on creating the tables.
+      if (dialect.lockAcquired && !dialect.lockAcquired(locked.rows))
+        throw new HistoryStoreError(
+          'BACKEND',
+          `${backend} could not take the schema lock`,
+        );
+      let unlocked = false;
       try {
         for (const statement of dialect.schema({ obs, feedsTable, metaTable }))
           await connection.query(statement, []);
@@ -122,9 +130,13 @@ export function createSqlStore({
       } finally {
         try {
           await connection.query(dialect.unlock(tablePrefix), []);
+          unlocked = true;
         } catch {
-          /* the lock dies with the connection */
+          /* handled below */
         }
+        // A lock that could not be released lives as long as its session, so
+        // that connection must not go back into the pool.
+        if (!unlocked) connection.discard();
       }
     });
   }
@@ -170,7 +182,13 @@ export function createSqlStore({
     return clause;
   }
 
-  const decodeObservation = (row) => decodeRow({ ...row, key: row.obs_key });
+  const decodeObservation = (row) =>
+    decodeRow({
+      ...row,
+      key: Buffer.isBuffer(row.obs_key)
+        ? row.obs_key.toString('utf8')
+        : row.obs_key,
+    });
 
   /** Rows of one batch with a repeated (t, key) collapsed to the last one. */
   function dedupe(rows) {
