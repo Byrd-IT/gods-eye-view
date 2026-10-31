@@ -1237,6 +1237,28 @@ calibration edit. Failed refreshes preserve settled pixels for the same camera,
 while a newly selected camera never shows the prior camera's image. Disposal
 releases listeners, subscriptions, image handlers, summary timers and chip-hide timers.
 
+## History store
+
+`server/history/store/` is the storage layer recorded history will use; nothing
+records into it yet, so no running feature changes. A store keeps timestamped
+observations per feed (`{ t, key, lat?, lon?, data? }`, with `(t, key)` unique per
+feed so a retried batch is safe) and answers `slice` (newest observation per key
+in a window, optionally inside a bounding box that may cross the antimeridian),
+`latestBefore`, `snapshots`, `coverage` (spans separated by gaps), `prune` and
+`health`. The SQLite backend uses Node's built-in `node:sqlite` (no dependency),
+a WAL journal, and one file, `./data/history.sqlite` unless `HISTORY_SQLITE_PATH`
+says otherwise.
+
+`HISTORY_STORE` picks the default backend and `HISTORY_STORE_<FEED>` overrides it
+for one feed; `HISTORY_RETENTION_DAYS` and `HISTORY_RETENTION_DAYS_<FEED>` set how
+many days are kept (0 keeps everything). `createHistoryStore(env)` validates all of
+it before opening a file and throws one error listing every problem: an unknown
+backend, a backend this build does not provide, a setting for a feed that does
+not exist, or a retention that is not a whole number of days. Error text names the
+setting and never quotes its value. Contract suite:
+`server/history/store/historyStore.contract.test.mjs`; gate:
+`npm run qa:history-store`.
+
 ## UI disposal
 
 UI disposal releases the CCTV subscription, command-dock observer, legacy drag
