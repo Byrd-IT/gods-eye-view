@@ -180,8 +180,8 @@ function readXmp(xmp) {
   const withZone = /(Z|[+-]\d{2}:\d{2})$/.test(created);
   const parsed = withZone ? Date.parse(created) : NaN;
   return {
-    lat: xmpNumber(xmp, 'GpsLatitude') ?? xmpNumber(xmp, 'GPSLatitude'),
-    lon: xmpNumber(xmp, 'GpsLongitude') ?? xmpNumber(xmp, 'GPSLongitude'),
+    lat: xmpNumber(xmp, 'GpsLatitude'),
+    lon: xmpNumber(xmp, 'GpsLongitude'),
     absAltM: xmpNumber(xmp, 'AbsoluteAltitude'),
     relAltM: xmpNumber(xmp, 'RelativeAltitude'),
     gimbalPitchDeg: xmpNumber(xmp, 'GimbalPitchDegree'),

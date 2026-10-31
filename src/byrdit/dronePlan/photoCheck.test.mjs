@@ -441,3 +441,18 @@ test('the CSV has one row per photo and per planned point, and a file name canno
   assert.match(rows[1], /^photo,"'=HYPERLINK/);
   assert.match(rows[3], /missing$/);
 });
+
+test('a run of missed shots at a steady pace is a gap, not a pause', () => {
+  // 5 shots in a row missing: distance and time are both 6x the usual step
+  const photos = [0, 1, 2, 3, 9, 10, 11].map((i) => photoAt(i * 30, 0, i));
+  const a = analyzePhotos(photos, []);
+  assert.equal(a.gaps.length, 1);
+  assert.equal(a.breaks.length, 0);
+});
+
+test('two different photos at one place with no time are not merged as copies', () => {
+  const a = photoAt(0, 0, 0, { timeMs: null, timeText: '', name: 'a.jpg' });
+  const b = photoAt(0, 0, 0, { timeMs: null, timeText: '', name: 'b.jpg' });
+  assert.equal(dedupePhotos([a, b]).photos.length, 2);
+  assert.equal(dedupePhotos([a, { ...a }]).photos.length, 1);
+});

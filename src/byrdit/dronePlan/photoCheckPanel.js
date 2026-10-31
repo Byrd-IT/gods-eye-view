@@ -61,7 +61,8 @@ export function mountPhotoCheck({ doc, container, host }) {
     skippedOver: 0,
     matchM: null, // null: the default for the plan
     analysis: null,
-    planKey: null,
+    planRef: null,
+    queued: [],
     busy: false,
     token: 0,
   };
@@ -171,6 +172,8 @@ export function mountPhotoCheck({ doc, container, host }) {
     save.disabled = !a?.summary;
     matchInput.disabled = !has;
     matchUnit.textContent = lengthUnit();
+    if (a?.summary && s.matchM == null)
+      matchInput.value = String(Math.round(lengthFromM(a.matchM)));
     if (!a?.summary) return;
     const sum = a.summary;
     line(
@@ -362,15 +365,12 @@ export function mountPhotoCheck({ doc, container, host }) {
 
   function analyze() {
     const plan = host.planned?.() ?? {};
-    s.planKey = `${plan.suite ? 'S' : ''}${plan.suite ?? plan.result ?? ''}`;
     s.planRef = plan.suite ?? plan.result ?? null;
     const planned = plannedPhotoPoints(plan);
     const matchM = s.matchM ?? defaultMatchM(planned);
     s.analysis = s.photos.length
       ? analyzePhotos(s.photos, planned, { matchM })
       : null;
-    if (s.analysis && s.matchM == null)
-      matchInput.value = String(Math.round(lengthFromM(s.analysis.matchM)));
     draw();
     render();
   }
@@ -378,7 +378,12 @@ export function mountPhotoCheck({ doc, container, host }) {
   /** Read the metadata of `files` (File objects) and check them. */
   async function addFiles(files) {
     const list = Array.from(files ?? []);
-    if (!list.length || s.busy) return null;
+    if (!list.length) return null;
+    if (s.busy) {
+      // Files chosen while others are still being read wait their turn.
+      s.queued.push(...list);
+      return null;
+    }
     const token = ++s.token;
     s.busy = true;
     const room = Math.max(0, MAX_PHOTOS - s.photos.length);
@@ -419,6 +424,11 @@ export function mountPhotoCheck({ doc, container, host }) {
       );
     }
     analyze();
+    if (s.queued.length) {
+      const more = s.queued;
+      s.queued = [];
+      return addFiles(more);
+    }
     return s.analysis;
   }
 
@@ -426,6 +436,7 @@ export function mountPhotoCheck({ doc, container, host }) {
     s.token += 1;
     s.busy = false;
     s.photos = [];
+    s.queued = [];
     s.unreadable = 0;
     s.notPhoto = 0;
     s.skippedOver = 0;

@@ -2667,7 +2667,6 @@ test('photo check: reads photos in the browser, plots them against the plan, fla
   assert.equal(a.summary.missingCount, 1);
   assert.equal(a.planned.findIndex((p) => !p.covered), 3);
   assert.ok(a.summary.gsdMedianCm > 0);
-  const texts = () => w.find((n) => n.getAttribute?.('data-role') === 'photo-results')[0].textContent ?? '';
   const shown = w.find((n) => n.getAttribute?.('data-level'))
     .map((n) => n.textContent).join('\n');
   assert.match(shown, /1 planned photo point has no photo/);
@@ -2683,7 +2682,6 @@ test('photo check: reads photos in the browser, plots them against the plan, fla
   // clear drops everything, photos and map layer
   w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'photos-clear').click();
   assert.equal(pc.analysis(), null);
-  void texts;
   w.handle.destroy();
 });
 
@@ -2729,4 +2727,23 @@ test('photo check: nothing is stored or sent anywhere', async () => {
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('photo check: files chosen while others are still being read wait their turn', async () => {
+  const { jpeg, tiff, xmpText } = await import('./photoFixtures.mjs');
+  const w = setup();
+  const pc = w.handle.photoCheck();
+  const mk = (i) => ({
+    name: `p${i}.jpg`,
+    bytes: jpeg({
+      exif: tiff({ gps: { lat: 30.1 + i * 0.0003, lon: -97.5, alt: 1 }, time: `2026:10:30 13:00:${String(i).padStart(2, '0')}` }),
+      xmp: xmpText({ lat: 30.1 + i * 0.0003, lon: -97.5, abs: 1, rel: 50 }),
+    }),
+  });
+  const first = pc.addFiles([mk(0), mk(1)]);
+  const second = await pc.addFiles([mk(2), mk(3)]); // arrives while the first is reading
+  assert.equal(second, null);
+  const done = await first;
+  assert.equal(done.summary.photoCount, 4);
+  w.handle.destroy();
 });

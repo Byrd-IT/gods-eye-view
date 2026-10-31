@@ -166,7 +166,7 @@ export function dedupePhotos(photos) {
   const seen = new Set();
   const out = [];
   for (const p of photos) {
-    const key = `${p.timeMs ?? p.timeText}|${p.lat.toFixed(7)}|${p.lon.toFixed(7)}`;
+    const key = `${p.timeMs ?? (p.timeText || p.name)}|${p.lat.toFixed(7)}|${p.lon.toFixed(7)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(p);
@@ -346,7 +346,13 @@ export function analyzePhotos(rawPhotos, planned = [], opts = {}) {
   const breaks = [];
   for (const s of steps) {
     if (usualM == null || s.distM < usualM * GAP_FACTOR) continue;
-    if (s.dtS != null && usualS != null && s.dtS > usualS * BREAK_TIME_FACTOR)
+    // A pause is time far beyond what the distance explains: at a steady pace
+    // a run of missed shots takes longer too, and that is a gap, not a pause.
+    if (
+      s.dtS != null &&
+      usualS != null &&
+      s.dtS / usualS > BREAK_TIME_FACTOR * Math.max(1, s.distM / usualM)
+    )
       breaks.push(s);
     else gaps.push(s);
   }
