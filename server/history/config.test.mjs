@@ -70,7 +70,7 @@ describe('history configuration', () => {
   });
 
   it('rejects an override for a feed that does not exist', () => {
-    const found = problems({ HISTORY_STORE_AIRCRAF: 'sqlite', HISTORY_RETENTION_DAYS_SATELLITES: '5' });
+    const found = problems({ HISTORY_STORE_AIRCRAF: 'sqlite', HISTORY_RETENTION_DAYS_NOPE: '5' });
     assert.equal(found.length, 2);
     assert.match(found[0], /HISTORY_STORE_AIRCRAF names no known feed/);
   });

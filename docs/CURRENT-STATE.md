@@ -1305,7 +1305,16 @@ position) and `launches` (`/api/launches`, keyed by the Launch Library 2 id, tim
 to 90 minutes). A cyclone answer the proxy marks stale is ignored, and an unavailable one is noted as
 a failed poll. A launch answer served from cache (`X-GEV-Cache` HIT, INFLIGHT or STALE-ERROR) is
 ignored. A fire perimeter answer is parsed in full after the response is sent (about 100 ms for a few
-MiB); the tee still skips a body over 32 MiB. Gate: `npm run qa:history-feeds` (fixtures in `server/history/recorder/feedFixtures/`).
+MiB); the tee still skips a body over 32 MiB. `satellites` (CelesTrak TLE text from
+`/api/celestrak/<group>`, tee `parse: 'text'` plus a `payload` hook; light) is a row per element set, not per
+position: key = NORAD number (Alpha-5 decoded), time = the set's own epoch, lat/lon null, data = name,
+both TLE lines and the elements read from them. Only `stations`, `visual`, `gps-ops`, `glo-ops`, `galileo`
+and `geo` are recorded; `starlink` and `active` (catalogue-sized) are not, and one answer stops at 5000 sets.
+A line must match the fixed TLE columns, pass its checksum and carry the same catalogue number as its
+partner; an epoch before 1970 is refused. The proxy's cache replays (`HIT`, `STALE-ERROR`) are skipped and
+a fresh fetch is timed by `X-TLE-Cached-At`; the proxy now also sets `x-tle-cache` and `X-TLE-Cached-At`
+with `setHeader`, because Node's `getHeader` does not see headers passed only to `writeHead`. Default
+minimum interval is six hours (the proxy's TTL). Gate: `npm run qa:history-feeds` (fixtures in `server/history/recorder/feedFixtures/`).
 
 `HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`
 switches one feed on or off, and `HISTORY_MIN_INTERVAL_S[_<FEED>]` skips an unchanged

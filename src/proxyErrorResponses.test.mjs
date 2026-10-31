@@ -96,6 +96,7 @@ function fixture(name, overrides = {}, preview = false) {
     async request(url = '/', method = 'GET') {
       const response = {
         headersSent: false,
+        setHeader() {},
         writeHead(status, headers) {
           Object.assign(this, { status, headers, headersSent: true });
         },

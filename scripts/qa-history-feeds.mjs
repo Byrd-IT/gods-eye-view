@@ -15,7 +15,8 @@
  *   - synthetic secrets placed in fields the adapter does not know reach no stored byte
  * and, across the board:
  *   - a heavy feed (aircraft, vessels) records only when named, never from HISTORY_RECORD=1 alone;
- *     a light one (military, cyclones, perimeters, launches) records from HISTORY_RECORD=1
+ *     a light one (military, cyclones, perimeters, launches, satellites) records from HISTORY_RECORD=1
+ *   - a path a fixture lists as ignored (catalogue-sized satellite groups) stores nothing
  *   - with recording off the tee mounts nothing and wraps nothing
  *   - a world-sized poll is tapped within a time budget and flushed without stalling the event loop
  * Exits non-zero on the first failed check; the report names each check.
@@ -322,6 +323,20 @@ async function main() {
         noisy.statusCode === 200 &&
           withNoise.count === fixture.expectedRows * 3,
         `${withNoise.count} rows`,
+      );
+    }
+
+    // Routes a fixture names as not recorded: nothing is stored.
+    for (const fixture of FIXTURES.filter((f) => f.ignoredPaths)) {
+      const before = (await runtime.store.coverage(fixture.feed)).count;
+      for (const ignored of fixture.ignoredPaths)
+        await request(tee, ignored, reply(fixture, {}));
+      await runtime.recorder.flush();
+      const after = (await runtime.store.coverage(fixture.feed)).count;
+      record(
+        `${fixture.feed}: ${fixture.ignoredPaths.join(', ')} are not recorded`,
+        after === before,
+        `${after} rows`,
       );
     }
 
