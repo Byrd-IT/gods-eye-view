@@ -29,6 +29,12 @@ export const fields = Object.freeze([
 ]);
 
 const MAX_FORECAST_POINTS = 12;
+// The proxy takes forecast points from NOAA GIS layers that can lag the status
+// feed by minutes. A storm answered before its forecast is attached is not
+// recorded yet, because a row keyed by the advisory's position time would
+// shadow the complete one that follows. If the forecast is still missing after
+// this long, the storm is recorded without it.
+export const FORECAST_GRACE_MS = 90 * 60_000;
 
 const num = (value) =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -70,6 +76,7 @@ function forecastOf(points) {
 
 export function toRecords(payload) {
   const list = Array.isArray(payload?.storms) ? payload.storms : [];
+  const fetchedAt = num(payload?.fetchedAt);
   const records = [];
   for (const storm of list) {
     if (!storm || !/^(?:al|ep|cp)\d{6}$/i.test(String(storm.id))) continue;
@@ -79,6 +86,12 @@ export function toRecords(payload) {
     const t = instant(storm.positionAt) ?? instant(storm.issuedAt);
     if (t === null) continue;
     const forecast = forecastOf(storm.forecastPoints);
+    if (!forecast.length) {
+      const issued = instant(storm.issuedAt) ?? t;
+      // No fetch time to measure against, or still inside the grace period: wait.
+      if (fetchedAt === null || fetchedAt - issued < FORECAST_GRACE_MS)
+        continue;
+    }
     const props = {
       name: text(storm.name),
       classification: text(storm.classification, 16),

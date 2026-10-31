@@ -65,7 +65,11 @@ export function createFeedRoutes() {
         if (body?.unavailable === true) return FAILED;
         return body?.stale === true ? SKIP : body;
       },
-      pollAt: (body) => positive(body?.fetchedAt),
+      // An unavailable answer has no fetch time; one failed poll a minute is noted.
+      pollAt: (body) =>
+        body?.unavailable === true
+          ? Math.floor(Date.now() / 60_000) * 60_000
+          : positive(body?.fetchedAt),
     },
     {
       feed: 'perimeters',

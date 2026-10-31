@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRecorder } from './index.js';
 import { createHistoryTee } from './tee.js';
@@ -109,6 +109,89 @@ describe('perimeters: size bound', () => {
   });
 });
 
+describe('perimeters: shapes', () => {
+  const adapter = ADAPTERS.perimeters;
+  const base = { stableId: 'F1', updatedTime: T0 - 1000, acres: 10 };
+  const square = (w, s, e, n) => [
+    [w, s],
+    [e, s],
+    [e, n],
+    [w, n],
+    [w, s],
+  ];
+
+  it('boxes the outer rings of every polygon and counts every ring', () => {
+    const [record] = adapter.toRecords({
+      fetchedAt: T0,
+      rows: [
+        {
+          ...base,
+          polygons: [
+            // An outer ring with a hole, then a second polygon further east.
+            [square(-100, 30, -99, 31), square(-99.6, 30.4, -99.4, 30.6)],
+            [square(-97, 30, -96, 32)],
+          ],
+        },
+      ],
+    });
+    assert.deepEqual(record.props.bbox, [-100, 30, -96, 32]);
+    assert.equal(record.props.polygonCount, 2);
+    assert.equal(record.props.vertexCount, 15);
+    assert.equal(record.lon, -98);
+    assert.equal(record.lat, 31);
+  });
+
+  it('gives a perimeter across the antimeridian no box and no position, and keeps the row', () => {
+    const [record] = adapter.toRecords({
+      fetchedAt: T0,
+      rows: [
+        {
+          ...base,
+          polygons: [
+            [square(179.5, 51, 180, 52)],
+            [square(-180, 51, -179.5, 52)],
+          ],
+        },
+      ],
+    });
+    assert.equal(record.lat, null);
+    assert.equal(record.lon, null);
+    assert.equal('bbox' in record.props, false);
+    assert.equal(record.props.acres, 10);
+  });
+});
+
+describe('cyclones: forecast timing', () => {
+  const fixture = byFeed.cyclones;
+  const answer = (forecast, fetchedAt = T0) => {
+    const body = fixture.build({ clock: T0 });
+    body.fetchedAt = fetchedAt;
+    body.storms = body.storms
+      .slice(0, 1)
+      .map((s) => ({ ...s, forecastPoints: forecast ? s.forecastPoints : [] }));
+    return body;
+  };
+
+  it('waits for the forecast instead of recording the storm without it', async () => {
+    const { store, recorder, tee } = setup('cyclones');
+    await request(tee, '/api/cyclones', send(answer(false)));
+    await recorder.flush();
+    assert.equal(rows(store).length, 0);
+    // Five minutes later the proxy has attached the forecast to the same advisory.
+    await request(tee, '/api/cyclones', send(answer(true, T0 + 300_000)));
+    await recorder.flush();
+    assert.equal(rows(store).length, 1);
+    assert.equal(rows(store)[0].data.forecast.length, 2);
+  });
+
+  it('records the storm without a forecast once the forecast is long overdue', () => {
+    const late = answer(false, T0 + 2 * 3_600_000);
+    const records = ADAPTERS.cyclones.toRecords(late);
+    assert.equal(records.length, 1);
+    assert.equal('forecast' in records[0].props, false);
+  });
+});
+
 describe('cyclones', () => {
   it('keeps the forecast points but not the track or cone', () => {
     const records = ADAPTERS.cyclones.toRecords(
@@ -150,6 +233,30 @@ describe('cyclones', () => {
     assert.deepEqual(
       store.ingests.map((i) => i.ok),
       [false],
+    );
+  });
+
+  it('notes a continuing outage once a minute, not once', async () => {
+    const { store, recorder, tee } = setup('cyclones');
+    const down = {
+      unavailable: true,
+      stale: true,
+      fetchedAt: null,
+      storms: [],
+    };
+    const now = mock.method(Date, 'now', () => T0);
+    try {
+      await request(tee, '/api/cyclones', send(down));
+      await request(tee, '/api/cyclones', send(down));
+      now.mock.mockImplementation(() => T0 + 61_000);
+      await request(tee, '/api/cyclones', send(down));
+    } finally {
+      now.mock.restore();
+    }
+    await recorder.flush();
+    assert.deepEqual(
+      store.ingests.map((i) => i.ok),
+      [false, false],
     );
   });
 

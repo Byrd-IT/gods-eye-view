@@ -10,7 +10,9 @@
  * one fire can be tens of thousands of vertices (the store caps a row at 64 KiB)
  * and a season holds thousands of them. The row keeps the size, containment and
  * dates, plus the bounding box and the vertex count, which is enough to place
- * the fire and to see it grow. Position is the centre of that box.
+ * the fire and to see it grow. Position is the centre of that box (none for a
+ * perimeter that crosses the antimeridian). The box covers the outer rings;
+ * the vertex count covers every ring.
  */
 export const feed = 'perimeters';
 export const source = 'NIFC WFIGS';
@@ -86,7 +88,17 @@ export function measure(polygons) {
   if (!polygonCount || !Number.isFinite(west)) return null;
   if (Math.abs(west) > 180 || Math.abs(east) > 180) return null;
   if (Math.abs(south) > 90 || Math.abs(north) > 90) return null;
-  return { west, south, east, north, polygonCount, vertexCount };
+  // A perimeter that crosses the antimeridian has no honest min/max box.
+  const crossesAntimeridian = east - west > 180;
+  return {
+    west,
+    south,
+    east,
+    north,
+    polygonCount,
+    vertexCount,
+    crossesAntimeridian,
+  };
 }
 
 export function toRecords(payload) {
@@ -117,12 +129,14 @@ export function toRecords(payload) {
       costToDate: num(row.costToDate),
       complexity: text(row.complexity, 32),
       complexName: text(row.complexName, 80),
-      bbox: [
-        round4(box.west),
-        round4(box.south),
-        round4(box.east),
-        round4(box.north),
-      ],
+      bbox: box.crossesAntimeridian
+        ? null
+        : [
+            round4(box.west),
+            round4(box.south),
+            round4(box.east),
+            round4(box.north),
+          ],
       polygonCount: box.polygonCount,
       vertexCount: box.vertexCount,
     };
@@ -131,8 +145,8 @@ export function toRecords(payload) {
     records.push({
       id,
       t,
-      lat: round4((box.south + box.north) / 2),
-      lon: round4((box.west + box.east) / 2),
+      lat: box.crossesAntimeridian ? null : round4((box.south + box.north) / 2),
+      lon: box.crossesAntimeridian ? null : round4((box.west + box.east) / 2),
       props,
     });
   }
