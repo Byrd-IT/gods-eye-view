@@ -2773,6 +2773,10 @@ test('photo check: files dropped anywhere on the panel are caught, also during a
   const first = pc.addFiles([mk(0)]);
   top.dispatch('drop', ev([mk(1)])); // while the first read runs
   top.dispatch('dragover', ev([]));
+  // text dragged over the panel is left alone
+  const before = prevented;
+  top.dispatch('drop', { preventDefault: () => (prevented += 1), dataTransfer: { types: ['text/plain'], files: [] } });
+  assert.equal(prevented, before);
   await first;
   await new Promise((r) => setTimeout(r, 20));
   assert.ok(prevented >= 2);

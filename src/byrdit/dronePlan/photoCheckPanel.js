@@ -494,8 +494,15 @@ export function mountPhotoCheck({ doc, container, host, dropZone = null }) {
   // The drone-plan panel only (not the rail it sits in): other panels there
   // have their own drop targets.
   const panelTop = dropZone ?? root;
-  const guardOver = (e) => e.preventDefault?.();
+  // Only drags that carry files: text dragged into a field works as before.
+  const hasFiles = (e) =>
+    !e.dataTransfer?.types ||
+    Array.from(e.dataTransfer.types).includes('Files');
+  const guardOver = (e) => {
+    if (hasFiles(e)) e.preventDefault?.();
+  };
   const guardDrop = (e) => {
+    if (!hasFiles(e)) return;
     e.preventDefault?.();
     e.stopPropagation?.();
     addFiles(e.dataTransfer?.files ?? []);
