@@ -26,9 +26,16 @@ const SETTINGS = Object.freeze([
   'HISTORY_STORE',
   'HISTORY_RETENTION_DAYS',
   'HISTORY_SQLITE_PATH',
+  // Recorder (server/history/recorder); parsed by recorder/config.js.
+  'HISTORY_RECORD',
+  'HISTORY_RECORD_QUEUE_ROWS',
+  'HISTORY_RECORD_FLUSH_S',
+  'HISTORY_MIN_INTERVAL_S',
 ]);
 const STORE_PREFIX = 'HISTORY_STORE_';
 const RETENTION_PREFIX = 'HISTORY_RETENTION_DAYS_';
+const RECORD_PREFIX = 'HISTORY_RECORD_';
+const MIN_INTERVAL_PREFIX = 'HISTORY_MIN_INTERVAL_S_';
 
 export class HistoryConfigError extends HistoryStoreError {
   /** @param {string[]} problems one sentence per problem; none quotes a configured value */
@@ -85,6 +92,9 @@ function parseRetention(env, name, problems) {
  *   HISTORY_RETENTION_DAYS        default retention in days (30); 0 keeps everything
  *   HISTORY_RETENTION_DAYS_<FEED> retention for one feed
  *   HISTORY_SQLITE_PATH           SQLite file (./data/history.sqlite)
+ *   HISTORY_RECORD, HISTORY_RECORD_<FEED>, HISTORY_MIN_INTERVAL_S[_<FEED>],
+ *   HISTORY_RECORD_QUEUE_ROWS, HISTORY_RECORD_FLUSH_S
+ *                                 recorder settings (see recorder/config.js)
  *
  * @param {Record<string, string|undefined>} [env]
  * @param {{ feeds?: readonly string[], available?: readonly string[] }} [options]
@@ -105,9 +115,12 @@ export function loadHistoryConfig(env = process.env, options = {}) {
   for (const name of Object.keys(env)) {
     if (!name.startsWith('HISTORY_') || text(env, name) === '') continue;
     if (SETTINGS.includes(name)) continue;
-    const prefix = [STORE_PREFIX, RETENTION_PREFIX].find((candidate) =>
-      name.startsWith(candidate),
-    );
+    const prefix = [
+      STORE_PREFIX,
+      RETENTION_PREFIX,
+      RECORD_PREFIX,
+      MIN_INTERVAL_PREFIX,
+    ].find((candidate) => name.startsWith(candidate));
     if (prefix && known.has(name.slice(prefix.length))) continue;
     // A variable name is echoed only when it looks like one, so a stray value
     // that was exported under an odd name is never repeated back.

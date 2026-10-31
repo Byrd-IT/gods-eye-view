@@ -1239,8 +1239,8 @@ releases listeners, subscriptions, image handlers, summary timers and chip-hide 
 
 ## History store
 
-`server/history/store/` is the storage layer recorded history will use; nothing
-records into it yet, so no running feature changes. A store keeps timestamped
+`server/history/store/` is the storage layer recorded history uses (the recorder
+below writes to it; off by default). A store keeps timestamped
 observations per feed (`{ t, key, lat?, lon?, data? }`, with `(t, key)` unique per
 feed so a retried batch is safe) and answers `slice` (newest observation per key
 in a window, optionally inside a bounding box that may cross the antimeridian),
@@ -1258,6 +1258,37 @@ not exist, any other `HISTORY_*` name (a typo), or a retention that is not a who
 setting and never quotes its value. Contract suite:
 `server/history/store/historyStore.contract.test.mjs`; gate:
 `npm run qa:history-store`.
+
+## History recorder
+
+`server/history/recorder/` copies what a feed's route handler already returns into
+the history store. It is **off by default**: with no `HISTORY_RECORD*` variable set
+nothing is opened or created and a tap is one function call. It is a tee, not a
+poller: it makes no request of its own, so it adds no load on a rate-limited source
+and holds no credential. NASA FIRMS fires (`/api/firms`) is the first feed; the
+USGS earthquake feed is fetched by the browser directly and has no server route to
+tee yet.
+
+`HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`
+switches one feed on or off, and `HISTORY_MIN_INTERVAL_S[_<FEED>]` skips an unchanged
+entity seen again inside that many seconds (default: the feed's cadence, 30 minutes
+for FIRMS; 0 keeps every one). `HISTORY_RECORD_QUEUE_ROWS` (200000) and
+`HISTORY_RECORD_FLUSH_S` (5) size the write queue. Retention runs once a minute after
+start and then daily while recording. A bad or misspelled setting stops the boot with
+every problem listed, without quoting any value.
+
+The handler hands over the refreshed payload after the client's response is written;
+a cache hit is not a new poll. The adapter (`adapters/firms.js`) maps each detection
+to `{ t = acquisition time, key = instrument:satellite:lat:lon, lat, lon, data }` and
+keeps only `frp`, `confidence`, `brightness`, `brightnessTi5`, `daynight`, `satellite`
+and `instrument`; request headers, URLs and keys are never copied. Rows go to a
+bounded queue and are written in batches of 2000 rows on a timer and at shutdown; a full
+queue drops the oldest poll and counts it (`recorder.health()`), and a store error
+is logged by feed and error code only and never reaches the response. Each poll also
+writes an ingest-log row (`ok`, `count`); a dropped or failed poll has none, which is
+how coverage tells a gap from an empty answer. FIRMS refreshes only while a client
+views the layer (`view-driven`), so gaps in the record are real. Gate:
+`npm run qa:history-recorder`. Design: `docs/history/DESIGN-recorder.md`.
 
 ## UI disposal
 
