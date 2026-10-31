@@ -5,6 +5,8 @@ import { createHistoryTee } from './tee.js';
 import { ADAPTERS } from './adapters/index.js';
 import { createFeedRoutes } from './routes.js';
 import { FIXTURES } from './feedFixtures/index.mjs';
+import { adsbLolFallbackBody } from './feedFixtures/aircraft.mjs';
+import { answerClockMs } from './adapters/military.js';
 import { request } from './feedFixtures/http.mjs';
 import { T0, stubStore } from './fixtures.mjs';
 
@@ -65,9 +67,8 @@ for (const fixture of FIXTURES) {
 
     it('keeps only whitelisted fields and never a noise value', () => {
       const input = fixture.build({ clock: T0, noise: NOISE });
-      const payload = fixture.kind === 'text' ? input : input;
       const records = adapter.toRecords(
-        fixture.adapterInput ? fixture.adapterInput(payload, T0) : payload,
+        fixture.adapterInput ? fixture.adapterInput(input, T0) : input,
       );
       assert.equal(records.length, fixture.expectedRows);
       for (const record of records) {
@@ -91,14 +92,15 @@ for (const fixture of FIXTURES) {
         [],
         'x',
         5,
-        { states: 5, ac: 'x' },
+        { states: 5, ac: 'x', rows: 7 },
       ])
         assert.ok(Array.isArray(adapter.toRecords(junk)));
     });
 
-    it('skips an answer the proxy marks as a cache replay', async () => {
+    it('skips an answer the proxy marks as a cache replay', async (t) => {
+      const header = fixture.replayHeader;
+      if (!header) return t.skip('this proxy route never replays an answer');
       const { store, recorder, tee } = setup(fixture);
-      const header = fixture.feed === 'aircraft' ? 'X-OpenSky-Cache' : 'X-Feed-Cache';
       const replay = (req, res) => {
         res.setHeader(header, 'HIT');
         replying(fixture, { clock: T0 })(req, res);
@@ -197,3 +199,167 @@ for (const fixture of FIXTURES) {
     });
   });
 }
+
+const flights = FIXTURES.find((fixture) => fixture.path === '/api/flights');
+
+describe('aircraft: the adsb.lol regional fallback behind /api/flights', () => {
+  const fallbackReply = (hexes, lat) => (req, res) => {
+    res.setHeader('X-OpenSky-Auth', 'adsblol-regional');
+    res.setHeader('X-OpenSky-Cache', 'MISS');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(adsbLolFallbackBody({ nowMs: T0, hexes, lat })));
+  };
+
+  it('records the fallback shape, timed by each aircraft\'s own position time', async () => {
+    const { store, recorder, tee } = setup(flights);
+    await request(tee, '/api/flights?lat=30.1&lon=-97.7', fallbackReply(['a1b2c3', 'a1b2c4']));
+    await recorder.flush();
+    const rows = rowsOf(store, 'aircraft');
+    assert.deepEqual(rows.map((row) => row.key).sort(), ['a1b2c3', 'a1b2c4']);
+    assert.ok(rows.every((row) => row.t < T0 && row.t > T0 - 5_000));
+  });
+
+  it('keeps answers for different view anchors that carry the same time apart', async () => {
+    const { store, recorder, tee } = setup(flights);
+    await request(tee, '/api/flights?lat=30.1&lon=-97.7', fallbackReply(['a1b2c3']));
+    await request(tee, '/api/flights?lat=48.9&lon=2.3', fallbackReply(['ffee01'], 48.9));
+    await recorder.flush();
+    assert.deepEqual(
+      rowsOf(store, 'aircraft').map((row) => row.key).sort(),
+      ['a1b2c3', 'ffee01'],
+    );
+    assert.equal(store.ingests.length, 2);
+    // The same anchor again, in the same second, is still the same answer.
+    await request(tee, '/api/flights?lat=30.12&lon=-97.68', fallbackReply(['a1b2c3']));
+    await recorder.flush();
+    assert.equal(store.ingests.length, 2);
+  });
+
+  it('does not split a world-wide OpenSky answer by the view that asked', async () => {
+    const { store, recorder, tee } = setup(flights);
+    const reply = replying(flights, { clock: T0 });
+    await request(tee, '/api/flights?lat=30.1&lon=-97.7', reply);
+    await request(tee, '/api/flights?lat=48.9&lon=2.3', reply);
+    await recorder.flush();
+    assert.equal(store.ingests.length, 1);
+  });
+});
+
+describe('a failed answer is a failed poll even when the proxy calls it a replay', () => {
+  for (const [path, header, status] of [
+    ['/api/flights', 'X-OpenSky-Cache', 429],
+    ['/api/military', 'X-Feed-Cache', 503],
+  ]) {
+    it(`${path} ${status} with ${header}: STALE`, async () => {
+      const fixture = FIXTURES.find((candidate) => candidate.path === path);
+      const { store, recorder, tee } = setup(fixture);
+      await request(tee, path, (req, res) => {
+        res.setHeader(header, 'STALE');
+        res.writeHead(status);
+        res.end('{}');
+      });
+      await recorder.flush();
+      assert.deepEqual(store.ingests.map((i) => i.ok), [false]);
+    });
+  }
+});
+
+describe('military: the answer clock', () => {
+  it('reads milliseconds as they are and seconds as seconds', () => {
+    assert.equal(answerClockMs({ now: T0 }), T0);
+    assert.equal(answerClockMs({ now: Math.floor(T0 / 1000) }), Math.floor(T0 / 1000) * 1000);
+    assert.equal(answerClockMs({ now: 0 }), null);
+    assert.equal(answerClockMs({}), null);
+  });
+
+  it('times a record from a seconds clock the same as from a milliseconds one', () => {
+    const body = (now) => ({
+      now,
+      ac: [{ hex: 'ae1234', lat: 38.9, lon: -77, seen_pos: 2 }],
+    });
+    const military = ADAPTERS.military;
+    const [fromMs] = military.toRecords(body(T0));
+    const [fromS] = military.toRecords(body(T0 / 1000));
+    assert.equal(fromS.t, fromMs.t);
+    assert.equal(fromMs.t, T0 - 2_000);
+  });
+});
+
+describe('vessels: the AISStream snapshot behind /api/vessels', () => {
+  const fixture = FIXTURES.find((candidate) => candidate.feed === 'vessels');
+  const snapshotReply =
+    (options, status = 200) =>
+    (req, res) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(fixture.build({ clock: T0, ...options })));
+    };
+
+  it('keeps the whitelisted fields, drops the placeholder name and empty codes', () => {
+    const records = ADAPTERS.vessels.toRecords(fixture.build({ clock: T0 }));
+    const byId = Object.fromEntries(records.map((record) => [record.id, record]));
+    assert.deepEqual(Object.keys(byId).sort(), ['244123456', '366999001', '538005000']);
+    assert.deepEqual(byId['244123456'].props, {});
+    assert.equal(byId['366999001'].props.imo, '9811000');
+    assert.equal(byId['366999001'].props.shipType, '70');
+    assert.equal(byId['366999001'].t % 1000, 0);
+  });
+
+  it('is a heavy feed: named, not part of HISTORY_RECORD=1', () => {
+    assert.equal(ADAPTERS.vessels.defaultOn, false);
+  });
+
+  it('notes a poll while the feed is not live as a failed poll, once a minute, and records nothing', async () => {
+    for (const status of ['down', 'auth-failed', 'missing-key', 'stale', 'reconnecting']) {
+      const { store, recorder, tee, clock } = setup(fixture);
+      await request(tee, '/api/vessels', snapshotReply({ status }));
+      await request(tee, '/api/vessels', snapshotReply({ status, variant: 1 }));
+      clock.now += 61_000;
+      await request(tee, '/api/vessels', snapshotReply({ status, variant: 2 }));
+      await recorder.flush();
+      assert.equal(rowsOf(store, 'vessels').length, 0, status);
+      assert.deepEqual(store.ingests.map((i) => i.ok), [false, false], status);
+    }
+  });
+
+  it('notes the 503 the route answers without a key, and a 502, as failed polls', async () => {
+    const { store, recorder, tee, clock } = setup(fixture);
+    await request(tee, '/api/vessels', (req, res) => {
+      res.writeHead(503);
+      res.end('{"rows":[],"status":"missing-key"}');
+    });
+    clock.now += 61_000;
+    await request(tee, '/api/vessels', (req, res) => {
+      res.writeHead(502);
+      res.end('{"rows":[]}');
+    });
+    await recorder.flush();
+    assert.deepEqual(store.ingests.map((i) => i.ok), [false, false]);
+  });
+
+  it('does not watch the track sub-route, and compares snapshots per maxRows', async () => {
+    const { store, recorder, tee } = setup(fixture);
+    await request(tee, '/api/vessels/track?mmsi=366999001', snapshotReply({}));
+    await request(tee, '/api/vessels?mmsi=1', snapshotReply({}));
+    await recorder.flush();
+    assert.equal(store.appended.length, 1);
+    await request(tee, '/api/vessels?maxRows=2', snapshotReply({}));
+    await recorder.flush();
+    assert.equal(store.ingests.length, 2);
+  });
+
+  it('a vessel that has not reported again writes nothing on the next snapshot', async () => {
+    const { store, recorder, tee } = setup(fixture);
+    await request(tee, '/api/vessels', snapshotReply({}));
+    await recorder.flush();
+    // Later snapshot, but the same cached fixes (same report times and places).
+    const again = fixture.build({ clock: T0 });
+    again.lastMessageAt += 5_000;
+    await request(tee, '/api/vessels', (req, res) => {
+      res.writeHead(200);
+      res.end(JSON.stringify(again));
+    });
+    await recorder.flush();
+    assert.equal(rowsOf(store, 'vessels').length, fixture.expectedRows);
+    assert.equal(store.ingests.length, 2);
+  });
+});

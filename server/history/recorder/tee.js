@@ -15,11 +15,15 @@
  *   observe   true: the route is read only to learn from (no feed is recorded for it)
  *   isReplay  (res) => true when the proxy marks this answer as a cache replay
  *   pollAt    (parsed, context, { res }) => ms the data was fetched, or null
+ *   dedupeKey (context, { res }) => string: which earlier answer this one is compared
+ *             with, when that depends on the answer (default: the route and context.key)
  *
- * A response whose pollAt equals the last one seen for the same route is the
- * same upstream refresh served again from the proxy's cache and is ignored; a
- * route without pollAt falls back to comparing the body. A 429 or 5xx answer is
- * noted as a failed poll (at most one per minute per route).
+ * A response whose pollAt equals the last one seen for the same dedupe key is
+ * the same upstream refresh served again from the proxy's cache and is
+ * ignored; a route without pollAt falls back to comparing the body. A 429 or
+ * 5xx answer, or a payload hook that returns FAILED, is noted as a failed poll
+ * (at most one per minute per route), even when the proxy marks it a replay: an
+ * outage must read as failed polls, not as a gap.
  */
 export const SKIP = Symbol('history-tee-skip');
 export const FAILED = Symbol('history-tee-failed');
@@ -63,17 +67,26 @@ export function createHistoryTee({
     if (map.size > MAX_REMEMBERED_ROUTES) map.delete(map.keys().next().value);
   };
 
-  function handleResponse(route, context, key, body, res) {
+  function noteFailure(route, key, t) {
+    const now = clock();
+    if (now - (lastFailure.get(key) ?? -Infinity) < FAILURE_EVERY_MS) return;
+    remember(lastFailure, key, now);
+    recorder.tapFailure(route.feed, { t: Number.isSafeInteger(t) ? t : now });
+  }
+
+  function handleResponse(route, context, routeKey, chunks, res) {
     const status = res.statusCode;
     if (route.observe && status !== 200) return;
     if (status === 429 || status >= 500) {
-      const now = clock();
-      if (now - (lastFailure.get(key) ?? -Infinity) < FAILURE_EVERY_MS) return;
-      remember(lastFailure, key, now);
-      recorder.tapFailure(route.feed, { t: now });
+      noteFailure(route, routeKey);
       return;
     }
     if (status !== 200) return;
+    // A cache replay was recorded when it was fetched: skip it before the body
+    // is copied and parsed.
+    if (route.isReplay?.(res)) return;
+    const key = route.dedupeKey?.(context, { res }) ?? routeKey;
+    const body = Buffer.concat(chunks);
     let parsed;
     try {
       const text = body.toString('utf8');
@@ -92,6 +105,10 @@ export function createHistoryTee({
       ? route.payload(parsed, context, helpers)
       : parsed;
     if (input === SKIP) return;
+    if (input === FAILED) {
+      noteFailure(route, routeKey);
+      return;
+    }
     const polledAt = route.pollAt
       ? route.pollAt(parsed, context, helpers)
       : null;
@@ -105,10 +122,6 @@ export function createHistoryTee({
       pollAt: Number.isSafeInteger(polledAt) ? polledAt : null,
       body: Number.isSafeInteger(polledAt) ? null : body,
     });
-    if (input === FAILED) {
-      recorder.tapFailure(route.feed, { t: polledAt ?? clock() });
-      return;
-    }
     recorder.tap(
       route.feed,
       input,
@@ -177,10 +190,7 @@ export function createHistoryTee({
           try {
             const encoded = res.getHeader?.('content-encoding');
             if (overflow || (encoded && encoded !== 'identity')) return;
-            // A cache replay was recorded when it was fetched: skip it before
-            // the body is copied and parsed.
-            if (route.isReplay?.(res)) return;
-            handleResponse(route, context, key, Buffer.concat(chunks), res);
+            handleResponse(route, context, key, chunks, res);
           } catch {
             // History must never change what a client gets, and the error text
             // can hold payload content, so nothing is logged here.
