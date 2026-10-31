@@ -15,15 +15,25 @@
  *       bbox is { west, south, east, north }; west > east crosses the
  *       antimeridian. Rows without a position never match a bbox.
  *   latestBefore(feed, { t, key })   -> observation | null
- *   snapshots(feed, { from?, to?, limit? })
+ *   snapshots(feed, { from?, to?, limit?, order? })
  *                                    -> { snapshots: [{ t, count }], truncated }
- *       Distinct observation times, ascending.
+ *       Distinct observation times, ascending, or newest first with
+ *       order: 'desc' (limit then keeps the newest).
+ *   recordIngest(feed, { t, ok, count? }) -> { recorded }
+ *       One poll of the source: ok says it answered, count is how many
+ *       observations the answer held. An answered poll with count 0 is an
+ *       empty answer, which is not the same as no poll at all. (feed, t) is
+ *       unique, so a retried record replaces itself. Failure text is not kept.
+ *   ingestLog(feed, { from?, to?, limit? })
+ *                                    -> { polls: [{ t, ok, count }], truncated }
+ *       Recorded polls, ascending.
  *   coverage(feed, { from?, to?, maxGapMs? })
  *                                    -> { feed, count, snapshots, firstT, lastT, maxGapMs,
  *                                         spans: [{ from, to, snapshots }] }
  *       Snapshots no more than maxGapMs apart share a span; the gaps between
  *       spans are the times history holds nothing for.
- *   prune(feed, { before })          -> { deleted }     removes t < before
+ *   prune(feed, { before })          -> { deleted }     removes t < before (observations
+ *       and polls; deleted counts observations)
  *   health()                         -> { backend, ok, feeds, ... }  never throws
  *   close()
  *
@@ -50,6 +60,8 @@ const METHODS = [
   'snapshots',
   'coverage',
   'prune',
+  'recordIngest',
+  'ingestLog',
 ];
 
 /**

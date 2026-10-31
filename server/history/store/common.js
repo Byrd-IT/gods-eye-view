@@ -14,6 +14,9 @@ export const DEFAULT_SLICE_ROWS = 20_000;
 export const MAX_SNAPSHOTS = 20_000;
 export const DEFAULT_SNAPSHOTS = 5_000;
 export const DEFAULT_MAX_GAP_MS = 60 * 60 * 1000;
+export const MAX_INGEST_ROWS = 50_000;
+export const DEFAULT_INGEST_ROWS = 20_000;
+export const MAX_INGEST_COUNT = 1_000_000_000;
 
 export const DEFAULT_SQLITE_PATH = './data/history.sqlite';
 
@@ -179,13 +182,57 @@ export function normalizeRange(options, name = 'options') {
 
 export function normalizeSnapshotOptions(options) {
   const range = normalizeRange(options);
+  const order = options?.order === undefined ? 'asc' : options.order;
+  if (order !== 'asc' && order !== 'desc')
+    throw invalid("order must be 'asc' or 'desc'");
   return {
     ...range,
+    order,
     limit: positiveInt(
       options?.limit,
       'limit',
       DEFAULT_SNAPSHOTS,
       MAX_SNAPSHOTS,
+    ),
+  };
+}
+
+/**
+ * One poll of a source: { t, ok, count }. ok says the source answered; count is
+ * how many observations that answer held (0 is a real, empty answer). The text
+ * of a failure is never stored.
+ */
+export function normalizeIngestRecord(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw))
+    throw invalid('ingest record must be an object');
+  const t = assertTime(raw.t, 't');
+  if (typeof raw.ok !== 'boolean') throw invalid('ok must be true or false');
+  let count = 0;
+  if (raw.count !== undefined && raw.count !== null) {
+    if (
+      !Number.isSafeInteger(raw.count) ||
+      raw.count < 0 ||
+      raw.count > MAX_INGEST_COUNT
+    )
+      throw invalid(
+        `count must be an integer from 0 to ${MAX_INGEST_COUNT}`,
+      );
+    count = raw.count;
+  }
+  if (!raw.ok && count !== 0)
+    throw invalid('a failed poll cannot have observations');
+  return { t, ok: raw.ok, count };
+}
+
+export function normalizeIngestQuery(options) {
+  const range = normalizeRange(options);
+  return {
+    ...range,
+    limit: positiveInt(
+      options?.limit,
+      'limit',
+      DEFAULT_INGEST_ROWS,
+      MAX_INGEST_ROWS,
     ),
   };
 }

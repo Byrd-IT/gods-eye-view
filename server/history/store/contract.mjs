@@ -426,6 +426,120 @@ export function defineHistoryStoreContract(label, makeStore) {
       });
     });
 
+    describe('snapshots order', () => {
+      beforeEach(async () => {
+        await store.append(
+          'transit',
+          [0, 1, 2, 3].map((m) => obs(T0 + m * MIN, 'a', 0, 0)),
+        );
+      });
+
+      it('lists newest first with order desc and keeps the newest on a limit', async () => {
+        const all = await store.snapshots('transit', { order: 'desc' });
+        assert.deepEqual(
+          all.snapshots.map((s) => s.t),
+          [3, 2, 1, 0].map((m) => T0 + m * MIN),
+        );
+        const limited = await store.snapshots('transit', {
+          order: 'desc',
+          limit: 2,
+          to: T0 + 2 * MIN,
+        });
+        assert.deepEqual(
+          limited.snapshots.map((s) => s.t),
+          [T0 + 2 * MIN, T0 + MIN],
+        );
+        assert.equal(limited.truncated, true);
+      });
+
+      it('rejects an unknown order', async () => {
+        await rejectsWith(
+          store.snapshots('transit', { order: 'sideways' }),
+          'INVALID_ARGUMENT',
+        );
+      });
+    });
+
+    describe('ingest log', () => {
+      it('keeps polls ascending, empty answers included, within from..to', async () => {
+        await store.recordIngest('firms', { t: T0 + 2 * MIN, ok: true, count: 0 });
+        await store.recordIngest('firms', { t: T0, ok: true, count: 7 });
+        await store.recordIngest('firms', { t: T0 + MIN, ok: false });
+        assert.deepEqual(await store.ingestLog('firms'), {
+          polls: [
+            { t: T0, ok: true, count: 7 },
+            { t: T0 + MIN, ok: false, count: 0 },
+            { t: T0 + 2 * MIN, ok: true, count: 0 },
+          ],
+          truncated: false,
+        });
+        assert.deepEqual(
+          (await store.ingestLog('firms', { from: T0 + MIN, to: T0 + MIN }))
+            .polls,
+          [{ t: T0 + MIN, ok: false, count: 0 }],
+        );
+        const limited = await store.ingestLog('firms', { limit: 2 });
+        assert.equal(limited.polls.length, 2);
+        assert.equal(limited.truncated, true);
+      });
+
+      it('replaces a poll recorded again at the same time', async () => {
+        await store.recordIngest('firms', { t: T0, ok: false });
+        assert.deepEqual(
+          await store.recordIngest('firms', { t: T0, ok: true, count: 3 }),
+          { recorded: 1 },
+        );
+        assert.deepEqual((await store.ingestLog('firms')).polls, [
+          { t: T0, ok: true, count: 3 },
+        ]);
+      });
+
+      it('is per feed and does not touch observations or coverage', async () => {
+        await store.recordIngest('firms', { t: T0, ok: true, count: 0 });
+        assert.deepEqual((await store.ingestLog('water')).polls, []);
+        assert.equal((await store.coverage('firms')).count, 0);
+        assert.deepEqual((await store.snapshots('firms')).snapshots, []);
+      });
+
+      it('is removed by prune along with older observations', async () => {
+        await store.append('firms', [obs(T0, 'x', 0, 0)]);
+        await store.recordIngest('firms', { t: T0, ok: true, count: 1 });
+        await store.recordIngest('firms', { t: T0 + 10 * MIN, ok: true, count: 0 });
+        assert.deepEqual(await store.prune('firms', { before: T0 + MIN }), {
+          deleted: 1,
+        });
+        assert.deepEqual((await store.ingestLog('firms')).polls, [
+          { t: T0 + 10 * MIN, ok: true, count: 0 },
+        ]);
+      });
+
+      it('rejects malformed records and queries', async () => {
+        const record = (r) => store.recordIngest('firms', r);
+        await rejectsWith(record(null), 'INVALID_ARGUMENT');
+        await rejectsWith(record({ t: 1.5, ok: true }), 'INVALID_ARGUMENT');
+        await rejectsWith(record({ t: T0 }), 'INVALID_ARGUMENT');
+        await rejectsWith(record({ t: T0, ok: 'yes' }), 'INVALID_ARGUMENT');
+        await rejectsWith(record({ t: T0, ok: true, count: -1 }), 'INVALID_ARGUMENT');
+        await rejectsWith(record({ t: T0, ok: true, count: 1.5 }), 'INVALID_ARGUMENT');
+        await rejectsWith(record({ t: T0, ok: false, count: 2 }), 'INVALID_ARGUMENT');
+        await rejectsWith(
+          store.recordIngest('Not A Feed', { t: T0, ok: true }),
+          'INVALID_ARGUMENT',
+        );
+        await rejectsWith(store.ingestLog('firms', { limit: 0 }), 'INVALID_ARGUMENT');
+        await rejectsWith(
+          store.ingestLog('firms', { from: T0 + 1, to: T0 }),
+          'INVALID_ARGUMENT',
+        );
+      });
+
+      it('fails with CLOSED after close', async () => {
+        await store.close();
+        await rejectsWith(store.recordIngest('firms', { t: T0, ok: true }), 'CLOSED');
+        await rejectsWith(store.ingestLog('firms'), 'CLOSED');
+      });
+    });
+
     describe('coverage', () => {
       it('reports spans separated by gaps larger than maxGapMs', async () => {
         const times = [0, 1, 2, 30, 31].map((m) => T0 + m * MIN);

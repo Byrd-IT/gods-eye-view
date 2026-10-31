@@ -10,6 +10,8 @@ import {
   invalid,
   normalizeBatch,
   normalizeCoverageOptions,
+  normalizeIngestQuery,
+  normalizeIngestRecord,
   normalizeLatestBefore,
   normalizeSliceOptions,
   normalizeSnapshotOptions,
@@ -31,6 +33,13 @@ const SCHEMA = `
   ) WITHOUT ROWID;
   CREATE INDEX IF NOT EXISTS observations_by_key ON observations (feed, key, t);
   CREATE TABLE IF NOT EXISTS feeds (feed TEXT PRIMARY KEY) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS ingest_log (
+    feed  TEXT NOT NULL,
+    t     INTEGER NOT NULL,
+    ok    INTEGER NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (feed, t)
+  ) WITHOUT ROWID;
 `;
 
 function backendError(action, error) {
@@ -105,6 +114,10 @@ export function createSqliteStore(options = {}) {
       'SELECT t, key, lat, lon, data FROM observations WHERE feed = ? AND key = ? AND t <= ? ORDER BY t DESC LIMIT 1',
     ),
     prune: db.prepare('DELETE FROM observations WHERE feed = ? AND t < ?'),
+    pruneLog: db.prepare('DELETE FROM ingest_log WHERE feed = ? AND t < ?'),
+    logPoll: db.prepare(`
+      INSERT INTO ingest_log (feed, t, ok, count) VALUES (?, ?, ?, ?)
+      ON CONFLICT (feed, t) DO UPDATE SET ok = excluded.ok, count = excluded.count`),
     feeds: db.prepare('SELECT feed FROM feeds ORDER BY feed'),
     minT: db.prepare('SELECT MIN(t) AS v FROM observations WHERE feed = ?'),
     maxT: db.prepare('SELECT MAX(t) AS v FROM observations WHERE feed = ?'),
@@ -220,17 +233,48 @@ export function createSqliteStore(options = {}) {
 
     async snapshots(feed, options) {
       assertFeed(feed);
-      const { from, to, limit } = normalizeSnapshotOptions(options);
+      const { from, to, limit, order } = normalizeSnapshotOptions(options);
       return guard('snapshots', () => {
         const params = [feed];
         const clause = rangeClause({ from, to }, params);
+        const direction = order === 'desc' ? 'DESC' : 'ASC';
         const found = prepared(
-          `SELECT t, COUNT(*) AS count FROM observations WHERE feed = ?${clause} GROUP BY t ORDER BY t LIMIT ?`,
+          `SELECT t, COUNT(*) AS count FROM observations WHERE feed = ?${clause} GROUP BY t ORDER BY t ${direction} LIMIT ?`,
         ).all(...params, limit + 1);
         return {
           snapshots: found
             .slice(0, limit)
             .map((row) => ({ t: Number(row.t), count: Number(row.count) })),
+          truncated: found.length > limit,
+        };
+      });
+    },
+
+    async recordIngest(feed, record) {
+      assertFeed(feed);
+      const { t, ok, count } = normalizeIngestRecord(record);
+      return guard('recordIngest', () => {
+        sql.feed.run(feed);
+        sql.logPoll.run(feed, t, ok ? 1 : 0, count);
+        return { recorded: 1 };
+      });
+    },
+
+    async ingestLog(feed, options) {
+      assertFeed(feed);
+      const { from, to, limit } = normalizeIngestQuery(options);
+      return guard('ingestLog', () => {
+        const params = [feed];
+        const clause = rangeClause({ from, to }, params);
+        const found = prepared(
+          `SELECT t, ok, count FROM ingest_log WHERE feed = ?${clause} ORDER BY t LIMIT ?`,
+        ).all(...params, limit + 1);
+        return {
+          polls: found.slice(0, limit).map((row) => ({
+            t: Number(row.t),
+            ok: Number(row.ok) === 1,
+            count: Number(row.count),
+          })),
           truncated: found.length > limit,
         };
       });
@@ -267,6 +311,7 @@ export function createSqliteStore(options = {}) {
       const before = assertTime(options?.before, 'before');
       return guard('prune', () => {
         const result = sql.prune.run(feed, before);
+        sql.pruneLog.run(feed, before);
         if (Number(result.changes) > 0 && !inMemory)
           db.exec('PRAGMA wal_checkpoint(PASSIVE)');
         return { deleted: Number(result.changes) };
