@@ -10,7 +10,7 @@
  *   1. a loaded store answers slice, coverage and snapshots within budget
  *   2. a writer killed with SIGKILL mid-run leaves a database that opens clean,
  *      passes SQLite's integrity check and holds only whole batches
- *   3. a reader sees a consistent snapshot while a writer is appending (WAL)
+ *   3. an open read transaction neither blocks a writer nor sees its commit (WAL)
  *   4. retention removes exactly what is older than the window
  *   5. unsupported settings stop the boot before any file is created
  * Exits non-zero on the first failed check; the report names each check.
@@ -29,7 +29,9 @@ const MIN = 60_000;
 const DAY = 24 * 3600 * 1000;
 const BATCH = 500;
 
-const BUDGET_MS = { slice: 100, coverage: 1500, snapshots: 500 };
+// Wall-clock limits; GEV_QA_BUDGET_SCALE=3 triples them on a slow or shared machine.
+const SCALE = Number(process.env.GEV_QA_BUDGET_SCALE) > 0 ? Number(process.env.GEV_QA_BUDGET_SCALE) : 1;
+const BUDGET_MS = { slice: 100 * SCALE, coverage: 1500 * SCALE, snapshots: 500 * SCALE };
 
 function ms(since) {
   return Number(process.hrtime.bigint() - since) / 1e6;
@@ -79,14 +81,35 @@ async function main() {
     const snaps = await timed(() => store.snapshots('aircraft', { limit: 400 }));
     record('snapshots budget', snaps.ms <= BUDGET_MS.snapshots && snaps.value.snapshots.length === 400, `${snaps.ms.toFixed(0)} ms of ${BUDGET_MS.snapshots}`);
 
-    // 3. reader sees a consistent snapshot while a writer appends
-    const reader = createSqliteStore({ path: file });
-    const before = (await reader.coverage('aircraft')).count;
-    const writing = (async () => { for (let index = 400; index < 420; index += 1) await store.append('aircraft', batch(index)); })();
-    const during = (await reader.coverage('aircraft')).count;
-    await writing;
-    record('reader unblocked and whole-batch during writes', during >= before && during % BATCH === 0, `${before} -> ${during}`);
-    await reader.close();
+    // 3. a read transaction held open on a second connection neither blocks the
+    //    writer nor sees its commit until it ends (WAL snapshot isolation)
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+    const journalMode = (await store.health()).journalMode;
+    record('journal mode is WAL', journalMode === 'wal', String(journalMode));
+    // Outside WAL the held read would stall the writer on a lock this same
+    // thread holds, so the check is skipped; the run has already failed above.
+    if (journalMode === 'wal') {
+    const reader = new DatabaseSync(file);
+    const countRows = () => Number(reader.prepare('SELECT COUNT(*) AS n FROM observations').get().n);
+    reader.exec('BEGIN');
+    const before = countRows();
+    let writeMs = Infinity;
+    try {
+      const wrote = await timed(() => store.append('aircraft', batch(400)));
+      writeMs = wrote.ms;
+    } catch {
+      // a blocked writer leaves writeMs infinite and fails the check below
+    }
+    const during = countRows();
+    reader.exec('COMMIT');
+    const after = countRows();
+    reader.close();
+    record(
+      'open reader does not block the writer and keeps its snapshot',
+      writeMs < 1000 && during === before && after === before + BATCH,
+      `write ${writeMs.toFixed(0)} ms, rows ${before} -> ${during} (reader open) -> ${after}`,
+    );
+    }
 
     // 4. retention
     const now = T0 + 400 * DAY;
@@ -110,7 +133,6 @@ async function main() {
     const count = (await reopened.coverage('aircraft')).count;
     record('database opens after SIGKILL', (await reopened.health()).ok);
     record('only whole batches survive SIGKILL', count > 0 && count % BATCH === 0, `${count} rows`);
-    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
     await reopened.close();
     const raw = new DatabaseSync(killed);
     record('integrity_check after SIGKILL', raw.prepare('PRAGMA integrity_check').get().integrity_check === 'ok');

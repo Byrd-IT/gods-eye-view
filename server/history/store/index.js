@@ -69,12 +69,20 @@ export function createHistoryStore(env = process.env, options = {}) {
       if (!opened.has(store)) opened.set(store, backends[store](config));
     }
   } catch (error) {
-    for (const backend of opened.values()) backend.close();
+    for (const backend of opened.values()) {
+      try {
+        Promise.resolve(backend.close()).catch(() => {});
+      } catch {
+        // Already failing to open; the original error is the one to report.
+      }
+    }
     throw error;
   }
   const route = (feed) => {
     assertFeed(feed);
-    const setting = config.feeds[feed];
+    const setting = Object.hasOwn(config.feeds, feed)
+      ? config.feeds[feed]
+      : undefined;
     if (!setting)
       throw new HistoryStoreError(
         'INVALID_ARGUMENT',

@@ -102,6 +102,16 @@ export function createSqliteStore(options = {}) {
     maxT: db.prepare('SELECT MAX(t) AS v FROM observations WHERE feed = ?'),
   };
   let closed = false;
+  // The few shapes of range queries are prepared once, not per request.
+  const statements = new Map();
+  const prepared = (text) => {
+    let statement = statements.get(text);
+    if (!statement) {
+      statement = db.prepare(text);
+      statements.set(text, statement);
+    }
+    return statement;
+  };
 
   const guard = (action, fn) => {
     if (closed)
@@ -157,27 +167,32 @@ export function createSqliteStore(options = {}) {
       assertFeed(feed);
       const { t, windowMs, limit, bbox } = normalizeSliceOptions(options);
       return guard('slice', () => {
-        const params = [feed, Math.max(0, t - windowMs), t];
-        let where = 'feed = ? AND t >= ? AND t <= ?';
+        // Newest observation per key inside the window, chosen by feed and time
+        // alone. The bounding box is applied to that newest row afterwards: a key
+        // whose latest position is outside the box must not show an older
+        // position that happened to be inside it. CROSS JOIN fixes the join
+        // order: without it SQLite may walk the whole feed by key for each
+        // window row (200 ms instead of 2 ms on 200k rows).
+        const params = [feed, Math.max(0, t - windowMs), t, feed];
+        let inBox = '';
         if (bbox) {
-          where += ' AND lat >= ? AND lat <= ?';
+          inBox = ' AND o.lat >= ? AND o.lat <= ?';
           params.push(bbox.south, bbox.north);
-          where +=
+          inBox +=
             bbox.west <= bbox.east
-              ? ' AND lon >= ? AND lon <= ?'
-              : ' AND (lon >= ? OR lon <= ?)';
+              ? ' AND o.lon >= ? AND o.lon <= ?'
+              : ' AND (o.lon >= ? OR o.lon <= ?)';
           params.push(bbox.west, bbox.east);
         }
-        // Newest observation per key inside the window, then its full row. CROSS
-        // JOIN fixes the order: without it SQLite may walk the whole feed by key
-        // for each window row (200 ms instead of 2 ms on 200k rows).
-        const statement = db.prepare(`
+        const statement = prepared(`
           SELECT o.t, o.key, o.lat, o.lon, o.data
-          FROM (SELECT key, MAX(t) AS t FROM observations WHERE ${where} GROUP BY key) newest
+          FROM (SELECT key, MAX(t) AS t FROM observations
+                WHERE feed = ? AND t >= ? AND t <= ? GROUP BY key) newest
           CROSS JOIN observations o ON o.feed = ? AND o.t = newest.t AND o.key = newest.key
+          WHERE 1 = 1${inBox}
           ORDER BY o.key
           LIMIT ?`);
-        const found = statement.all(...params, feed, limit + 1);
+        const found = statement.all(...params, limit + 1);
         const truncated = found.length > limit;
         return {
           observations: found.slice(0, limit).map(decodeRow),
@@ -202,11 +217,9 @@ export function createSqliteStore(options = {}) {
       return guard('snapshots', () => {
         const params = [feed];
         const clause = rangeClause({ from, to }, params);
-        const found = db
-          .prepare(
-            `SELECT t, COUNT(*) AS count FROM observations WHERE feed = ?${clause} GROUP BY t ORDER BY t LIMIT ?`,
-          )
-          .all(...params, limit + 1);
+        const found = prepared(
+          `SELECT t, COUNT(*) AS count FROM observations WHERE feed = ?${clause} GROUP BY t ORDER BY t LIMIT ?`,
+        ).all(...params, limit + 1);
         return {
           snapshots: found
             .slice(0, limit)
@@ -224,11 +237,9 @@ export function createSqliteStore(options = {}) {
         const clause = rangeClause({ from, to }, params);
         const times = [];
         let count = 0;
-        for (const row of db
-          .prepare(
-            `SELECT t, COUNT(*) AS n FROM observations WHERE feed = ?${clause} GROUP BY t ORDER BY t`,
-          )
-          .iterate(...params)) {
+        for (const row of prepared(
+          `SELECT t, COUNT(*) AS n FROM observations WHERE feed = ?${clause} GROUP BY t ORDER BY t`,
+        ).iterate(...params)) {
           times.push(Number(row.t));
           count += Number(row.n);
         }

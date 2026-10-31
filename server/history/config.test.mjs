@@ -58,7 +58,7 @@ describe('history configuration', () => {
   it('rejects a backend the build does not provide', () => {
     const found = problems({ HISTORY_STORE: 'elasticsearch' });
     assert.equal(found.length, 1);
-    assert.match(found[0], /HISTORY_STORE .*"elasticsearch".*does not provide/);
+    assert.match(found[0], /HISTORY_STORE selects a backend this build does not provide/);
   });
 
   it('rejects a per-feed backend the build does not provide', () => {

@@ -261,6 +261,44 @@ export function defineHistoryStoreContract(label, makeStore) {
         );
       });
 
+      it('judges a key by its newest position, so a box never shows where it used to be', async () => {
+        await store.append('aircraft', [
+          obs(T0, 'a', 10, 10, { at: 'inside' }),
+          obs(T0 + MIN, 'a', 50, 50, { at: 'outside' }),
+          obs(T0, 'b', 11, 11, { at: 'stays' }),
+        ]);
+        const box = { west: 0, south: 0, east: 20, north: 20 };
+        const boxed = await store.slice('aircraft', {
+          t: T0 + MIN,
+          windowMs: 10 * MIN,
+          bbox: box,
+        });
+        assert.deepEqual(
+          boxed.observations.map((o) => o.key),
+          ['b'],
+        );
+        const open = await store.slice('aircraft', {
+          t: T0 + MIN,
+          windowMs: 10 * MIN,
+        });
+        assert.deepEqual(
+          open.observations.map((o) => [o.key, o.data.at]),
+          [
+            ['a', 'outside'],
+            ['b', 'stays'],
+          ],
+        );
+        const earlier = await store.slice('aircraft', {
+          t: T0,
+          windowMs: 10 * MIN,
+          bbox: box,
+        });
+        assert.deepEqual(
+          earlier.observations.map((o) => o.key),
+          ['a', 'b'],
+        );
+      });
+
       it('leaves position-less rows out of a bbox query only', async () => {
         await store.append('launches', [
           obs(T0, 'nowhere'),

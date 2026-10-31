@@ -50,7 +50,7 @@ function parseBackend(env, name, available, problems) {
   }
   if (!available.includes(raw)) {
     problems.push(
-      `${name} selects the "${raw}" backend, which this build does not provide (available: ${available.join(', ')}).`,
+      `${name} selects a backend this build does not provide (available: ${available.join(', ')}).`,
     );
     return null;
   }
