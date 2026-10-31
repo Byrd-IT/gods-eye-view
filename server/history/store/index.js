@@ -44,6 +44,7 @@ import { loadHistoryConfig } from '../config.js';
 import { HistoryStoreError, assertFeed, assertTime } from './common.js';
 import { createMysqlStore } from './mysql.js';
 import { createPostgresStore } from './postgres.js';
+import { LIVE_BACKENDS, describeSupport } from '../live/index.js';
 import { createSqliteStore } from './sqlite.js';
 
 export { HistoryStoreError } from './common.js';
@@ -61,6 +62,7 @@ const BACKENDS = Object.freeze({
       url: config.postgresUrl,
       tablePrefix: config.sqlTablePrefix,
     }),
+  ...LIVE_BACKENDS,
 });
 
 export const AVAILABLE_BACKENDS = Object.freeze(Object.keys(BACKENDS));
@@ -90,7 +92,7 @@ export function createHistoryStore(env = process.env, options = {}) {
   const opened = new Map();
   try {
     for (const { store } of Object.values(config.feeds)) {
-      if (!opened.has(store)) opened.set(store, backends[store](config));
+      if (!opened.has(store)) opened.set(store, backends[store](config, env));
     }
   } catch (error) {
     for (const backend of opened.values()) {
@@ -114,7 +116,12 @@ export function createHistoryStore(env = process.env, options = {}) {
       );
     return opened.get(setting.store);
   };
-  const router = { config, backend: 'router' };
+  const router = {
+    config,
+    backend: 'router',
+    // What each feed does: stored, live-api or live-only, and whether the slider is offered.
+    support: () => describeSupport(config),
+  };
   for (const method of METHODS)
     router[method] = async (feed, options) =>
       route(feed)[method](feed, options);

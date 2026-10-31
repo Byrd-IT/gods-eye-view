@@ -1371,6 +1371,38 @@ unnamed queries and use no session state). The MySQL/MariaDB schema lock
 (`GET_LOCK`) is a session lock and does not: point `HISTORY_MYSQL_URL` at the
 database directly, or at a proxy in session mode, not at a transaction-pooling
 proxy such as ProxySQL multiplexing.
+### Feeds with no stored history: live-api and live-only
+
+Two more backend names keep nothing (`server/history/live`). `live-only` keeps no
+history: writes are accepted and dropped, every question about the past has an
+empty answer, and the feed's time slider is not offered. `live-api` asks the
+source's own history API when someone scrubs back, and stores nothing. It is
+offered only for feeds whose source has such an API, checked against the source:
+
+| Feed | live-api | Source and limits |
+| --- | --- | --- |
+| quakes | yes | USGS FDSN event query; any time; no key |
+| firms | yes | NASA FIRMS area API with a date and 1 to 5 days; last 60 days (a conservative bound); needs `FIRMS_MAP_KEY`; every question needs a bounding box of at most 3000 square degrees; `latestBefore` is refused |
+| water | yes | USGS NWIS instantaneous values; about 120 days; every question needs a bounding box of at most 25 square degrees |
+| launches | yes | Launch Library 2; at most 10 questions an hour (the anonymous quota is 15) |
+| aircraft, military | no | OpenSky answers a past time only to a signed-in client, only for the last hour, and spends the shared credit budget; adsb.lol publishes daily archive releases only |
+| vessels, transit, bikeshare | no | live streams or current-state feeds with no history query |
+| perimeters | no | the NIFC layer used is "Current", with no time information |
+| cyclones | no | NHC publishes yearly archive files, with no time query |
+
+The table lives in `server/history/live/support.js`, and the settings, the
+adapters and a test all read it. `HISTORY_STORE_<FEED>=live-api` on a feed that
+cannot is a boot error that says why. As the default (`HISTORY_STORE=live-api`),
+such a feed becomes `live-only` and a warning says so. Every live-api question
+passes one budget per feed per hour, a 20 s timeout, a response size cap and no
+redirects; an answer is cached for 5 minutes; an error names the feed and what
+happened, never the URL (a FIRMS URL carries the key). `coverage` reports one
+span with `continuous: true`, and `snapshots` is empty, because a source has no
+list of moments. `latestBefore` looks back one day (water asks for the one gauge). A question's time is snapped down to a per-feed step (1 to 15 minutes, `stepMs` in `support.js`), so the API and UI need not snap it. `store.support()` returns, per
+feed, its mode, whether the slider is offered and why; `npm run history:support`
+prints that table for the current environment without touching the network.
+Esri Wayback is not a feed here: it is a list of dated imagery releases
+(`waybackconfig.json`), not observations.
 
 ## UI disposal
 
