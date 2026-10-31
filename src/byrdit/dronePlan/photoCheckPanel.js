@@ -53,7 +53,7 @@ async function readHeader(file) {
   return new Uint8Array(buffer);
 }
 
-export function mountPhotoCheck({ doc, container, host }) {
+export function mountPhotoCheck({ doc, container, host, dropZone = null }) {
   const s = {
     photos: [], // metadata of the photos read (no pixels)
     unreadable: 0,
@@ -491,16 +491,13 @@ export function mountPhotoCheck({ doc, container, host }) {
   // Files dropped anywhere else on the panel (also while a read is running)
   // must not make the browser open the file and leave the page: they join the
   // same queue.
-  let panelTop = container;
-  while (
-    panelTop.parentNode &&
-    panelTop.parentNode !== doc.body &&
-    panelTop.parentNode.nodeType !== 9
-  )
-    panelTop = panelTop.parentNode;
+  // The drone-plan panel only (not the rail it sits in): other panels there
+  // have their own drop targets.
+  const panelTop = dropZone ?? root;
   const guardOver = (e) => e.preventDefault?.();
   const guardDrop = (e) => {
     e.preventDefault?.();
+    e.stopPropagation?.();
     addFiles(e.dataTransfer?.files ?? []);
   };
   if (panelTop !== root) {

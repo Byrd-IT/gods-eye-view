@@ -491,6 +491,8 @@ test('same second and place: different files are kept, a renamed copy is merged'
   const copy = { ...base, name: 'p0 (1).jpg' };
   assert.equal(dedupePhotos([base, other]).photos.length, 2);
   assert.equal(dedupePhotos([base, copy]).photos.length, 1);
+  for (const n of ['p0 - Copy.jpg', 'p0 - Copy (2).jpg', 'p0 copy 2.jpg'])
+    assert.equal(dedupePhotos([base, { ...base, name: n }]).photos.length, 1, n);
   // with sub-second times a different name does not matter
   const ms = { ...base, timeMs: 2_000_123 };
   assert.equal(dedupePhotos([ms, { ...ms, name: 'x.jpg' }]).photos.length, 1);

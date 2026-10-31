@@ -31,6 +31,17 @@ export const BREAK_TIME_FACTOR = 4;
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
+/** Smallest and largest of a list, by loop (no spread: lists can be 5000 long). */
+const extent = (values) => {
+  let min = null;
+  let max = null;
+  for (const v of values) {
+    if (min == null || v < min) min = v;
+    if (max == null || v > max) max = v;
+  }
+  return { min, max };
+};
+
 const median = (values) => {
   const v = values.filter(finite).sort((a, b) => a - b);
   if (!v.length) return null;
@@ -172,7 +183,7 @@ export function dedupePhotos(photos) {
     const whole = p.timeMs != null && p.timeMs % 1000 === 0;
     const base = String(p.name ?? '')
       .replace(/\.[^.]*$/, '')
-      .replace(/(\s*\(\d+\)|[ _-]copy( \d+)?)$/i, '')
+      .replace(/(\s*-?\s*copy(\s*\(?\d+\)?)?|\s*\(\d+\))+$/i, '')
       .toLowerCase();
     const key = `${p.timeMs ?? (p.timeText || p.name)}|${whole ? base : ''}|${p.lat.toFixed(7)}|${p.lon.toFixed(7)}`;
     if (seen.has(key)) continue;
@@ -288,7 +299,8 @@ export function analyzePhotos(rawPhotos, planned = [], opts = {}) {
   // Each planned point: the nearest photo, and whether it is near enough.
   const reach = Math.ceil(matchM / Math.max(matchM, 20));
   // One photo covers one planned point: every pair within reach is taken
-  // closest first, and a photo or a point already used is skipped, so a photo
+  // closest first (greedy, not a maximum matching: in rare layouts a different
+  // pairing would cover one more point), and a photo or a point already used is skipped, so a photo
   // between two planned points does not cover both.
   const pairs = [];
   planned.forEach((_, i) => {
@@ -402,20 +414,20 @@ export function analyzePhotos(rawPhotos, planned = [], opts = {}) {
       ? photosOut.filter((p) => !p.onPlan).length
       : 0,
     medianOffsetM: median(offsets),
-    maxOffsetM: offsets.length ? Math.max(...offsets) : null,
+    maxOffsetM: extent(offsets).max,
     gapCount: gaps.length,
     breakCount: breaks.length,
     usualSpacingM: usualM,
     usualIntervalS: usualS,
-    gsdMinCm: gsds.length ? Math.min(...gsds) : null,
+    gsdMinCm: extent(gsds).min,
     gsdMedianCm: median(gsds),
-    gsdMaxCm: gsds.length ? Math.max(...gsds) : null,
+    gsdMaxCm: extent(gsds).max,
     heightMedianM: median(heights),
     gsdFromPlan: photosOut.filter((p) => p.heightBasis === 'plan').length,
     gsdFromTakeoff: photosOut.filter((p) => p.heightBasis === 'takeoff').length,
     gsdMissing: photosOut.filter((p) => p.gsdCm == null).length,
-    firstTimeMs: times.length ? Math.min(...times) : null,
-    lastTimeMs: times.length ? Math.max(...times) : null,
+    firstTimeMs: extent(times).min,
+    lastTimeMs: extent(times).max,
   };
   return {
     photos: photosOut,

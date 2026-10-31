@@ -2753,9 +2753,13 @@ test('photo check: files dropped anywhere on the panel are caught, also during a
   const w = setup();
   const pc = w.handle.photoCheck();
   const section = w.find((n) => n.getAttribute?.('data-role') === 'photo-check')[0];
-  const chain = [];
-  for (let n = section.parentNode; n; n = n.parentNode) chain.push(n);
-  const top = { dispatch: (type, e) => chain.forEach((n) => n.dispatch(type, e)) };
+  const top = w.panel;
+  // nothing above the drone-plan panel (the rail with the other panels) listens
+  for (let n = w.panel.parentNode; n; n = n.parentNode) {
+    assert.equal((n.listeners.get('drop') ?? []).length, 0);
+    assert.equal((n.listeners.get('dragover') ?? []).length, 0);
+  }
+  assert.equal(section.parentNode !== null, true);
   const mk = (i) => ({
     name: `g${i}.jpg`,
     bytes: jpeg({
@@ -2764,13 +2768,32 @@ test('photo check: files dropped anywhere on the panel are caught, also during a
     }),
   });
   let prevented = 0;
-  const ev = (files) => ({ preventDefault: () => (prevented += 1), dataTransfer: { files } });
+  let stopped = 0;
+  const ev = (files) => ({ preventDefault: () => (prevented += 1), stopPropagation: () => (stopped += 1), dataTransfer: { files } });
   const first = pc.addFiles([mk(0)]);
   top.dispatch('drop', ev([mk(1)])); // while the first read runs
   top.dispatch('dragover', ev([]));
   await first;
   await new Promise((r) => setTimeout(r, 20));
   assert.ok(prevented >= 2);
+  assert.ok(stopped >= 1);
   assert.equal(pc.analysis().summary.photoCount, 2);
+  w.handle.destroy();
+});
+
+test('photo check: a drop of only non-JPEG files says not-a-JPEG; JPEGs without a position say no-position', async () => {
+  const { jpeg, tiff } = await import('./fixtures/photoFixtures.mjs');
+  const w = setup();
+  const pc = w.handle.photoCheck();
+  const progress = () => w.find((n) => n.getAttribute?.('data-role') === 'photo-progress')[0].textContent;
+  await pc.addFiles([{ name: 'a.txt', bytes: new TextEncoder().encode('x') }]);
+  assert.match(progress(), /not a JPEG/);
+  assert.doesNotMatch(progress(), /position/);
+  pc.clear();
+  await pc.addFiles([
+    { name: 'a.txt', bytes: new TextEncoder().encode('x') },
+    { name: 'nopos.jpg', bytes: jpeg({ exif: tiff({ gps: 'none' }) }) },
+  ]);
+  assert.match(progress(), /position/);
   w.handle.destroy();
 });

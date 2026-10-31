@@ -3812,6 +3812,7 @@ export function initDronePlan({
   photoCheck = mountPhotoCheck({
     doc,
     container: ui.photoCheck,
+    dropZone: panel,
     host: {
       planned: () => ({ suite: state.suite, result: state.result }),
       plannedGsdCm: () => state.result?.totals?.gsdCm ?? null,
