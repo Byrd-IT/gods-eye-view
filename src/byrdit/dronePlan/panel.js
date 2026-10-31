@@ -16,7 +16,15 @@ import { createSlider } from '../../ui/slider.js';
 import { assembleAreaPlan, distanceToAreasM, planAreas } from './areas.js';
 import { initPolygonTool } from './polygonTool.js';
 import { validateDroneBox } from './limits.js';
+import { checkConflicts } from './conflicts.js';
 import { initPointTool } from './pointTool.js';
+import {
+  DEFAULT_OUTWARD_PITCH_DEG,
+  DEFAULT_RING_ANGLES_DEG,
+  MAX_OUTWARD_PITCH_DEG,
+  MIN_OUTWARD_PITCH_DEG,
+  normalizeRingAngles,
+} from './orbitRings.js';
 import {
   DEFAULT_ZONE_HALF_WIDTH_M,
   MAX_ZONE_HALF_WIDTH_M,
@@ -99,6 +107,7 @@ export const BODY_ID = 'drone-plan-panel-body';
 /** The card's own header button is the launcher: there is no DISPLAY entry. */
 export const ENTRY_SELECTOR = '.panel-collapse-btn';
 export const TARGET_POINTER_OWNER = 'drone-plan-orbit-target';
+export const PATH_POINTER_OWNER = 'drone-plan-lookat-path';
 export const OBSTACLE_ADD_POINTER_OWNER = 'drone-plan-obstacle-add';
 const BOX_OWNER = 'drone-plan-box';
 const REPLAN_DELAY_MS = 160;
@@ -202,6 +211,11 @@ export function initDronePlan({
       batteryMin: 25,
       orbitRadiusM: null,
       orbitHeightsM: null,
+      orbitRingMode: 'angles',
+      orbitAnglesDeg: null,
+      orbitOutward: true,
+      orbitOutwardPitchDeg: DEFAULT_OUTWARD_PITCH_DEG,
+      lookAtPaths: [],
       orbitTargetHeightM: 3,
       obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
       orbitTargets: [],
@@ -233,6 +247,7 @@ export function initDronePlan({
       alpha: readAlpha(unitStorage),
     },
     suiteBusy: false,
+    pathDraft: null,
     error: null,
     busy: false,
     open: false,
@@ -347,6 +362,43 @@ export function initDronePlan({
       ui.targetAdd?.setAttribute('aria-pressed', String(active));
       if (active)
         status(t('Click the structure or tree you want to orbit'), 'info');
+    },
+  });
+
+  const pathTool = initPointTool({
+    viewer,
+    cesium,
+    owner: PATH_POINTER_OWNER,
+    onPoint: (point) => {
+      if (!state.pathDraft) return;
+      state.pathDraft.push(point);
+      status(
+        t('Path: {n} points. Click more, or press DRAW PATH again to finish', {
+          n: num(state.pathDraft.length),
+        }),
+        'info',
+      );
+      // The point tool stops after each click: pick up the next one.
+      pathTool?.start();
+    },
+    onCancel: (reason) => {
+      if (reason === 'sky') {
+        status(t('Click on the ground, not the sky'), 'warn');
+        return;
+      }
+      if (reason === 'done') return;
+      if (reason === 'escape') status(t('Path drawing cancelled'));
+      else if (reason === 'pointer-busy')
+        status(t('Another tool is using the pointer. Close it first'), 'warn');
+      state.pathDraft = null;
+    },
+    onActive: (active) => {
+      ui.pathAdd?.setAttribute(
+        'aria-pressed',
+        String(Boolean(state.pathDraft)),
+      );
+      if (active && !state.pathDraft?.length)
+        status(t('Click points along the route to fly'), 'info');
     },
   });
 
@@ -587,6 +639,121 @@ export function initDronePlan({
     return true;
   }
 
+  /** Change one target's own settings (size, blocked sector, ...). */
+  function updateOrbitTarget(id, patch) {
+    const target = (state.options.orbitTargets ?? []).find((x) => x.id === id);
+    if (!target) return false;
+    touchTargets();
+    state.options.orbitTargets = state.options.orbitTargets.map((x) => {
+      if (x.id !== id) return x;
+      const next = { ...x, ...patch };
+      for (const key of Object.keys(next)) {
+        if (next[key] === undefined) delete next[key];
+      }
+      return next;
+    });
+    schedule(0);
+    return true;
+  }
+
+  // ---------------------------------------------------------- look-at paths --
+  function nextPathId() {
+    const list = state.options.lookAtPaths ?? [];
+    const taken = new Set(list.map((x) => x.id));
+    let n = list.length + 1;
+    while (taken.has(`path-${n}`)) n += 1;
+    return `path-${n}`;
+  }
+
+  function nearestTargetId(point) {
+    const list = (state.options.orbitTargets ?? []).filter(
+      (x) => x.active !== false,
+    );
+    let best = null;
+    for (const tg of list) {
+      const d = Math.hypot(tg.lon - point.lon, tg.lat - point.lat);
+      if (!best || d < best.d) best = { id: tg.id, d };
+    }
+    return best?.id ?? '';
+  }
+
+  function finishPathDraft() {
+    const draft = state.pathDraft;
+    state.pathDraft = null;
+    pathTool?.cancel('done');
+    ui.pathAdd?.setAttribute('aria-pressed', 'false');
+    if (!draft || draft.length < 2) {
+      if (draft) status(t('A path needs at least two points'), 'warn');
+      render();
+      return false;
+    }
+    const list = [...(state.options.lookAtPaths ?? [])];
+    return addLookAtPath(draft);
+  }
+
+  /** Add a look-at path from two or more points (also used by tests). */
+  function addLookAtPath(points, targetId) {
+    const pts = (Array.isArray(points) ? points : [])
+      .map((q) => ({ lon: Number(q?.lon), lat: Number(q?.lat) }))
+      .filter((q) => Number.isFinite(q.lon) && Number.isFinite(q.lat));
+    if (pts.length < 2) return false;
+    const list = [...(state.options.lookAtPaths ?? [])];
+    list.push({
+      id: nextPathId(),
+      label: `${t('Path')} ${list.length + 1}`,
+      active: true,
+      targetId: targetId ?? nearestTargetId(pts[0]),
+      aglM: null,
+      points: pts,
+    });
+    state.options.lookAtPaths = list;
+    if (!orbitsShown()) state.options.pattern = 'orbit';
+    status('');
+    schedule(0);
+    return true;
+  }
+
+  function toggleDrawPath() {
+    if (state.pathDraft) return finishPathDraft();
+    if (!state.areas.length) {
+      status(t('Draw a box on the globe first'), 'warn');
+      return false;
+    }
+    if (!(state.options.orbitTargets ?? []).some((x) => x.active !== false)) {
+      status(t('Add an orbit target to look at first'), 'warn');
+      return false;
+    }
+    boxTool?.cancel('switch');
+    polygonTool?.cancel('switch');
+    takeoffTool?.cancel('switch');
+    targetTool?.cancel('switch');
+    pathTool?.cancel('switch');
+    state.pathDraft = [];
+    if (!pathTool?.start()) {
+      state.pathDraft = null;
+      return false;
+    }
+    return true;
+  }
+
+  function updateLookAtPath(id, patch) {
+    const list = state.options.lookAtPaths ?? [];
+    if (!list.some((x) => x.id === id)) return false;
+    state.options.lookAtPaths = list.map((x) =>
+      x.id === id ? { ...x, ...patch } : x,
+    );
+    schedule(0);
+    return true;
+  }
+
+  function removeLookAtPath(id) {
+    const list = state.options.lookAtPaths ?? [];
+    if (!list.some((x) => x.id === id)) return false;
+    state.options.lookAtPaths = list.filter((x) => x.id !== id);
+    schedule(0);
+    return true;
+  }
+
   function setOrbitTargetActive(id, active) {
     const target = (state.options.orbitTargets ?? []).find((x) => x.id === id);
     if (!target) return false;
@@ -763,6 +930,7 @@ export function initDronePlan({
     polygonTool?.cancel('switch');
     takeoffTool?.cancel('switch');
     targetTool?.cancel('switch');
+    pathTool?.cancel('switch');
     if (obstacleTool?.isActive()) {
       if (!toggle) return true;
       obstacleTool.cancel('cancel');
@@ -1315,6 +1483,49 @@ export function initDronePlan({
       ui.rings,
       { value: false },
     ));
+    ui.angles = el(doc, 'input', null, {
+      cls: 'pp-text-input gev-dp-text',
+      attrs: {
+        type: 'text',
+        inputmode: 'numeric',
+        autocomplete: 'off',
+        spellcheck: 'false',
+        'aria-label': t('Viewing angles'),
+        placeholder: DEFAULT_RING_ANGLES_DEG.join(', '),
+      },
+    });
+    ({ row: ui.anglesRow } = field(t('Viewing angles (° down)'), ui.angles, {
+      value: false,
+    }));
+    ui.anglesRow.title = t(
+      'Each ring is set by how steeply the camera looks down at the target. The height follows from the angle and the radius.',
+    );
+    ui.outward = select(
+      [
+        ['on', t('Facing the building, then facing away')],
+        ['off', t('Facing the building only')],
+      ],
+      t('Photos at each building stop'),
+    );
+    ({ row: ui.outwardRow } = field(t('Photos at each stop'), ui.outward, {
+      value: false,
+    }));
+    ui.outwardPitch = el(doc, 'input', null, {
+      cls: 'pp-text-input gev-dp-text',
+      attrs: {
+        type: 'text',
+        inputmode: 'numeric',
+        autocomplete: 'off',
+        spellcheck: 'false',
+        'aria-label': t('Outward tilt'),
+        placeholder: String(-DEFAULT_OUTWARD_PITCH_DEG),
+      },
+    });
+    ({ row: ui.outwardPitchRow } = field(
+      t('Outward tilt (° down)'),
+      ui.outwardPitch,
+      { value: false },
+    ));
     ui.targetHeight = lslider(t('Target height'), {
       minM: 0,
       maxM: 60,
@@ -1389,6 +1600,10 @@ export function initDronePlan({
         'Data: tree canopy height by Meta and WRI (CC BY 4.0), towers from the FAA Digital Obstacle File, buildings from OpenStreetMap contributors.',
       ),
     });
+    ui.conflictBox = el(doc, 'div', host, {
+      cls: 'gev-dp-targets gev-dp-conflicts',
+      attrs: { 'data-role': 'conflicts' },
+    });
     into('orbits');
     ui.targetsBox = el(doc, 'div', host, {
       cls: 'gev-dp-targets',
@@ -1431,6 +1646,31 @@ export function initDronePlan({
       text: t(
         'Building targets come from OpenStreetMap. Trees, towers and power lines are not in that data: check clearance yourself. Not flight-tested.',
       ),
+    });
+
+    const pathBar = el(doc, 'div', ui.targetsBox, {
+      cls: 'gev-dp-row gev-dp-target-bar',
+    });
+    el(doc, 'span', pathBar, {
+      cls: 'gev-dp-label',
+      text: t('Look-at paths'),
+    });
+    const pathWrap = el(doc, 'span', pathBar, { cls: 'gev-dp-control' });
+    ui.pathAdd = el(doc, 'button', pathWrap, {
+      cls: 'data-toggle-chip',
+      text: t('DRAW PATH'),
+      attrs: {
+        type: 'button',
+        'aria-pressed': 'false',
+        'data-action': 'draw-path',
+        title: t(
+          'Click points along a road, fence or gap. The drone flies it with the camera locked on an orbit target. Click this button again to finish, Esc cancels.',
+        ),
+      },
+    });
+    ui.pathList = el(doc, 'div', ui.targetsBox, {
+      cls: 'gev-dp-target-list',
+      attrs: { 'data-role': 'lookat-paths' },
     });
 
     into('shots');
@@ -1789,9 +2029,38 @@ export function initDronePlan({
             : lengthToM(Number(text)),
         );
       o.orbitHeightsM = list.length ? list : null;
+      // Typed heights replace the viewing angles; clearing them goes back.
+      o.orbitRingMode = list.length ? 'heights' : 'angles';
       syncControls();
       schedule();
     });
+    ui.angles.addEventListener('change', () => {
+      const list = ui.angles.value
+        .split(/[\s,;]+/)
+        .filter((text) => text !== '' && Number.isFinite(Number(text)));
+      o.orbitAnglesDeg = list.length ? normalizeRingAngles(list) : null;
+      o.orbitRingMode = 'angles';
+      o.orbitHeightsM = null;
+      syncControls();
+      schedule();
+    });
+    ui.outward.addEventListener('change', () => {
+      o.orbitOutward = ui.outward.value !== 'off';
+      syncControls();
+      schedule();
+    });
+    ui.outwardPitch.addEventListener('change', () => {
+      const n = Number(ui.outwardPitch.value);
+      o.orbitOutwardPitchDeg = Number.isFinite(n)
+        ? Math.min(
+            MAX_OUTWARD_PITCH_DEG,
+            Math.max(MIN_OUTWARD_PITCH_DEG, -Math.abs(n)),
+          )
+        : DEFAULT_OUTWARD_PITCH_DEG;
+      syncControls();
+      schedule();
+    });
+    ui.pathAdd.addEventListener('click', () => toggleDrawPath());
     ui.photoMode.addEventListener('change', () => {
       o.photoMode = ui.photoMode.value;
       schedule();
@@ -1949,11 +2218,7 @@ export function initDronePlan({
     };
     row(t('Speed'), speedText(rec.speedMs));
     if (rec.pattern !== 'orbit') row(t('Height'), heightText(rec.aglM));
-    else
-      row(
-        t('Orbit heights ({unit})', { unit: lengthUnit() }),
-        rec.orbitHeightsM.map((m) => lengthField(m)).join(', '),
-      );
+    else row(t('Viewing angles (° down)'), DEFAULT_RING_ANGLES_DEG.join(', '));
     row(
       t('Overlap'),
       rec.sideOverlap === null
@@ -2078,7 +2343,7 @@ export function initDronePlan({
     ui.aglRow.title = t('Hard cap {cap} above ground', {
       cap: lengthText(AGL_CAP_M),
     });
-    ui.ringsLabel.textContent = t('Orbit heights ({unit})', {
+    ui.ringsLabel.textContent = t('Fixed heights ({unit}, optional)', {
       unit: lengthUnit(),
     });
     ui.rings.setAttribute?.(
@@ -2104,6 +2369,11 @@ export function initDronePlan({
     ui.rings.value = (o.orbitHeightsM ?? [])
       .map((m) => lengthField(m))
       .join(', ');
+    ui.angles.value = (o.orbitAnglesDeg ?? []).map((a) => String(a)).join(', ');
+    ui.outward.value = o.orbitOutward === false ? 'off' : 'on';
+    ui.outwardPitch.value = String(
+      Math.abs(o.orbitOutwardPitchDeg ?? DEFAULT_OUTWARD_PITCH_DEG),
+    );
     ui.targetHeight.value = lengthField(o.orbitTargetHeightM);
     ui.targetHeightOut.textContent = lengthText(o.orbitTargetHeightM);
     ui.obstacle.value = lengthField(o.obstacleHeightM);
@@ -2123,6 +2393,9 @@ export function initDronePlan({
     ui.tiltRow.hidden = o.pattern !== 'double';
     ui.radiusRow.hidden = !orbit;
     ui.ringsRow.hidden = !orbit;
+    ui.anglesRow.hidden = !orbit;
+    ui.outwardRow.hidden = !orbit;
+    ui.outwardPitchRow.hidden = !orbit || o.orbitOutward === false;
     ui.targetHeightRow.hidden = !orbit;
     const orbits = orbitsShown();
     ui.obstacleRow.hidden = !orbits;
@@ -2162,6 +2435,7 @@ export function initDronePlan({
     ui.jobNote.textContent = jobNote;
     renderAreas();
     renderTargets();
+    renderPaths();
     renderObstacleStatus();
     renderObstacles();
     renderStepLines();
@@ -2214,6 +2488,201 @@ export function initDronePlan({
       });
       remove.addEventListener('click', () => {
         removeOrbitTarget(target.id);
+      });
+      // Its own size and open arc. The size starts at the automatic value.
+      const planRadius =
+        state.options.orbitRadiusM ??
+        state.result?.plan?.options?.orbitRadiusM ??
+        40;
+      const radius = target.radiusM ?? planRadius;
+      const size = el(doc, 'input', row, {
+        cls: 'pp-text-input gev-dp-text gev-dp-target-size',
+        attrs: {
+          type: 'text',
+          inputmode: 'decimal',
+          autocomplete: 'off',
+          'aria-label': t('Orbit diameter ({unit})', { unit: lengthUnit() }),
+          title: t('Orbit diameter ({unit})', { unit: lengthUnit() }),
+          'data-target-size': target.id,
+        },
+      });
+      size.value = lengthField(radius * 2);
+      size.addEventListener('change', () => {
+        const d = lengthToM(size.value);
+        updateOrbitTarget(target.id, {
+          radiusM:
+            Number.isFinite(d) && d > 0
+              ? Math.min(300, Math.max(10, d / 2))
+              : undefined,
+        });
+      });
+      const arc = (key, label) => {
+        const input = el(doc, 'input', row, {
+          cls: 'pp-text-input gev-dp-text gev-dp-target-arc',
+          attrs: {
+            type: 'text',
+            inputmode: 'numeric',
+            autocomplete: 'off',
+            'aria-label': label,
+            title: label,
+            placeholder: '—',
+            'data-target-blocked': `${target.id}:${key}`,
+          },
+        });
+        input.value = target.blocked ? String(target.blocked[key]) : '';
+        input.addEventListener('change', () => {
+          const other = key === 'fromDeg' ? 'toDeg' : 'fromDeg';
+          const mine = input.value.trim() === '' ? null : Number(input.value);
+          const theirs = target.blocked ? target.blocked[other] : null;
+          const bothSet =
+            mine !== null && Number.isFinite(mine) && theirs !== null;
+          updateOrbitTarget(target.id, {
+            blocked: bothSet
+              ? { [key]: mine, [other]: theirs }
+              : mine !== null && Number.isFinite(mine)
+                ? { [key]: mine, [other]: mine === 0 ? 90 : 0 }
+                : undefined,
+          });
+        });
+      };
+      arc('fromDeg', t('Blocked sector from (° compass)'));
+      arc('toDeg', t('Blocked sector to (° compass)'));
+    }
+  }
+
+  function renderPaths() {
+    ui.pathList.replaceChildren();
+    if (!orbitsShown()) return;
+    const list = state.options.lookAtPaths ?? [];
+    const targets = (state.options.orbitTargets ?? []).filter(
+      (x) => x.active !== false,
+    );
+    for (const path of list) {
+      const row = el(doc, 'div', ui.pathList, {
+        cls: 'gev-dp-area gev-dp-target',
+        attrs: { 'data-lookat-path': path.id },
+      });
+      const on = el(doc, 'input', row, {
+        attrs: {
+          type: 'checkbox',
+          'aria-label': t('Fly this path'),
+          'data-toggle-path': path.id,
+        },
+      });
+      on.checked = path.active !== false;
+      on.addEventListener('change', () =>
+        updateLookAtPath(path.id, { active: on.checked }),
+      );
+      el(doc, 'span', row, {
+        cls: 'gev-dp-area-kind',
+        text: `${path.label || path.id} · ${t('points: {n}', { n: num(path.points.length) })}`,
+      });
+      const pick = el(doc, 'select', row, {
+        cls: 'pp-select gev-field gev-field--compact',
+        attrs: {
+          'aria-label': t('Look at'),
+          title: t('Look at'),
+          'data-path-target': path.id,
+        },
+      });
+      for (const tg of targets) {
+        el(doc, 'option', pick, {
+          text: tg.label || tg.id,
+          attrs: { value: tg.id },
+        });
+      }
+      pick.value = targets.some((x) => x.id === path.targetId)
+        ? path.targetId
+        : (targets[0]?.id ?? '');
+      pick.addEventListener('change', () =>
+        updateLookAtPath(path.id, { targetId: pick.value }),
+      );
+      const height = el(doc, 'input', row, {
+        cls: 'pp-text-input gev-dp-text gev-dp-target-size',
+        attrs: {
+          type: 'text',
+          inputmode: 'decimal',
+          autocomplete: 'off',
+          'aria-label': t('Path height ({unit})', { unit: lengthUnit() }),
+          title: t('Path height ({unit})', { unit: lengthUnit() }),
+          'data-path-height': path.id,
+        },
+      });
+      height.value = lengthField(path.aglM ?? 40);
+      height.addEventListener('change', () => {
+        const h = lengthToM(height.value);
+        updateLookAtPath(path.id, {
+          aglM: Number.isFinite(h) && h > 0 ? h : null,
+        });
+      });
+      const remove = el(doc, 'button', row, {
+        cls: 'data-toggle-chip',
+        text: t('Remove'),
+        attrs: { type: 'button', 'data-remove-path': path.id },
+      });
+      remove.addEventListener('click', () => removeLookAtPath(path.id));
+    }
+  }
+
+  /** Warn-only check of the planned route against buildings and obstacles. */
+  function renderConflicts() {
+    ui.conflictBox.replaceChildren();
+    const plan = state.result?.plan;
+    if (!plan?.legs?.length) return;
+    const footprints = footprintCache.get(areasKey()) ?? [];
+    const found = checkConflicts({
+      legs: plan.legs,
+      buildings: footprints,
+      obstacles: obstacleStore.list(),
+      zoneHalfWidthM: state.check.halfWidthM,
+    });
+    state.conflicts = found;
+    el(doc, 'p', ui.conflictBox, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'conflict-disclaimer' },
+      text: t(
+        'This check only knows OpenStreetMap buildings and the obstacles you entered. It does NOT see trees, power lines or towers, and it never changes your route.',
+      ),
+    });
+    if (!found.conflicts.length && !found.unknownHeight.length) {
+      el(doc, 'p', ui.conflictBox, {
+        cls: 'gev-dp-note',
+        text: t('No conflicts found with the buildings and obstacles known.'),
+        attrs: { 'data-role': 'conflict-none' },
+      });
+      return;
+    }
+    const lead = (b) => b.label || b.id || t('building');
+    for (const c of found.conflicts.slice(0, 8)) {
+      el(doc, 'p', ui.conflictBox, {
+        cls: 'gev-dp-warning',
+        attrs: { 'data-role': 'conflict' },
+        text: t(
+          'Conflict: the route passes {name} at {flown}, which needs {need}',
+          {
+            name: lead(c),
+            flown: lengthText(c.flownAglM),
+            need: lengthText(c.needAglM),
+          },
+        ),
+      });
+    }
+    if (found.conflicts.length > 8) {
+      el(doc, 'p', ui.conflictBox, {
+        cls: 'gev-dp-note',
+        text: t('And {n} more conflicts', {
+          n: num(found.conflicts.length - 8),
+        }),
+      });
+    }
+    if (found.unknownHeight.length) {
+      el(doc, 'p', ui.conflictBox, {
+        cls: 'gev-dp-warning',
+        attrs: { 'data-role': 'conflict-unknown' },
+        text: t(
+          '{n} buildings near the route have no height in the data: check them yourself',
+          { n: num(found.unknownHeight.length) },
+        ),
       });
     }
   }
@@ -2270,6 +2739,7 @@ export function initDronePlan({
     ui.missions.replaceChildren();
     renderSuite();
     renderSummary();
+    renderConflicts();
     panel.dataset.state = state.busy ? 'busy' : state.result ? 'ready' : 'idle';
     if (state.error) {
       status(planErrorText(state.error), 'warn');
@@ -2842,6 +3312,7 @@ export function initDronePlan({
     polygonTool?.cancel('close');
     takeoffTool?.cancel('close');
     targetTool?.cancel('close');
+    pathTool?.cancel('close');
     obstacleTool?.cancel('close');
     state.box = null;
     state.areas = [];
@@ -2849,6 +3320,7 @@ export function initDronePlan({
     state.takeoff = null;
     state.orbitsPlanned = false;
     state.options.orbitTargets = [];
+    state.options.lookAtPaths = [];
     state.orbitTargetsTouched = false;
     footprintCache.clear();
     footprintPromises.clear();
@@ -2892,6 +3364,7 @@ export function initDronePlan({
       polygonTool?.cancel('close');
       takeoffTool?.cancel('close');
       targetTool?.cancel('close');
+      pathTool?.cancel('close');
       obstacleTool?.cancel('close');
     }
   };
@@ -2919,6 +3392,7 @@ export function initDronePlan({
     polygonTool?.cancel('load');
     takeoffTool?.cancel('load');
     targetTool?.cancel('load');
+    pathTool?.cancel('load');
     obstacleTool?.cancel('load');
     clearTimeout(timer);
     planToken += 1;
@@ -2932,6 +3406,7 @@ export function initDronePlan({
     state.takeoff = plan.takeoff;
     Object.assign(state.options, plan.options);
     state.options.orbitTargets = plan.orbitTargets;
+    state.options.lookAtPaths = plan.lookAtPaths ?? [];
     state.orbitTargetsTouched = plan.orbitTargetsTouched;
     state.orbitsPlanned = plan.suite.planned;
     state.wpml = { ...plan.wpml };
@@ -3060,7 +3535,22 @@ export function initDronePlan({
     }
     if (Object.hasOwn(patch, 'orbitHeightsM')) {
       o.orbitHeightsM = patch.orbitHeightsM;
+      // Asking for fixed heights means fixed heights; null goes back to angles.
+      if (!Object.hasOwn(patch, 'orbitRingMode'))
+        o.orbitRingMode = patch.orbitHeightsM?.length ? 'heights' : 'angles';
       plan = true;
+    }
+    for (const key of [
+      'orbitRingMode',
+      'orbitAnglesDeg',
+      'orbitOutward',
+      'orbitOutwardPitchDeg',
+      'lookAtPaths',
+    ]) {
+      if (Object.hasOwn(patch, key)) {
+        o[key] = patch[key];
+        plan = true;
+      }
     }
     if (Object.hasOwn(patch, 'obstacleHeightM')) {
       o.obstacleHeightM = patch.obstacleHeightM;
@@ -3169,6 +3659,11 @@ export function initDronePlan({
     drawPolygon,
     useRecommended,
     applyOptions,
+    updateOrbitTarget,
+    toggleDrawPath,
+    addLookAtPath,
+    updateLookAtPath,
+    removeLookAtPath,
     clearTakeoff,
     startTakeoffPick,
     startTargetPick,
@@ -3199,6 +3694,7 @@ export function initDronePlan({
       polygonTool?.destroy();
       takeoffTool?.destroy();
       targetTool?.destroy();
+      pathTool?.destroy();
       obstacleTool?.destroy();
       resetObstacles();
       library?.destroy();

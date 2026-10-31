@@ -1058,7 +1058,11 @@ test('orbit: obstacle height raises the orbit and shows the fly-over height', as
   const w = setup();
   w.handle.setBox(boxM(300, 200));
   pick(w, 'Mode', 'splat-orbit');
-  w.handle.applyOptions({ obstacleHeightM: 45, orbitHeightsM: [20, 30] });
+  w.handle.applyOptions({
+    obstacleHeightM: 45,
+    orbitHeightsM: [20, 30],
+    orbitRingMode: 'heights',
+  });
   await w.handle.replan();
   const plan = w.handle.getResult().plan;
   assert.equal(plan.orbit.minAglM, 50);
@@ -2386,4 +2390,138 @@ test('units: editing one orbit height in feet leaves the others at their exact m
   assert.notEqual(after[1], b);
   assert.equal(after[1], 91.44);
   w.handle.destroy();
+});
+
+// ----------------------------------------- orbit angles, sizes, paths, conflicts --
+const planTilts = (w) => [
+  ...new Set(
+    w.handle
+      .getResult()
+      .plan.legs.filter((l) => l.kind === 'orbit')
+      .flatMap((l) => l.waypoints.map((x) => Math.round(-x.pitchDeg))),
+  ),
+].sort((a, b) => a - b);
+
+test('orbit: rings follow the viewing angles field (25, 40, 55 by default)', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  w.handle.applyOptions({ orbitRadiusM: 40 });
+  await w.handle.replan();
+  assert.deepEqual(planTilts(w), [25, 40, 55]);
+  assert.equal(w.handle.getState().options.orbitRingMode, 'angles');
+  const angles = w.control('Viewing angles');
+  angles.value = '30, 50';
+  angles.dispatch('change');
+  await w.handle.replan();
+  assert.deepEqual(planTilts(w), [30, 50]);
+  // Typed heights take over from the angles; clearing them goes back.
+  const rings = w.control('Orbit heights');
+  rings.value = '60, 90';
+  rings.dispatch('change');
+  assert.equal(w.handle.getState().options.orbitRingMode, 'heights');
+  rings.value = '';
+  rings.dispatch('change');
+  assert.equal(w.handle.getState().options.orbitRingMode, 'angles');
+  w.handle.destroy();
+});
+
+test('orbit: each target has its own editable size, pre-filled with the automatic value', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  await w.handle.replan();
+  const id = w.handle.getState().options.orbitTargets[0].id;
+  const sizeOf = () =>
+    w.find((n) => n.attributes.get('data-target-size') === id)[0];
+  const auto = Number(sizeOf().value);
+  assert.ok(auto >= 30, `automatic diameter shown: ${auto}`);
+  sizeOf().value = '90';
+  sizeOf().dispatch('change');
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.orbitTargets[0].radiusM, 45);
+  assert.equal(w.handle.getResult().plan.orbit.targets[0].radiusM, 45);
+  assert.equal(sizeOf().value, '90');
+  w.handle.destroy();
+});
+
+test('orbit: a blocked sector is typed per target and the orbit stays out of it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  await w.handle.replan();
+  const id = w.handle.getState().options.orbitTargets[0].id;
+  const arc = (key) =>
+    w.find((n) => n.attributes.get('data-target-blocked') === `${id}:${key}`)[0];
+  arc('fromDeg').value = '20';
+  arc('fromDeg').dispatch('change');
+  arc('toDeg').value = '140';
+  arc('toDeg').dispatch('change');
+  await w.handle.replan();
+  assert.deepEqual(w.handle.getState().options.orbitTargets[0].blocked, {
+    fromDeg: 20,
+    toDeg: 140,
+  });
+  const t0 = w.handle.getResult().plan.orbit.targets[0];
+  assert.deepEqual(t0.blocked, { fromDeg: 20, toDeg: 140 });
+  arc('toDeg').value = '';
+  arc('toDeg').dispatch('change');
+  assert.equal(w.handle.getState().options.orbitTargets[0].blocked, undefined);
+  w.handle.destroy();
+});
+
+test('look-at path: added, listed with its target and height, edited and removed', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  await w.handle.replan();
+  assert.equal(w.handle.toggleDrawPath(), true, 'drawing starts with a target');
+  assert.equal(w.handle.toggleDrawPath(), false, 'finishing with no points adds nothing');
+  const m = metersPerDegree(30.27);
+  const p1 = { lon: -97.77 - 60 / m.lon, lat: 30.27 - 50 / m.lat };
+  const p2 = { lon: -97.77 + 60 / m.lon, lat: 30.27 - 50 / m.lat };
+  assert.equal(w.handle.addLookAtPath([p1]), false);
+  assert.equal(w.handle.addLookAtPath([p1, p2]), true);
+  await w.handle.replan();
+  const path = w.handle.getState().options.lookAtPaths[0];
+  assert.equal(path.targetId, w.handle.getState().options.orbitTargets[0].id);
+  assert.ok(w.handle.getResult().plan.legs.some((l) => l.kind === 'lookat'));
+  assert.equal(w.find((n) => n.attributes.get('data-lookat-path') === path.id).length, 1);
+  const height = w.find((n) => n.attributes.get('data-path-height') === path.id)[0];
+  height.value = '60';
+  height.dispatch('change');
+  assert.equal(w.handle.getState().options.lookAtPaths[0].aglM, 60);
+  assert.equal(w.handle.removeLookAtPath(path.id), true);
+  await w.handle.replan();
+  assert.ok(!w.handle.getResult().plan.legs.some((l) => l.kind === 'lookat'));
+  w.handle.destroy();
+});
+
+test('conflicts: the panel says what the check cannot see, and warns about a tall building', async () => {
+  resetPointerOwnership();
+  const dom = makeDoc();
+  const world = makeWorld({ sample: (c) => flat(c) });
+  const m = metersPerDegree(30.27);
+  const tall = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => ({
+    lon: -97.77 + (a * 60) / m.lon,
+    lat: 30.27 + (b * 60) / m.lat,
+  }));
+  const handle = initDronePlan({
+    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
+    viewer: world.viewer,
+    cesium: world.cesium,
+    document: dom.doc,
+    downloadFile: () => {},
+    getBuildingFootprints: async () => [{ ring: tall, label: 'Tower', heightM: 90 }],
+  });
+  handle.setBox(boxM(300, 200));
+  handle.applyOptions({ pattern: 'orbit' });
+  await handle.replan();
+  await new Promise((r) => setTimeout(r, 5));
+  await handle.replan();
+  const roles = (role) =>
+    all(dom.body, (n) => n.attributes.get('data-role') === role);
+  assert.match(roles('conflict-disclaimer')[0].textContent, /does NOT see trees, power lines or towers/);
+  assert.match(roles('conflict-disclaimer')[0].textContent, /never changes your route/);
+  handle.destroy();
 });

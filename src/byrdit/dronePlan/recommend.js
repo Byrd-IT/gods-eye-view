@@ -52,7 +52,9 @@ const MODE_BASE = Object.freeze({
     // The camera follows the ring: the planner points it at the centre.
     gimbalPitchDeg: null,
     tiltPitchDeg: -60,
-    orbitHeightsM: Object.freeze([40, 80]),
+    // Rings come from viewing angles (25/40/55 degrees down), not heights.
+    orbitHeightsM: null,
+    orbitRingMode: 'angles',
     shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
   }),
   'fast-survey': Object.freeze({
@@ -175,6 +177,7 @@ export function recommend(preset, mode, context = {}) {
     gimbalPitchDeg: base.gimbalPitchDeg,
     tiltPitchDeg: base.tiltPitchDeg,
     orbitHeightsM: base.orbitHeightsM ? [...base.orbitHeightsM] : null,
+    orbitRingMode: base.orbitRingMode ?? null,
     speedMs,
     shutterDenominator: base.shutterDenominator,
     // Camera settings to type into DJI Fly / GO 4 (the file cannot set them).
@@ -200,6 +203,7 @@ export const RECOMMENDED_OPTION_KEYS = Object.freeze([
   'sideOverlap',
   'tiltPitchDeg',
   'orbitHeightsM',
+  'orbitRingMode',
   'speedMs',
   'shutterDenominator',
 ]);

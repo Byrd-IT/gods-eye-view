@@ -22,6 +22,20 @@ import {
   speedLimits,
 } from './speed.js';
 import {
+  DEFAULT_OUTWARD_PITCH_DEG,
+  MAX_OUTWARD_PITCH_DEG,
+  MIN_OUTWARD_PITCH_DEG,
+  ORBIT_STOP_S,
+  OUTWARD_STOP_S,
+  RING_MAX_AGL_M,
+  angleRings,
+  blockedSpanDeg,
+  lookAtPitchDeg,
+  normalizeBlocked,
+  normalizeRingAngles,
+  openArcBearings,
+} from './orbitRings.js';
+import {
   bearingDeg,
   groundDistanceM,
   lonSpanDeg,
@@ -147,6 +161,13 @@ export const DEFAULT_OPTIONS = Object.freeze({
   maxWaypoints: MAX_WAYPOINTS_PER_MISSION,
   orbitRadiusM: null,
   orbitHeightsM: null,
+  // Rings by viewing angle (degrees below the horizon) or by fixed heights.
+  orbitRingMode: null,
+  orbitAnglesDeg: null,
+  // Building stops: one photo at the building, one facing directly away.
+  orbitOutward: true,
+  orbitOutwardPitchDeg: DEFAULT_OUTWARD_PITCH_DEG,
+  lookAtPaths: null,
   orbitTargetHeightM: 3,
   obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
   orbitTargets: null,
@@ -156,7 +177,12 @@ export const DEFAULT_OPTIONS = Object.freeze({
 });
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+// null, undefined and '' are "not set": Number(null) is 0, which used to turn
+// an unset orbit radius into the 10 m minimum.
+// A number from a value that may be unset: null and '' are NaN, not 0.
+const optNumber = (v) => (v == null || v === '' ? NaN : Number(v));
 const num = (v, fallback) => {
+  if (v == null || v === '') return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 };
@@ -216,9 +242,10 @@ export function normalizeOrbitTargets(raw) {
     const lat = Number(t?.lat);
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
     if (Math.abs(lon) > 180 || Math.abs(lat) > 90) continue;
-    const h = Number(t.heightM);
-    const radius = Number(t.radiusM);
-    const roof = Number(t.roofHeightM);
+    const h = optNumber(t.heightM);
+    const radius = optNumber(t.radiusM);
+    const roof = optNumber(t.roofHeightM);
+    const blocked = normalizeBlocked(t.blocked);
     out.push({
       id: typeof t.id === 'string' && t.id ? t.id : `target-${out.length + 1}`,
       lon,
@@ -235,8 +262,51 @@ export function normalizeOrbitTargets(raw) {
         ? { roofHeightM: clamp(roof, 0, 300) }
         : {}),
       ...(typeof t.osmId === 'string' ? { osmId: t.osmId } : {}),
+      ...(blocked ? { blocked } : {}),
+      // Per-target outward photo switch; unset follows the plan setting.
+      ...(typeof t.outward === 'boolean' ? { outward: t.outward } : {}),
     });
     if (out.length >= MAX_ORBIT_TARGETS) break;
+  }
+  return out;
+}
+
+/** Most look-at paths one plan carries, and most points in one. */
+export const MAX_LOOKAT_PATHS = 6;
+export const MAX_LOOKAT_POINTS = 200;
+/** Default flight height of a look-at path, metres above ground. */
+export const DEFAULT_LOOKAT_AGL_M = 40;
+
+/**
+ * Look-at paths: `{ id, label, active, targetId, aglM, points: [{lon, lat}] }`.
+ * The drone flies the drawn route with the camera locked on the orbit target
+ * `targetId`. A path needs two or more valid points.
+ */
+export function normalizeLookAtPaths(raw) {
+  if (!Array.isArray(raw)) return null;
+  const out = [];
+  for (const p of raw) {
+    const points = (Array.isArray(p?.points) ? p.points : [])
+      .map((q) => ({ lon: Number(q?.lon), lat: Number(q?.lat) }))
+      .filter(
+        (q) =>
+          Number.isFinite(q.lon) &&
+          Number.isFinite(q.lat) &&
+          Math.abs(q.lon) <= 180 &&
+          Math.abs(q.lat) <= 90,
+      )
+      .slice(0, MAX_LOOKAT_POINTS);
+    if (points.length < 2) continue;
+    const agl = p.aglM == null || p.aglM === '' ? NaN : Number(p.aglM);
+    out.push({
+      id: typeof p.id === 'string' && p.id ? p.id : `path-${out.length + 1}`,
+      label: typeof p.label === 'string' ? p.label.slice(0, 80) : '',
+      active: p.active !== false,
+      targetId: typeof p.targetId === 'string' ? p.targetId : '',
+      aglM: Number.isFinite(agl) ? clamp(agl, MIN_AGL_M, AGL_CAP_M) : null,
+      points,
+    });
+    if (out.length >= MAX_LOOKAT_PATHS) break;
   }
   return out;
 }
@@ -305,6 +375,13 @@ export function normalizeOptions(raw = {}, box = null) {
     AGL_CAP_M - OBSTACLE_MARGIN_M,
   );
   o.orbitTargets = normalizeOrbitTargets(o.orbitTargets);
+  o.lookAtPaths = normalizeLookAtPaths(o.lookAtPaths);
+  o.orbitOutward = o.orbitOutward !== false;
+  o.orbitOutwardPitchDeg = clamp(
+    num(o.orbitOutwardPitchDeg, DEFAULT_OUTWARD_PITCH_DEG),
+    MIN_OUTWARD_PITCH_DEG,
+    MAX_OUTWARD_PITCH_DEG,
+  );
   o.obstacles = normalizeObstacles(o.obstacles);
   o.obstaclesDropped = clamp(Math.round(num(o.obstaclesDropped, 0)), 0, 1e6);
   if (box) {
@@ -319,8 +396,20 @@ export function normalizeOptions(raw = {}, box = null) {
     o.orbitRadiusM = clamp(num(o.orbitRadiusM, 40), 10, 300);
   }
   const heights = Array.isArray(o.orbitHeightsM)
-    ? o.orbitHeightsM.map(Number).filter(Number.isFinite)
+    ? o.orbitHeightsM
+        .filter((h) => h != null && h !== '')
+        .map(Number)
+        .filter(Number.isFinite)
     : [];
+  // Rings are set by viewing angle unless fixed heights were asked for (a
+  // saved plan or caller that passes heights and no mode keeps its heights).
+  o.orbitRingMode =
+    o.orbitRingMode === 'angles' || o.orbitRingMode === 'heights'
+      ? o.orbitRingMode
+      : heights.length
+        ? 'heights'
+        : 'angles';
+  o.orbitAnglesDeg = normalizeRingAngles(o.orbitAnglesDeg);
   // Every ring flies at least obstacle + margin above ground, so the drone
   // passes over the trees; a ring asked for lower is raised and says so.
   const floorAgl = minOrbitAglM(o.obstacleHeightM);
@@ -328,7 +417,10 @@ export function normalizeOptions(raw = {}, box = null) {
     .map((h) => clamp(h, MIN_AGL_M, AGL_CAP_M))
     .slice(0, 6);
   const rings = requestedRings.map((h) => Math.max(h, floorAgl));
-  if (rings.some((h, i) => h !== requestedRings[i])) {
+  if (
+    o.orbitRingMode === 'heights' &&
+    rings.some((h, i) => h !== requestedRings[i])
+  ) {
     notes.push({
       code: 'orbit-raised-for-obstacles',
       params: {
@@ -506,6 +598,13 @@ export function planFlight(box, rawOptions = {}) {
       pitchDeg: extra.pitchDeg,
       headingDeg: extra.headingDeg ?? null,
       photo: extra.photo,
+      ...(extra.dwellS ? { dwellS: extra.dwellS } : {}),
+      ...(extra.outwardHeadingDeg != null
+        ? {
+            outwardHeadingDeg: extra.outwardHeadingDeg,
+            outwardPitchDeg: extra.outwardPitchDeg,
+          }
+        : {}),
     };
   };
 
@@ -517,12 +616,17 @@ export function planFlight(box, rawOptions = {}) {
 
   let orbitInfo = null;
   if (options.pattern === 'orbit') {
-    // No target list: one orbit on the centre of the box, as before.
-    const active = (options.orbitTargets ?? []).filter((t) => t.active);
-    const stops = options.orbitTargets?.length
+    const allTargets = options.orbitTargets ?? [];
+    const activePaths = (options.lookAtPaths ?? []).filter((x) => x.active);
+    // No target list: one orbit on the centre of the box, as before (unless
+    // look-at paths are all that was asked for).
+    const active = allTargets.filter((t) => t.active);
+    const stops = allTargets.length
       ? active
-      : [{ id: 'centre', ...center, heightM: null, label: '' }];
-    if (!stops.length) {
+      : activePaths.length
+        ? []
+        : [{ id: 'centre', ...center, heightM: null, label: '' }];
+    if (!stops.length && !activePaths.length) {
       return {
         error: 'no-orbit-targets',
         message: 'Turn on at least one orbit target',
@@ -530,17 +634,72 @@ export function planFlight(box, rawOptions = {}) {
     }
     const obstacle = options.obstacleHeightM;
     const floorAgl = minOrbitAglM(obstacle);
+    const angleMode = options.orbitRingMode === 'angles';
+    const ringCapM = Math.min(AGL_CAP_M, RING_MAX_AGL_M);
+    const aimOf = (stop) => stop.heightM ?? options.orbitTargetHeightM;
+    const roofOf = (stop) => {
+      const roof = Number(stop?.roofHeightM);
+      return stop?.roofHeightM != null && Number.isFinite(roof) && roof > 0
+        ? roof
+        : 0;
+    };
+    // The rings of one stop: each has its own radius (an angle ring is
+    // widened when the obstacle or roof floor forces it higher) and height.
+    const ringsOf = (stop) => {
+      const targetH = aimOf(stop);
+      const radius = stop.radiusM ?? options.orbitRadiusM;
+      if (angleMode) {
+        const need = roofOf(stop) ? roofOf(stop) + ROOF_CLEARANCE_M : 0;
+        const rings = angleRings({
+          aimM: targetH,
+          radiusM: radius,
+          anglesDeg: options.orbitAnglesDeg,
+          floorAglM: Math.min(ringCapM, Math.max(floorAgl, need)),
+          capAglM: ringCapM,
+        });
+        return { rings, belowRoofClearance: need > AGL_CAP_M + 1e-9 };
+      }
+      const { heights, belowRoofClearance } = targetRingHeights(
+        stop,
+        options.orbitHeightsM,
+        obstacle,
+      );
+      const rings = heights.map((aglM) => ({
+        angleDeg: null,
+        radiusM: radius,
+        aglM,
+        pitchDeg: round(
+          -clamp(toDeg(Math.atan2(Math.max(1, aglM - targetH), radius)), 5, 89),
+          1,
+        ),
+        widened: false,
+        capped: false,
+        steepened: false,
+      }));
+      return { rings, belowRoofClearance };
+    };
     // Between targets the drone climbs to this and crosses at it, so it
     // always passes over the trees at obstacle + margin or higher.
-    const stopRings = new Map(
-      stops.map((stop) => [
-        stop,
-        targetRingHeights(stop, options.orbitHeightsM, obstacle),
-      ]),
-    );
+    const stopRings = new Map(stops.map((stop) => [stop, ringsOf(stop)]));
+    const pathAgl = (path, target) =>
+      round(
+        clamp(
+          Math.max(
+            path.aglM ?? DEFAULT_LOOKAT_AGL_M,
+            floorAgl,
+            target && roofOf(target) ? roofOf(target) + ROOF_CLEARANCE_M : 0,
+          ),
+          MIN_AGL_M,
+          AGL_CAP_M,
+        ),
+        1,
+      );
+    const pathTarget = (path) =>
+      allTargets.find((x) => x.id === path.targetId) ?? allTargets[0] ?? null;
     const transitAgl = Math.max(
       floorAgl,
-      ...[...stopRings.values()].flatMap((r) => r.heights),
+      ...[...stopRings.values()].flatMap((r) => r.rings.map((x) => x.aglM)),
+      ...activePaths.map((x) => pathAgl(x, pathTarget(x))),
     );
     const toTakeoff = frame.toXY(takeoff.lon, takeoff.lat);
     let tooLarge = false;
@@ -549,21 +708,72 @@ export function planFlight(box, rawOptions = {}) {
     const ringInfo = [];
     let prevEnd = null;
     const targetInfo = [];
+    const lookAtInfo = [];
+    let widenedCount = 0;
+    let angleChangedCount = 0;
+    const headingTo = (from, to) =>
+      round(wrapHeading(toDeg(Math.atan2(to.x - from.x, to.y - from.y))), 1);
+    // Climb where the last orbit ended, cross at transit height and come
+    // down on the first point of the next one.
+    const addHop = (first, pitch, heading) => {
+      const hop = [];
+      if (prevEnd.aglM < transitAgl - 0.5) {
+        hop.push(
+          toWaypoint(prevEnd.p, {
+            aglM: transitAgl,
+            pitchDeg: prevEnd.pitchDeg,
+            headingDeg: prevEnd.headingDeg,
+            photo: false,
+          }),
+        );
+      }
+      hop.push(
+        toWaypoint(first, {
+          aglM: transitAgl,
+          pitchDeg: pitch,
+          headingDeg: heading,
+          photo: false,
+        }),
+      );
+      addLeg({
+        id: legs.length,
+        passId: 0,
+        kind: 'transit',
+        pitchDeg: pitch,
+        photoMode: 'waypoint',
+        waypoints: hop,
+        lengthM: Math.hypot(first.x - prevEnd.p.x, first.y - prevEnd.p.y),
+        photoCount: 0,
+      });
+    };
     for (const stop of stops) {
       if (tooLarge) break;
-      const targetH = stop.heightM ?? options.orbitTargetHeightM;
-      // A building target brings its own radius and roof-aware rings; others
-      // use the plan's.
-      const radius = stop.radiusM ?? options.orbitRadiusM;
-      const { heights: ringHeights, belowRoofClearance } = stopRings.get(stop);
+      const targetH = aimOf(stop);
+      const { rings, belowRoofClearance } = stopRings.get(stop);
       const c = frame.toXY(stop.lon, stop.lat);
       const from = prevEnd ? prevEnd.p : toTakeoff;
       const startAngle = Math.atan2(from.y - c.y, from.x - c.x);
       const firstLeg = legs.length;
-      ringHeights.forEach((ringAgl, ringIndex) => {
+      const blocked = normalizeBlocked(stop.blocked);
+      const blockedSpan = blockedSpanDeg(blocked);
+      if (blocked && blockedSpan >= 350) {
+        notes.push({
+          code: 'orbit-blocked-all',
+          params: { label: stop.label || stop.id },
+        });
+        continue;
+      }
+      const outward =
+        stop.outward ?? (stop.source === 'building' && options.orbitOutward);
+      // Which way the first ring of an open arc runs: from the end nearest
+      // the drone, so the hop does not cross the blocked sector.
+      let arcForward = true;
+      rings.forEach((ring, ringIndex) => {
         if (tooLarge) return;
+        const radius = ring.radiusM;
+        const ringAgl = ring.aglM;
+        const pitch = ring.pitchDeg;
         const dz = Math.max(1, ringAgl - targetH);
-        const pitch = -clamp(toDeg(Math.atan2(dz, radius)), 5, 89);
         const range = Math.hypot(radius, dz);
         const acrossM = (range * preset.sensorWidthMm) / preset.focalMm;
         const arcM = acrossM * (1 - options.frontOverlap / 100);
@@ -572,69 +782,64 @@ export function planFlight(box, rawOptions = {}) {
           preset.focalMm;
         gsdMin = Math.min(gsdMin, gsd);
         arcMax = Math.min(arcMax, arcM);
-        const n = Math.max(12, Math.ceil((2 * Math.PI * radius) / arcM));
-        const sign = ringIndex % 2 === 0 ? 1 : -1;
-        const points = [];
-        for (let k = 0; k < n; k += 1) {
-          const a = startAngle + sign * ((2 * Math.PI * k) / n);
-          points.push({
-            x: c.x + radius * Math.cos(a),
-            y: c.y + radius * Math.sin(a),
+        let points;
+        if (blocked) {
+          const openLenM = (2 * Math.PI * radius * (360 - blockedSpan)) / 360;
+          const n = Math.max(3, Math.ceil(openLenM / arcM) + 1);
+          const at = (bearing) => ({
+            x: c.x + radius * Math.sin(toRad(bearing)),
+            y: c.y + radius * Math.cos(toRad(bearing)),
           });
+          let bearings = openArcBearings(blocked, n);
+          if (ringIndex === 0) {
+            const dFirst = Math.hypot(
+              at(bearings[0]).x - from.x,
+              at(bearings[0]).y - from.y,
+            );
+            const dLast = Math.hypot(
+              at(bearings[n - 1]).x - from.x,
+              at(bearings[n - 1]).y - from.y,
+            );
+            arcForward = dFirst <= dLast;
+          }
+          if ((ringIndex % 2 === 0) !== arcForward)
+            bearings = bearings.reverse();
+          points = bearings.map(at);
+        } else {
+          const n = Math.max(12, Math.ceil((2 * Math.PI * radius) / arcM));
+          const sign = ringIndex % 2 === 0 ? 1 : -1;
+          points = [];
+          for (let k = 0; k < n; k += 1) {
+            const a = startAngle + sign * ((2 * Math.PI * k) / n);
+            points.push({
+              x: c.x + radius * Math.cos(a),
+              y: c.y + radius * Math.sin(a),
+            });
+          }
         }
-        if (waypointCount + n > MAX_WAYPOINTS_TOTAL) {
+        if (waypointCount + points.length > MAX_WAYPOINTS_TOTAL) {
           tooLarge = true;
           return;
         }
         if (ringIndex === 0 && prevEnd) {
-          // Climb where the last orbit ended, cross at transit height and
-          // come down on the first point of this one.
-          const hop = [];
-          if (prevEnd.aglM < transitAgl - 0.5) {
-            hop.push(
-              toWaypoint(prevEnd.p, {
-                aglM: transitAgl,
-                pitchDeg: prevEnd.pitchDeg,
-                headingDeg: prevEnd.headingDeg,
-                photo: false,
-              }),
-            );
-          }
-          hop.push(
-            toWaypoint(points[0], {
-              aglM: transitAgl,
-              pitchDeg: round(pitch, 1),
-              headingDeg: round(
-                wrapHeading(
-                  toDeg(Math.atan2(c.x - points[0].x, c.y - points[0].y)),
-                ),
-                1,
-              ),
-              photo: false,
-            }),
-          );
-          const hopLen = Math.hypot(
-            points[0].x - prevEnd.p.x,
-            points[0].y - prevEnd.p.y,
-          );
-          addLeg({
-            id: legs.length,
-            passId: 0,
-            kind: 'transit',
-            pitchDeg: round(pitch, 1),
-            photoMode: 'waypoint',
-            waypoints: hop,
-            lengthM: hopLen,
-            photoCount: 0,
-          });
+          addHop(points[0], pitch, headingTo(points[0], c));
         }
         const waypoints = points.map((p) => {
-          const heading = wrapHeading(toDeg(Math.atan2(c.x - p.x, c.y - p.y)));
+          const heading = headingTo(p, c);
           return toWaypoint(p, {
             aglM: ringAgl,
-            pitchDeg: round(pitch, 1),
-            headingDeg: round(heading, 1),
+            pitchDeg: pitch,
+            headingDeg: heading,
             photo: true,
+            // Stop at the point, turn to the target and shoot; with an
+            // outward photo the aircraft then turns half way round.
+            dwellS: outward ? OUTWARD_STOP_S : ORBIT_STOP_S,
+            ...(outward
+              ? {
+                  outwardHeadingDeg: round(wrapHeading(heading + 180), 1),
+                  outwardPitchDeg: options.orbitOutwardPitchDeg,
+                }
+              : {}),
           });
         });
         let length = 0;
@@ -649,22 +854,21 @@ export function planFlight(box, rawOptions = {}) {
           passId: 0,
           kind: 'orbit',
           targetId: stop.id,
-          pitchDeg: round(pitch, 1),
+          pitchDeg: pitch,
           photoMode: 'waypoint',
           waypoints,
           lengthM: length,
-          photoCount: waypoints.length,
+          photoCount: waypoints.length * (outward ? 2 : 1),
         });
         const last = points[points.length - 1];
         prevEnd = {
           p: last,
           aglM: ringAgl,
-          pitchDeg: round(pitch, 1),
-          headingDeg: round(
-            wrapHeading(toDeg(Math.atan2(c.x - last.x, c.y - last.y))),
-            1,
-          ),
+          pitchDeg: pitch,
+          headingDeg: headingTo(last, c),
         };
+        if (ring.widened) widenedCount += 1;
+        if (ring.capped || ring.steepened) angleChangedCount += 1;
         // The first target's rings are the plan's headline; a building
         // target with its own radius or rings adds its own entries.
         if (
@@ -675,7 +879,11 @@ export function planFlight(box, rawOptions = {}) {
           ringInfo.push({
             targetId: stop.id,
             aglM: ringAgl,
-            pitchDeg: round(pitch, 1),
+            radiusM: radius,
+            angleDeg: ring.angleDeg,
+            widened: ring.widened,
+            capped: ring.capped || ring.steepened,
+            pitchDeg: pitch,
             ...orbitClearance({
               ringAglM: ringAgl,
               radiusM: radius,
@@ -691,19 +899,124 @@ export function planFlight(box, rawOptions = {}) {
         lat: stop.lat,
         label: stop.label ?? '',
         heightM: targetH,
-        radiusM: radius,
+        radiusM: stop.radiusM ?? options.orbitRadiusM,
+        ringsAglM: rings.map((r) => r.aglM),
+        ringRadiiM: rings.map((r) => r.radiusM),
+        outward: Boolean(outward),
+        ...(blocked ? { blocked } : {}),
         ...(stop.roofHeightM != null
-          ? {
-              roofHeightM: stop.roofHeightM,
-              ringsAglM: ringHeights,
-              belowRoofClearance,
-            }
+          ? { roofHeightM: stop.roofHeightM, belowRoofClearance }
           : {}),
+        firstLeg,
+      });
+    }
+    // Look-at paths: fly the drawn route with the camera locked on a target.
+    for (const path of activePaths) {
+      if (tooLarge) break;
+      const target = pathTarget(path);
+      if (!target) {
+        notes.push({
+          code: 'lookat-no-target',
+          params: { label: path.label || path.id },
+        });
+        continue;
+      }
+      const aim = aimOf(target);
+      const agl = pathAgl(path, target);
+      const tc = frame.toXY(target.lon, target.lat);
+      const xy = path.points.map((q) => frame.toXY(q.lon, q.lat));
+      const distOf = (q) => Math.hypot(q.x - tc.x, q.y - tc.y);
+      // Photo spacing from the middle distance to the target, so the overlap
+      // setting holds on average along the route.
+      const dists = xy.map(distOf).sort((x, y) => x - y);
+      const midRange = Math.hypot(
+        dists[Math.floor(dists.length / 2)],
+        agl - aim,
+      );
+      const stepM = clamp(
+        ((midRange * preset.sensorWidthMm) / preset.focalMm) *
+          (1 - options.frontOverlap / 100),
+        2,
+        60,
+      );
+      const pts = [xy[0]];
+      let length = 0;
+      for (let i = 1; i < xy.length; i += 1) {
+        const seg = subdivide(xy[i - 1], xy[i], stepM);
+        length += seg.length;
+        pts.push(...seg.points.slice(1));
+      }
+      if (waypointCount + pts.length > MAX_WAYPOINTS_TOTAL) {
+        tooLarge = true;
+        break;
+      }
+      let lastHeading = 0;
+      const wps = pts.map((q) => {
+        const d = distOf(q);
+        if (d > 0.5) lastHeading = headingTo(q, tc);
+        const pitch = round(lookAtPitchDeg(agl, aim, d), 1);
+        return toWaypoint(q, {
+          aglM: agl,
+          pitchDeg: pitch,
+          headingDeg: lastHeading,
+          photo: true,
+        });
+      });
+      if (prevEnd) addHop(pts[0], wps[0].pitchDeg, wps[0].headingDeg);
+      const firstLeg = legs.length;
+      addLeg({
+        id: legs.length,
+        passId: 0,
+        kind: 'lookat',
+        targetId: target.id,
+        pathId: path.id,
+        pitchDeg: wps[0].pitchDeg,
+        photoMode: 'waypoint',
+        waypoints: wps,
+        lengthM: length,
+        photoCount: wps.length,
+      });
+      const endP = pts[pts.length - 1];
+      const endW = wps[wps.length - 1];
+      prevEnd = {
+        p: endP,
+        aglM: agl,
+        pitchDeg: endW.pitchDeg,
+        headingDeg: endW.headingDeg,
+      };
+      const range0 = Math.hypot(distOf(pts[0]), agl - aim);
+      const gsd =
+        (range0 * (preset.sensorWidthMm / preset.imageWidthPx) * 100) /
+        preset.focalMm;
+      gsdMin = Math.min(gsdMin, gsd);
+      arcMax = Math.min(arcMax, stepM);
+      lookAtInfo.push({
+        id: path.id,
+        label: path.label,
+        targetId: target.id,
+        aglM: agl,
+        waypointCount: wps.length,
+        lengthM: round(length, 1),
         firstLeg,
       });
     }
     if (tooLarge) {
       return { error: 'too-large', message: 'Plan needs too many waypoints' };
+    }
+    if (!legs.length) {
+      return { error: 'empty', message: 'Box is too small to plan a flight' };
+    }
+    if (widenedCount) {
+      notes.push({
+        code: 'orbit-ring-widened',
+        params: { count: widenedCount },
+      });
+    }
+    if (angleChangedCount) {
+      notes.push({
+        code: 'orbit-angle-changed',
+        params: { count: angleChangedCount, capM: ringCapM },
+      });
     }
     fpInfo = {
       acrossM: 0,
@@ -717,8 +1030,10 @@ export function planFlight(box, rawOptions = {}) {
       marginM: OBSTACLE_MARGIN_M,
       minAglM: floorAgl,
       transitAglM: transitAgl,
+      ringMode: options.orbitRingMode,
       rings: ringInfo,
       targets: targetInfo,
+      lookAt: lookAtInfo,
     };
   } else {
     const passes =
@@ -863,6 +1178,15 @@ export function planFlight(box, rawOptions = {}) {
   };
 }
 
+/** A waypoint that is only a place to stand: no photo, no outward turn. */
+function withoutPhoto(w) {
+  const out = { ...w, photo: false };
+  delete out.outwardHeadingDeg;
+  delete out.outwardPitchDeg;
+  delete out.dwellS;
+  return out;
+}
+
 function segmentLength(a, b) {
   return Math.hypot(
     groundDistanceM(a, b),
@@ -885,11 +1209,15 @@ export function estimateMission(waypoints, takeoff, speedMs, legCount = 1) {
   }
   const outM = segmentLength(home, waypoints[0]);
   const backM = segmentLength(waypoints[waypoints.length - 1], home);
+  // Stops that turn the aircraft (orbit points with a photo facing away) cost
+  // time on top of the flying.
+  const dwellS = waypoints.reduce((sum, w) => sum + (w.dwellS ?? 0), 0);
   const durationS =
     routeM / speedMs +
     (outM + backM) / TRANSIT_SPEED_MS +
     OVERHEAD_S +
-    TURN_S * Math.max(0, legCount - 1);
+    TURN_S * Math.max(0, legCount - 1) +
+    dwellS;
   return { distanceM: routeM + outM + backM, routeM, durationS };
 }
 
@@ -1036,7 +1364,11 @@ export function assembleMissions(plan, ground) {
     leg.photoMode === 'interval'
       ? Math.floor(lengthM / (leg.photoSpacingM || 1) + 1e-9) +
         (leg.continued ? 0 : 1)
-      : waypoints.filter((w) => w.photo).length;
+      : waypoints.reduce(
+          (sum, w) =>
+            sum + (w.photo ? (w.outwardHeadingDeg != null ? 2 : 1) : 0),
+          0,
+        );
   const pending = [...legs];
   let guard = 0;
   while (pending.length && !tooMany) {
@@ -1067,7 +1399,7 @@ export function assembleMissions(plan, ground) {
     const tail = leg.waypoints
       .slice(take - 1)
       .map((w, i) =>
-        i === 0 && leg.photoMode !== 'interval' ? { ...w, photo: false } : w,
+        i === 0 && leg.photoMode !== 'interval' ? withoutPhoto(w) : w,
       );
     const asLeg = (waypoints, continued = leg.continued === true) => {
       const lengthM = waypoints.reduce(

@@ -231,7 +231,8 @@ test('orbit mode ignores side overlap in the recommended options', () => {
   assert.equal(rec.sideOverlap, null);
   assert.equal('sideOverlap' in recommendedOptions(rec), false);
   assert.equal(rec.gimbalPitchDeg, null);
-  assert.deepEqual(rec.orbitHeightsM, [40, 80]);
+  assert.equal(rec.orbitHeightsM, null, 'rings come from viewing angles');
+  assert.equal(rec.orbitRingMode, 'angles');
 });
 
 test('orbit recommend() memoises the planner run by aircraft, mode and radius', () => {
@@ -260,7 +261,6 @@ test('memoised orbit recommendation is not corrupted by caller mutation', () => 
   const a = recommend(p, 'splat-orbit', { orbitRadiusM: 41.25 });
   const snapshot = JSON.stringify(a);
   a.limits.limitMs = -1;
-  a.orbitHeightsM.push(999);
   a.camera.isoRange.push(1);
   assert.equal(
     JSON.stringify(recommend(p, 'splat-orbit', { orbitRadiusM: 41.25 })),

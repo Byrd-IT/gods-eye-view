@@ -89,7 +89,37 @@ function photoAction(id) {
           </wpml:action>`;
 }
 
-function actionGroup({ id, start, end, trigger, triggerParam, actions }) {
+/** Turn the aircraft to an absolute heading (-180..180, 0 = north) by the short way. */
+function yawAction(id, headingDeg, fromDeg) {
+  const h = wrap180(headingDeg);
+  // The shorter way round: clockwise when the heading is up to 180 degrees
+  // clockwise of where the aircraft points now.
+  const diff = (((h - wrap180(fromDeg ?? 0)) % 360) + 360) % 360;
+  const mode = diff <= 180 ? 'clockwise' : 'counterClockwise';
+  return `          <wpml:action>
+            <wpml:actionId>${id}</wpml:actionId>
+            <wpml:actionActuatorFunc>rotateYaw</wpml:actionActuatorFunc>
+            <wpml:actionActuatorFuncParam>
+              <wpml:aircraftHeading>${one(h)}</wpml:aircraftHeading>
+              <wpml:aircraftPathMode>${mode}</wpml:aircraftPathMode>
+            </wpml:actionActuatorFuncParam>
+          </wpml:action>`;
+}
+
+const wrap180 = (deg) => {
+  const w = ((Number(deg) % 360) + 360) % 360;
+  return w > 180 ? w - 360 : w;
+};
+
+function actionGroup({
+  id,
+  start,
+  end,
+  trigger,
+  triggerParam,
+  actions,
+  mode = 'parallel',
+}) {
   const param =
     triggerParam == null
       ? ''
@@ -99,7 +129,7 @@ function actionGroup({ id, start, end, trigger, triggerParam, actions }) {
           <wpml:actionGroupId>${id}</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>${start}</wpml:actionGroupStartIndex>
           <wpml:actionGroupEndIndex>${end}</wpml:actionGroupEndIndex>
-          <wpml:actionGroupMode>parallel</wpml:actionGroupMode>
+          <wpml:actionGroupMode>${mode}</wpml:actionGroupMode>
           <wpml:actionTrigger>
             <wpml:actionTriggerType>${trigger}</wpml:actionTriggerType>${param}
           </wpml:actionTrigger>
@@ -110,6 +140,9 @@ ${actions.join('\n')}
 
 function placemark(wp, speedMs, groups) {
   const orbit = wp.headingDeg != null;
+  // A stop that turns round for the outward photo halts at the point, so the
+  // photo is taken from the place and heading planned, not mid-curve.
+  const stops = wp.outwardHeadingDeg != null;
   return `      <Placemark>
         <Point>
           <coordinates>
@@ -128,7 +161,7 @@ function placemark(wp, speedMs, groups) {
           <wpml:waypointHeadingPoiIndex>0</wpml:waypointHeadingPoiIndex>
         </wpml:waypointHeadingParam>
         <wpml:waypointTurnParam>
-          <wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>
+          <wpml:waypointTurnMode>${stops ? 'toPointAndStopWithDiscontinuityCurvature' : 'toPointAndPassWithContinuityCurvature'}</wpml:waypointTurnMode>
           <wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>
         </wpml:waypointTurnParam>
         <wpml:useStraightLine>0</wpml:useStraightLine>
@@ -183,7 +216,25 @@ function placemarks(mission, speedMs) {
             actions: [gimbalAction(actionId++, wp.pitchDeg)],
           });
         }
-        if (wp.photo) {
+        if (wp.photo && wp.outwardHeadingDeg != null) {
+          // One ordered group: photo at the building, turn the aircraft and
+          // tilt the camera away, photo, then turn and tilt back.
+          groups += actionGroup({
+            id: groupId++,
+            start: wp.index,
+            end: wp.index,
+            trigger: 'reachPoint',
+            mode: 'sequence',
+            actions: [
+              photoAction(actionId++),
+              yawAction(actionId++, wp.outwardHeadingDeg, wp.headingDeg),
+              gimbalAction(actionId++, wp.outwardPitchDeg),
+              photoAction(actionId++),
+              yawAction(actionId++, wp.headingDeg, wp.outwardHeadingDeg),
+              gimbalAction(actionId++, wp.pitchDeg),
+            ],
+          });
+        } else if (wp.photo) {
           groups += actionGroup({
             id: groupId++,
             start: wp.index,
@@ -294,7 +345,8 @@ export function readmeText(result, when = new Date(), opts = {}) {
       : []),
     'Verified against real DJI Fly files: the file layout, namespace, aircraft code,',
     'gimbal rotation actions. NOT verified by a real file: takePhoto actions,',
-    'distance-interval photos and smooth-transition orbit headings.',
+    'distance-interval photos, smooth-transition orbit headings, and the stop,',
+    'rotateYaw and sequence-mode actions of the outward orbit photo.',
     'Check airspace and local rules, keep the aircraft in sight, and fly the',
     'first mission short and supervised.',
     'The 3D check on the globe is a VISUAL aid only: it does not detect a',

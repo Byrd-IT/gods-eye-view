@@ -129,7 +129,7 @@ test('planner: building targets orbit at their own radius and rings; others keep
   assert.equal(tb.radiusM, 60);
   assert.deepEqual(tb.ringsAglM, [55]);
   assert.equal(tu.radiusM, 30);
-  assert.equal(tu.ringsAglM, undefined);
+  assert.deepEqual(tu.ringsAglM, [20, 30]);
   const orbitLegs = plan.legs.filter((l) => l.kind === 'orbit');
   const aglsOf = (id) => [...new Set(orbitLegs.filter((l) => l.targetId === id).flatMap((l) => l.waypoints.map((w) => w.aglM)))];
   assert.deepEqual(aglsOf('b'), [55]);

@@ -236,11 +236,9 @@ test('showSuite draws every pass in its own style; orbit rings float at two heig
     [...heights].every((h) => h > 200),
     'ground height plus AGL',
   );
-  assert.equal(
-    [...heights].includes(240) && [...heights].includes(280),
-    true,
-    `rings at 40 and 80 m AGL over 200 m ground: ${[...heights]}`,
-  );
+  // Rings come from viewing angles now (25, 40, 55 degrees down): three
+  // heights, each above the one before.
+  assert.equal(heights.size, 3, `three ring heights, got ${[...heights]}`);
   assert.equal(
     source.entities.values.filter((e) => e.name === 'Takeoff').length,
     1,

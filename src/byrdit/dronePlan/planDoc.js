@@ -12,7 +12,7 @@
  * Pure: no DOM, no Cesium. Everything read back is re-validated here, because
  * a `.gevplan` file is untrusted input.
  */
-import { normalizeOrbitTargets } from './planner.js';
+import { normalizeLookAtPaths, normalizeOrbitTargets } from './planner.js';
 import { normalizeObstacles } from './obstacles.js';
 import { getPreset } from './presets.js';
 
@@ -41,6 +41,11 @@ const OPTION_TYPES = Object.freeze({
   orbitRadiusM: (v) => v === null || finite(v),
   orbitHeightsM: (v) =>
     v === null || (Array.isArray(v) && v.length <= 20 && v.every(finite)),
+  orbitRingMode: (v) => v === null || v === 'angles' || v === 'heights',
+  orbitAnglesDeg: (v) =>
+    v === null || (Array.isArray(v) && v.length <= 6 && v.every(finite)),
+  orbitOutward: (v) => typeof v === 'boolean',
+  orbitOutwardPitchDeg: finite,
   orbitTargetHeightM: finite,
   obstacleHeightM: finite,
 });
@@ -187,6 +192,7 @@ export function serializePlan(
     options,
     orbitTargets: state.options.orbitTargets ?? [],
     orbitTargetsTouched: Boolean(state.orbitTargetsTouched),
+    lookAtPaths: state.options.lookAtPaths ?? [],
     obstacles: state.options.obstacles ?? [],
     wpml: {
       droneEnumValue: state.wpml?.droneEnumValue ?? null,
@@ -238,6 +244,7 @@ export function readPlan(raw) {
     options,
     orbitTargets: normalizeOrbitTargets(raw.orbitTargets) ?? [],
     orbitTargetsTouched: raw.orbitTargetsTouched === true,
+    lookAtPaths: normalizeLookAtPaths(raw.lookAtPaths) ?? [],
     obstacles: normalizeObstacles(raw.obstacles),
     wpml: {
       droneEnumValue:

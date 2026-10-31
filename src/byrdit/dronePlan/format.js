@@ -134,6 +134,24 @@ export function warningText(warning) {
         'Orbit heights were raised to {min}: the trees are {obstacle} tall and the drone keeps a margin above them',
         { min: lengthText(p.minAglM), obstacle: lengthText(p.obstacleHeightM) },
       );
+    case 'orbit-ring-widened':
+      return t(
+        '{count} orbit rings were made wider so the viewing angle holds above the obstacle or roof',
+        { count: fixed(p.count) },
+      );
+    case 'orbit-angle-changed':
+      return t(
+        '{count} orbit rings could not keep their viewing angle under the {cap} height limit',
+        { count: fixed(p.count), cap: lengthText(p.capM) },
+      );
+    case 'orbit-blocked-all':
+      return t('The blocked sector of {label} leaves no open arc to fly', {
+        label: p.label,
+      });
+    case 'lookat-no-target':
+      return t('The look-at path {label} has no orbit target to look at', {
+        label: p.label,
+      });
     case 'obstacle-raised':
       return t(
         '{count} waypoints were raised to clear an obstacle column (its height plus {margin})',
