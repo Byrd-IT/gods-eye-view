@@ -3481,5 +3481,6 @@
   "No conflicts found with the buildings and obstacles known.": "Конфликтов с известными зданиями и препятствиями не найдено.",
   "Conflict: the route passes {name} at {flown}, which needs {need}": "Конфликт: маршрут проходит {name} на высоте {flown}, нужно {need}",
   "And {n} more conflicts": "И ещё конфликтов: {n}",
-  "{n} buildings near the route have no height in the data: check them yourself": "Зданий возле маршрута без высоты в данных: {n}. Проверьте их самостоятельно"
+  "{n} buildings near the route have no height in the data: check them yourself": "Зданий возле маршрута без высоты в данных: {n}. Проверьте их самостоятельно",
+  "The blocked sector leaves no open arc to fly": "Заблокированный сектор не оставляет открытой дуги для полёта"
 }

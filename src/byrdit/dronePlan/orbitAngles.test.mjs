@@ -491,3 +491,44 @@ test('rings: a floor above the cap is held to the cap, never lifted past it', ()
   const rings = angleRings({ aimM: 0, radiusM: 30, anglesDeg: [40], floorAglM: 150, capAglM: 120 });
   assert.equal(rings[0].aglM, 120);
 });
+
+test('look-at: the target is the first ACTIVE one when the chosen id is missing or off', () => {
+  const off = buildingTarget({ id: 'off', active: false });
+  const on = buildingTarget({ id: 'on', ...at(0, 90), radiusM: 20 });
+  const p = plan({
+    orbitTargets: [off, on],
+    orbitOutward: false,
+    lookAtPaths: [
+      { id: 'a', points: [at(-60, 60), at(-60, 120)], targetId: 'off' },
+      { id: 'b', points: [at(-60, 60), at(-60, 120)], targetId: '' },
+    ],
+  });
+  const legs = p.legs.filter((l) => l.kind === 'lookat');
+  assert.equal(legs.length, 2);
+  assert.ok(legs.every((l) => l.targetId === 'on'));
+});
+
+test('look-at: every photo stop counts its stop time', () => {
+  const p = plan({
+    orbitTargets: [buildingTarget()],
+    lookAtPaths: [{ id: 'r', points: [at(-60, -40), at(-60, 40)], targetId: 'b1' }],
+  });
+  const leg = p.legs.find((l) => l.kind === 'lookat');
+  assert.ok(leg.waypoints.every((w) => w.dwellS > 0));
+});
+
+test('arc: every target fully blocked is its own error, not "box too small"', () => {
+  const p = plan({ orbitTargets: [buildingTarget({ blocked: { fromDeg: 0, toDeg: 359 } })] });
+  assert.equal(p.error, 'orbit-blocked-all');
+});
+
+test('conflicts: a building far from the route is skipped without changing the answer', () => {
+  const far = parseBuildings({
+    elements: [{ type: 'way', id: 9, tags: { building: 'yes' }, geometry: rectGeometry(0, 800, 30, 20) }],
+  });
+  assert.deepEqual(checkConflicts({ legs: routeAt(10), buildings: far }), {
+    conflicts: [],
+    unknownHeight: [],
+    checked: checkConflicts({ legs: routeAt(10), buildings: far }).checked,
+  });
+});

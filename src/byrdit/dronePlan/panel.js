@@ -2630,12 +2630,28 @@ export function initDronePlan({
     const plan = state.result?.plan;
     if (!plan?.legs?.length) return;
     const footprints = footprintCache.get(areasKey()) ?? [];
-    const found = checkConflicts({
-      legs: plan.legs,
-      buildings: footprints,
-      obstacles: obstacleStore.list(),
-      zoneHalfWidthM: state.check.halfWidthM,
-    });
+    const obstacles = obstacleStore.list();
+    // The check is not cheap: keep the answer until the plan, the footprints,
+    // the obstacles or the zone width change.
+    const key = JSON.stringify([obstacles, state.check.halfWidthM]);
+    const cached = state.conflictCache;
+    let found;
+    if (
+      cached &&
+      cached.plan === plan &&
+      cached.footprints === footprints &&
+      cached.key === key
+    ) {
+      found = cached.found;
+    } else {
+      found = checkConflicts({
+        legs: plan.legs,
+        buildings: footprints,
+        obstacles,
+        zoneHalfWidthM: state.check.halfWidthM,
+      });
+      state.conflictCache = { plan, footprints, key, found };
+    }
     state.conflicts = found;
     el(doc, 'p', ui.conflictBox, {
       cls: 'gev-dp-note',

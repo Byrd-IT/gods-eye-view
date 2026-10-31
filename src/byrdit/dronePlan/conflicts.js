@@ -139,7 +139,27 @@ export function checkConflicts({
       id: b.osmId ?? `building-${index + 1}`,
       ring: b.ring.map((p) => ({ x: f.x(p.lon), y: f.y(p.lat) })),
     }));
+  // Only samples near a building can matter: skip the rest with a box test.
+  let sMinX = Infinity;
+  let sMaxX = -Infinity;
+  let sMinY = Infinity;
+  let sMaxY = -Infinity;
+  for (const s of samples) {
+    sMinX = Math.min(sMinX, s.x);
+    sMaxX = Math.max(sMaxX, s.x);
+    sMinY = Math.min(sMinY, s.y);
+    sMaxY = Math.max(sMaxY, s.y);
+  }
   for (const { b, id, ring } of rings) {
+    const xs = ring.map((q) => q.x);
+    const ys = ring.map((q) => q.y);
+    if (
+      Math.min(...xs) - margin > sMaxX ||
+      Math.max(...xs) + margin < sMinX ||
+      Math.min(...ys) - margin > sMaxY ||
+      Math.max(...ys) + margin < sMinY
+    )
+      continue;
     let worst = null;
     for (const s of samples) {
       const d = distToRing(ring, s.x, s.y);

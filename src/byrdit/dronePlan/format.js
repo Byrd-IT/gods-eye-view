@@ -185,6 +185,8 @@ export function planErrorText(code) {
     return t('The box is too small to plan a flight');
   if (code === 'no-orbit-targets')
     return t('Turn on at least one orbit target');
+  if (code === 'orbit-blocked-all')
+    return t('The blocked sector leaves no open arc to fly');
   if (code === 'self-intersecting')
     return t('That polygon crosses itself. Remove a corner or draw it again.');
   return t('Draw a box on the globe first');

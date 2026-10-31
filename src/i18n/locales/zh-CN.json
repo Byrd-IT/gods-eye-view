@@ -3271,5 +3271,6 @@
   "No conflicts found with the buildings and obstacles known.": "与已知的建筑和障碍物未发现冲突。",
   "Conflict: the route passes {name} at {flown}, which needs {need}": "冲突：航线在 {flown} 高度经过 {name}，需要 {need}",
   "And {n} more conflicts": "另有 {n} 处冲突",
-  "{n} buildings near the route have no height in the data: check them yourself": "航线附近有 {n} 栋建筑在数据中没有高度：请自行核实"
+  "{n} buildings near the route have no height in the data: check them yourself": "航线附近有 {n} 栋建筑在数据中没有高度：请自行核实",
+  "The blocked sector leaves no open arc to fly": "屏蔽扇区没有留下可飞行的开放弧段"
 }

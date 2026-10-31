@@ -695,7 +695,7 @@ export function planFlight(box, rawOptions = {}) {
         1,
       );
     const pathTarget = (path) =>
-      allTargets.find((x) => x.id === path.targetId) ?? allTargets[0] ?? null;
+      stops.find((x) => x.id === path.targetId) ?? stops[0] ?? null;
     const transitAgl = Math.max(
       floorAgl,
       ...[...stopRings.values()].flatMap((r) => r.rings.map((x) => x.aglM)),
@@ -960,6 +960,7 @@ export function planFlight(box, rawOptions = {}) {
           pitchDeg: pitch,
           headingDeg: lastHeading,
           photo: true,
+          dwellS: ORBIT_STOP_S,
         });
       });
       if (prevEnd) addHop(pts[0], wps[0].pitchDeg, wps[0].headingDeg);
@@ -1008,6 +1009,13 @@ export function planFlight(box, rawOptions = {}) {
         return {
           error: 'no-orbit-targets',
           message: 'Turn on at least one orbit target for the look-at path',
+        };
+      }
+      if (notes.some((n) => n.code === 'orbit-blocked-all')) {
+        return {
+          error: 'orbit-blocked-all',
+          message: 'The blocked sector leaves no open arc to fly',
+          notes,
         };
       }
       return { error: 'empty', message: 'Box is too small to plan a flight' };

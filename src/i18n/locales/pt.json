@@ -3411,5 +3411,6 @@
   "No conflicts found with the buildings and obstacles known.": "Nenhum conflito encontrado com os edifícios e obstáculos conhecidos.",
   "Conflict: the route passes {name} at {flown}, which needs {need}": "Conflito: o trajeto passa por {name} a {flown}, é preciso {need}",
   "And {n} more conflicts": "E mais {n} conflitos",
-  "{n} buildings near the route have no height in the data: check them yourself": "{n} edifícios perto do trajeto não têm altura nos dados: verifique você mesmo"
+  "{n} buildings near the route have no height in the data: check them yourself": "{n} edifícios perto do trajeto não têm altura nos dados: verifique você mesmo",
+  "The blocked sector leaves no open arc to fly": "O setor bloqueado não deixa nenhum arco aberto para voar"
 }

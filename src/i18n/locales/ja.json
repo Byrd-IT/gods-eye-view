@@ -3271,5 +3271,6 @@
   "No conflicts found with the buildings and obstacles known.": "既知の建物と障害物との競合は見つかりませんでした。",
   "Conflict: the route passes {name} at {flown}, which needs {need}": "競合: ルートは {name} を {flown} で通過しますが、{need} が必要です",
   "And {n} more conflicts": "ほか {n} 件の競合",
-  "{n} buildings near the route have no height in the data: check them yourself": "ルート付近の {n} 棟の建物は、データに高さがありません。ご自身で確認してください"
+  "{n} buildings near the route have no height in the data: check them yourself": "ルート付近の {n} 棟の建物は、データに高さがありません。ご自身で確認してください",
+  "The blocked sector leaves no open arc to fly": "遮断セクターには、飛行できる開いた弧が残っていません"
 }
