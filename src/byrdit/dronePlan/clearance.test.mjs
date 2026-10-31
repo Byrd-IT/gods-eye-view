@@ -325,22 +325,33 @@ test('two surfaces side by side: the seam is not a hole', () => {
   assert.ok(tree.spanCount >= 1, 'the tree in the east grid warns from the west side of the seam');
 });
 
-test('a large ring is sampled further apart and asks for more clearance', () => {
-  const grid = makeGrid({ size: 700, topAt: (x, y) => (Math.hypot(x - 280, y) < 3 ? 20 : 0) });
+test('a ring over the point cap is sampled further apart and asks for more clearance', () => {
+  // Past ~477 m the 2000-point cap spaces the points more than 1.5 m apart.
+  const grid = makeGrid({
+    size: 1200,
+    topAt: (x, y) => (Math.hypot(x - 520, y) < 3 ? 20 : 0),
+  });
   const probe = createSurfaceProbe(createSurfaceModel([grid]), 9.144);
-  // radius 280 m: capped points would be ~2.4 m apart without the cap lifted.
-  const f = probe.ringFloor(LON, LAT, 280);
+  const f = probe.ringFloor(LON, LAT, 520);
   assert.equal(f.covered, 'full');
-  assert.ok(f.aglM >= 20 + 9.144 - 1e-6, String(f.aglM));
+  const spacing = (2 * Math.PI * 520) / 2000;
+  assert.ok(spacing > 1.6);
+  assert.ok(f.aglM >= 20 + 9.144 + spacing / 2 - 0.05, String(f.aglM));
 });
 
 test('a very long route widens the search by half the extra sample gap', () => {
-  const grid = makeGrid({ size: 300, topAt: (x) => (Math.abs(x - 50) < 1 ? 20 : 0) });
+  // A column 15 m beside the line, 20 m high, at the height the drone flies.
+  const grid = makeGrid({
+    size: 300,
+    topAt: (x, y) => (Math.abs(x + 40) < 1 && Math.abs(y - 15) < 1 ? 20 : 0),
+  });
   const model = createSurfaceModel([grid]);
   const legs = [leg(0, [[-140, 0, 20], [140, 0, 20]])];
-  const fine = checkClearance({ legs, model, minClearanceM: 6, errorMarginM: 3 });
-  const coarse = checkClearance({ legs, model, minClearanceM: 6, errorMarginM: 3, stepM: 0.0001 });
-  assert.equal(fine.requiredM, 9);
-  assert.ok(coarse.checked >= fine.checked);
+  const args = { legs, model, minClearanceM: 6, errorMarginM: 3 };
+  const fine = checkClearance(args);
+  const coarse = checkClearance({ ...args, maxSamples: 14 });
+  assert.equal(fine.spanCount, 0, '9 m wanted, the column is 14 m away');
+  // Sampling every 20 m searches 9.5 m further, so the column is now seen.
+  assert.ok(coarse.spanCount >= 1);
   assert.equal(coarse.requiredM, 9, 'the reported setting is unchanged');
 });

@@ -38,6 +38,7 @@ export function buildSurface({ dsm, dtm, id, name, areaId, capturedAt, cellM, so
   const ground = new Float32Array(cols * rows).fill(NaN);
   const gsum = new Float64Array(cols * rows);
   const gn = new Uint32Array(cols * rows);
+  const holes = new Uint32Array(cols * rows);
   // The DTM may have another cell size and corner: read it by coordinate.
   const dtmAt = (e, n) => {
     const c = Math.floor((e - dtm.originE) / dtm.cellX);
@@ -49,8 +50,11 @@ export function buildSurface({ dsm, dtm, id, name, areaId, capturedAt, cellM, so
   for (let r = 0; r < dsm.height; r += 1) {
     for (let c = 0; c < dsm.width; c += 1) {
       const v = dsm.data[r * dsm.width + c];
-      if (isNo(v, dsm.nodata)) continue;
       const o = Math.floor(r / f) * cols + Math.floor(c / f);
+      if (isNo(v, dsm.nodata)) {
+        holes[o] += 1;
+        continue;
+      }
       if (!(top[o] >= v)) top[o] = v;
       const g = dtmAt(dsm.originE + (c + 0.5) * dsm.cellX, dsm.originN - (r + 0.5) * dsm.cellY);
       if (g === g) {
@@ -60,6 +64,13 @@ export function buildSurface({ dsm, dtm, id, name, areaId, capturedAt, cellM, so
     }
   }
   for (let i = 0; i < ground.length; i += 1) {
+    // A coarse cell with a hole in it is not fully seen: an unseen tree may
+    // stand in the missing part, so it stays a hole (no verdict).
+    if (holes[i]) {
+      top[i] = NaN;
+      ground[i] = NaN;
+      continue;
+    }
     if (gn[i]) ground[i] = gsum[i] / gn[i];
     // The top can never be under the bare ground it stands on.
     if (top[i] === top[i] && ground[i] === ground[i] && top[i] < ground[i]) top[i] = ground[i];

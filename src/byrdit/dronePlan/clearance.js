@@ -314,6 +314,7 @@ export function checkClearance({
   minClearanceM,
   errorMarginM = 0,
   stepM = CLEARANCE_STEP_M,
+  maxSamples = MAX_CLEARANCE_SAMPLES,
 } = {}) {
   const requiredM =
     Math.max(0, Number(minClearanceM) || 0) +
@@ -354,10 +355,12 @@ export function checkClearance({
       );
     }
   }
-  const step = Math.max(stepM, total / MAX_CLEARANCE_SAMPLES);
+  const step = Math.max(stepM, total / maxSamples);
 
   const result = { ...empty, stepM: r1(step) };
   const used = new Set();
+  // (At the 1 m default a point can sit 0.5 m from its nearest sample; the
+  // position error margin in requiredM is far larger, so this is not widened.)
   // A very long route is sampled further apart than stepM: the distance to
   // the surface changes by at most 1 m per metre, so half of the extra gap is
   // added to what is looked for. (requiredM, as reported, stays the setting.)
