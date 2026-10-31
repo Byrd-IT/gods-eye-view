@@ -182,3 +182,52 @@ test('discrete: play moves forward one item per tick and stops at the newest', (
   ]);
   assert.equal(s.isPlaying(), false, 'stopped on the newest');
 });
+
+test('discrete: a drag stops playback and destroyed / dragging read live', () => {
+  const doc = fakeDocument();
+  const timers = {
+    fns: [],
+    setInterval(fn) {
+      this.fns.push(fn);
+      return 1;
+    },
+    clearInterval() {
+      this.fns = [];
+    },
+  };
+  const s = createDiscreteSlider({
+    document: doc,
+    parent: doc.body,
+    timers,
+    index: 0,
+    items: [1, 2, 3, 4].map((v) => ({ value: v, label: String(v) })),
+  });
+  s.scrub.getBoundingClientRect = () => ({ left: 0, width: 300 });
+  s.play.click();
+  assert.equal(s.isPlaying(), true);
+  s.scrub.dispatch('pointerdown', { clientX: 100, pointerId: 1 });
+  assert.equal(s.isPlaying(), false, 'the drag took over');
+  assert.equal(s.dragging, true);
+  s.scrub.dispatch('pointerup', {});
+  assert.equal(s.dragging, false);
+  assert.equal(s.destroyed, false);
+  s.destroy();
+  assert.equal(s.destroyed, true);
+});
+
+test('discrete: tick labels replace the edges row; many items draw no ticks', () => {
+  const doc = fakeDocument();
+  const few = createDiscreteSlider({
+    document: doc,
+    parent: doc.body,
+    tickLabels: true,
+    items: [2010, 2014, 2018].map((v) => ({ value: v, label: String(v) })),
+  });
+  assert.equal(few.edges.hidden, true);
+  const many = createDiscreteSlider({
+    document: doc,
+    parent: doc.body,
+    items: Array.from({ length: 200 }, (_, i) => ({ value: i, label: `${i}` })),
+  });
+  assert.equal(many.scrub.children.length, 1, 'only the thumb: no tick marks');
+});

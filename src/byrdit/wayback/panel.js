@@ -159,10 +159,16 @@ export function createWaybackPanel({
     index: Math.max(0, count - 1),
     rates: [1, 2, 4],
     picker: items.some((it) => Number.isFinite(it.ms))
-      ? { kind: 'date', zone: 'utc', label: t('Imagery date') }
+      ? { kind: 'date', zone: 'utc', label: `${t('Imagery date')} (UTC)` }
       : null,
     latestLabel: t('Latest'),
-    labels: { back: t('Older imagery'), fwd: t('Newer imagery') },
+    labels: {
+      back: t('Older imagery'),
+      fwd: t('Newer imagery'),
+      play: t('Play'),
+      pause: t('Pause'),
+      rates: t('Speed'),
+    },
     attrs: {
       back: { 'aria-label': t('Older imagery') },
       fwd: { 'aria-label': t('Newer imagery') },

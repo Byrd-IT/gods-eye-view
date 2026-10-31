@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as Cesium from 'cesium';
 import { readFileSync } from 'node:fs';
 import { mountSkyView } from './skyView.js';
+import { timeSliderCss } from '../timeTravel/timeSlider.js';
 import { parseBoundaries, parseSkyData } from './starData.js';
 
 const read = (name) =>
@@ -396,6 +397,43 @@ test('play/pause, speed, reverse, step buttons and sky keys drive the single clo
   assert.equal(frames.size, 0, 'no frame loop while paused');
 });
 
+test('shared slider: the scrub bar spans +-12 h, re-centres, Home/End/PageUp and a drag move the one clock', async () => {
+  const { doc, handle, viewer } = setup();
+  await handle.enterAt({ ...HOUSTON, heightM: 15, heightKnown: true, source: 'manual' });
+  const T = Date.parse('2026-10-11T18:00:00Z');
+  const H = 3600_000;
+  handle.clock.setFixed(T - 100 * H); // outside any window: the next jump re-centres
+  handle.clock.setFixed(T);
+  const bar = doc.body.find('time-slider');
+  bar.getBoundingClientRect = () => ({ left: 0, width: 400 });
+  assert.equal(bar.getAttribute('role'), 'slider');
+  assert.equal(bar.getAttribute('aria-valuenow'), '500', 'centred on the time');
+  // Home / End jump to the window edges (the bar does not re-centre on them)
+  key(bar, 'Home');
+  assert.equal(handle.clock.getTime(), T - 12 * H);
+  assert.equal(bar.getAttribute('aria-valuenow'), '0');
+  key(bar, 'End');
+  assert.equal(handle.clock.getTime(), T + 12 * H);
+  assert.equal(bar.getAttribute('aria-valuenow'), '1000');
+  // PageUp = 1 hour, ArrowLeft = 1 minute
+  handle.clock.setFixed(T);
+  key(bar, 'PageUp');
+  assert.equal(handle.clock.getTime(), T + H);
+  key(bar, 'ArrowLeft');
+  assert.equal(handle.clock.getTime(), T + H - 60_000);
+  // a drag: pointerdown at 3/4 of the bar -> 3/4 of the 24 h window
+  const from = T - 12 * H;
+  const down = Object.assign(new Event('pointerdown'), { clientX: 300, pointerId: 1 });
+  bar.dispatchEvent(down);
+  bar.dispatchEvent(new Event('pointerup'));
+  assert.equal(handle.clock.getTime(), from + 18 * H);
+  assert.equal(viewerMs(viewer), from + 18 * H);
+  // a jump past the window re-centres the bar on the new time
+  const far = T + 30 * H;
+  handle.clock.setFixed(far);
+  assert.equal(bar.getAttribute('aria-valuenow'), '500');
+});
+
 test('ACCEPT: the Sunset preset puts the Sun (apparent, refraction-aware) at 0 +/- 0.3 deg in the drawn ephemeris', async () => {
   const { doc, handle, viewer } = setup();
   await handle.enterAt({ ...HOUSTON, heightM: 15, heightKnown: true, source: 'manual' });
@@ -721,6 +759,10 @@ test('accessibility CSS: 44 px touch targets on coarse pointers, visible keyboar
   assert.match(coarse[1], /min-width: 44px/);
   assert.match(css, /\.gev-sky-bar :focus-visible[\s\S]*?outline: 2px solid/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  // the scrub / step / play buttons are the shared slider's: it owns their 44 px
+  const shared = timeSliderCss('gev-ts');
+  assert.match(shared, /@media \(pointer: coarse\)[\s\S]*?min-height: 44px/);
+  assert.match(shared, /-btn[\s\S]*?min-width: 44px/);
 });
 
 test('one label collision space: satellite labels avoid sky labels and cardinals; only the selected one may overlap', async () => {

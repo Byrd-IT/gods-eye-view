@@ -179,7 +179,6 @@ function build(doc) {
       label: 'Go to date and time (UTC)',
       unit: 'UTC',
     },
-    attrs: { play: {} },
     onScrub: call('scrub'),
     onStep: call('step'),
     onJump: call('jump'),
@@ -847,12 +846,6 @@ export function mountHistoryControl({
 
   // ── input ───────────────────────────────────────────────
 
-  function fractionAt(clientX) {
-    const r = dom.scrub.getBoundingClientRect?.();
-    if (!r || !(r.width > 0)) return null;
-    return (clientX - r.left) / r.width;
-  }
-
   listen(dom.badge, 'click', () => expand());
   listen(dom.live, 'click', () => leave());
   for (const [id, b] of dom.presetButtons)
@@ -942,6 +935,7 @@ export function mountHistoryControl({
     // Sky may mount after the first event: repeat the state while active
     if (s.mode === 'history') emit();
   }, SKY_HEARTBEAT_MS);
+  removers.push(() => dom.slider.destroy());
   removers.push(() => timers.clearInterval(heartbeat));
   const chipTimer = timers.setInterval(() => {
     feedChips.refresh?.();

@@ -172,6 +172,35 @@ test('scrub: enter history, ht in the address, snap to recorded data on release'
   h.control.destroy();
 });
 
+test('shared slider: Home seeks to the window start, End goes live, PageUp steps 10, the UTC picker seeks and snaps', async () => {
+  const h = setup();
+  h.q('.gev-hist-badge').click();
+  const start = NOW - 5 * 3_600_000;
+  h.control.seek(start);
+  await h.clock.run(500);
+  const at = () => Date.parse(h.root.getAttribute('data-time'));
+  const scrub = h.q('.gev-hist-scrub');
+  const press = (k, extra = {}) =>
+    scrub.dispatch('keydown', { key: k, stopPropagation() {}, ...extra });
+  press('PageUp');
+  await h.clock.run(100);
+  assert.equal(at(), start + 10 * MINUTE_MS, 'PageUp = 10 recorded snapshots');
+  press('Home');
+  await h.clock.run(1500);
+  assert.equal(at(), NOW - DAY_MS, 'Home = the window start (snapped)');
+  const picker = h.q('.gev-hist-picker');
+  const target = new Date(NOW - 3 * 3_600_000 + 25_000);
+  picker.value = target.toISOString().slice(0, 16);
+  picker.dispatch('change', {});
+  await h.clock.run(1500);
+  assert.equal(at() % MINUTE_MS, 0, 'the picker time snapped onto a recorded minute');
+  assert.ok(Math.abs(at() - target.getTime()) <= 2 * MINUTE_MS);
+  press('End');
+  await h.clock.run(500);
+  assert.equal(h.root.getAttribute('data-time'), null, 'End = back to live');
+  h.control.destroy();
+});
+
 test('ht round trip: a reload with the address restores the same moment; LIVE clears it', async () => {
   const h = setup();
   h.control.seek(NOW - 3 * DAY_MS + 7 * MINUTE_MS, { snap: true });

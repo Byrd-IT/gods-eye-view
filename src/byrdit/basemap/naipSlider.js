@@ -122,7 +122,13 @@ function yearRange(
     steps: true,
     play: transport,
     rates: transport ? [1, 2, 4] : [],
-    labels: { back: t('Older imagery'), fwd: t('Newer imagery') },
+    labels: {
+      back: t('Older imagery'),
+      fwd: t('Newer imagery'),
+      play: t('Play'),
+      pause: t('Pause'),
+      rates: t('Speed'),
+    },
     attrs: {
       back: { 'aria-label': t('Older imagery') },
       fwd: { 'aria-label': t('Newer imagery') },
@@ -234,6 +240,7 @@ export function createNaipSlider({
     update(next) {
       toggle.checked = Boolean(next.enabled);
       compare.checked = Boolean(next.compare);
+      if (!next.enabled) a.slider.stop();
       a.update(next.year, next.label);
       b.row.style.display = next.compare ? 'flex' : 'none';
       b.update(next.yearB, next.labelB);
@@ -241,6 +248,7 @@ export function createNaipSlider({
     setVisible(visible) {
       panel.hidden = !visible;
       panel.style.display = visible ? 'flex' : 'none';
+      if (!visible) a.slider.stop();
     },
     destroy() {
       a.slider.destroy();

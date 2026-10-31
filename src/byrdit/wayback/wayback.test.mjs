@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { timeSliderCss } from '../timeTravel/timeSlider.js';
 import assert from 'node:assert/strict';
 import { acquireImageryComparison } from '../../maps/imageryComparison.js';
 import { attachWayback } from './index.js';
@@ -860,6 +861,9 @@ test('panel: touch targets are at least 44 px and it never exceeds the screen wi
   // step back / play / step forward / 3 speeds / Latest: the shared slider
   // sizes them to 44 px on coarse pointers (timeSlider.js CSS)
   assert.equal(buttons.length, 7);
+  const css = timeSliderCss('gev-ts');
+  assert.match(css, /@media \(pointer: coarse\)[\s\S]*?min-height: 44px/);
+  assert.match(css, /-btn[\s\S]*?min-width: 44px/);
   assert.match(panel.style.maxWidth, /calc\(100% - 16px\)/);
   assert.equal(panel.style.position, 'absolute');
 });

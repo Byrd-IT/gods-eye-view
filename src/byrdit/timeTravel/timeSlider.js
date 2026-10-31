@@ -72,7 +72,7 @@ ${p}-scrub {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--glass-border, rgba(255,255,255,0.14));
   cursor: pointer;
-  touch-action: none;
+  touch-action: pan-y;
 }
 ${p}-scrub:focus-visible { outline: 2px solid var(--accent, #7fd3ff); outline-offset: 2px; }
 ${p}-thumb {
@@ -89,6 +89,8 @@ ${p}-thumb {
 ${p}-tick { position: absolute; top: 3px; width: 1px; height: 10px; margin-left: -0.5px; background: rgba(255,255,255,0.28); pointer-events: none; }
 ${p}-ticklabels { position: relative; height: 12px; font-size: 10px; opacity: 0.75; }
 ${p}-ticklabel { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+${p}-ticklabel:first-child { transform: translateX(0); }
+${p}-ticklabel:last-child { transform: translateX(-100%); }
 ${p}-picker {
   height: 24px;
   padding: 0 6px;
@@ -501,6 +503,8 @@ export function createTimeSlider(options = {}) {
       for (const old of [...tickLabels.children]) old.remove();
       if (labelNodes.length) tickLabels.append(...labelNodes);
       tickLabels.hidden = labelNodes.length === 0;
+      // the end labels already say it: no second edges row under them
+      edges.hidden = labelNodes.length > 0;
     },
     setPlaying(on) {
       state.playing = Boolean(on);
@@ -589,6 +593,8 @@ export function createDiscreteSlider(options = {}) {
     rates,
     onScrub(f, phase) {
       if (!items.length) return;
+      // a drag takes over from playback
+      if (phase === 'start') stop();
       const i = clampIndex(Math.round(f * (items.length - 1)));
       // the thumb follows the pointer; the item changes on a new stop
       if (i !== index) move(i, 'scrub');
@@ -709,7 +715,7 @@ export function createDiscreteSlider(options = {}) {
   if (ui.rateButtons.size) ui.setRate(rate);
   sync();
 
-  return {
+  const handle = {
     ...ui,
     ui,
     getIndex: () => index,
@@ -737,4 +743,10 @@ export function createDiscreteSlider(options = {}) {
       ui.destroy();
     },
   };
+  // the spread above would freeze these getters at their creation values
+  Object.defineProperties(handle, {
+    destroyed: { get: () => ui.destroyed, enumerable: true },
+    dragging: { get: () => ui.dragging, enumerable: true },
+  });
+  return handle;
 }
