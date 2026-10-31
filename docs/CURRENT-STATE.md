@@ -1273,11 +1273,20 @@ Routes whose answer is a finished JSON body are watched by a response tee
 (`server/history/recorder/tee.js`, route table in `routes.js`, listed first in
 `server/providers/local.js`). It copies the bytes on their way out, parses after the
 response is sent, ignores an answer whose own poll time it has already seen (the proxy's cache
-serving the same refresh again), and notes a 429 or 5xx answer as one failed poll a minute. The
-aircraft group is the first on it: `aircraft` (`/api/flights`) and `military` (`/api/military`).
-`aircraft` is heavy, so it records only when `HISTORY_RECORD_AIRCRAFT=1` names it. A moved
-entity counts as changed even when its other fields did not. Gate: `npm run qa:history-feeds`
-(fixtures in `server/history/recorder/feedFixtures/`).
+serving the same refresh again), and notes a 429 or 5xx answer as one failed poll a minute, even
+when the proxy marks it a replay. A route can also name a `dedupeKey` (the aircraft route keeps the
+adsb.lol regional fallback apart per 0.25 degree view anchor, because two views asking in the same
+second get different answers carrying the same `time`) and can answer `FAILED` for a 200 whose
+content says the feed is down. The aircraft group came first: `aircraft` (`/api/flights`) and
+`military` (`/api/military`). `vessels` (`/api/vessels`) is the second group. AIS reaches the
+route through a websocket-fed in-memory cache, so there is no second poller and no second
+AISStream connection (the key allows one): the tee reads the snapshot the live layer already
+serves, keyed by MMSI and timed by each vessel's own report time. While the feed status is not
+`live` (down, auth-failed, missing-key, stale, reconnecting, connecting, idle) the snapshot holds
+only old fixes, so that poll is noted as failed and stores nothing. `aircraft` and `vessels` are
+heavy, so they record only when `HISTORY_RECORD_AIRCRAFT=1` / `HISTORY_RECORD_VESSELS=1` name
+them; vessels keep an unchanged vessel about every five minutes. A moved entity counts as changed
+even when its other fields did not. Gate: `npm run qa:history-feeds` (fixtures in `server/history/recorder/feedFixtures/`).
 
 `HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`
 switches one feed on or off, and `HISTORY_MIN_INTERVAL_S[_<FEED>]` skips an unchanged

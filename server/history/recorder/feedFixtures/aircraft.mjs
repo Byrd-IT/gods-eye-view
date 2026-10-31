@@ -1,3 +1,5 @@
+import { normalizeAdsbLolPointResponse } from '../../../../src/data/adsbLolFallback.js';
+
 // Fixtures for the aircraft group: payloads shaped like what the proxy routes serve.
 // `build` returns the body object; variant 1 is a later poll with moved aircraft.
 const state = (hex, callsign, lat, lon, seenS, extra = []) => [
@@ -27,6 +29,7 @@ export const aircraftFixtures = [
     feed: 'aircraft',
     group: 'aircraft',
     path: '/api/flights',
+    replayHeader: 'X-OpenSky-Cache',
     kind: 'json',
     expectedRows: 3,
     // A world-wide poll: about twelve thousand aircraft.
@@ -90,6 +93,7 @@ export const aircraftFixtures = [
     feed: 'military',
     group: 'aircraft',
     path: '/api/military',
+    replayHeader: 'X-Feed-Cache',
     kind: 'json',
     expectedRows: 2,
     build({ clock, variant = 0, noise = {} }) {
@@ -130,3 +134,29 @@ export const aircraftFixtures = [
     },
   },
 ];
+
+/**
+ * What /api/flights serves when OpenSky is down: an adsb.lol v2 point answer
+ * rewritten into the OpenSky shape by the proxy's own normaliser, so the fixture
+ * cannot drift from it. `nowMs` is adsb.lol's clock; `hexes` are the aircraft
+ * around the caller's view.
+ */
+export function adsbLolFallbackBody({ nowMs, hexes = ['a1b2c3'], lat = 30.1 }) {
+  return normalizeAdsbLolPointResponse({
+    now: nowMs,
+    total: hexes.length,
+    ac: hexes.map((hex, i) => ({
+      hex,
+      flight: `FALL${i}   `,
+      lat: lat + i * 0.01,
+      lon: -97.7,
+      alt_baro: 12000,
+      alt_geom: 12100,
+      gs: 250,
+      track: 90,
+      seen: 1,
+      seen_pos: 1.5,
+      category: 'A3',
+    })),
+  });
+}

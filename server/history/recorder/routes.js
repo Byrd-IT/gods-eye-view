@@ -4,9 +4,36 @@
  * entries here and its adapter in adapters/index.js. See tee.js for the shape.
  */
 import { answerClockMs } from './adapters/military.js';
+import { NOT_LIVE } from './adapters/vessels.js';
+import { FAILED } from './tee.js';
 
 const exactPath = (path) => (url) =>
   url.pathname === path ? { key: path } : null;
+
+/**
+ * /api/flights answers a world-wide OpenSky poll, but when OpenSky is down it
+ * answers from adsb.lol around the caller's view, rounded to a 0.25 degree anchor
+ * (server/providers/aircraft/opensky.js). Two views asking in the same second
+ * get different answers carrying the same `time`, so the answer's own anchor
+ * is part of what it is compared with.
+ */
+const roundedQuarter = (value) => (Math.round(value * 4) / 4).toFixed(2);
+const flightsMatch = (url) => {
+  if (url.pathname !== '/api/flights') return null;
+  const lat = Number(url.searchParams.get('lat'));
+  const lon = Number(url.searchParams.get('lon'));
+  const anchored =
+    url.searchParams.get('lat') !== null &&
+    url.searchParams.get('lon') !== null &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lon);
+  return {
+    key: '/api/flights',
+    anchor: anchored ? `${roundedQuarter(lat)},${roundedQuarter(lon)}` : null,
+  };
+};
+const isRegionalFallback = (res) =>
+  String(res.getHeader?.('x-opensky-auth') ?? '') === 'adsblol-regional';
 
 const seconds = (value) =>
   typeof value === 'number' && Number.isFinite(value) && value > 0
@@ -23,10 +50,14 @@ export function createFeedRoutes() {
     {
       feed: 'aircraft',
       name: 'flights',
-      match: exactPath('/api/flights'),
+      match: flightsMatch,
       isReplay: replayHeader('x-opensky-cache'),
       parse: 'json',
       pollAt: (payload) => seconds(payload?.time),
+      dedupeKey: (context, { res }) =>
+        isRegionalFallback(res) && context.anchor
+          ? `${context.key}|${context.anchor}`
+          : context.key,
     },
     {
       feed: 'military',
@@ -35,6 +66,24 @@ export function createFeedRoutes() {
       isReplay: replayHeader('x-feed-cache'),
       parse: 'json',
       pollAt: (payload) => answerClockMs(payload),
+    },
+    {
+      // A snapshot of the AISStream cache, never replayed from a response
+      // cache (the proxy sends no-store). When the feed is not live the rows are
+      // old, so that poll counts as a failed one rather than as new data.
+      feed: 'vessels',
+      name: 'vessels',
+      match: (url) =>
+        url.pathname === '/api/vessels'
+          ? { key: `/api/vessels|${url.searchParams.get('maxRows') ?? ''}` }
+          : null,
+      parse: 'json',
+      payload: (payload) =>
+        NOT_LIVE.includes(payload?.status) ? FAILED : payload,
+      pollAt: (payload) =>
+        Number.isSafeInteger(payload?.lastMessageAt)
+          ? payload.lastMessageAt
+          : null,
     },
   ];
 }

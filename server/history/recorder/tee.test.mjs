@@ -172,6 +172,73 @@ describe('history tee', () => {
     assert.equal(recorder.calls.length, 1);
   });
 
+  it('notes a failed answer even when the proxy marks it a replay, and skips a replayed good one', async () => {
+    const recorder = recorderStub();
+    const tee = createHistoryTee({
+      recorder,
+      routes: [route({ isReplay: (res) => res.getHeader('x-cache') === 'STALE' })],
+    });
+    const reply = (status) => (req, res) => {
+      res.setHeader('X-Cache', 'STALE');
+      res.writeHead(status);
+      res.end('{"n":1}');
+    };
+    await request(tee, '/api/x', reply(200));
+    assert.equal(recorder.calls.length, 0);
+    await request(tee, '/api/x', reply(429));
+    assert.deepEqual(recorder.calls.map((c) => c.kind), ['fail']);
+  });
+
+  it('compares an answer only with the earlier one that has the same dedupeKey', async () => {
+    const recorder = recorderStub();
+    const tee = createHistoryTee({
+      recorder,
+      routes: [
+        route({
+          match: (url) =>
+            url.pathname === '/api/x'
+              ? { key: 'x', anchor: url.searchParams.get('a') }
+              : null,
+          pollAt: () => 1000,
+          dedupeKey: (context) => `${context.key}|${context.anchor}`,
+        }),
+      ],
+    });
+    const reply = (req, res) => {
+      res.writeHead(200);
+      res.end('{"n":1}');
+    };
+    await request(tee, '/api/x?a=1', reply);
+    await request(tee, '/api/x?a=2', reply);
+    await request(tee, '/api/x?a=1', reply);
+    assert.equal(recorder.calls.length, 2);
+  });
+
+  it('limits FAILED answers to one a minute, and does not let them hide the next good one', async () => {
+    const recorder = recorderStub();
+    let mode = FAILED;
+    const clock = { now: 1_000_000 };
+    const tee = createHistoryTee({
+      recorder,
+      clock: () => clock.now,
+      routes: [route({ payload: (p) => (mode === FAILED ? FAILED : p), pollAt: () => 5 })],
+    });
+    const reply = (req, res) => {
+      res.writeHead(200);
+      res.end('{"n":1}');
+    };
+    await request(tee, '/api/x', reply);
+    await request(tee, '/api/x', reply);
+    assert.deepEqual(recorder.calls.map((c) => c.kind), ['fail']);
+    mode = 'ok';
+    await request(tee, '/api/x', reply);
+    assert.deepEqual(recorder.calls.map((c) => c.kind), ['fail', 'tap']);
+    mode = FAILED;
+    clock.now += 61_000;
+    await request(tee, '/api/x', reply);
+    assert.deepEqual(recorder.calls.map((c) => c.kind), ['fail', 'tap', 'fail']);
+  });
+
   it('does nothing with a disabled recorder', async () => {
     const recorder = { ...recorderStub(), enabled: false };
     const tee = createHistoryTee({ recorder, routes: [route()] });

@@ -90,6 +90,90 @@ function allBytes(directory) {
     .join('');
 }
 
+/**
+ * World-sized polls of one heavy feed through the real tee. The second poll moves every
+ * entity, so every entity has a prior entry (the dedup path hashes all of them).
+ */
+async function perfChecks(perf) {
+  const perfDir = mkdtempSync(path.join(tmpdir(), 'gev-qa-feeds-perf-'));
+  let big = null;
+  try {
+    big = createHistoryRuntime({
+      HISTORY_SQLITE_PATH: path.join(perfDir, 'p.sqlite'),
+      HISTORY_RECORD_QUEUE_ROWS: '300000',
+      [`HISTORY_RECORD_${perf.feed.toUpperCase()}`]: '1',
+    });
+    const bigTee = middlewareOf(historyResponseTee(big));
+    const tick = () => new Promise((resolve) => setImmediate(resolve));
+    let expectedQueued = 0;
+    for (const variant of [0, 1]) {
+      const payload = perf.perf(CLOCK, variant);
+      let worst = 0;
+      let last = process.hrtime.bigint();
+      const watcher = setInterval(() => {
+        const now = process.hrtime.bigint();
+        worst = Math.max(worst, Number(now - last) / 1e6);
+        last = now;
+      }, 1);
+      try {
+        const start = process.hrtime.bigint();
+        let responseMs = 0;
+        const res = await request(bigTee, perf.path, (req, response) => {
+          const t0 = process.hrtime.bigint();
+          response.writeHead(200);
+          response.end(payload);
+          responseMs = Number(process.hrtime.bigint() - t0) / 1e6;
+        });
+        // request() waits two ticks; wait for the tap to finish queueing.
+        for (
+          let i = 0;
+          i < 2000 && big.recorder.health().queuedRows <= expectedQueued;
+          i++
+        )
+          await tick();
+        const tapMs = Number(process.hrtime.bigint() - start) / 1e6;
+        const queued = big.recorder.health().queuedRows;
+        record(
+          `${perf.feed}: world poll ${variant + 1} is tapped inside the budget without stalling the event loop`,
+          res.statusCode === 200 &&
+            queued > expectedQueued &&
+            responseMs <= TAP_BUDGET_MS &&
+            tapMs <= TAP_BUDGET_MS &&
+            worst <= STALL_BUDGET_MS,
+          `${queued - expectedQueued} rows queued, response ${responseMs.toFixed(1)} ms, tap done after ${tapMs.toFixed(0)} ms of ${TAP_BUDGET_MS}, longest stall ${worst.toFixed(0)} ms of ${STALL_BUDGET_MS}`,
+        );
+        expectedQueued = queued;
+      } finally {
+        clearInterval(watcher);
+      }
+    }
+    let worst = 0;
+    let last = process.hrtime.bigint();
+    const watcher = setInterval(() => {
+      const now = process.hrtime.bigint();
+      worst = Math.max(worst, Number(now - last) / 1e6);
+      last = now;
+    }, 1);
+    let flushMs = 0;
+    try {
+      const flushStart = process.hrtime.bigint();
+      await big.recorder.flush();
+      flushMs = Number(process.hrtime.bigint() - flushStart) / 1e6;
+    } finally {
+      clearInterval(watcher);
+    }
+    const stored = (await big.store.coverage(perf.feed)).count;
+    record(
+      `${perf.feed}: flushing both polls yields to the event loop`,
+      stored === expectedQueued && worst <= STALL_BUDGET_MS,
+      `${flushMs.toFixed(0)} ms in total, longest stall ${worst.toFixed(0)} ms of ${STALL_BUDGET_MS}, ${stored} rows`,
+    );
+  } finally {
+    await big?.close();
+    rmSync(perfDir, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const directory = mkdtempSync(path.join(tmpdir(), 'gev-qa-feeds-'));
   const file = path.join(directory, 'h.sqlite');
@@ -188,6 +272,33 @@ async function main() {
         last && last.ok === false && last.count === 0,
       );
 
+      if (fixture.notLive) {
+        // Its own runtime: the failed-poll limit is per route, and the check above used it.
+        const idle = createHistoryRuntime({
+          HISTORY_SQLITE_PATH: path.join(directory, 'n.sqlite'),
+          [`HISTORY_RECORD_${fixture.feed.toUpperCase()}`]: '1',
+        });
+        try {
+          const idleTee = middlewareOf(historyResponseTee(idle));
+          const down = await request(
+            idleTee,
+            fixture.path,
+            reply(fixture, fixture.notLive),
+          );
+          await idle.recorder.flush();
+          const polls = (await idle.store.ingestLog(fixture.feed)).polls;
+          record(
+            `${label}: an answer served while the feed is not live is a failed poll and stores nothing`,
+            down.statusCode === 200 &&
+              polls.length === 1 &&
+              polls[0].ok === false &&
+              (await idle.store.coverage(fixture.feed)).count === 0,
+          );
+        } finally {
+          await idle.close();
+        }
+      }
+
       const noisy = await request(
         tee,
         fixture.path,
@@ -224,68 +335,9 @@ async function main() {
     );
     await runtime.close();
 
-    // Budget: world-sized polls of the heaviest feed through the real tee. The second poll moves
-    // every aircraft, so every entity has a prior entry (the dedup path hashes all of them).
-    const perf = FIXTURES.find((fixture) => fixture.perf);
-    if (perf) {
-      const perfDir = mkdtempSync(path.join(tmpdir(), 'gev-qa-feeds-perf-'));
-      const big = createHistoryRuntime({
-        HISTORY_SQLITE_PATH: path.join(perfDir, 'p.sqlite'),
-        HISTORY_RECORD_QUEUE_ROWS: '300000',
-        [`HISTORY_RECORD_${perf.feed.toUpperCase()}`]: '1',
-      });
-      const bigTee = middlewareOf(historyResponseTee(big));
-      const tick = () => new Promise((resolve) => setImmediate(resolve));
-      let expectedQueued = 0;
-      for (const variant of [0, 1]) {
-        const payload = perf.perf(CLOCK, variant);
-        let worst = 0;
-        let last = process.hrtime.bigint();
-        const watcher = setInterval(() => {
-          const now = process.hrtime.bigint();
-          worst = Math.max(worst, Number(now - last) / 1e6);
-          last = now;
-        }, 1);
-        const start = process.hrtime.bigint();
-        let responseMs = 0;
-        const res = await request(bigTee, perf.path, (req, response) => {
-          const t0 = process.hrtime.bigint();
-          response.writeHead(200);
-          response.end(payload);
-          responseMs = Number(process.hrtime.bigint() - t0) / 1e6;
-        });
-        // request() waits two ticks; wait for the tap to finish queueing.
-        for (let i = 0; i < 2000 && big.recorder.health().queuedRows <= expectedQueued; i++) await tick();
-        const tapMs = Number(process.hrtime.bigint() - start) / 1e6;
-        clearInterval(watcher);
-        const queued = big.recorder.health().queuedRows;
-        record(
-          `${perf.feed}: world poll ${variant + 1} is tapped inside the budget without stalling the event loop`,
-          res.statusCode === 200 && queued > expectedQueued && responseMs <= TAP_BUDGET_MS && tapMs <= TAP_BUDGET_MS && worst <= STALL_BUDGET_MS,
-          `${queued - expectedQueued} rows queued, response ${responseMs.toFixed(1)} ms, tap done after ${tapMs.toFixed(0)} ms of ${TAP_BUDGET_MS}, longest stall ${worst.toFixed(0)} ms of ${STALL_BUDGET_MS}`,
-        );
-        expectedQueued = queued;
-      }
-      let worst = 0;
-      let last = process.hrtime.bigint();
-      const watcher = setInterval(() => {
-        const now = process.hrtime.bigint();
-        worst = Math.max(worst, Number(now - last) / 1e6);
-        last = now;
-      }, 1);
-      const flushStart = process.hrtime.bigint();
-      await big.recorder.flush();
-      const flushMs = Number(process.hrtime.bigint() - flushStart) / 1e6;
-      clearInterval(watcher);
-      const stored = (await big.store.coverage(perf.feed)).count;
-      await big.close();
-      rmSync(perfDir, { recursive: true, force: true });
-      record(
-        `${perf.feed}: flushing both polls yields to the event loop`,
-        stored === expectedQueued && worst <= STALL_BUDGET_MS,
-        `${flushMs.toFixed(0)} ms in total, longest stall ${worst.toFixed(0)} ms of ${STALL_BUDGET_MS}, ${stored} rows`,
-      );
-    }
+    // Budget: world-sized polls of each heavy feed through the real tee.
+    for (const perf of FIXTURES.filter((fixture) => fixture.perf))
+      await perfChecks(perf);
   } finally {
     console.warn = originalWarn;
     rmSync(directory, { recursive: true, force: true });
