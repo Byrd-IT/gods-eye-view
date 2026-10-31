@@ -19,7 +19,6 @@ export const HISTORY_FEEDS = Object.freeze([
   'cyclones',
   'launches',
   'water',
-  'quakes',
 ]);
 
 /** Every backend name the settings recognise. A build supplies which ones it implements. */
