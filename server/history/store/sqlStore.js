@@ -125,9 +125,9 @@ export function createSqlStore({
       // it also works behind PgBouncer in transaction-pooling mode, where two
       // statements of a session may run on different server connections.
       if (dialect.transactionLock) {
-        await connection.query(dialect.begin, []);
         let rolledBack = true;
         try {
+          await connection.query(dialect.begin, []);
           await connection.query(dialect.lock(tablePrefix), []);
           await applySchema(connection);
           await connection.query('COMMIT', []);

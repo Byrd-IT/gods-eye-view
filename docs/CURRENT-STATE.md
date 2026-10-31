@@ -1281,8 +1281,9 @@ PostgreSQL socket directory is given as `postgres://user@localhost/db?host=%2Fva
 Coverage is computed in the database (window functions: SQLite 3.25 or later,
 MySQL 8, MariaDB 10.2 or later, PostgreSQL), so only one row per span, not one per
 snapshot, reaches the server. The PostgreSQL schema lock is
-`pg_advisory_xact_lock` taken inside the schema transaction, so the backend works
-behind PgBouncer in transaction-pooling mode. The MySQL/MariaDB schema lock
+`pg_advisory_xact_lock` taken inside the schema transaction, so that lock works
+behind PgBouncer in transaction-pooling mode (the other statements are plain
+unnamed queries and use no session state). The MySQL/MariaDB schema lock
 (`GET_LOCK`) is a session lock and does not: point `HISTORY_MYSQL_URL` at the
 database directly, or at a proxy in session mode, not at a transaction-pooling
 proxy such as ProxySQL multiplexing.

@@ -250,8 +250,11 @@ export function buildSpans(times, maxGapMs) {
  * The spans of a feed's snapshot times, worked out inside the database so the
  * server never holds one row per snapshot: consecutive distinct times closer
  * than `maxGapMs` fall in the same span (the same rule as `buildSpans`). One
- * row comes back per span. Window functions need SQLite 3.25, MySQL 8 or
- * MariaDB 10.2.
+ * row comes back per span. Window functions need SQLite 3.25, MySQL 8,
+ * MariaDB 10.2 or PostgreSQL (any supported version).
+ *
+ * Bind order: the gap placeholder appears first in the SQL text, then the feed,
+ * then the range clause, so a `?` dialect must pass its params in that order.
  */
 export function coverageSql({
   table,
