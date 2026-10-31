@@ -98,12 +98,12 @@ for (const fixture of FIXTURES) {
     });
 
     it('skips an answer the proxy marks as a cache replay', async (t) => {
-      const header = fixture.replayHeader;
-      if (!header) return t.skip('this proxy route never replays an answer');
+      if (!fixture.replay) return t.skip('this proxy route never replays an answer');
       const { store, recorder, tee } = setup(fixture);
+      const { header, options = {} } = fixture.replay;
       const replay = (req, res) => {
-        res.setHeader(header, 'HIT');
-        replying(fixture, { clock: T0 })(req, res);
+        if (header) res.setHeader(header[0], header[1]);
+        replying(fixture, { clock: T0, ...options })(req, res);
       };
       await request(tee, fixture.path, replay);
       await recorder.flush();

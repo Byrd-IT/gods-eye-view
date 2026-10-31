@@ -5,7 +5,7 @@
  */
 import { answerClockMs } from './adapters/military.js';
 import { NOT_LIVE } from './adapters/vessels.js';
-import { FAILED } from './tee.js';
+import { FAILED, SKIP } from './tee.js';
 
 const exactPath = (path) => (url) =>
   url.pathname === path ? { key: path } : null;
@@ -34,6 +34,8 @@ const flightsMatch = (url) => {
 };
 const isRegionalFallback = (res) =>
   String(res.getHeader?.('x-opensky-auth') ?? '') === 'adsblol-regional';
+const positive = (value) =>
+  Number.isSafeInteger(value) && value > 0 ? value : null;
 
 const seconds = (value) =>
   typeof value === 'number' && Number.isFinite(value) && value > 0
@@ -41,9 +43,23 @@ const seconds = (value) =>
     : null;
 
 // The proxies mark an answer they serve again from memory in a response header.
-const REPLAYS = new Set(['HIT', 'STALE', 'INFLIGHT', 'COOLDOWN']);
+const REPLAYS = new Set([
+  'HIT',
+  'STALE',
+  'STALE-ERROR',
+  'INFLIGHT',
+  'COOLDOWN',
+]);
 const replayHeader = (name) => (res) =>
   REPLAYS.has(String(res.getHeader?.(name) ?? '').toUpperCase());
+const staleHeader = (name) => (res) =>
+  String(res.getHeader?.(name) ?? '').toLowerCase() === 'true';
+
+// LL2's proxy stamps the time of the upstream fetch it is serving as an ISO header.
+const cachedAt = (res) => {
+  const ms = Date.parse(String(res.getHeader?.('x-gev-cached-at') ?? ''));
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+};
 
 export function createFeedRoutes() {
   return [
@@ -84,6 +100,45 @@ export function createFeedRoutes() {
         Number.isSafeInteger(payload?.lastMessageAt)
           ? payload.lastMessageAt
           : null,
+    },
+    {
+      // An answer the NHC proxy serves from an old fetch says so in the body;
+      // an answer it could not build at all is a failed poll.
+      feed: 'cyclones',
+      name: 'cyclones',
+      match: exactPath('/api/cyclones'),
+      parse: 'json',
+      payload: (body) => {
+        if (body?.unavailable === true) return FAILED;
+        return body?.stale === true ? SKIP : body;
+      },
+      // An unavailable answer has no fetch time; one failed poll a minute is noted.
+      pollAt: (body) =>
+        body?.unavailable === true
+          ? Math.floor(Date.now() / 60_000) * 60_000
+          : positive(body?.fetchedAt),
+    },
+    {
+      feed: 'perimeters',
+      name: 'fire-perimeters',
+      match: exactPath('/api/fire-perimeters'),
+      isReplay: staleHeader('x-data-stale'),
+      parse: 'json',
+      payload: (body) => (body?.stale === true ? SKIP : body),
+      pollAt: (body) => positive(body?.fetchedAt),
+    },
+    {
+      feed: 'launches',
+      name: 'launches',
+      match: exactPath('/api/launches'),
+      isReplay: replayHeader('x-gev-cache'),
+      parse: 'json',
+      // The body has no fetch time; the proxy's header does.
+      payload: (body, _context, { res }) => ({
+        results: body?.results,
+        fetchedAt: cachedAt(res),
+      }),
+      pollAt: (_body, _context, { res }) => cachedAt(res),
     },
   ];
 }

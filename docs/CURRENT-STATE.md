@@ -1292,7 +1292,20 @@ serves, keyed by MMSI and timed by each vessel's own report time. While the feed
 only old fixes, so that poll is noted as failed and stores nothing. `aircraft` and `vessels` are
 heavy, so they record only when `HISTORY_RECORD_AIRCRAFT=1` / `HISTORY_RECORD_VESSELS=1` name
 them; vessels keep an unchanged vessel about every five minutes. A moved entity counts as changed
-even when its other fields did not. Gate: `npm run qa:history-feeds` (fixtures in `server/history/recorder/feedFixtures/`).
+even when its other fields did not. The hazards group follows (light, so `HISTORY_RECORD=1` turns
+it on): `cyclones` (`/api/cyclones`, keyed by NHC storm id, timed by the storm's position time;
+forecast points kept, track and cone not), `perimeters` (`/api/fire-perimeters`, keyed by the incident
+id and timed by the hour of the fetch, because the agency's update time is only the last polygon edit
+while acres and containment change on their own; the recorder's change check skips an unchanged fire
+for 12 hours and stores a changed one at once; the row holds acres, containment, dates, the polygon
+edit time, bounding box and vertex count but never the polygon, which can run to tens of thousands of
+vertices against the store's 64 KiB row cap; a perimeter across the antimeridian has no box or
+position) and `launches` (`/api/launches`, keyed by the Launch Library 2 id, timed by its
+`last_updated`). A storm whose forecast points are not attached yet is held back until they are (up
+to 90 minutes). A cyclone answer the proxy marks stale is ignored, and an unavailable one is noted as
+a failed poll. A launch answer served from cache (`X-GEV-Cache` HIT, INFLIGHT or STALE-ERROR) is
+ignored. A fire perimeter answer is parsed in full after the response is sent (about 100 ms for a few
+MiB); the tee still skips a body over 32 MiB. Gate: `npm run qa:history-feeds` (fixtures in `server/history/recorder/feedFixtures/`).
 
 `HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`
 switches one feed on or off, and `HISTORY_MIN_INTERVAL_S[_<FEED>]` skips an unchanged
