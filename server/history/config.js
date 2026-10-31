@@ -103,8 +103,13 @@ export function loadHistoryConfig(env = process.env, options = {}) {
         !known.has(name.slice(prefix.length)) &&
         text(env, name) !== ''
       ) {
+        // A variable name is echoed only when it looks like one, so a stray
+        // value that was exported under an odd name is never repeated back.
+        const shown = /^[A-Z0-9_]{1,64}$/.test(name)
+          ? name
+          : `${prefix}<unrecognised>`;
         problems.push(
-          `${name} names no known feed (known: ${feeds.join(', ')}).`,
+          `${shown} names no known feed (known: ${feeds.join(', ')}).`,
         );
       }
     }

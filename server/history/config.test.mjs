@@ -107,3 +107,17 @@ describe('history configuration', () => {
     assert.throws(() => { 'use strict'; config.feeds.aircraft.store = 'x'; }, TypeError);
   });
 });
+
+describe('history configuration: odd variable names', () => {
+  it('does not repeat a variable name that is not a plain upper-case name', () => {
+    const odd = 'HISTORY_STORE_https://user:hunter2-token@example.invalid';
+    let text = '';
+    try {
+      loadHistoryConfig({ [odd]: 'sqlite' });
+    } catch (error) {
+      text = error.problems.join('\n');
+    }
+    assert.match(text, /HISTORY_STORE_<unrecognised> names no known feed/);
+    assert.ok(!text.includes('hunter2'), text);
+  });
+});
