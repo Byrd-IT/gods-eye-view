@@ -15,6 +15,7 @@ export function createLaunchesAdapter() {
     source: support.source,
     maxWindowMs: support.maxWindowMs,
     maxPerHour: support.maxPerHour,
+    stepMs: support.stepMs,
     earliestMs: () => 0,
 
     async query({ t, windowMs, limit, ctx }) {

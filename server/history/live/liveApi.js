@@ -187,12 +187,15 @@ export function createLiveApiStore({
       const seen = newest.get(row.key);
       if (!seen || row.t > seen.t) newest.set(row.key, row);
     }
-    const ordered = [...newest.values()]
+    // Keep the newest `limit`, then list them by key like the stored backends.
+    const kept = [...newest.values()]
+      .sort((a, b) => b.t - a.t || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+      .slice(0, limit)
       .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
       .map((row) => decodeRow({ ...row, data: row.json }));
     return {
-      observations: ordered.slice(0, limit),
-      truncated: ordered.length > limit,
+      observations: kept,
+      truncated: newest.size > limit,
     };
   }
 
@@ -203,6 +206,7 @@ export function createLiveApiStore({
       query.t,
       query.windowMs,
       query.limit,
+      query.key ?? null,
       query.bbox && [
         query.bbox.west,
         query.bbox.south,
@@ -218,6 +222,7 @@ export function createLiveApiStore({
       try {
         raw = await adapter.query({
           ...query,
+          nowMs,
           ctx: makeContext(feed, adapter),
         });
       } catch (error) {
@@ -249,14 +254,14 @@ export function createLiveApiStore({
     }
   }
 
-  async function slice(feed, options) {
-    open();
-    const adapter = adapterFor(feed);
-    const query = normalizeSliceOptions(options);
+  async function run(feed, adapter, query) {
     const nowMs = now();
     if (query.t > nowMs + FUTURE_SLACK_MS)
       throw invalid('t must not be in the future');
-    query.t = Math.min(query.t, nowMs);
+    // Snap to the feed's step so a slider drag is a few questions, not one per
+    // pixel; the budget is shared by everyone using the server.
+    const step = adapter.stepMs || 1;
+    query.t = Math.floor(Math.min(query.t, nowMs) / step) * step;
     if (query.windowMs > adapter.maxWindowMs)
       throw invalid(
         `windowMs may be at most ${adapter.maxWindowMs} for this feed's live history source`,
@@ -275,6 +280,12 @@ export function createLiveApiStore({
     };
   }
 
+  async function slice(feed, options) {
+    open();
+    const adapter = adapterFor(feed);
+    return run(feed, adapter, normalizeSliceOptions(options));
+  }
+
   return {
     backend: 'live-api',
 
@@ -291,12 +302,15 @@ export function createLiveApiStore({
       open();
       const adapter = adapterFor(feed);
       const { t, key } = normalizeLatestBefore(options);
+      if (adapter.latestBefore === false)
+        throw invalid(
+          `${feed} cannot look up one key in its live history source; use slice with a bounding box`,
+        );
       const windowMs = Math.min(adapter.maxWindowMs, LATEST_LOOKBACK_MS);
-      const { observations } = await slice(feed, {
-        t,
-        windowMs,
-        limit: 100_000,
-      });
+      const query = normalizeSliceOptions({ t, windowMs, limit: 100_000 });
+      // An adapter that can ask for one key does; it then needs no bounding box.
+      if (adapter.byKey) query.key = key;
+      const { observations } = await run(feed, adapter, query);
       return observations.find((row) => row.key === key) ?? null;
     },
 
@@ -346,6 +360,8 @@ export function createLiveApiStore({
           requestsLastHour: entry.hits.filter((at) => at > t - HOUR).length,
           maxPerHour: adapter.maxPerHour,
           lastError: entry.lastError,
+          ready: !adapter.notReady?.(),
+          ...(adapter.notReady?.() ? { reason: adapter.notReady() } : {}),
         };
       }
       return { backend: 'live-api', ok: true, keepsHistory: false, feeds };

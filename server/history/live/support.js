@@ -30,6 +30,8 @@ const DAY = 24 * 3600 * 1000;
  *   env           the environment variable that must be set, when one must
  *   maxWindowMs   widest slice window one question may ask for
  *   maxPerHour    questions per hour this build will send to the source
+ *   stepMs        a question's time is snapped down to a multiple of this, so a
+ *                 slider drag becomes a few questions, not one per pixel
  *   checked       what was verified against the live source
  */
 export const LIVE_API_SUPPORT = Object.freeze({
@@ -39,6 +41,7 @@ export const LIVE_API_SUPPORT = Object.freeze({
     needs: 'nothing (no key)',
     maxWindowMs: 31 * DAY,
     maxPerHour: 120,
+    stepMs: 60 * 1000,
     checked:
       'earthquake.usgs.gov/fdsnws/event/1/query with starttime and endtime answered with GeoJSON; limit is capped at 20000',
   }),
@@ -46,10 +49,12 @@ export const LIVE_API_SUPPORT = Object.freeze({
     source: 'NASA FIRMS area API (VIIRS S-NPP near real time)',
     reach:
       'the last 60 days (the near-real-time product; older data is in the standard-processing product, not used)',
-    needs: 'FIRMS_MAP_KEY, the same key the live layer uses',
+    needs:
+      'FIRMS_MAP_KEY, the same key the live layer uses; every question needs a bounding box of at most 3000 square degrees (a whole-world day is tens of megabytes)',
     env: 'FIRMS_MAP_KEY',
     maxWindowMs: 9 * DAY,
     maxPerHour: 120,
+    stepMs: 5 * 60 * 1000,
     checked:
       'FIRMS area API documents /api/area/csv/[KEY]/[SOURCE]/[AREA]/[DAY_RANGE 1-5]/[DATE]; the near-real-time retention of 60 days is a conservative bound, not read from the data_availability endpoint (that needs a key)',
   }),
@@ -61,6 +66,7 @@ export const LIVE_API_SUPPORT = Object.freeze({
       'a bounding box on every question (the service refuses an unbounded one)',
     maxWindowMs: 6 * 3600 * 1000,
     maxPerHour: 120,
+    stepMs: 5 * 60 * 1000,
     checked:
       'waterservices.usgs.gov/nwis/iv with bBox, startDT and endDT answered with a time series per site',
   }),
@@ -71,6 +77,7 @@ export const LIVE_API_SUPPORT = Object.freeze({
       'nothing (anonymous quota is 15 requests an hour, so this build sends at most 10)',
     maxWindowMs: 366 * DAY,
     maxPerHour: 10,
+    stepMs: 15 * 60 * 1000,
     checked:
       'll.thespacedevs.com/2.3.0/launches with net__gte and net__lte answered; mode=normal carries the pad position',
   }),

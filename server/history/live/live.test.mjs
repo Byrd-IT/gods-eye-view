@@ -18,6 +18,7 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const NOW = Date.UTC(2026, 9, 31, 12, 0, 0);
+const AREA = { west: -125, south: 30, east: -115, north: 40 };
 
 /** A fetch that records every request and answers from `respond(url, init)`. */
 function fakeFetch(respond) {
@@ -353,9 +354,9 @@ describe('live-api store: NASA FIRMS', () => {
 
   it('asks for the day range from the start date and maps detections like the recorder', async () => {
     const { store, fetchImpl } = makeStore(() => ({ body: csv(row(34.1, -118.2, '2026-10-31', '1005'), row(34.1, -118.2, '2026-10-30', '2330')) }));
-    const result = await store.slice('firms', { t: NOW, windowMs: 2 * DAY });
+    const result = await store.slice('firms', { t: NOW, windowMs: 2 * DAY, bbox: AREA });
     assert.equal(fetchImpl.calls.length, 1);
-    assert.equal(fetchImpl.calls[0].url, 'https://firms.modaps.eosdis.nasa.gov/api/area/csv/SECRETKEY123/VIIRS_SNPP_NRT/world/3/2026-10-29');
+    assert.equal(fetchImpl.calls[0].url, 'https://firms.modaps.eosdis.nasa.gov/api/area/csv/SECRETKEY123/VIIRS_SNPP_NRT/-125,30,-115,40/3/2026-10-29');
     assert.deepEqual(result.observations.map((o) => [o.key, o.t]), [
       ['VIIRS:N:34.1000:-118.2000', Date.UTC(2026, 9, 31, 10, 5)],
     ]);
@@ -366,7 +367,7 @@ describe('live-api store: NASA FIRMS', () => {
 
   it('keeps only detections between the window start and t', async () => {
     const { store } = makeStore(() => ({ body: csv(row(1, 1, '2026-10-31', '1100'), row(2, 2, '2026-10-31', '1300'), row(3, 3, '2026-10-30', '0100')) }));
-    const result = await store.slice('firms', { t: NOW, windowMs: 2 * HOUR });
+    const result = await store.slice('firms', { t: NOW, windowMs: 2 * HOUR, bbox: { west: -10, south: 0, east: 10, north: 10 } });
     assert.deepEqual(result.observations.map((o) => o.lat), [1]);
   });
 
@@ -389,7 +390,7 @@ describe('live-api store: NASA FIRMS', () => {
     ];
     for (const respond of failures) {
       const { store } = makeStore(respond);
-      await assert.rejects(store.slice('firms', { t: NOW, windowMs: HOUR }), (error) => {
+      await assert.rejects(store.slice('firms', { t: NOW, windowMs: HOUR, bbox: AREA }), (error) => {
         const seen = [error.message, String(error.cause), JSON.stringify(error), error.stack.split('\n')[0]].join('\n');
         for (const form of [key, encodeURIComponent(key), Buffer.from(key).toString('base64'), key.slice(-6), key.slice(0, 6)])
           assert.ok(!seen.includes(form), `leaked ${form}`);
@@ -402,15 +403,15 @@ describe('live-api store: NASA FIRMS', () => {
 
   it('says so when the key is missing or rejected', async () => {
     const { store, fetchImpl } = makeStore(() => ({ body: csv() }), { env: { FIRMS_MAP_KEY: '  ' } });
-    await rejectsWith(store.slice('firms', { t: NOW }), 'BACKEND', /FIRMS_MAP_KEY is not set/);
+    await rejectsWith(store.slice('firms', { t: NOW, bbox: AREA }), 'BACKEND', /FIRMS_MAP_KEY is not set/);
     assert.equal(fetchImpl.calls.length, 0);
     const rejected = makeStore(() => ({ status: 403, body: 'Invalid MAP_KEY' }));
-    await rejectsWith(rejected.store.slice('firms', { t: NOW }), 'BACKEND', /rejected the key/);
+    await rejectsWith(rejected.store.slice('firms', { t: NOW, bbox: AREA }), 'BACKEND', /rejected the key/);
   });
 
   it('answers empty for a time before the product reaches', async () => {
     const { store, fetchImpl } = makeStore(() => ({ body: csv() }));
-    assert.deepEqual(await store.slice('firms', { t: NOW - 61 * DAY }), { observations: [], truncated: false });
+    assert.deepEqual(await store.slice('firms', { t: NOW - 61 * DAY, bbox: AREA }), { observations: [], truncated: false });
     assert.equal(fetchImpl.calls.length, 0);
     assert.equal((await store.coverage('firms', {})).firstT, NOW - 60 * DAY);
   });
@@ -484,8 +485,65 @@ describe('live-api store: launches', () => {
 
   it('keeps to 10 questions an hour', async () => {
     const { store } = makeStore(() => json({ count: 0, results: [] }));
-    for (let n = 0; n < 10; n += 1) await store.slice('launches', { t: NOW - n * MIN, windowMs: DAY });
-    await rejectsWith(store.slice('launches', { t: NOW - 99 * MIN, windowMs: DAY }), 'BACKEND', /budget/);
+    for (let n = 0; n < 10; n += 1) await store.slice('launches', { t: NOW, windowMs: DAY - n * MIN });
+    await rejectsWith(store.slice('launches', { t: NOW, windowMs: DAY - 99 * MIN }), 'BACKEND', /budget/);
+  });
+});
+
+describe('review fixes', () => {
+  it('snaps a question time down to the feed step so scrubbing reuses answers', async () => {
+    const { store, fetchImpl } = makeStore(() => json({ count: 0, results: [] }));
+    await store.slice('launches', { t: NOW - 3 * MIN, windowMs: DAY });
+    await store.slice('launches', { t: NOW - 14 * MIN, windowMs: DAY });
+    assert.equal(fetchImpl.calls.length, 1);
+    assert.equal(new URL(fetchImpl.calls[0].url).searchParams.get('net__lte'), new Date(NOW - 15 * MIN).toISOString());
+  });
+
+  it('keeps the newest rows, not the first keys, when a limit cuts the answer short', async () => {
+    const features = [quake('aaa', NOW - 50 * MIN, 1, 1), quake('zzz', NOW - 2 * MIN, 1, 1), quake('mmm', NOW - 5 * MIN, 1, 1)];
+    const { store } = makeStore(() => json({ features }));
+    const result = await store.slice('quakes', { t: NOW, windowMs: HOUR, limit: 2 });
+    assert.deepEqual(result.observations.map((o) => o.key), ['mmm', 'zzz']);
+    assert.equal(result.truncated, true);
+  });
+
+  it('firms needs a modest bounding box and refuses latestBefore, before spending budget', async () => {
+    const { store, fetchImpl } = makeStore(() => ({ body: '' }));
+    await rejectsWith(store.slice('firms', { t: NOW }), 'INVALID_ARGUMENT', /needs a bounding box/);
+    await rejectsWith(store.slice('firms', { t: NOW, bbox: { west: -100, south: 0, east: -20, north: 50 } }), 'INVALID_ARGUMENT', /3000 square degrees/);
+    await rejectsWith(store.latestBefore('firms', { t: NOW, key: 'VIIRS:N:1.0000:2.0000' }), 'INVALID_ARGUMENT', /cannot look up one key/);
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('firms never asks for dates past the product reach', async () => {
+    const { store, fetchImpl } = makeStore(() => ({ body: 'latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_ti5,frp,daynight\n' }));
+    await store.slice('firms', { t: NOW - 55 * DAY, windowMs: 9 * DAY, bbox: AREA });
+    const dates = fetchImpl.calls.map((c) => c.url.split('/').pop());
+    assert.ok(dates.length > 0 && dates.every((d) => Date.parse(d) >= NOW - 60 * DAY - DAY), dates.join());
+  });
+
+  it('water latestBefore asks for the one gauge, with no bounding box', async () => {
+    const body = { value: { timeSeries: [{
+      sourceInfo: { siteName: 'G', siteCode: [{ value: '01646305' }], geoLocation: { geogLocation: { latitude: 38.9, longitude: -77.1 } } },
+      variable: { variableCode: [{ value: '00060' }] },
+      values: [{ value: [{ dateTime: '2026-10-31T11:55:00.000-00:00', value: '13.5' }] }],
+    }] } };
+    const { store, fetchImpl } = makeStore(() => json(body));
+    const row = await store.latestBefore('water', { t: NOW, key: '01646305' });
+    assert.equal(row.data.dischargeCfs, 13.5);
+    const url = new URL(fetchImpl.calls[0].url);
+    assert.equal(url.searchParams.get('sites'), '01646305');
+    assert.equal(url.searchParams.get('bBox'), null);
+  });
+
+  it('health says which feeds are not ready, without the value', async () => {
+    const { store } = makeStore(() => json({}), { env: { FIRMS_MAP_KEY: '' } });
+    const feeds = (await store.health()).feeds;
+    assert.deepEqual({ ready: feeds.firms.ready, reason: feeds.firms.reason }, { ready: false, reason: 'FIRMS_MAP_KEY is not set' });
+    assert.equal(feeds.quakes.ready, true);
+    const ok = makeStore(() => json({}));
+    assert.equal((await ok.store.health()).feeds.firms.ready, true);
+    assert.ok(!JSON.stringify(await ok.store.health()).includes('SECRETKEY123'));
   });
 });
 

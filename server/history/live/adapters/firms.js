@@ -3,6 +3,7 @@ import {
   parseFirmsCsv,
 } from '../../../../src/data/firmsCsv.js';
 import { LIVE_API_SUPPORT } from '../support.js';
+import { invalid } from '../../store/common.js';
 import { splitBox } from '../liveApi.js';
 
 const BASE = 'https://firms.modaps.eosdis.nasa.gov/api/area/csv';
@@ -12,6 +13,8 @@ const DAY = 24 * 3600 * 1000;
 const MAX_DAYS_PER_REQUEST = 5;
 /** What the near-real-time product is trusted to hold. */
 const REACH_MS = 60 * DAY;
+/** A whole-world day is tens of megabytes, so every question names an area. */
+const MAX_AREA_SQ_DEG = 3000;
 const FIELDS = [
   'frp',
   'confidence',
@@ -40,12 +43,34 @@ export function createFirmsAdapter({ getMapKey }) {
     source: support.source,
     maxWindowMs: support.maxWindowMs,
     maxPerHour: support.maxPerHour,
+    stepMs: support.stepMs,
     earliestMs: (nowMs) => nowMs - REACH_MS,
+    // A detection's key is its position, so one key cannot be asked for alone.
+    latestBefore: false,
+    notReady: () =>
+      String(getMapKey() || '').trim() ? '' : `${support.env} is not set`,
 
-    async query({ t, windowMs, bbox, ctx }) {
+    check({ bbox }) {
+      if (!bbox)
+        throw invalid(
+          'firms history needs a bounding box (a whole-world day is too large); zoom in',
+        );
+      const area = splitBox(bbox).reduce(
+        (sum, b) => sum + (b.east - b.west) * (b.north - b.south),
+        0,
+      );
+      if (area > MAX_AREA_SQ_DEG)
+        throw invalid(
+          `firms history area may be at most ${MAX_AREA_SQ_DEG} square degrees; zoom in`,
+        );
+    },
+
+    async query({ t, windowMs, bbox, nowMs, ctx }) {
       const key = String(getMapKey() || '').trim();
       if (!key) throw ctx.fail(`${support.env} is not set`);
-      const first = Date.parse(`${day(Math.max(0, t - windowMs))}T00:00:00Z`);
+      const first = Date.parse(
+        `${day(Math.max(t - windowMs, nowMs - REACH_MS))}T00:00:00Z`,
+      );
       const last = Date.parse(`${day(t)}T00:00:00Z`);
       const requests = [];
       for (
@@ -61,9 +86,7 @@ export function createFirmsAdapter({ getMapKey }) {
       }
       const observations = [];
       for (const box of splitBox(bbox)) {
-        const area = bbox
-          ? [box.west, box.south, box.east, box.north].join(',')
-          : 'world';
+        const area = [box.west, box.south, box.east, box.north].join(',');
         for (const { date, days } of requests) {
           const url = `${BASE}/${encodeURIComponent(key)}/${SOURCE}/${area}/${days}/${date}`;
           const { status, text } = await ctx.http(url, 'text/csv, text/plain');

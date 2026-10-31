@@ -27,9 +27,13 @@ export function createWaterAdapter() {
     source: support.source,
     maxWindowMs: support.maxWindowMs,
     maxPerHour: support.maxPerHour,
+    stepMs: support.stepMs,
     earliestMs: (nowMs) => nowMs - REACH_MS,
 
-    check({ bbox }) {
+    byKey: true,
+
+    check({ bbox, key }) {
+      if (key) return; // one gauge by number needs no area
       if (!bbox)
         throw invalid(
           'water history needs a bounding box (the source refuses an unbounded question)',
@@ -42,12 +46,16 @@ export function createWaterAdapter() {
         );
     },
 
-    async query({ t, windowMs, bbox, ctx }) {
+    async query({ t, windowMs, bbox, key, ctx }) {
       const params = new URLSearchParams({
         format: 'json',
-        bBox: [bbox.west, bbox.south, bbox.east, bbox.north]
-          .map((n) => n.toFixed(6))
-          .join(','),
+        ...(key
+          ? { sites: key }
+          : {
+              bBox: [bbox.west, bbox.south, bbox.east, bbox.north]
+                .map((n) => n.toFixed(6))
+                .join(','),
+            }),
         parameterCd: Object.keys(PARAMETERS).join(','),
         startDT: minute(Math.max(0, t - windowMs)),
         endDT: minute(t),
