@@ -69,7 +69,7 @@ function distToRing(ring, x, y) {
  * Check the route of a plan.
  * @param {object} args
  * @param {object[]} args.legs planner legs, waypoints `{ lon, lat, aglM }`
- *   (only flown photo legs: `kind` orbit, lookat, grid ...; all are checked)
+ *   (all legs are checked, transit hops included)
  * @param {{ ring: {lon:number,lat:number}[], heightM: number|null,
  *   label?: string, osmId?: string }[]} [args.buildings]
  * @param {object[]} [args.obstacles] entered obstacles
@@ -177,11 +177,9 @@ export function checkConflicts({
         break;
       }
       const need = b.heightM + clearanceM;
-      if (
-        s.agl < need - 0.05 &&
-        (!worst || s.agl - need < worst.flownAglM - need)
-      ) {
+      if (s.agl < need - 0.05 && (!worst || s.agl < worst.rawAgl)) {
         worst = {
+          rawAgl: s.agl,
           kind: 'building',
           id,
           label: b.label || '',
@@ -205,8 +203,9 @@ export function checkConflicts({
     for (const s of samples) {
       const d = Math.hypot(s.x - ox, s.y - oy);
       if (d > reach) continue;
-      if (s.agl < need - 0.05 && (!worst || s.agl < worst.flownAglM)) {
+      if (s.agl < need - 0.05 && (!worst || s.agl < worst.rawAgl)) {
         worst = {
+          rawAgl: s.agl,
           kind: 'obstacle',
           id: o.id ?? '',
           label: o.label || '',
@@ -220,6 +219,7 @@ export function checkConflicts({
     }
     if (worst) conflicts.push(worst);
   }
+  for (const c of conflicts) delete c.rawAgl;
   conflicts.sort(
     (a, b) => a.flownAglM - a.needAglM - (b.flownAglM - b.needAglM),
   );

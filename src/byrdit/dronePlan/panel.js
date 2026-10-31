@@ -16,7 +16,7 @@ import { createSlider } from '../../ui/slider.js';
 import { assembleAreaPlan, distanceToAreasM, planAreas } from './areas.js';
 import { initPolygonTool } from './polygonTool.js';
 import { validateDroneBox } from './limits.js';
-import { checkConflicts } from './conflicts.js';
+import { MAX_LISTED, checkConflicts } from './conflicts.js';
 import { initPointTool } from './pointTool.js';
 import {
   DEFAULT_OUTWARD_PITCH_DEG,
@@ -2669,7 +2669,7 @@ export function initDronePlan({
       return;
     }
     const lead = (b) => b.label || b.id || t('building');
-    for (const c of found.conflicts.slice(0, 8)) {
+    for (const c of found.conflicts.slice(0, MAX_LISTED)) {
       el(doc, 'p', ui.conflictBox, {
         cls: 'gev-dp-warning',
         attrs: { 'data-role': 'conflict' },
@@ -2683,11 +2683,11 @@ export function initDronePlan({
         ),
       });
     }
-    if (found.conflicts.length > 8) {
+    if (found.conflicts.length > MAX_LISTED) {
       el(doc, 'p', ui.conflictBox, {
         cls: 'gev-dp-note',
         text: t('And {n} more conflicts', {
-          n: num(found.conflicts.length - 8),
+          n: num(found.conflicts.length - MAX_LISTED),
         }),
       });
     }

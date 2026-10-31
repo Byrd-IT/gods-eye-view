@@ -177,9 +177,9 @@ export const DEFAULT_OPTIONS = Object.freeze({
 });
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-// null, undefined and '' are "not set": Number(null) is 0, which used to turn
-// an unset orbit radius into the 10 m minimum.
-// A number from a value that may be unset: null and '' are NaN, not 0.
+// A number from a value that may be unset: null, undefined and '' are NaN, not
+// 0. Number(null) is 0, which used to turn an unset orbit radius into the 10 m
+// minimum.
 const optNumber = (v) => (v == null || v === '' ? NaN : Number(v));
 const num = (v, fallback) => {
   if (v == null || v === '') return fallback;
