@@ -157,11 +157,12 @@ function geometryQueueHarness({ heightM = 20_000 } = {}) {
   };
   const parts = {
     selection: { getActiveRecord: () => null },
-    model: { haversineKm: () => 1 },
+    model: { haversineKm: () => 1, projectionTilesReady: () => true },
     geometry: { updateRecordGeometry: (r) => visited.push(r.camera.id) },
     presentation: { notifyListeners: () => {} },
     rendering: { refreshCoverageStyles: () => {} },
     cards: { refreshAmbientCards: () => {} },
+    ground: { currentSurfaceRegime: () => 'terrain-globe' },
   };
   const q = createGeometryQueue({ state, services: {}, parts, source: {} });
   return { q, state, viewer, visited, onScreen, offScreen, farSide };
@@ -173,46 +174,6 @@ function drain(h) {
     h.q.processGeometryBatch();
   }
 }
-
-test('geometry drain grounds only on-screen cameras; panning in queues the rest once', () => {
-  const h = geometryQueueHarness();
-  h.q.startGeometryLoadQueue();
-  assert.deepEqual(
-    h.state._geoQueue.map((r) => r.camera.id),
-    ['on'],
-  );
-  drain(h);
-  assert.deepEqual(
-    h.visited,
-    ['on'],
-    'no ground lookups for off-screen cameras',
-  );
-
-  // Pan so the second camera is on screen.
-  h.viewer.screens.set(h.offScreen.position, { x: 300, y: 200 });
-  h.q.enqueueVisibleGeometry();
-  assert.deepEqual(
-    h.state._geoQueue.map((r) => r.camera.id),
-    ['off'],
-  );
-  drain(h);
-  assert.deepEqual(h.visited, ['on', 'off'], 'each camera grounded once');
-  h.q.enqueueVisibleGeometry();
-  assert.equal(h.state._geoQueue.length, 0, 'no repeat work on later settles');
-  assert.ok(
-    !h.visited.includes('farside'),
-    'far side of the globe never queued',
-  );
-  h.q.stopGeometryLoadQueue();
-});
-
-test('geometry drain does nothing at state/national zoom', () => {
-  const h = geometryQueueHarness({ heightM: 1_600_000 });
-  h.q.startGeometryLoadQueue();
-  drain(h);
-  assert.deepEqual(h.visited, []);
-  h.q.stopGeometryLoadQueue();
-});
 
 test('geometry drain pauses while the tab is hidden', () => {
   const h = geometryQueueHarness();
@@ -333,10 +294,11 @@ test('wiring: layer polling and panel preview consult the visibility gates', () 
     new URL('../layers/cctv/lifecycle.js', import.meta.url),
     'utf8',
   );
-  assert.match(
-    layerLifecycle,
-    /parts\.geometryQueue\.enqueueVisibleGeometry\(\)/,
-  );
+  // Fork note (2026-10-31 upstream merge a725178e): the on-screen-only ground
+  // lookups are now upstream's geometryWorkingSet / settleView (#1485); the
+  // fork's enqueueVisibleGeometry hook was retired. Only the hidden-tab pause
+  // remains in the geometry queue.
+  assert.match(layerLifecycle, /settleView\(\)/);
 });
 
 test('server upstream feeds: no demand at startup, released after the idle window', () => {
@@ -396,29 +358,6 @@ test('per-pass cap keeps the nearest on-screen cameras', () => {
   });
   assert.equal(picked.length, CCTV_GEO_REFINE_MAX_PER_PASS);
   assert.equal(picked[0].d, 1, 'nearest first');
-});
-
-test('panning away drops queued off-screen cameras before they are grounded', () => {
-  const h = geometryQueueHarness();
-  h.q.startGeometryLoadQueue();
-  assert.deepEqual(
-    h.state._geoQueue.map((r) => r.camera.id),
-    ['on'],
-  );
-  h.viewer.screens.set(h.onScreen.position, { x: -5000, y: 300 }); // pan away
-  h.q.enqueueVisibleGeometry();
-  assert.equal(h.state._geoQueue.length, 0, 'queue pruned');
-  drain(h);
-  assert.deepEqual(
-    h.visited,
-    [],
-    'no ground lookup for a camera that left the screen',
-  );
-  h.viewer.screens.set(h.onScreen.position, { x: 500, y: 300 }); // back in view
-  h.q.enqueueVisibleGeometry();
-  drain(h);
-  assert.deepEqual(h.visited, ['on'], 're-queued once it is back on screen');
-  h.q.stopGeometryLoadQueue();
 });
 
 test('live layers do not poll while the tab is hidden, and resume after', async () => {

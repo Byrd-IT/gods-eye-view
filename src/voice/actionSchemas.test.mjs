@@ -53,7 +53,9 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Drone Flight Plan voice adds the control_droneplan tool (last).
     // drawn/compare/waybackOff speaking rule, description only.
     // waybackStillOn and starting speaking rule, description only.
-    'a9fed63f89f628c37fd7594f8db34c7d227d3ebbe7696218089bf840bb313fcf',
+    // Snow leaves the set_visual_style enum.
+    // The Operator HUD layout leaves set_hud's layout enum.
+    'eba67f3877c781c894f44729701071887ef95bfe17b294f327c0944b5cd8aa3c',
   );
 });
 
@@ -182,9 +184,22 @@ test('all legacy action arguments are byte-identical after removing the delibera
     delete center.properties[axis].minimum;
     delete center.properties[axis].maximum;
   }
-  // Cyber adds one HUD layout.
+  // Cyber adds one HUD layout and Operator was retired.
   const hud = property('set_hud').layout;
-  hud.enum = hud.enum.filter((layout) => layout !== 'cyber');
+  assert.deepEqual(hud.enum, ['tactical', 'minimal', 'cyber']);
+  hud.enum = ['tactical', 'operator', 'minimal'];
+  // Snow is retired from set_visual_style; restore it to keep the legacy pin.
+  const visualStyle = legacy.find((tool) => tool.name === 'set_visual_style')
+    .parameters.properties.style;
+  assert.deepEqual(visualStyle.enum, [
+    'normal',
+    'retro',
+    'surveillance',
+    'thermal',
+    'anime',
+    'noir',
+  ]);
+  visualStyle.enum = [...visualStyle.enum, 'snow'];
   // Derived by applying the same removals to the 4b56d0e9 actionSchemas.
   assert.equal(
     createHash('sha256').update(JSON.stringify(legacy)).digest('hex'),
