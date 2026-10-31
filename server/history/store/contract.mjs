@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach, afterEach } from 'node:test';
+import { buildSpans } from './common.js';
 
 const MIN = 60_000;
 const T0 = Date.UTC(2026, 0, 1);
@@ -498,6 +499,55 @@ export function defineHistoryStoreContract(label, makeStore) {
           { from: T0, to: T0 + 2 * MIN, snapshots: 3 },
           { from: T0 + 30 * MIN, to: T0 + 31 * MIN, snapshots: 2 },
         ]);
+      });
+
+      it('splits spans on a gap strictly larger than maxGapMs and counts repeats', async () => {
+        const gap = 5 * MIN;
+        // exactly maxGapMs apart stays one span; one ms more starts another
+        const times = [0, gap, 2 * gap, 2 * gap + gap + 1, 4 * gap + 5].map(
+          (ms) => T0 + ms,
+        );
+        await store.append('firms', [
+          ...times.map((t) => obs(t, 'a', 0, 0)),
+          obs(times[1], 'b', 1, 1),
+          obs(times[1], 'c', 2, 2),
+        ]);
+        const coverage = await store.coverage('firms', { maxGapMs: gap });
+        assert.equal(coverage.count, 7);
+        assert.equal(coverage.snapshots, 5);
+        assert.deepEqual(coverage.spans, [
+          { from: times[0], to: times[2], snapshots: 3 },
+          { from: times[3], to: times[3], snapshots: 1 },
+          { from: times[4], to: times[4], snapshots: 1 },
+        ]);
+        assert.equal(coverage.firstT, times[0]);
+        assert.equal(coverage.lastT, times[4]);
+      });
+
+      it('agrees with buildSpans over many snapshots, bounded by from..to', async () => {
+        const times = [];
+        let t = T0;
+        for (let i = 0; i < 1500; i += 1) {
+          t += (i % 7 === 0 ? 11 : 1 + (i % 3)) * MIN;
+          times.push(t);
+        }
+        await store.append(
+          'firms',
+          times.map((at) => obs(at, 'x', 0, 0)),
+        );
+        const from = times[100];
+        const to = times[1400];
+        const inside = times.filter((at) => at >= from && at <= to);
+        const coverage = await store.coverage('firms', {
+          from,
+          to,
+          maxGapMs: 10 * MIN,
+        });
+        assert.deepEqual(coverage.spans, buildSpans(inside, 10 * MIN));
+        assert.equal(coverage.snapshots, inside.length);
+        assert.equal(coverage.count, inside.length);
+        assert.equal(coverage.firstT, inside[0]);
+        assert.equal(coverage.lastT, inside.at(-1));
       });
 
       it('limits itself to from..to', async () => {

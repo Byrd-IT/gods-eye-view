@@ -2,7 +2,8 @@ import {
   HistoryStoreError,
   assertFeed,
   assertTime,
-  buildSpans,
+  coverageResult,
+  coverageSql,
   decodeRow,
   normalizeBatch,
   normalizeCoverageOptions,
@@ -97,8 +98,50 @@ export function createSqlStore({
   const query = (sql, params = []) =>
     adapter.withConnection((connection) => connection.query(sql, params));
 
+  async function applySchema(connection) {
+    for (const statement of dialect.schema({ obs, feedsTable, metaTable }))
+      await connection.query(statement, []);
+    const found = await connection.query(
+      `SELECT value FROM ${metaTable} WHERE name = ${ph(1)}`,
+      ['schema_version'],
+    );
+    const version = found.rows.length ? Number(found.rows[0].value) : 0;
+    if (version > SQL_SCHEMA_VERSION) {
+      throw new HistoryStoreError(
+        'BACKEND',
+        `history database schema ${version} is newer than this build supports (${SQL_SCHEMA_VERSION})`,
+      );
+    }
+    if (version !== SQL_SCHEMA_VERSION)
+      await connection.query(dialect.upsertMeta(metaTable), [
+        'schema_version',
+        String(SQL_SCHEMA_VERSION),
+      ]);
+  }
+
   async function initialise() {
     await adapter.withConnection(async (connection) => {
+      // A transaction-scoped lock (PostgreSQL) is held by one transaction, so
+      // it also works behind PgBouncer in transaction-pooling mode, where two
+      // statements of a session may run on different server connections.
+      if (dialect.transactionLock) {
+        await connection.query(dialect.begin, []);
+        let rolledBack = true;
+        try {
+          await connection.query(dialect.lock(tablePrefix), []);
+          await applySchema(connection);
+          await connection.query('COMMIT', []);
+        } catch (error) {
+          try {
+            await connection.query('ROLLBACK', []);
+          } catch {
+            rolledBack = false;
+          }
+          if (!rolledBack) connection.discard();
+          throw error;
+        }
+        return;
+      }
       const locked = await connection.query(dialect.lock(tablePrefix), []);
       // A timed-out or failed lock request raises nothing in MySQL; without the
       // lock two starting processes could race on creating the tables.
@@ -109,24 +152,7 @@ export function createSqlStore({
         );
       let unlocked = false;
       try {
-        for (const statement of dialect.schema({ obs, feedsTable, metaTable }))
-          await connection.query(statement, []);
-        const found = await connection.query(
-          `SELECT value FROM ${metaTable} WHERE name = ${ph(1)}`,
-          ['schema_version'],
-        );
-        const version = found.rows.length ? Number(found.rows[0].value) : 0;
-        if (version > SQL_SCHEMA_VERSION) {
-          throw new HistoryStoreError(
-            'BACKEND',
-            `history database schema ${version} is newer than this build supports (${SQL_SCHEMA_VERSION})`,
-          );
-        }
-        if (version !== SQL_SCHEMA_VERSION)
-          await connection.query(dialect.upsertMeta(metaTable), [
-            'schema_version',
-            String(SQL_SCHEMA_VERSION),
-          ]);
+        await applySchema(connection);
       } finally {
         try {
           await connection.query(dialect.unlock(tablePrefix), []);
@@ -323,24 +349,19 @@ export function createSqlStore({
       assertFeed(feed);
       const { from, to, maxGapMs } = normalizeCoverageOptions(options);
       return guard('coverage', async () => {
-        const params = [feed];
+        // The gap comes first: `?` placeholders bind in text order.
+        const params = [maxGapMs, feed];
         const clause = rangeClause({ from, to }, params);
         const { rows } = await query(
-          `SELECT t, COUNT(*) AS n FROM ${obs} WHERE feed = ${ph(1)}${clause}
-           GROUP BY t ORDER BY t`,
+          coverageSql({
+            table: obs,
+            feedPlaceholder: ph(2),
+            clause,
+            gapPlaceholder: ph(1),
+          }),
           params,
         );
-        const times = rows.map((row) => Number(row.t));
-        const count = rows.reduce((sum, row) => sum + Number(row.n), 0);
-        return {
-          feed,
-          count,
-          snapshots: times.length,
-          firstT: times.length ? times[0] : null,
-          lastT: times.length ? times[times.length - 1] : null,
-          maxGapMs,
-          spans: buildSpans(times, maxGapMs),
-        };
+        return coverageResult(feed, maxGapMs, rows);
       });
     },
 

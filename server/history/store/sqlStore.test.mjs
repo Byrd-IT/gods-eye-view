@@ -262,18 +262,18 @@ describe('sql backend schema lock', () => {
     await store.close();
   });
 
-  it('destroys a PostgreSQL connection whose lock cannot be released', async () => {
-    const released = [];
+  it('takes the PostgreSQL schema lock inside one transaction, with no session lock', async () => {
+    const seen = [];
     const driver = {
       Pool: class {
         on() {}
         async connect() {
           return {
             async query(sql) {
-              if (/pg_advisory_unlock/.test(sql)) throw new Error('connection lost');
+              seen.push(sql.trim().replace(/\s+/g, ' '));
               return { rows: /SELECT value/.test(sql) ? [] : [{}], rowCount: 0 };
             },
-            release: (destroy) => released.push(destroy),
+            release() {},
           };
         }
         async end() {}
@@ -281,8 +281,41 @@ describe('sql backend schema lock', () => {
     };
     const store = createPostgresStore({ url: PG, driver });
     await store.ready();
-    assert.deepEqual(released, [true]);
+    assert.equal(seen[0], 'BEGIN');
+    assert.match(seen[1], /^SELECT pg_advisory_xact_lock\(/);
+    assert.equal(seen.at(-1), 'COMMIT');
+    assert.ok(!seen.some((sql) => /pg_advisory_(un)?lock/.test(sql)));
     await store.close();
+  });
+
+  it('rolls back, and destroys the PostgreSQL connection if it cannot, when the schema step fails', async () => {
+    for (const rollbackFails of [false, true]) {
+      const released = [];
+      const seen = [];
+      const driver = {
+        Pool: class {
+          on() {}
+          async connect() {
+            return {
+              async query(sql) {
+                seen.push(sql.trim().split(/\s+/)[0]);
+                if (/^\s*CREATE TABLE/.test(sql)) throw new Error('boom');
+                if (/ROLLBACK/.test(sql) && rollbackFails)
+                  throw new Error('connection lost');
+                return { rows: [{}], rowCount: 0 };
+              },
+              release: (destroy) => released.push(destroy),
+            };
+          }
+          async end() {}
+        },
+      };
+      const store = createPostgresStore({ url: PG, driver });
+      await assert.rejects(() => store.ready());
+      assert.ok(seen.includes('ROLLBACK'));
+      assert.deepEqual(released, [rollbackFails]);
+      await store.close();
+    }
   });
 
   it('returns a healthy PostgreSQL connection to the pool', async () => {

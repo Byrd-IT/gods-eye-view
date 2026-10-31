@@ -6,10 +6,11 @@ export const postgresDialect = Object.freeze({
   placeholder: (i) => `$${i}`,
   begin: 'BEGIN',
   insertChunk: 5000, // six parameters a row; the protocol allows 65535
+  // Transaction-scoped, so it is released by COMMIT/ROLLBACK and works behind
+  // PgBouncer in transaction-pooling mode (a session lock would not).
+  transactionLock: true,
   lock: (prefix) =>
-    `SELECT pg_advisory_lock(hashtext('gev_history_schema_${prefix}'))`,
-  unlock: (prefix) =>
-    `SELECT pg_advisory_unlock(hashtext('gev_history_schema_${prefix}'))`,
+    `SELECT pg_advisory_xact_lock(hashtext('gev_history_schema_${prefix}'))`,
   schema: ({ obs, feedsTable, metaTable }) => [
     `CREATE TABLE IF NOT EXISTS ${obs} (
        feed TEXT COLLATE "C" NOT NULL,
