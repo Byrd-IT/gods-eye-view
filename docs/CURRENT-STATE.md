@@ -1264,10 +1264,16 @@ setting and never quotes its value. Contract suite:
 `server/history/recorder/` copies what a feed's route handler already returns into
 the history store. It is **off by default**: with no `HISTORY_RECORD*` variable set
 nothing is opened or created and a tap is one function call. It is a tee, not a
-poller: it makes no request of its own, so it adds no load on a rate-limited source
-and holds no credential. NASA FIRMS fires (`/api/firms`) is the first feed; the
-USGS earthquake feed is fetched by the browser directly and has no server route to
-tee yet.
+poller for the feeds it tees: it makes no request of its own, so it adds no load on a rate-limited source
+and holds no credential. NASA FIRMS fires (`/api/firms`) is the first feed. USGS
+earthquakes are fetched by the browser directly (unchanged: no new route, no change
+to what users see), so nothing server-side sees them; the quakes feed is therefore
+**opt-in** and is the one feed with a poller: only with `HISTORY_RECORD_QUAKES=1` the
+server makes one extra request to the keyless USGS all_day feed every 5 minutes and
+records the M2.5+ events (one row per event version: key = event id, time = `updated`).
+`HISTORY_RECORD=1` alone does not start it. It writes through the same store as every
+feed (SQLite today; the store interface also names an Elasticsearch backend, which is
+a separate change).
 
 `HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`
 switches one feed on or off, and `HISTORY_MIN_INTERVAL_S[_<FEED>]` skips an unchanged

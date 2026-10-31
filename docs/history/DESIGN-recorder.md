@@ -36,8 +36,11 @@ server-side refresh loop. Each feed adapter declares one of:
 `append(feed, records)`, `recordIngest(feed, record)`, `prune(feed, olderThan)` and `close()`. Backends that cannot take `append` are refused at start-up when recording is on.
 
 ## Feeds
-FIRMS fires (`/api/firms`) is the first feed. Earthquakes are fetched by the browser directly, so they have no server route to tee; they need a cached
-server-side route first and are a separate change. Later feed groups (aircraft, vessels, cyclones, launches, satellites, transit) add one adapter each.
+FIRMS fires (`/api/firms`) is the first feed. Earthquakes are fetched by the browser directly and that stays as it is, so there is no handler to tee. The quakes
+feed is an opt-in poller (`mode: 'poller'`, `optIn: true`): only `HISTORY_RECORD_QUAKES=1` starts it, `HISTORY_RECORD=1` alone does not, and it makes one request to
+the USGS all_day feed every 5 minutes (`server/history/recorder/poller.js`), taps the parsed body like a route would, and logs a failed poll as a gap. A quakes row is
+one version of an event: key = USGS event id, time = the `updated` stamp (origin time if absent); only M2.5+ events and the fields `mag`, `magType`, `place`,
+`depthKm`, `time`, `updated`, `status` are kept. Later feed groups (aircraft, vessels, cyclones, launches, satellites, transit) add one adapter each.
 
 ## Choices made in the first implementation
 - The queue holds 200,000 rows by default (`HISTORY_RECORD_QUEUE_ROWS`, 1,000 to 2,000,000): one world-wide FIRMS refresh holds up to about 130,000 detections.

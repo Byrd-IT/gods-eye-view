@@ -7,6 +7,7 @@ import { HistoryConfigError } from './config.js';
 import { loadRecorderConfig, recordingRequested } from './recorder/config.js';
 import { ADAPTERS } from './recorder/adapters/index.js';
 import { NOOP_RECORDER, createRecorder } from './recorder/index.js';
+import { createPollers } from './recorder/poller.js';
 import {
   AVAILABLE_BACKENDS,
   applyRetention,
@@ -19,6 +20,7 @@ const RETENTION_EVERY_MS = 24 * 3600 * 1000;
 const NOOP_RUNTIME = Object.freeze({
   recorder: NOOP_RECORDER,
   store: null,
+  pollers: Object.freeze({ feeds: Object.freeze([]) }),
   start() {},
   close: async () => {},
 });
@@ -28,7 +30,7 @@ const NOOP_RUNTIME = Object.freeze({
  * recorder. Throws HistoryConfigError at boot for anything unsupported.
  *
  * @param {Record<string, string|undefined>} [env]
- * @param {{ adapters?: object, createStore?: Function, warn?: Function, clock?: () => number }} [options] test seams
+ * @param {{ adapters?: object, fetchImpl?: Function, createStore?: Function, warn?: Function, clock?: () => number }} [options] test seams
  */
 export function createHistoryRuntime(env = process.env, options = {}) {
   if (!recordingRequested(env)) return NOOP_RUNTIME;
@@ -71,6 +73,16 @@ export function createHistoryRuntime(env = process.env, options = {}) {
     clock: options.clock,
   });
 
+  // Feeds nothing else sees get a poller; it is empty unless one is switched on.
+  const pollers = createPollers({
+    recorder,
+    adapters,
+    feeds: config.active,
+    fetchImpl: options.fetchImpl,
+    warn,
+    clock: options.clock,
+  });
+
   let first = null;
   let daily = null;
   let started = false;
@@ -85,6 +97,7 @@ export function createHistoryRuntime(env = process.env, options = {}) {
     started = true;
     openStore();
     recorder.start();
+    pollers.start();
     first = setTimeout(prune, RETENTION_FIRST_RUN_MS);
     daily = setInterval(prune, RETENTION_EVERY_MS);
     first.unref?.();
@@ -95,6 +108,7 @@ export function createHistoryRuntime(env = process.env, options = {}) {
   let closing = null;
   return {
     recorder,
+    pollers,
     get store() {
       return store;
     },
@@ -103,6 +117,7 @@ export function createHistoryRuntime(env = process.env, options = {}) {
       closing ??= (async () => {
         clearTimeout(first);
         clearInterval(daily);
+        await pollers.stop();
         await recorder.close();
         await store?.close();
       })();

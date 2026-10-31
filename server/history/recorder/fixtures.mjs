@@ -63,3 +63,32 @@ export const recorderConfig = (overrides = {}) => ({
   flushMs: 5_000,
   ...overrides,
 });
+
+/** A USGS summary feature, as the all_day GeoJSON carries it. */
+export function quake(overrides = {}) {
+  const { properties, ...rest } = overrides;
+  return {
+    type: 'Feature',
+    id: 'us7000abcd',
+    geometry: { type: 'Point', coordinates: [-122.5, 37.75, 8.2] },
+    properties: {
+      mag: 4.2,
+      magType: 'ml',
+      place: '5 km W of Somewhere, CA',
+      time: T0 - 3_600_000,
+      updated: T0 - 3_000_000,
+      status: 'reviewed',
+      url: 'https://earthquake.usgs.gov/earthquakes/eventpage/us7000abcd',
+      detail:
+        'https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000abcd',
+      ...properties,
+    },
+    ...rest,
+  };
+}
+
+export const quakesPayload = (features) => ({
+  type: 'FeatureCollection',
+  metadata: { count: features.length },
+  features,
+});

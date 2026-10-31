@@ -20,6 +20,10 @@
  *   6. a synthetic secret (the FIRMS key, a bearer token, userinfo, a query
  *      key) appears in no stored byte, no warning and no response
  *   7. unsupported settings stop the boot before a file is created
+ *   8. quakes (opt-in poller): HISTORY_RECORD=1 alone makes no request to USGS;
+ *      HISTORY_RECORD_QUAKES=1 polls, stores M2.5+ events, a repeat adds no rows
+ *      but is logged, a revision adds a row, a dead upstream is logged as a gap,
+ *      and synthetic secrets in unkept fields or errors reach no stored byte or warning
  * Exits non-zero on the first failed check; the report names each check.
  */
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -238,6 +242,57 @@ async function main() {
       }
     }
     record('unsupported settings stop the boot before a file is created', errors.every((e) => e === 'HistoryConfigError') && !existsSync(bootFile), errors.join(', '));
+
+    // 8. quakes: the opt-in poller (no route, no browser change)
+    const quakeFile = path.join(directory, 'h-quakes.sqlite');
+    const feature = (id, mag, updated) => ({
+      type: 'Feature',
+      id,
+      geometry: { type: 'Point', coordinates: [-120.5, 36.5, 7.5] },
+      properties: { mag, magType: 'ml', place: `near ${id}`, time: clock - 3600_000, updated, status: 'reviewed', url: `https://${SECRETS.userinfo.slice(8)}?${SECRETS.queryKey}`, detail: SECRETS.bearer },
+    });
+    const quakeBody = (features) => JSON.stringify({ type: 'FeatureCollection', features });
+    const quakeUrls = [];
+    let quakeUpstream = () => new Response('offline', { status: 503 });
+    const quakeFetch = async (url) => {
+      quakeUrls.push(String(url));
+      return quakeUpstream();
+    };
+    const idle = createHistoryRuntime({ HISTORY_SQLITE_PATH: path.join(directory, 'h-idle.sqlite'), HISTORY_RECORD: '1' }, { fetchImpl: quakeFetch });
+    idle.start();
+    await idle.close();
+    record('quakes: HISTORY_RECORD=1 alone makes no request to USGS', quakeUrls.length === 0 && idle.pollers.feeds.length === 0, `${quakeUrls.length} requests`);
+    const quakeRuntime = createHistoryRuntime({ HISTORY_SQLITE_PATH: quakeFile, HISTORY_RECORD_QUAKES: '1' }, { fetchImpl: quakeFetch });
+    const published = clock - 3600_000;
+    quakeUpstream = () => new Response(quakeBody([feature('qa1', 4.1, published), feature('qa2', 3.3, published), feature('qa3', 1.9, published)]));
+    await quakeRuntime.pollers.pollOnce('quakes');
+    await quakeRuntime.recorder.flush();
+    const quakeCoverage = await quakeRuntime.store.coverage('quakes');
+    record('quakes: one poll stores the M2.5+ events only', quakeCoverage.count === 2 && quakeUrls.length === 1 && quakeUrls[0].startsWith('https://earthquake.usgs.gov/'), `${quakeCoverage.count} events from ${quakeUrls.length} request`);
+    clock += 301_000;
+    await quakeRuntime.pollers.pollOnce('quakes');
+    await quakeRuntime.recorder.flush();
+    record('quakes: repeat poll adds no rows but is logged', (await quakeRuntime.store.coverage('quakes')).count === 2 && (await quakeRuntime.store.ingestLog('quakes')).polls.length === 2);
+    quakeUpstream = () => new Response(quakeBody([feature('qa1', 4.4, clock - 60_000)]));
+    clock += 301_000;
+    await quakeRuntime.pollers.pollOnce('quakes');
+    await quakeRuntime.recorder.flush();
+    record('quakes: a revision adds one row', (await quakeRuntime.store.coverage('quakes')).count === 3);
+    quakeUpstream = () => {
+      throw new Error(`connect failed ${SECRETS.userinfo} ${SECRETS.bearer} ${SECRETS.queryKey}`);
+    };
+    clock += 301_000;
+    await quakeRuntime.pollers.pollOnce('quakes');
+    await quakeRuntime.recorder.flush();
+    const quakeLast = (await quakeRuntime.store.ingestLog('quakes')).polls.at(-1);
+    record('quakes: dead upstream is logged as a gap', quakeLast.ok === false);
+    await quakeRuntime.close();
+    const quakeHay = [readdirSync(directory).filter((n) => n.startsWith('h-quakes.sqlite')).map((n) => readFileSync(path.join(directory, n)).toString('latin1')).join(''), warnings.join('\n')].join('\n');
+    const quakeLeaks = Object.entries(SECRETS).filter(([name]) => name !== 'mapKey').flatMap(([name, value]) => {
+      const forms = [value, encodeURIComponent(value), Buffer.from(value).toString('base64'), value.slice(0, 10), value.slice(-8)];
+      return forms.some((form) => quakeHay.includes(form)) ? [name] : [];
+    });
+    record('quakes: synthetic secrets in unkept fields and errors appear in no stored byte or warning', quakeLeaks.length === 0 && warnings.some((w) => w.includes('history-poller')), quakeLeaks.length ? `LEAK: ${quakeLeaks.join(', ')}` : '0 hits');
   } finally {
     console.warn = originalWarn;
     Date.now = realNow;

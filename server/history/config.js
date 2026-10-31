@@ -8,6 +8,7 @@ export const HISTORY_FEEDS = Object.freeze([
   'transit',
   'bikeshare',
   'firms',
+  'quakes',
   'perimeters',
   'cyclones',
   'launches',

@@ -22,18 +22,23 @@ describe('recorder configuration', () => {
     assert.deepEqual(load({}).active, []);
   });
 
-  it('HISTORY_RECORD=1 turns on every feed that has an adapter', () => {
+  it('HISTORY_RECORD=1 turns on every feed that has an adapter, except opt-in ones', () => {
     assert.equal(recordingRequested({ HISTORY_RECORD: '1' }), true);
     assert.deepEqual(load({ HISTORY_RECORD: '1' }).active, ['firms']);
+    assert.equal(load({ HISTORY_RECORD: '1' }).feeds.quakes.record, false);
   });
 
   it('a per-feed setting overrides the global one', () => {
     assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0' }).active, []);
+    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_QUAKES: '1' }).active, ['firms', 'quakes']);
+    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0', HISTORY_RECORD_QUAKES: '0' }).active, []);
+    assert.deepEqual(load({ HISTORY_RECORD_QUAKES: '1' }).active, ['quakes']);
     assert.deepEqual(load({ HISTORY_RECORD_FIRMS: '1' }).active, ['firms']);
   });
 
   it('defaults the minimum interval to the feed cadence and honours overrides', () => {
     assert.equal(load({ HISTORY_RECORD: '1' }).feeds.firms.minIntervalMs, 1_800_000);
+    assert.equal(load({ HISTORY_RECORD: '1' }).feeds.quakes.minIntervalMs, 300_000);
     assert.equal(load({ HISTORY_RECORD: '1', HISTORY_MIN_INTERVAL_S: '60' }).feeds.firms.minIntervalMs, 60_000);
     assert.equal(
       load({ HISTORY_RECORD: '1', HISTORY_MIN_INTERVAL_S: '60', HISTORY_MIN_INTERVAL_S_FIRMS: '0' }).feeds.firms.minIntervalMs,
