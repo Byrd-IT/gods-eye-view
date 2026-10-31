@@ -207,13 +207,17 @@ export function normalizeLatestBefore(options) {
   if (options === null || typeof options !== 'object')
     throw invalid('latestBefore options must be an object');
   const t = assertTime(options.t, 't');
+  const key = options.key;
   if (
-    options.key !== undefined &&
-    (typeof options.key !== 'string' || options.key.length === 0)
+    typeof key !== 'string' ||
+    key.length === 0 ||
+    key.length > MAX_KEY_LENGTH
   ) {
-    throw invalid('key must be a non-empty string when given');
+    throw invalid(
+      `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`,
+    );
   }
-  return { t, key: options.key };
+  return { t, key };
 }
 
 /**

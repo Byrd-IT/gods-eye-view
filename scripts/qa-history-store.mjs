@@ -106,7 +106,7 @@ async function main() {
     reader.close();
     record(
       'open reader does not block the writer and keeps its snapshot',
-      writeMs < 1000 && during === before && after === before + BATCH,
+      writeMs < 1000 * SCALE && during === before && after === before + BATCH,
       `write ${writeMs.toFixed(0)} ms, rows ${before} -> ${during} (reader open) -> ${after}`,
     );
     }

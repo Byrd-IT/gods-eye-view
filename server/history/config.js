@@ -21,6 +21,12 @@ export const DEFAULT_BACKEND = 'sqlite';
 export const DEFAULT_RETENTION_DAYS = 30;
 export const MAX_RETENTION_DAYS = 3650;
 
+/** Settings with no feed suffix. A HISTORY_* name outside this list is a typo. */
+const SETTINGS = Object.freeze([
+  'HISTORY_STORE',
+  'HISTORY_RETENTION_DAYS',
+  'HISTORY_SQLITE_PATH',
+]);
 const STORE_PREFIX = 'HISTORY_STORE_';
 const RETENTION_PREFIX = 'HISTORY_RETENTION_DAYS_';
 
@@ -97,22 +103,22 @@ export function loadHistoryConfig(env = process.env, options = {}) {
 
   const known = new Set(feeds.map((feed) => feed.toUpperCase()));
   for (const name of Object.keys(env)) {
-    for (const prefix of [STORE_PREFIX, RETENTION_PREFIX]) {
-      if (
-        name.startsWith(prefix) &&
-        !known.has(name.slice(prefix.length)) &&
-        text(env, name) !== ''
-      ) {
-        // A variable name is echoed only when it looks like one, so a stray
-        // value that was exported under an odd name is never repeated back.
-        const shown = /^[A-Z0-9_]{1,64}$/.test(name)
-          ? name
-          : `${prefix}<unrecognised>`;
-        problems.push(
-          `${shown} names no known feed (known: ${feeds.join(', ')}).`,
-        );
-      }
-    }
+    if (!name.startsWith('HISTORY_') || text(env, name) === '') continue;
+    if (SETTINGS.includes(name)) continue;
+    const prefix = [STORE_PREFIX, RETENTION_PREFIX].find((candidate) =>
+      name.startsWith(candidate),
+    );
+    if (prefix && known.has(name.slice(prefix.length))) continue;
+    // A variable name is echoed only when it looks like one, so a stray value
+    // that was exported under an odd name is never repeated back.
+    const shown = /^[A-Z0-9_]{1,64}$/.test(name)
+      ? name
+      : `${prefix ?? 'HISTORY_'}<unrecognised>`;
+    problems.push(
+      prefix
+        ? `${shown} names no known feed (known: ${feeds.join(', ')}).`
+        : `${shown} is not a history setting (settings: ${SETTINGS.join(', ')}, plus ${STORE_PREFIX}<FEED> and ${RETENTION_PREFIX}<FEED>).`,
+    );
   }
 
   const perFeed = {};

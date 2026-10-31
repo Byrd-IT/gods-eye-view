@@ -66,7 +66,15 @@ export function createSqliteStore(options = {}) {
     const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
     db = new DatabaseSync(file);
     db.exec('PRAGMA busy_timeout = 5000');
-    db.exec('PRAGMA journal_mode = WAL');
+    const mode = db.prepare('PRAGMA journal_mode = WAL').get().journal_mode;
+    if (!inMemory && mode !== 'wal') {
+      // Some network and FUSE filesystems cannot do WAL; without it a reader
+      // blocks the writer, so refuse instead of degrading quietly.
+      throw new HistoryStoreError(
+        'BACKEND',
+        'the history database location does not support the WAL journal',
+      );
+    }
     db.exec('PRAGMA synchronous = NORMAL');
     const version = db.prepare('PRAGMA user_version').get().user_version;
     if (version > SQLITE_SCHEMA_VERSION) {
@@ -204,7 +212,6 @@ export function createSqliteStore(options = {}) {
     async latestBefore(feed, options) {
       assertFeed(feed);
       const { t, key } = normalizeLatestBefore(options);
-      if (key === undefined) throw invalid('key is required');
       return guard('latestBefore', () => {
         const row = sql.latest.get(feed, key, t);
         return row ? decodeRow(row) : null;

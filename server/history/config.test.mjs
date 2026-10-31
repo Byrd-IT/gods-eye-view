@@ -121,3 +121,19 @@ describe('history configuration: odd variable names', () => {
     assert.ok(!text.includes('hunter2'), text);
   });
 });
+
+describe('history configuration: misspelled settings', () => {
+  it('rejects a HISTORY_* name that is not a setting', () => {
+    const found = problems({
+      HISTORY_STORES: 'sqlite',
+      HISTORY_RETENTION_DAY: '5',
+      HISTORY_SQLITE: './x',
+    });
+    assert.equal(found.length, 3);
+    assert.match(found[0], /HISTORY_STORES is not a history setting/);
+  });
+
+  it('ignores a misspelled name that is blank and unrelated names', () => {
+    assert.doesNotThrow(() => load({ HISTORY_STORES: '', HISTORYSTORE: 'x', PATH: '/usr/bin' }));
+  });
+});

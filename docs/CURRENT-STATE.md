@@ -1254,7 +1254,7 @@ for one feed; `HISTORY_RETENTION_DAYS` and `HISTORY_RETENTION_DAYS_<FEED>` set h
 many days are kept (0 keeps everything). `createHistoryStore(env)` validates all of
 it before opening a file and throws one error listing every problem: an unknown
 backend, a backend this build does not provide, a setting for a feed that does
-not exist, or a retention that is not a whole number of days. Error text names the
+not exist, any other `HISTORY_*` name (a typo), or a retention that is not a whole number of days. Error text names the
 setting and never quotes its value. Contract suite:
 `server/history/store/historyStore.contract.test.mjs`; gate:
 `npm run qa:history-store`.
