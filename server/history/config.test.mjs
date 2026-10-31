@@ -66,7 +66,7 @@ describe('history configuration', () => {
   });
 
   it('rejects an unknown backend name', () => {
-    assert.match(problems({ HISTORY_STORE: 'postgres' })[0], /must be one of: sqlite, elasticsearch/);
+    assert.match(problems({ HISTORY_STORE: 'oracle' })[0], /must be one of: sqlite, elasticsearch, mysql, postgres, mariadb/);
   });
 
   it('rejects an override for a feed that does not exist', () => {

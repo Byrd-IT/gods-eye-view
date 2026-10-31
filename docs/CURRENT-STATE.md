@@ -1259,6 +1259,22 @@ setting and never quotes its value. Contract suite:
 `server/history/store/historyStore.contract.test.mjs`; gate:
 `npm run qa:history-store`.
 
+PostgreSQL and MySQL/MariaDB backends (`postgres`, `mysql`, and `mariadb` as another
+name for `mysql`) keep the same contract in tables `gev_history_observations`,
+`gev_history_feeds` and `gev_history_meta` (prefix `HISTORY_SQL_TABLE_PREFIX`),
+created on first use under a database lock. Select one with `HISTORY_STORE=postgres`
+or `mysql` (or per feed) and give its connection string in `HISTORY_POSTGRES_URL` or
+`HISTORY_MYSQL_URL`. The drivers `pg` and `mysql2` are optional peer dependencies,
+loaded only when a feed uses the backend; a missing driver, a missing or malformed
+connection string, or a string for a backend no feed uses stops the boot with a
+named problem. A connection string holds a password: it is never printed, never in
+an error (failures show only the driver's short error code), and not an enumerable
+field of the loaded config. `store.ready()` (and the router's) opens the connection
+and creates the tables at boot rather than at the first write. The contract suite
+runs against all three servers in CI (`GEV_TEST_POSTGRES_URL`,
+`GEV_TEST_MYSQL_URL`, `GEV_TEST_MARIADB_URL`; `GEV_REQUIRE_SQL_BACKENDS=1` makes a
+missing server a failure instead of a skip).
+
 ## UI disposal
 
 UI disposal releases the CCTV subscription, command-dock observer, legacy drag
