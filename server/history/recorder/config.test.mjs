@@ -30,6 +30,10 @@ describe('recorder configuration', () => {
   it('a heavy feed records only when it is named, never from HISTORY_RECORD=1', () => {
     assert.equal(load({ HISTORY_RECORD: '1' }).feeds.aircraft.record, false);
     assert.deepEqual(load({ HISTORY_RECORD_AIRCRAFT: '1' }).active, ['aircraft']);
+    for (const feed of ['transit', 'bikeshare']) {
+      assert.equal(load({ HISTORY_RECORD: '1' }).feeds[feed].record, false);
+      assert.deepEqual(load({ [`HISTORY_RECORD_${feed.toUpperCase()}`]: '1' }).active, [feed]);
+    }
     assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_AIRCRAFT: '1' }).active, ['aircraft', 'military', 'firms']);
   });
 
