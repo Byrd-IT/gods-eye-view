@@ -139,6 +139,11 @@ export function warningText(warning) {
         '{count} orbit rings were made wider so the viewing angle holds above the obstacle or roof',
         { count: fixed(p.count) },
       );
+    case 'orbit-surface-fallback':
+      return t(
+        '{count} orbit rings are outside the surface model (or only partly inside), so the tree / obstacle height setting of {min} is used for them',
+        { count: fixed(p.count), min: lengthText(p.minAglM) },
+      );
     case 'orbit-angle-changed':
       return t(
         '{count} orbit rings could not keep their viewing angle under the {cap} height limit',

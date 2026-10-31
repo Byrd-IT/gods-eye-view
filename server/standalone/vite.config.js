@@ -11,6 +11,7 @@ import { historyPlugins } from '../byrdit/history.js';
 import { basemapPlugins } from '../byrdit/basemap.js';
 import { waybackPlugins } from '../byrdit/wayback/index.js';
 import { planLibraryPlugins } from '../byrdit/planLibrary/api.js';
+import { surfacePlugins } from '../byrdit/surfaces/api.js';
 import { unwatchedRuntimeDirsPlugin } from './unwatched-cache.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -25,6 +26,7 @@ export default defineConfig(({ command, mode }) => {
   return createBrowserViteConfig({
     plugins: [
       ...planLibraryPlugins(),
+      ...surfacePlugins(),
       ...historyPlugins(),
       ...basemapPlugins(),
       ...waybackPlugins(),

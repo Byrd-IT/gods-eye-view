@@ -92,3 +92,37 @@ export function writeAlpha(storage, alpha) {
   }
   return writeJson(storage, ALPHA_STORAGE_KEY, out);
 }
+
+export const CLEARANCE_STORAGE_KEY = 'gev.dronePlan.clearance';
+/** Wanted distance to the surface model and the position error added to it. */
+export const DEFAULT_CLEARANCE = Object.freeze({
+  enabled: true,
+  minM: 6.096, // 20 ft
+  marginM: 3.048, // 10 ft: there is no RTK or ground control
+});
+export const CLEARANCE_MAX_M = 61;
+
+const clampM = (v, fallback) => {
+  const n = Number(v);
+  return Number.isFinite(n)
+    ? Math.min(CLEARANCE_MAX_M, Math.max(0, n))
+    : fallback;
+};
+
+/** The clearance settings: remembered values (clamped) over the defaults. */
+export function readClearance(storage) {
+  const saved = readJson(storage, CLEARANCE_STORAGE_KEY) ?? {};
+  return {
+    enabled: saved.enabled !== false,
+    minM: clampM(saved.minM, DEFAULT_CLEARANCE.minM),
+    marginM: clampM(saved.marginM, DEFAULT_CLEARANCE.marginM),
+  };
+}
+
+export function writeClearance(storage, value) {
+  return writeJson(storage, CLEARANCE_STORAGE_KEY, {
+    enabled: value?.enabled !== false,
+    minM: clampM(value?.minM, DEFAULT_CLEARANCE.minM),
+    marginM: clampM(value?.marginM, DEFAULT_CLEARANCE.marginM),
+  });
+}

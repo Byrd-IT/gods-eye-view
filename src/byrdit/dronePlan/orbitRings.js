@@ -115,6 +115,59 @@ export function angleRings({
   });
 }
 
+/**
+ * Rings like `angleRings`, but the floor can depend on the ring's radius: a
+ * wider ring crosses different trees. `floorFor(radiusM, angleDeg)` returns
+ * `{ aglM, source }`. A ring is widened (never steepened) to reach its floor,
+ * the floor is read again at the wider radius, and this repeats up to four
+ * times. Each ring carries the `floorSource` of the floor it was built with.
+ */
+export function angleRingsWithFloor({
+  aimM,
+  radiusM,
+  anglesDeg,
+  floorFor,
+  capAglM = RING_MAX_AGL_M,
+  maxRadiusM = 300,
+}) {
+  const baseR = Math.max(1, Number(radiusM) || 1);
+  const rings = [];
+  for (const angleDeg of normalizeRingAngles(anglesDeg)) {
+    let r = baseR;
+    let ring = null;
+    let source = 'tree';
+    for (let pass = 0; pass < 4; pass += 1) {
+      const floor = floorFor(r, angleDeg);
+      source = floor.source;
+      [ring] = angleRings({
+        aimM,
+        radiusM: r,
+        anglesDeg: [angleDeg],
+        floorAglM: floor.aglM,
+        capAglM,
+        maxRadiusM,
+      });
+      if (ring.radiusM <= r + 0.05) break;
+      r = ring.radiusM;
+    }
+    rings.push({
+      ...ring,
+      widened: ring.radiusM > baseR + 1e-9,
+      floorSource: source,
+    });
+  }
+  const seen = [];
+  return rings.filter((ring) => {
+    const dup = seen.some(
+      (s) =>
+        Math.abs(s.aglM - ring.aglM) < 0.05 &&
+        Math.abs(s.radiusM - ring.radiusM) < 0.05,
+    );
+    if (!dup) seen.push(ring);
+    return !dup;
+  });
+}
+
 /** Compass bearing (degrees clockwise from north) as an XY-plane angle (radians). */
 export const bearingToMath = (bearingDeg) => (90 - bearingDeg) * DEG;
 

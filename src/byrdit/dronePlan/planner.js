@@ -29,6 +29,7 @@ import {
   OUTWARD_STOP_S,
   RING_MAX_AGL_M,
   angleRings,
+  angleRingsWithFloor,
   blockedSpanDeg,
   lookAtPitchDeg,
   normalizeBlocked,
@@ -173,6 +174,9 @@ export const DEFAULT_OPTIONS = Object.freeze({
   orbitTargets: null,
   obstacles: null,
   obstaclesDropped: 0,
+  // Floors from the photogrammetry surface model (clearance.js), when the
+  // person has one for the area. Never saved: it is a live object.
+  surfaceProbe: null,
   takeoff: null,
 });
 
@@ -383,6 +387,13 @@ export function normalizeOptions(raw = {}, box = null) {
     MAX_OUTWARD_PITCH_DEG,
   );
   o.obstacles = normalizeObstacles(o.obstacles);
+  o.surfaceProbe =
+    o.surfaceProbe &&
+    o.surfaceProbe.ready === true &&
+    typeof o.surfaceProbe.ringFloor === 'function' &&
+    typeof o.surfaceProbe.pathFloor === 'function'
+      ? o.surfaceProbe
+      : null;
   o.obstaclesDropped = clamp(Math.round(num(o.obstaclesDropped, 0)), 0, 1e6);
   if (box) {
     const m = metersPerDegree((box.south + box.north) / 2);
@@ -645,18 +656,56 @@ export function planFlight(box, rawOptions = {}) {
     };
     // The rings of one stop: each has its own radius (an angle ring is
     // widened when the obstacle or roof floor forces it higher) and height.
+    const probe = options.surfaceProbe;
+    const surfaceStats = {
+      rings: 0,
+      fromSurface: 0,
+      partial: 0,
+      outside: 0,
+      paths: 0,
+      pathsFromSurface: 0,
+      pathsPartial: 0,
+      pathsOutside: 0,
+    };
     const ringsOf = (stop) => {
       const targetH = aimOf(stop);
       const radius = stop.radiusM ?? options.orbitRadiusM;
       if (angleMode) {
         const need = roofOf(stop) ? roofOf(stop) + ROOF_CLEARANCE_M : 0;
-        const rings = angleRings({
+        // The lowest height for a ring of radius r. Inside the surface model
+        // it is what the model needs (clearance to every canopy, roof and
+        // pole near the ring); outside it, the tree height setting stands in.
+        const floorFor = (r, angleDeg) => {
+          const tree = Math.max(floorAgl, need);
+          if (!probe) return { aglM: Math.min(ringCapM, tree), source: 'tree' };
+          const found = probe.ringFloor(stop.lon, stop.lat, r);
+          if (found.covered === 'full' && found.aglM != null) {
+            return {
+              aglM: Math.min(ringCapM, Math.max(found.aglM, need, MIN_AGL_M)),
+              source: 'surface',
+            };
+          }
+          if (found.covered === 'partial' && found.aglM != null) {
+            return {
+              aglM: Math.min(ringCapM, Math.max(found.aglM, tree)),
+              source: 'mixed',
+            };
+          }
+          return { aglM: Math.min(ringCapM, tree), source: 'tree' };
+        };
+        const rings = angleRingsWithFloor({
           aimM: targetH,
           radiusM: radius,
           anglesDeg: options.orbitAnglesDeg,
-          floorAglM: Math.min(ringCapM, Math.max(floorAgl, need)),
           capAglM: ringCapM,
+          floorFor,
         });
+        for (const ring of rings) {
+          surfaceStats.rings += 1;
+          if (ring.floorSource === 'surface') surfaceStats.fromSurface += 1;
+          else if (ring.floorSource === 'mixed') surfaceStats.partial += 1;
+          else if (probe) surfaceStats.outside += 1;
+        }
         return { rings, belowRoofClearance: need > ringCapM + 1e-9 };
       }
       const { heights, belowRoofClearance } = targetRingHeights(
@@ -681,12 +730,42 @@ export function planFlight(box, rawOptions = {}) {
     // Between targets the drone climbs to this and crosses at it, so it
     // always passes over the trees at obstacle + margin or higher.
     const stopRings = new Map(stops.map((stop) => [stop, ringsOf(stop)]));
+    // The lowest height of a look-at path: inside the surface model what the
+    // model needs along the whole drawn route, outside it the tree setting.
+    const pathFloors = new Map();
+    const pathFloorOf = (path) => {
+      if (!pathFloors.has(path.id)) {
+        let found = { aglM: null, covered: 'none' };
+        if (probe && Array.isArray(path.points) && path.points.length)
+          found = probe.pathFloor(path.points);
+        const source =
+          found.covered === 'full' && found.aglM != null
+            ? 'surface'
+            : found.covered === 'partial' && found.aglM != null
+              ? 'mixed'
+              : 'tree';
+        surfaceStats.paths += 1;
+        if (source === 'surface') surfaceStats.pathsFromSurface += 1;
+        else if (source === 'mixed') surfaceStats.pathsPartial += 1;
+        else if (probe) surfaceStats.pathsOutside += 1;
+        pathFloors.set(path.id, {
+          aglM:
+            source === 'surface'
+              ? Math.max(found.aglM, MIN_AGL_M)
+              : source === 'mixed'
+                ? Math.max(found.aglM, floorAgl)
+                : floorAgl,
+          source,
+        });
+      }
+      return pathFloors.get(path.id);
+    };
     const pathAgl = (path, target) =>
       round(
         clamp(
           Math.max(
             path.aglM ?? DEFAULT_LOOKAT_AGL_M,
-            floorAgl,
+            pathFloorOf(path).aglM,
             target && roofOf(target) ? roofOf(target) + ROOF_CLEARANCE_M : 0,
           ),
           MIN_AGL_M,
@@ -883,6 +962,7 @@ export function planFlight(box, rawOptions = {}) {
             angleDeg: ring.angleDeg,
             widened: ring.widened,
             capped: ring.capped || ring.steepened,
+            floorSource: ring.floorSource ?? 'tree',
             pitchDeg: pitch,
             ...orbitClearance({
               ringAglM: ringAgl,
@@ -996,6 +1076,7 @@ export function planFlight(box, rawOptions = {}) {
         label: path.label,
         targetId: target.id,
         aglM: agl,
+        floorSource: pathFloorOf(path).source,
         waypointCount: wps.length,
         lengthM: round(length, 1),
         firstLeg,
@@ -1019,6 +1100,15 @@ export function planFlight(box, rawOptions = {}) {
         };
       }
       return { error: 'empty', message: 'Box is too small to plan a flight' };
+    }
+    if (probe && surfaceStats.outside + surfaceStats.partial > 0) {
+      notes.push({
+        code: 'orbit-surface-fallback',
+        params: {
+          count: surfaceStats.outside + surfaceStats.partial,
+          minAglM: Math.round(floorAgl),
+        },
+      });
     }
     if (widenedCount) {
       notes.push({
@@ -1048,6 +1138,7 @@ export function planFlight(box, rawOptions = {}) {
       rings: ringInfo,
       targets: targetInfo,
       lookAt: lookAtInfo,
+      surface: probe ? { ...surfaceStats, requiredM: probe.requiredM } : null,
     };
   } else {
     const passes =
@@ -1172,7 +1263,7 @@ export function planFlight(box, rawOptions = {}) {
   }
 
   return {
-    options,
+    options: { ...options, surfaceProbe: null },
     preset,
     box,
     center,

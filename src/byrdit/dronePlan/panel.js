@@ -17,6 +17,12 @@ import { assembleAreaPlan, distanceToAreasM, planAreas } from './areas.js';
 import { initPolygonTool } from './polygonTool.js';
 import { validateDroneBox } from './limits.js';
 import { MAX_LISTED, checkConflicts } from './conflicts.js';
+import {
+  checkClearance,
+  createSurfaceModel,
+  createSurfaceProbe,
+} from './clearance.js';
+import { createSurfaceClient, surfaceTouches } from './surfaceClient.js';
 import { initPointTool } from './pointTool.js';
 import {
   DEFAULT_OUTWARD_PITCH_DEG,
@@ -97,6 +103,9 @@ import { ALPHA_RANGE, DEFAULT_ALPHA, clampAlpha } from './checkLayer.js';
 import {
   STEP_KEYS,
   readAlpha,
+  readClearance,
+  writeClearance,
+  CLEARANCE_MAX_M,
   readStepsOpen,
   writeAlpha,
   writeStepsOpen,
@@ -111,6 +120,8 @@ export const PATH_POINTER_OWNER = 'drone-plan-lookat-path';
 export const OBSTACLE_ADD_POINTER_OWNER = 'drone-plan-obstacle-add';
 const BOX_OWNER = 'drone-plan-box';
 const REPLAN_DELAY_MS = 160;
+/** How far past an area's box a surface model still matters, metres. */
+const SURFACE_REACH_M = 400;
 const MAX_TERRAIN_CACHE = 30000;
 const CHECK_SLIDER_DELAY_MS = 150;
 
@@ -176,6 +187,7 @@ export function initDronePlan({
   libraryClient,
   getBuildingFootprints = null,
   fetchObstacles = null,
+  surfaceClient = createSurfaceClient(),
   unitStorage = browserStorage(doc?.defaultView ?? globalThis),
   overlay = {
     set: (entries) => setOverlayEntries(OBSTACLE_OVERLAY_SOURCE, entries),
@@ -246,6 +258,17 @@ export function initDronePlan({
       // How see-through each layer is (0 = invisible): the sliders.
       alpha: readAlpha(unitStorage),
     },
+    // The photogrammetry surface model used as an obstacle surface. Warn only:
+    // nothing it finds ever moves the route.
+    surface: {
+      ...readClearance(unitStorage),
+      // 'idle' | 'loading' | 'ready' | 'none' | 'signin' | 'error'
+      status: 'idle',
+      key: null,
+      headers: [],
+      model: null,
+      ids: [],
+    },
     suiteBusy: false,
     pathDraft: null,
     error: null,
@@ -265,6 +288,7 @@ export function initDronePlan({
   let reading = false;
   let timer = null;
   let destroyed = false;
+  let surfaceLoading = false;
 
   // Per-obstacle heights: first guesses from open data, then the operator's
   // own numbers (typed or dragged). Estimates only, never surveyed.
@@ -1076,6 +1100,82 @@ export function initDronePlan({
     return Boolean(targetTool?.start());
   }
 
+  // ------------------------------------------------------ surface model --
+  /** Lon/lat box around every area (and the takeoff), or null. */
+  function workBox() {
+    let west = Infinity;
+    let south = Infinity;
+    let east = -Infinity;
+    let north = -Infinity;
+    const add = (lon, lat) => {
+      west = Math.min(west, lon);
+      east = Math.max(east, lon);
+      south = Math.min(south, lat);
+      north = Math.max(north, lat);
+    };
+    for (const area of state.areas) {
+      if (area.kind === 'polygon') {
+        for (const p of area.ring ?? []) add(p.lon, p.lat);
+      } else if (area.box) {
+        add(area.box.west, area.box.south);
+        add(area.box.east, area.box.north);
+      }
+    }
+    return Number.isFinite(west) ? { west, south, east, north } : null;
+  }
+
+  /**
+   * Find the surface models that touch the working area and load them. The
+   * list is read once per page; a model is downloaded once per page. Failure
+   * is never fatal: no model means the tree height setting is used.
+   */
+  async function ensureSurfaces() {
+    const s = state.surface;
+    const box = workBox();
+    if (!box) return false;
+    if (s.status === 'idle' || s.status === 'error') {
+      s.status = 'loading';
+      try {
+        s.headers = await surfaceClient.list();
+      } catch (error) {
+        s.headers = [];
+        s.status = error?.message === 'no-identity' ? 'signin' : 'error';
+      }
+      if (destroyed) return false;
+      if (s.status === 'loading') s.status = 'none';
+    }
+    const wanted = s.headers
+      .filter((h) => surfaceTouches(h, box, SURFACE_REACH_M))
+      .map((h) => h.id)
+      .sort();
+    const key = wanted.join('|');
+    if (key === s.key) return false;
+    const grids = [];
+    for (const id of wanted) {
+      try {
+        grids.push(await surfaceClient.load(id));
+      } catch {
+        s.status = 'error';
+      }
+    }
+    if (destroyed) return false;
+    const hadModel = Boolean(s.model);
+    s.key = key;
+    s.model = grids.length ? createSurfaceModel(grids) : null;
+    s.ids = grids.map((g) => g.id);
+    if (grids.length) s.status = 'ready';
+    else if (s.status !== 'error' && s.status !== 'signin') s.status = 'none';
+    state.conflictCache = null;
+    return hadModel || grids.length > 0;
+  }
+
+  /** What the planner asks for heights, or null when the model is off. */
+  function surfaceProbe() {
+    const s = state.surface;
+    if (!s.enabled || !s.model) return null;
+    return createSurfaceProbe(s.model, s.minM + s.marginM);
+  }
+
   function schedule(delay = REPLAN_DELAY_MS) {
     // The plan on screen is out of date from this moment: no file may come
     // from it while the new one is waiting to be built.
@@ -1149,10 +1249,24 @@ export function initDronePlan({
     state.ack = false;
     syncOrbitTargets();
     syncObstacles();
+    // The surface models load beside the plan, never in front of it: when
+    // they arrive and change what is covered, the plan is made again.
+    if (!surfaceLoading) {
+      surfaceLoading = true;
+      ensureSurfaces()
+        .then((changed) => {
+          if (changed && !destroyed) schedule(0);
+        })
+        .catch(() => {})
+        .finally(() => {
+          surfaceLoading = false;
+        });
+    }
     const options = {
       ...state.options,
       takeoff: state.takeoff,
       jobGrouping: state.jobGrouping,
+      surfaceProbe: surfaceProbe(),
     };
     const plan = planAreas(state.areas, options);
     if (plan.error) {
@@ -1600,6 +1714,52 @@ export function initDronePlan({
         'Data: tree canopy height by Meta and WRI (CC BY 4.0), towers from the FAA Digital Obstacle File, buildings from OpenStreetMap contributors.',
       ),
     });
+    // Surface model: clearance to the canopy and roofs seen by the photos.
+    ui.surfaceBox = el(doc, 'div', host, {
+      cls: 'gev-dp-targets gev-dp-surface',
+      attrs: { 'data-role': 'surface' },
+    });
+    ui.surfaceStatus = el(doc, 'p', ui.surfaceBox, {
+      cls: 'gev-dp-note gev-dp-surface-status',
+      attrs: { 'data-role': 'surface-status', 'aria-live': 'polite' },
+    });
+    ui.surfaceUse = select(
+      [
+        ['on', t('On')],
+        ['off', t('Off')],
+      ],
+      t('Check the route against the surface model'),
+    );
+    ui.surfaceUseRow = field(t('Surface model check'), ui.surfaceUse, {
+      value: false,
+    }).row;
+    ui.surfaceUseRow.setAttribute?.('data-role', 'surface-use');
+    ui.clearance = lslider(t('Minimum clearance'), {
+      minM: 0,
+      maxM: CLEARANCE_MAX_M,
+      stepM: 1,
+      stepFt: 5,
+    });
+    ({ row: ui.clearanceRow, out: ui.clearanceOut } = field(
+      t('Minimum clearance'),
+      ui.clearance,
+    ));
+    ui.clearanceRow.setAttribute?.('data-role', 'clearance-min');
+    ui.margin = lslider(t('Position error margin'), {
+      minM: 0,
+      maxM: CLEARANCE_MAX_M,
+      stepM: 1,
+      stepFt: 5,
+    });
+    ({ row: ui.marginRow, out: ui.marginOut } = field(
+      t('Position error margin'),
+      ui.margin,
+    ));
+    ui.marginRow.setAttribute?.('data-role', 'clearance-margin');
+    ui.surfaceDisclaimer = el(doc, 'p', host, {
+      cls: 'gev-dp-note gev-dp-surface-disclaimer',
+      attrs: { 'data-role': 'surface-disclaimer' },
+    });
     ui.conflictBox = el(doc, 'div', host, {
       cls: 'gev-dp-targets gev-dp-conflicts',
       attrs: { 'data-role': 'conflicts' },
@@ -2008,6 +2168,22 @@ export function initDronePlan({
       ui.obstacle,
       () => (o.obstacleHeightM = lengthToM(ui.obstacle.value)),
     );
+    const saveClearance = () => writeClearance(unitStorage, state.surface);
+    onInput(ui.clearance, () => {
+      state.surface.minM = lengthToM(ui.clearance.value);
+      saveClearance();
+    });
+    onInput(ui.margin, () => {
+      state.surface.marginM = lengthToM(ui.margin.value);
+      saveClearance();
+    });
+    ui.surfaceUse.addEventListener('change', () => {
+      state.surface.enabled = ui.surfaceUse.value !== 'off';
+      saveClearance();
+      state.conflictCache = null;
+      syncControls();
+      schedule();
+    });
     ui.targetRecommend.addEventListener('click', () => recommendTargets());
     ui.obstacleRefresh.addEventListener('click', () =>
       syncObstacles({ force: true }),
@@ -2378,6 +2554,45 @@ export function initDronePlan({
     ui.targetHeightOut.textContent = lengthText(o.orbitTargetHeightM);
     ui.obstacle.value = lengthField(o.obstacleHeightM);
     ui.obstacleOut.textContent = lengthText(o.obstacleHeightM);
+    {
+      const s = state.surface;
+      ui.clearance.value = lengthField(s.minM);
+      ui.clearanceOut.textContent = lengthText(s.minM);
+      ui.margin.value = lengthField(s.marginM);
+      ui.marginOut.textContent = lengthText(s.marginM);
+      ui.surfaceUse.value = s.enabled ? 'on' : 'off';
+      const have = s.status === 'ready';
+      ui.surfaceUseRow.hidden = !have;
+      ui.clearanceRow.hidden = !have;
+      ui.marginRow.hidden = !have;
+      ui.surfaceStatus.textContent =
+        s.status === 'ready'
+          ? t(
+              '{n} surface model(s) cover this area: {names}. Inside them, orbit heights and the clearance check use the model; outside, the tree / obstacle height setting is used.',
+              {
+                n: num(s.ids.length),
+                names: s.headers
+                  .filter((h) => s.ids.includes(h.id))
+                  .map((h) => h.name)
+                  .join(', '),
+              },
+            )
+          : s.status === 'signin'
+            ? t('Sign in through byrd-it.com to use surface models.')
+            : s.status === 'error'
+              ? t(
+                  'The surface models could not be read. The tree / obstacle height setting is used.',
+                )
+              : s.status === 'loading'
+                ? t('Looking for a surface model of this area')
+                : t(
+                    'No surface model covers this area, so the tree / obstacle height setting is used.',
+                  );
+      ui.surfaceDisclaimer.hidden = !have;
+      ui.surfaceDisclaimer.textContent = t(
+        'The surface model is built from photos. It does not reliably show bare branches, single limbs, power lines or guy wires, and trees change with the season. Keep visual line of sight and fly with margin. Clearance is a warning only: your route is never changed.',
+      );
+    }
     ui.photoMode.value = o.photoMode;
     ui.speed.value = String(Math.round(speedFromMs(o.speedMs) * 10) / 10);
     ui.speedOut.textContent = speedText(o.speedMs);
@@ -2625,10 +2840,118 @@ export function initDronePlan({
   }
 
   /** Warn-only check of the planned route against buildings and obstacles. */
+  /** Clearance of the route to the surface model: warn only. */
+  function renderClearance(plan) {
+    const s = state.surface;
+    const model = s.enabled ? s.model : null;
+    if (!model) {
+      state.clearance = null;
+      preview.setClearance?.([]);
+      return;
+    }
+    const key = JSON.stringify([s.ids, s.minM, s.marginM]);
+    const cached = state.clearanceCache;
+    let found;
+    if (cached && cached.plan === plan && cached.key === key) {
+      found = cached.found;
+    } else {
+      found = checkClearance({
+        legs: plan.legs,
+        model,
+        minClearanceM: s.minM,
+        errorMarginM: s.marginM,
+      });
+      state.clearanceCache = { plan, key, found };
+    }
+    state.clearance = found;
+    preview.setClearance?.(found.spans);
+    const box = el(doc, 'div', ui.conflictBox, {
+      attrs: { 'data-role': 'clearance' },
+    });
+    const total = found.covered + found.outside;
+    if (!found.covered) {
+      el(doc, 'p', box, {
+        cls: 'gev-dp-note',
+        attrs: { 'data-role': 'clearance-outside' },
+        text: t(
+          'The route is outside the surface model, so its clearance is not checked. The tree / obstacle height setting is used.',
+        ),
+      });
+      return;
+    }
+    if (!found.spanCount) {
+      el(doc, 'p', box, {
+        cls: 'gev-dp-note',
+        attrs: { 'data-role': 'clearance-none' },
+        text: t(
+          'Surface model: every checked point keeps at least {need} from the canopy and roofs it shows ({min} clearance plus {margin} position error).',
+          {
+            need: lengthText(found.requiredM),
+            min: lengthText(s.minM),
+            margin: lengthText(s.marginM),
+          },
+        ),
+      });
+    } else {
+      el(doc, 'p', box, {
+        cls: 'gev-dp-warning',
+        attrs: { 'data-role': 'clearance-summary' },
+        text: t(
+          'Too close to the surface model in {n} places. The closest point is {worst} away; {need} is wanted ({min} clearance plus {margin} position error). The route is not changed: raise it, move it or accept the risk. Red on the globe.',
+          {
+            n: num(found.spanCount),
+            worst: lengthText(found.worst.distM, 1),
+            need: lengthText(found.requiredM),
+            min: lengthText(s.minM),
+            margin: lengthText(s.marginM),
+          },
+        ),
+      });
+      for (const span of found.spans.slice(0, MAX_LISTED)) {
+        el(doc, 'p', box, {
+          cls: 'gev-dp-warning',
+          attrs: { 'data-role': 'clearance-span' },
+          text: t(
+            'Clearance: {length} of the route comes within {dist} of the canopy or a roof (it is {top} high there, the drone {agl} above ground)',
+            {
+              length: lengthText(Math.max(span.lengthM, 1)),
+              dist: lengthText(span.minDistM, 1),
+              top: lengthText(span.topAglM ?? 0),
+              agl: lengthText(span.minAt.aglM),
+            },
+          ),
+        });
+      }
+      if (found.spanCount > MAX_LISTED) {
+        el(doc, 'p', box, {
+          cls: 'gev-dp-note',
+          text: t('And {n} more places', {
+            n: num(found.spanCount - MAX_LISTED),
+          }),
+        });
+      }
+    }
+    if (found.outside > 0 && total > 0) {
+      el(doc, 'p', box, {
+        cls: 'gev-dp-note',
+        attrs: { 'data-role': 'clearance-partial' },
+        text: t(
+          '{n}% of the route is outside the surface model and is not checked.',
+          { n: num(Math.round((100 * found.outside) / total)) },
+        ),
+      });
+    }
+  }
+
   function renderConflicts() {
     ui.conflictBox.replaceChildren();
     const plan = state.result?.plan;
-    if (!plan?.legs?.length) return;
+    if (!plan?.legs?.length) {
+      state.clearance = null;
+      preview.setClearance?.([]);
+      return;
+    }
+    renderClearance(plan);
     const footprints = footprintCache.get(areasKey()) ?? [];
     const obstacles = obstacleStore.list();
     // The check is not cheap: keep the answer until the plan, the footprints,
@@ -2939,12 +3262,15 @@ export function initDronePlan({
     }
     cachedProvider = provider;
     const passes = [];
+    await ensureSurfaces();
+    const probe = surfaceProbe();
     try {
       for (const pass of suiteOptions(state.options)) {
         const plan = planAreas(state.areas, {
           ...pass.options,
           takeoff: state.takeoff,
           jobGrouping: state.jobGrouping,
+          surfaceProbe: probe,
         });
         if (plan.error) {
           passes.push({

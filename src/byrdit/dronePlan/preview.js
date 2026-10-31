@@ -85,6 +85,7 @@ export function createDronePlanPreview({
   let planEntities = [];
   let suiteEntities = [];
   let importEntities = [];
+  let clearanceEntities = [];
   let suitePasses = null;
   const drop = (list) => {
     for (const entity of list) dataSource.entities.remove(entity);
@@ -505,6 +506,56 @@ export function createDronePlanPreview({
     setObstacleGround(m) {
       obstacles.setGroundHint(m);
     },
+    /**
+     * Flag the stretches that come too close to the surface model: a red line
+     * on the ground under each stretch and a red marker at its closest point.
+     * `spans` come from checkClearance(); an empty list clears the flags.
+     */
+    setClearance(spans) {
+      clearanceEntities = drop(clearanceEntities);
+      for (const s of Array.isArray(spans) ? spans.slice(0, 200) : []) {
+        const a = s.start;
+        const b = s.end;
+        if (!a || !b) continue;
+        if (a.lon !== b.lon || a.lat !== b.lat) {
+          clearanceEntities.push(
+            dataSource.entities.add({
+              name: 'Too close to the surface model',
+              polyline: {
+                positions: cesium.Cartesian3.fromDegreesArray([
+                  a.lon,
+                  a.lat,
+                  b.lon,
+                  b.lat,
+                ]),
+                width: 8,
+                ...ground,
+                material: color('#ff2d2d', 0.9),
+              },
+            }),
+          );
+        }
+        const m = s.minAt ?? a;
+        clearanceEntities.push(
+          dataSource.entities.add({
+            name: 'Closest point to the surface model',
+            position: cesium.Cartesian3.fromDegrees(m.lon, m.lat),
+            point: {
+              pixelSize: 11,
+              color: color('#ff2d2d'),
+              outlineColor: color('#ffffff', 0.9),
+              outlineWidth: 2,
+              heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: 1500,
+            },
+          }),
+        );
+      }
+      requestRender();
+    },
+    clearanceCount() {
+      return clearanceEntities.length;
+    },
     obstacleCount() {
       return obstacles.count();
     },
@@ -528,6 +579,7 @@ export function createDronePlanPreview({
       planEntities = drop(planEntities);
       suiteEntities = drop(suiteEntities);
       importEntities = drop(importEntities);
+      clearanceEntities = drop(clearanceEntities);
       suitePasses = null;
       requestRender();
     },

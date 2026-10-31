@@ -21,6 +21,7 @@ import { createDronePlanVoice } from './dronePlanVoice.js';
 import { metersPerDegree } from './geo.js';
 import { MAX_OBSTACLES } from './obstacles.js';
 import { readZip } from './zip.js';
+import { makeGrid } from './surfaceFixtures.mjs';
 
 // ---------------------------------------------------------------- DOM stub --
 class El {
@@ -233,6 +234,7 @@ const memoryStorage = (initial = {}) => {
 function setup({
   sample = async (cartos) => flat(cartos),
   libraryClient,
+  surfaceClient,
   storage = memoryStorage({ 'gev.dronePlan.units': 'm' }),
 } = {}) {
   resetPointerOwnership();
@@ -245,6 +247,7 @@ function setup({
     document: dom.doc,
     downloadFile: (name, bytes, type) => downloads.push({ name, bytes, type }),
     libraryClient,
+    ...(surfaceClient ? { surfaceClient } : {}),
     unitStorage: storage,
   });
   const find = (pred) => all(dom.body, pred);
@@ -2524,4 +2527,117 @@ test('conflicts: the panel says what the check cannot see, and warns about a tal
   assert.match(roles('conflict-disclaimer')[0].textContent, /does NOT see trees, power lines or towers/);
   assert.match(roles('conflict-disclaimer')[0].textContent, /never changes your route/);
   handle.destroy();
+});
+
+// -------------------------------------------------------- surface model --
+const surfaceStub = ({ tall = 35, fail = false } = {}) => {
+  const grid = makeGrid({
+    id: 'ranch',
+    size: 600,
+    origin: { lon: -97.77, lat: 30.27 },
+    topAt: () => tall,
+  });
+  return {
+    grid,
+    list: async () => {
+      if (fail) throw new Error('no-identity');
+      return [{ ...grid.meta, bytes: 1 }];
+    },
+    load: async () => grid,
+  };
+};
+const settleLoad = () => new Promise((r) => setTimeout(r, 30));
+const textOf = (w, role) =>
+  w
+    .find((n) => n.getAttribute?.('data-role') === role)
+    .map((n) => n.textContent)
+    .join(' | ');
+
+test('surface model: a route too close to the canopy is flagged, with the disclaimer, and never rerouted', async () => {
+  const w = setup({ surfaceClient: surfaceStub() });
+  w.handle.getState().options.aglM = 30;
+  w.handle.setBox(boxM(200, 150));
+  await w.handle.replan();
+  await settleLoad();
+  await w.handle.replan();
+  const s = w.handle.getState();
+  assert.equal(s.surface.status, 'ready');
+  assert.deepEqual(s.surface.ids, ['ranch']);
+  assert.ok(s.clearance.spanCount > 0, 'the grid at 30 m is within reach of 35 m trees');
+  assert.equal(s.clearance.requiredM, 9.144);
+  assert.match(textOf(w, 'clearance-summary'), /Too close to the surface model/);
+  assert.ok(w.find((n) => n.getAttribute?.('data-role') === 'clearance-span').length > 0);
+  assert.match(textOf(w, 'surface-disclaimer'), /bare branches, single limbs, power lines or guy wires/);
+  assert.match(textOf(w, 'surface-disclaimer'), /trees change with the season/);
+  assert.match(textOf(w, 'surface-disclaimer'), /never changed/);
+  // The heights flown are the ones asked for: a warning never moves the route.
+  const flown = w.handle.getResult().plan.legs.flatMap((l) => l.waypoints.map((x) => x.aglM));
+  assert.ok(flown.every((a) => Math.abs(a - 30) < 0.06), 'no automatic reroute');
+  // The globe got red flags.
+  assert.ok(w.viewer.dataSources.sources[0].entities.values.some((e) => e.name === 'Too close to the surface model' || e.name === 'Closest point to the surface model'));
+  // Higher and it passes.
+  s.options.aglM = 60;
+  await w.handle.replan();
+  assert.equal(w.handle.getState().clearance.spanCount, 0);
+  assert.match(textOf(w, 'clearance-none'), /keeps at least/);
+  // Switched off: no check, no flags.
+  w.handle.getState().surface.enabled = false;
+  w.handle.getState().options.aglM = 30;
+  await w.handle.replan();
+  assert.equal(w.handle.getState().clearance, null);
+  w.handle.destroy();
+});
+
+test('surface model: the settings are remembered and clamped, defaults are 20 ft + 10 ft', async () => {
+  const storage = memoryStorage({ 'gev.dronePlan.units': 'ft' });
+  const w = setup({ surfaceClient: surfaceStub(), storage });
+  const s = w.handle.getState().surface;
+  assert.equal(s.minM, 6.096);
+  assert.equal(s.marginM, 3.048);
+  w.handle.destroy();
+  const store2 = memoryStorage({
+    'gev.dronePlan.clearance': JSON.stringify({ enabled: false, minM: 9999, marginM: -5 }),
+  });
+  const w2 = setup({ surfaceClient: surfaceStub(), storage: store2 });
+  const s2 = w2.handle.getState().surface;
+  assert.equal(s2.enabled, false);
+  assert.equal(s2.minM, 61);
+  assert.equal(s2.marginM, 0);
+  w2.handle.destroy();
+});
+
+test('surface model: no model, no sign-in or a failed read falls back to the tree height and says so', async () => {
+  for (const client of [
+    { list: async () => [], load: async () => null },
+    surfaceStub({ fail: true }),
+  ]) {
+    const w = setup({ surfaceClient: client });
+    w.handle.setBox(boxM(200, 150));
+    await w.handle.replan();
+    await settleLoad();
+    await w.handle.replan();
+    const s = w.handle.getState();
+    assert.equal(s.clearance, null);
+    assert.ok(['none', 'signin'].includes(s.surface.status));
+    assert.ok(s.result.plan.legs.length > 0, 'the plan is made without it');
+    assert.match(textOf(w, 'surface-status'), /tree \/ obstacle height setting|Sign in/);
+    w.handle.destroy();
+  }
+});
+
+test('surface model: an orbit plan inside the model takes its ring heights from it', async () => {
+  const w = setup({ surfaceClient: surfaceStub({ tall: 40 }) });
+  const o = w.handle.getState().options;
+  o.pattern = 'orbit';
+  o.obstacleHeightM = 15;
+  w.handle.setBox(boxM(200, 150));
+  await w.handle.replan();
+  await settleLoad();
+  await w.handle.replan();
+  const p = w.handle.getResult().plan;
+  assert.ok(p.orbit.surface && p.orbit.surface.fromSurface > 0);
+  assert.ok(Math.min(...p.legs.filter((l) => l.kind === 'orbit').flatMap((l) => l.waypoints.map((x) => x.aglM))) >= 40);
+  // The probe is a live object and never reaches the saved options.
+  assert.equal(JSON.stringify(w.handle.getState().options).includes('ringFloor'), false);
+  w.handle.destroy();
 });
