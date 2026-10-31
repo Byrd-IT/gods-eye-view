@@ -130,15 +130,14 @@ for (const backend of BACKENDS) {
         );
         assert.equal((await stores[0].coverage('aircraft')).count, 4);
       } finally {
-        const last = stores.pop();
         for (const store of stores) await store.close();
-        last.prefix = prefix;
-        const close = last.close;
-        await close();
         const raw = await backend.raw(url);
-        for (const table of ['observations', 'feeds', 'meta'])
-          await raw.run(`DROP TABLE IF EXISTS ${prefix}_${table}`);
-        await raw.close();
+        try {
+          for (const table of ['observations', 'feeds', 'meta'])
+            await raw.run(`DROP TABLE IF EXISTS ${prefix}_${table}`);
+        } finally {
+          await raw.close();
+        }
       }
     });
 

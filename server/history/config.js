@@ -217,6 +217,13 @@ export function loadHistoryConfig(env = process.env, options = {}) {
   }
 
   const tablePrefix = text(env, 'HISTORY_SQL_TABLE_PREFIX');
+  const usesSql = Object.values(perFeed).some((feed) =>
+    Object.hasOwn(URL_SETTINGS, feed.store),
+  );
+  if (tablePrefix !== '' && !usesSql)
+    warnings.push(
+      'HISTORY_SQL_TABLE_PREFIX is set but no feed uses a SQL backend, so it is ignored.',
+    );
   if (tablePrefix !== '' && !TABLE_PREFIX_PATTERN.test(tablePrefix))
     problems.push(
       'HISTORY_SQL_TABLE_PREFIX must be lowercase letters, digits and _ (starts with a letter; at most 24 characters).',

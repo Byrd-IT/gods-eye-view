@@ -29,13 +29,13 @@ export function driverErrorCode(error) {
       : 'unknown';
 }
 
-/** Split rows into statements of at most `max` rows and about 4 million characters of payload (UTF-16 units, not bytes). */
+/** Split rows into statements of at most `max` rows and about 4 MiB of payload. */
 function* chunksOf(rows, max) {
   let chunk = [];
   let bytes = 0;
   for (const row of rows) {
     chunk.push(row);
-    bytes += row.json.length + row.key.length + 64;
+    bytes += Buffer.byteLength(row.json) + Buffer.byteLength(row.key) + 64;
     if (chunk.length >= max || bytes >= 4 * 1024 * 1024) {
       yield chunk;
       chunk = [];

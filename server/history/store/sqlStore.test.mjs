@@ -361,3 +361,37 @@ describe('sql backend settings: sockets', () => {
     assert.equal(config.feeds.aircraft.store, 'postgres');
   });
 });
+
+describe('sql backend small checks', () => {
+  it('warns when a table prefix is set but no feed uses a SQL backend', () => {
+    const config = loadHistoryConfig({ HISTORY_SQL_TABLE_PREFIX: 'gev2' }, { available });
+    assert.match(config.warnings[0], /HISTORY_SQL_TABLE_PREFIX is set but no feed uses a SQL backend/);
+    const used = loadHistoryConfig(
+      { HISTORY_STORE: 'postgres', HISTORY_POSTGRES_URL: PG, HISTORY_SQL_TABLE_PREFIX: 'gev2' },
+      { available },
+    );
+    assert.deepEqual([...used.warnings], []);
+  });
+
+  it('keeps an error event on a checked-out PostgreSQL client from crashing the process', async () => {
+    const { EventEmitter } = await import('node:events');
+    const driver = {
+      Pool: class {
+        on() {}
+        async connect() {
+          const client = new EventEmitter();
+          client.query = async (sql) => {
+            client.emit('error', new Error(`socket reset ${PG}`));
+            return { rows: /SELECT value/.test(sql) ? [] : [{}], rowCount: 0 };
+          };
+          client.release = () => {};
+          return client;
+        }
+        async end() {}
+      },
+    };
+    const store = createPostgresStore({ url: PG, driver });
+    await store.ready();
+    await store.close();
+  });
+});

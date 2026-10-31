@@ -79,6 +79,12 @@ export function createPostgresStore({
     async withConnection(fn) {
       const client = await pool.connect();
       let discarded = false;
+      // The pool listens to idle clients only; an error on a checked-out client
+      // with no listener would crash the process. The failing query reports it.
+      const ignore = () => {
+        discarded = true;
+      };
+      client.on?.('error', ignore);
       try {
         return await fn({
           discard: () => {
@@ -90,6 +96,7 @@ export function createPostgresStore({
           },
         });
       } finally {
+        client.removeListener?.('error', ignore);
         client.release(discarded);
       }
     },
