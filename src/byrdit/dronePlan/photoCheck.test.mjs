@@ -12,7 +12,7 @@ import {
   reportCsv,
 } from './photoCheck.js';
 
-import { jpeg, tiff, u32, xmpText } from './photoFixtures.mjs';
+import { jpeg, tiff, u32, xmpText } from './fixtures/photoFixtures.mjs';
 
 const HERE = { lat: 33.1, lon: -96.2 };
 
@@ -455,4 +455,43 @@ test('two different photos at one place with no time are not merged as copies', 
   const b = photoAt(0, 0, 0, { timeMs: null, timeText: '', name: 'b.jpg' });
   assert.equal(dedupePhotos([a, b]).photos.length, 2);
   assert.equal(dedupePhotos([a, { ...a }]).photos.length, 1);
+});
+
+// ------------------------------------------------- review follow-up P3s --
+test('one photo covers one planned point: a photo between two points covers only the closer', () => {
+  const planned = [plannedAt(0, 0), plannedAt(8, 0)];
+  const a = analyzePhotos([photoAt(3, 0, 0)], planned, { matchM: 10 });
+  assert.equal(a.summary.coveredCount, 1);
+  assert.equal(a.summary.missingCount, 1);
+  assert.equal(a.planned[0].covered, true);
+  assert.equal(a.planned[1].covered, false);
+  // two photos, two points: both covered, each by its own photo
+  const b = analyzePhotos([photoAt(1, 0, 0), photoAt(9, 0, 1)], planned, { matchM: 10 });
+  assert.equal(b.summary.coveredCount, 2);
+  assert.notEqual(b.planned[0].photo, b.planned[1].photo);
+});
+
+test('mixed EXIF-local and XMP-UTC times: only the larger group keeps its times', () => {
+  const photos = [
+    photoAt(0, 0, 0, { timeBasis: 'utc' }),
+    photoAt(10, 0, 1, { timeBasis: 'utc' }),
+    photoAt(20, 0, 2, { timeBasis: 'local', timeMs: 5 }),
+  ];
+  const a = analyzePhotos(photos, [], {});
+  assert.equal(a.mixedTime, true);
+  assert.deepEqual(a.photos.map((p) => p.name), ['p0.jpg', 'p1.jpg', 'p2.jpg']);
+  assert.equal(a.photos[2].timeMs, null);
+  const same = analyzePhotos(photos.slice(0, 2), [], {});
+  assert.equal(same.mixedTime, false);
+});
+
+test('same second and place: different files are kept, a renamed copy is merged', () => {
+  const base = photoAt(0, 0, 0, { timeMs: 2_000_000 });
+  const other = { ...base, name: 'DJI_0002.jpg' };
+  const copy = { ...base, name: 'p0 (1).jpg' };
+  assert.equal(dedupePhotos([base, other]).photos.length, 2);
+  assert.equal(dedupePhotos([base, copy]).photos.length, 1);
+  // with sub-second times a different name does not matter
+  const ms = { ...base, timeMs: 2_000_123 };
+  assert.equal(dedupePhotos([ms, { ...ms, name: 'x.jpg' }]).photos.length, 1);
 });

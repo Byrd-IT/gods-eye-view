@@ -289,6 +289,10 @@ export function readPhotoMeta(bytes, name = '') {
     absAltM: xmp?.absAltM ?? exif?.altM ?? null,
     relAltM: xmp?.relAltM ?? null,
     timeMs: xmp?.timeMs ?? exif?.timeMs ?? null,
+    // 'utc' from the XMP CreateDate (has a zone); 'local' from EXIF (camera
+    // clock, no zone, read as if UTC). The two cannot be compared.
+    timeBasis:
+      xmp?.timeMs != null ? 'utc' : exif?.timeMs != null ? 'local' : null,
     timeText: exif?.timeText ?? '',
     make: exif?.make ?? '',
     model: exif?.model || xmp?.product || '',

@@ -419,9 +419,19 @@ export function mountPhotoCheck({ doc, container, host }) {
     s.busy = false;
     progress.textContent = '';
     if (!s.photos.length) {
-      progress.textContent = t(
-        'None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.',
-      );
+      // Only say "no position" when JPEGs were read; a drop of non-JPEG files
+      // gets the not-a-JPEG line instead.
+      progress.textContent =
+        s.unreadable || !s.notPhoto
+          ? t(
+              'None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.',
+            )
+          : tn(
+              s.notPhoto,
+              '{count} file is not a JPEG and was skipped',
+              '{count} files are not JPEGs and were skipped',
+              { count: s.notPhoto },
+            );
     }
     analyze();
     if (s.queued.length) {
@@ -472,11 +482,31 @@ export function mountPhotoCheck({ doc, container, host }) {
     analyze();
   });
   // Dropping files on the section works like CHOOSE PHOTOS.
-  root.addEventListener('dragover', (e) => e.preventDefault());
+  root.addEventListener('dragover', (e) => e.preventDefault?.());
   root.addEventListener('drop', (e) => {
-    e.preventDefault();
+    e.preventDefault?.();
+    e.stopPropagation?.();
     addFiles(e.dataTransfer?.files ?? []);
   });
+  // Files dropped anywhere else on the panel (also while a read is running)
+  // must not make the browser open the file and leave the page: they join the
+  // same queue.
+  let panelTop = container;
+  while (
+    panelTop.parentNode &&
+    panelTop.parentNode !== doc.body &&
+    panelTop.parentNode.nodeType !== 9
+  )
+    panelTop = panelTop.parentNode;
+  const guardOver = (e) => e.preventDefault?.();
+  const guardDrop = (e) => {
+    e.preventDefault?.();
+    addFiles(e.dataTransfer?.files ?? []);
+  };
+  if (panelTop !== root) {
+    panelTop.addEventListener('dragover', guardOver);
+    panelTop.addEventListener('drop', guardDrop);
+  }
   render();
 
   return {
@@ -492,6 +522,8 @@ export function mountPhotoCheck({ doc, container, host }) {
     },
     analysis: () => s.analysis,
     destroy() {
+      panelTop.removeEventListener?.('dragover', guardOver);
+      panelTop.removeEventListener?.('drop', guardDrop);
       s.token += 1;
       s.photos = [];
       s.analysis = null;

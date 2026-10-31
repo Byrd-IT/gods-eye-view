@@ -166,7 +166,15 @@ export function dedupePhotos(photos) {
   const seen = new Set();
   const out = [];
   for (const p of photos) {
-    const key = `${p.timeMs ?? (p.timeText || p.name)}|${p.lat.toFixed(7)}|${p.lon.toFixed(7)}`;
+    // A time without fractions (whole second) is weak: two real shots can
+    // share it at one spot, so the file's base name (copy suffixes removed)
+    // joins the key. A copy of the same file keeps its base name.
+    const whole = p.timeMs != null && p.timeMs % 1000 === 0;
+    const base = String(p.name ?? '')
+      .replace(/\.[^.]*$/, '')
+      .replace(/(\s*\(\d+\)|[ _-]copy( \d+)?)$/i, '')
+      .toLowerCase();
+    const key = `${p.timeMs ?? (p.timeText || p.name)}|${whole ? base : ''}|${p.lat.toFixed(7)}|${p.lon.toFixed(7)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(p);
@@ -231,9 +239,21 @@ function gridIndex(xy, cellM) {
  * @param {{ matchM?: number }} [opts]
  */
 export function analyzePhotos(rawPhotos, planned = [], opts = {}) {
-  const { photos: unique, duplicates } = dedupePhotos(
+  const { photos: deduped, duplicates } = dedupePhotos(
     rawPhotos.slice(0, MAX_PHOTOS),
   );
+  // EXIF times are camera-local, XMP times are UTC: mixing them would put the
+  // flown order wrong. Keep the times of the larger group only; the others
+  // sort last and take no part in the spacing/pause timing.
+  const nUtc = deduped.filter((p) => p.timeBasis === 'utc').length;
+  const nLocal = deduped.filter((p) => p.timeBasis === 'local').length;
+  const mixedTime = nUtc > 0 && nLocal > 0;
+  const keepBasis = nUtc >= nLocal ? 'utc' : 'local';
+  const unique = mixedTime
+    ? deduped.map((p) =>
+        p.timeBasis === keepBasis ? p : { ...p, timeMs: null },
+      )
+    : deduped;
   const photos = unique.slice().sort((a, b) => {
     const ta = a.timeMs ?? Infinity;
     const tb = b.timeMs ?? Infinity;
@@ -254,6 +274,7 @@ export function analyzePhotos(rawPhotos, planned = [], opts = {}) {
     summary: null,
     matchM,
     duplicates,
+    mixedTime: false,
   };
   if (!photos.length) return empty;
 
@@ -266,21 +287,31 @@ export function analyzePhotos(rawPhotos, planned = [], opts = {}) {
 
   // Each planned point: the nearest photo, and whether it is near enough.
   const reach = Math.ceil(matchM / Math.max(matchM, 20));
-  const plannedOut = planned.map((p, i) => {
-    let best = null;
-    let bestD = Infinity;
+  // One photo covers one planned point: every pair within reach is taken
+  // closest first, and a photo or a point already used is skipped, so a photo
+  // between two planned points does not cover both.
+  const pairs = [];
+  planned.forEach((_, i) => {
     for (const j of photoIndex.near(lxy[i].x, lxy[i].y, reach)) {
       const d = Math.hypot(pxy[j].x - lxy[i].x, pxy[j].y - lxy[i].y);
-      if (d < bestD) {
-        bestD = d;
-        best = j;
-      }
+      if (d <= matchM) pairs.push([d, i, j]);
     }
+  });
+  pairs.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  const pointTaken = new Map();
+  const photoTaken = new Set();
+  for (const [d, i, j] of pairs) {
+    if (pointTaken.has(i) || photoTaken.has(j)) continue;
+    pointTaken.set(i, { j, d });
+    photoTaken.add(j);
+  }
+  const plannedOut = planned.map((p, i) => {
+    const hit = pointTaken.get(i);
     return {
       ...p,
-      covered: best != null && bestD <= matchM,
-      photo: best != null && bestD <= matchM ? best : null,
-      offsetM: best != null && bestD <= matchM ? bestD : null,
+      covered: !!hit,
+      photo: hit ? hit.j : null,
+      offsetM: hit ? hit.d : null,
     };
   });
 
@@ -394,6 +425,7 @@ export function analyzePhotos(rawPhotos, planned = [], opts = {}) {
     summary,
     matchM,
     duplicates,
+    mixedTime,
   };
 }
 

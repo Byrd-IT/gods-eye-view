@@ -104,8 +104,8 @@ class El {
       (this.listeners.get(type) ?? []).filter((f) => f !== fn),
     );
   }
-  dispatch(type) {
-    for (const fn of this.listeners.get(type) ?? []) fn({ target: this });
+  dispatch(type, ev = {}) {
+    for (const fn of this.listeners.get(type) ?? []) fn({ target: this, ...ev });
   }
   click() {
     if (!this.disabled) this.dispatch('click');
@@ -2644,7 +2644,7 @@ test('surface model: an orbit plan inside the model takes its ring heights from 
 
 // ------------------------------------------------------------ photo check --
 test('photo check: reads photos in the browser, plots them against the plan, flags missing points, saves a CSV', async () => {
-  const { jpeg, tiff, xmpText } = await import('./photoFixtures.mjs');
+  const { jpeg, tiff, xmpText } = await import('./fixtures/photoFixtures.mjs');
   const { plannedPhotoPoints } = await import('./photoCheck.js');
   const w = setup();
   w.handle.setBox(boxM(300, 150));
@@ -2686,7 +2686,7 @@ test('photo check: reads photos in the browser, plots them against the plan, fla
 });
 
 test('photo check: with no plan it still checks spacing and ground detail; copies and bad files are reported', async () => {
-  const { jpeg, tiff, xmpText } = await import('./photoFixtures.mjs');
+  const { jpeg, tiff, xmpText } = await import('./fixtures/photoFixtures.mjs');
   const w = setup();
   const pc = w.handle.photoCheck();
   const mk = (i, lat) => ({
@@ -2711,7 +2711,7 @@ test('photo check: with no plan it still checks spacing and ground detail; copie
 });
 
 test('photo check: nothing is stored or sent anywhere', async () => {
-  const { jpeg, tiff, xmpText } = await import('./photoFixtures.mjs');
+  const { jpeg, tiff, xmpText } = await import('./fixtures/photoFixtures.mjs');
   const storage = memoryStorage({ 'gev.dronePlan.units': 'm' });
   const calls = [];
   const realFetch = globalThis.fetch;
@@ -2730,7 +2730,7 @@ test('photo check: nothing is stored or sent anywhere', async () => {
 });
 
 test('photo check: files chosen while others are still being read wait their turn', async () => {
-  const { jpeg, tiff, xmpText } = await import('./photoFixtures.mjs');
+  const { jpeg, tiff, xmpText } = await import('./fixtures/photoFixtures.mjs');
   const w = setup();
   const pc = w.handle.photoCheck();
   const mk = (i) => ({
@@ -2745,5 +2745,32 @@ test('photo check: files chosen while others are still being read wait their tur
   assert.equal(second, null);
   const done = await first;
   assert.equal(done.summary.photoCount, 4);
+  w.handle.destroy();
+});
+
+test('photo check: files dropped anywhere on the panel are caught, also during a read', async () => {
+  const { jpeg, tiff, xmpText } = await import('./fixtures/photoFixtures.mjs');
+  const w = setup();
+  const pc = w.handle.photoCheck();
+  const section = w.find((n) => n.getAttribute?.('data-role') === 'photo-check')[0];
+  const chain = [];
+  for (let n = section.parentNode; n; n = n.parentNode) chain.push(n);
+  const top = { dispatch: (type, e) => chain.forEach((n) => n.dispatch(type, e)) };
+  const mk = (i) => ({
+    name: `g${i}.jpg`,
+    bytes: jpeg({
+      exif: tiff({ gps: { lat: 30.1 + i * 0.0001, lon: -97.5, alt: 200 }, time: `2026:10:30 13:00:0${i}` }),
+      xmp: xmpText({ lat: 30.1 + i * 0.0001, lon: -97.5, abs: 200, rel: 60 }),
+    }),
+  });
+  let prevented = 0;
+  const ev = (files) => ({ preventDefault: () => (prevented += 1), dataTransfer: { files } });
+  const first = pc.addFiles([mk(0)]);
+  top.dispatch('drop', ev([mk(1)])); // while the first read runs
+  top.dispatch('dragover', ev([]));
+  await first;
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(prevented >= 2);
+  assert.equal(pc.analysis().summary.photoCount, 2);
   w.handle.destroy();
 });
