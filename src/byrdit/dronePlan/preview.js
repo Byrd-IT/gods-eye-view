@@ -575,7 +575,12 @@ export function createDronePlanPreview({
       if (lons.length) {
         // A loop, not Math.min(...array): up to ~17k points would risk the
         // engine's argument limit.
-        const b = { west: Infinity, east: -Infinity, south: Infinity, north: -Infinity };
+        const b = {
+          west: Infinity,
+          east: -Infinity,
+          south: Infinity,
+          north: -Infinity,
+        };
         for (const v of lons) {
           if (v < b.west) b.west = v;
           if (v > b.east) b.east = v;
