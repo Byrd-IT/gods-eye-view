@@ -1852,11 +1852,11 @@ export function initDronePlan({
       ],
       orbits: [
         lengthText(o.orbitRadiusM ?? result?.plan?.options?.orbitRadiusM ?? 40),
-        t('{n} targets', { n: num(targets.length) }),
+        t('targets: {n}', { n: num(targets.length) }),
       ],
       obstacles: [
         t('trees {h}', { h: heightText(o.obstacleHeightM) }),
-        t('{n} marked', { n: num(obstacleStore.list().length) }),
+        t('marked: {n}', { n: num(obstacleStore.list().length) }),
         t('zone ±{w}', { w: heightText(state.check.halfWidthM) }),
       ],
       flight: [
@@ -1903,8 +1903,14 @@ export function initDronePlan({
   }
 
   /** A length as typed in the chosen unit: a short plain number. */
-  const lengthField = (metres, digits = 0) =>
-    String(Math.round(lengthFromM(metres) * 10 ** digits) / 10 ** digits);
+  const lengthField = (metres, digits = 0) => {
+    // Metres show exactly as stored (to the centimetre); feet round to the
+    // asked digits.
+    const places = lengthUnit() === 'm' ? Math.max(digits, 2) : digits;
+    return String(
+      Math.round(lengthFromM(metres) * 10 ** places) / 10 ** places,
+    );
+  };
 
   function modeLabel(mode) {
     switch (mode) {

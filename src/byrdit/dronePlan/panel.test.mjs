@@ -240,7 +240,6 @@ function setup({
   const world = makeWorld({ sample: (cartos) => sample(cartos) });
   const downloads = [];
   const handle = initDronePlan({
-    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
     viewer: world.viewer,
     cesium: world.cesium,
     document: dom.doc,
@@ -1262,7 +1261,7 @@ test('orbit: a failing or timed-out lookup falls back to the area centre', async
     const dom = makeDoc();
     const world = makeWorld({ sample: (c) => flat(c) });
     const handle = initDronePlan({
-    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
+      unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
       viewer: world.viewer,
       cesium: world.cesium,
       document: dom.doc,
@@ -1894,7 +1893,7 @@ test('PLAN ALL: a late building-footprint reply does not wipe the suite, and the
     const world = makeWorld({ sample: (cartos) => flat(cartos) });
     const late = deferred();
     const handle = initDronePlan({
-    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
+      unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
       viewer: world.viewer,
       cesium: world.cesium,
       document: dom.doc,
