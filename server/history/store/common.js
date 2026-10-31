@@ -214,9 +214,7 @@ export function normalizeIngestRecord(raw) {
       raw.count < 0 ||
       raw.count > MAX_INGEST_COUNT
     )
-      throw invalid(
-        `count must be an integer from 0 to ${MAX_INGEST_COUNT}`,
-      );
+      throw invalid(`count must be an integer from 0 to ${MAX_INGEST_COUNT}`);
     count = raw.count;
   }
   if (!raw.ok && count !== 0)

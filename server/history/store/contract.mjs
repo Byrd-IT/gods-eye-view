@@ -462,7 +462,11 @@ export function defineHistoryStoreContract(label, makeStore) {
 
     describe('ingest log', () => {
       it('keeps polls ascending, empty answers included, within from..to', async () => {
-        await store.recordIngest('firms', { t: T0 + 2 * MIN, ok: true, count: 0 });
+        await store.recordIngest('firms', {
+          t: T0 + 2 * MIN,
+          ok: true,
+          count: 0,
+        });
         await store.recordIngest('firms', { t: T0, ok: true, count: 7 });
         await store.recordIngest('firms', { t: T0 + MIN, ok: false });
         assert.deepEqual(await store.ingestLog('firms'), {
@@ -504,7 +508,11 @@ export function defineHistoryStoreContract(label, makeStore) {
       it('is removed by prune along with older observations', async () => {
         await store.append('firms', [obs(T0, 'x', 0, 0)]);
         await store.recordIngest('firms', { t: T0, ok: true, count: 1 });
-        await store.recordIngest('firms', { t: T0 + 10 * MIN, ok: true, count: 0 });
+        await store.recordIngest('firms', {
+          t: T0 + 10 * MIN,
+          ok: true,
+          count: 0,
+        });
         assert.deepEqual(await store.prune('firms', { before: T0 + MIN }), {
           deleted: 1,
         });
@@ -519,14 +527,26 @@ export function defineHistoryStoreContract(label, makeStore) {
         await rejectsWith(record({ t: 1.5, ok: true }), 'INVALID_ARGUMENT');
         await rejectsWith(record({ t: T0 }), 'INVALID_ARGUMENT');
         await rejectsWith(record({ t: T0, ok: 'yes' }), 'INVALID_ARGUMENT');
-        await rejectsWith(record({ t: T0, ok: true, count: -1 }), 'INVALID_ARGUMENT');
-        await rejectsWith(record({ t: T0, ok: true, count: 1.5 }), 'INVALID_ARGUMENT');
-        await rejectsWith(record({ t: T0, ok: false, count: 2 }), 'INVALID_ARGUMENT');
+        await rejectsWith(
+          record({ t: T0, ok: true, count: -1 }),
+          'INVALID_ARGUMENT',
+        );
+        await rejectsWith(
+          record({ t: T0, ok: true, count: 1.5 }),
+          'INVALID_ARGUMENT',
+        );
+        await rejectsWith(
+          record({ t: T0, ok: false, count: 2 }),
+          'INVALID_ARGUMENT',
+        );
         await rejectsWith(
           store.recordIngest('Not A Feed', { t: T0, ok: true }),
           'INVALID_ARGUMENT',
         );
-        await rejectsWith(store.ingestLog('firms', { limit: 0 }), 'INVALID_ARGUMENT');
+        await rejectsWith(
+          store.ingestLog('firms', { limit: 0 }),
+          'INVALID_ARGUMENT',
+        );
         await rejectsWith(
           store.ingestLog('firms', { from: T0 + 1, to: T0 }),
           'INVALID_ARGUMENT',
@@ -535,7 +555,10 @@ export function defineHistoryStoreContract(label, makeStore) {
 
       it('fails with CLOSED after close', async () => {
         await store.close();
-        await rejectsWith(store.recordIngest('firms', { t: T0, ok: true }), 'CLOSED');
+        await rejectsWith(
+          store.recordIngest('firms', { t: T0, ok: true }),
+          'CLOSED',
+        );
         await rejectsWith(store.ingestLog('firms'), 'CLOSED');
       });
     });
