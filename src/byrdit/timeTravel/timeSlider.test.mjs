@@ -224,10 +224,22 @@ test('discrete: tick labels replace the edges row; many items draw no ticks', ()
     items: [2010, 2014, 2018].map((v) => ({ value: v, label: String(v) })),
   });
   assert.equal(few.edges.hidden, true);
+  // `.row {display:flex}` would beat the UA [hidden] rule: the CSS must restore it
+  assert.match(timeSliderCss('gev-ts'), /-row\[hidden\]\s*{\s*display: none/);
   const many = createDiscreteSlider({
     document: doc,
     parent: doc.body,
     items: Array.from({ length: 200 }, (_, i) => ({ value: i, label: `${i}` })),
   });
   assert.equal(many.scrub.children.length, 1, 'only the thumb: no tick marks');
+});
+
+test('component: a cancelled pan (pointercancel) commits the position it touched', () => {
+  const { slider, calls } = make();
+  slider.scrub.dispatch('pointerdown', { clientX: 50, pointerId: 1 });
+  slider.scrub.dispatch('pointercancel', {});
+  assert.deepEqual(calls, [
+    ['scrub', 0.25, 'start'],
+    ['scrub', 0.25, 'end'],
+  ]);
 });

@@ -48,6 +48,7 @@ export function timeSliderCss(prefix = TS_DEFAULT_PREFIX) {
   const p = `.${prefix}`;
   return `
 ${p}-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+${p}-row[hidden] { display: none; }
 ${p}-edges { justify-content: space-between; opacity: 0.7; font-size: 10px; }
 ${p}-btn {
   min-width: 28px;
@@ -72,6 +73,7 @@ ${p}-scrub {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--glass-border, rgba(255,255,255,0.14));
   cursor: pointer;
+  /* a vertical swipe still scrolls the panel; a cancelled pan keeps the position it touched */
   touch-action: pan-y;
 }
 ${p}-scrub:focus-visible { outline: 2px solid var(--accent, #7fd3ff); outline-offset: 2px; }

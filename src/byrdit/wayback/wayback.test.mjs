@@ -1,5 +1,4 @@
 import test from 'node:test';
-import { timeSliderCss } from '../timeTravel/timeSlider.js';
 import assert from 'node:assert/strict';
 import { acquireImageryComparison } from '../../maps/imageryComparison.js';
 import { attachWayback } from './index.js';
@@ -15,6 +14,7 @@ import {
   tileTemplate,
   waybackFlagOn,
 } from './model.js';
+import { timeSliderCss } from '../timeTravel/timeSlider.js';
 
 // ------------------------------------------------------------------ fakes
 
