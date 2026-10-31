@@ -14,7 +14,8 @@
  *   - a failed answer is logged as a failed poll
  *   - synthetic secrets placed in fields the adapter does not know reach no stored byte
  * and, across the board:
- *   - a heavy feed (aircraft, vessels) records only when named, never from HISTORY_RECORD=1 alone
+ *   - a heavy feed (aircraft, vessels) records only when named, never from HISTORY_RECORD=1 alone;
+ *     a light one (military, cyclones, perimeters, launches) records from HISTORY_RECORD=1
  *   - with recording off the tee mounts nothing and wraps nothing
  *   - a world-sized poll is tapped within a time budget and flushed without stalling the event loop
  * Exits non-zero on the first failed check; the report names each check.
@@ -113,6 +114,16 @@ async function main() {
       'a heavy feed does not record from HISTORY_RECORD=1 alone',
       heavy.every((feed) => !globalOnly.recorder.feeds.includes(feed)),
       `heavy feeds: ${heavy.join(', ') || 'none'}`,
+    );
+    // The small, low-rate feeds (cyclones, perimeters, launches) follow HISTORY_RECORD=1.
+    const light = [...new Set(FIXTURES.map((fixture) => fixture.feed))].filter(
+      (feed) => ADAPTERS[feed]?.defaultOn !== false,
+    );
+    record(
+      'a light feed records from HISTORY_RECORD=1 alone',
+      light.length > 0 &&
+        light.every((feed) => globalOnly.recorder.feeds.includes(feed)),
+      `light feeds: ${light.join(', ')}`,
     );
     await globalOnly.close();
 

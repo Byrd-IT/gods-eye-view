@@ -1275,6 +1275,16 @@ Routes whose answer is a finished JSON body are watched by a response tee
 response is sent, ignores an answer whose own poll time it has already seen (the proxy's cache
 serving the same refresh again), and notes a 429 or 5xx answer as one failed poll a minute. The
 aircraft group is the first on it: `aircraft` (`/api/flights`) and `military` (`/api/military`).
+The hazards group follows: `cyclones` (`/api/cyclones`, keyed by NHC storm id, timed by the storm's
+position time; forecast points kept, track and cone not), `perimeters` (`/api/fire-perimeters`, keyed
+by the incident id, timed by the agency's update time, so an unchanged perimeter on the next poll
+writes nothing; the row holds acres, containment, dates, bounding box and vertex count but never the
+polygon, which can run to tens of thousands of vertices against the store's 64 KiB row cap) and
+`launches` (`/api/launches`, keyed by the Launch Library 2 id, timed by its `last_updated`). All three
+are light and follow `HISTORY_RECORD=1`. A cyclone answer the proxy marks stale is ignored, and an
+unavailable one is noted as a failed poll. A launch answer the proxy serves from cache (`X-GEV-Cache`
+HIT, INFLIGHT or STALE-ERROR) is ignored. A fire perimeter answer is parsed in full after the response
+is sent (about 100 ms for a few MiB); the tee still skips a body over 32 MiB.
 `aircraft` is heavy, so it records only when `HISTORY_RECORD_AIRCRAFT=1` names it. A moved
 entity counts as changed even when its other fields did not. Gate: `npm run qa:history-feeds`
 (fixtures in `server/history/recorder/feedFixtures/`).

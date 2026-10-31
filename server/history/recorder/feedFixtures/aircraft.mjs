@@ -28,6 +28,7 @@ export const aircraftFixtures = [
     group: 'aircraft',
     path: '/api/flights',
     kind: 'json',
+    replay: { header: ['X-OpenSky-Cache', 'HIT'] },
     expectedRows: 3,
     // A world-wide poll: about twelve thousand aircraft.
     perf: (clock, variant = 0) => {
@@ -91,6 +92,7 @@ export const aircraftFixtures = [
     group: 'aircraft',
     path: '/api/military',
     kind: 'json',
+    replay: { header: ['X-Feed-Cache', 'HIT'] },
     expectedRows: 2,
     build({ clock, variant = 0, noise = {} }) {
       const now = clock + variant * 15_000;
