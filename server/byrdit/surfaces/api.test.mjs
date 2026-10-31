@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { EventEmitter } from 'node:events';
+import { Writable } from 'node:stream';
 import { readGeoTiff } from '../../../tools/droneSurface/geotiff.mjs';
 import { boundsOf, buildSurface, utmToLonLat } from '../../../tools/droneSurface/build-surface.mjs';
 import { encodeSurface, parseSurface } from '../../../src/byrdit/dronePlan/surfaceGrid.js';
@@ -128,14 +128,29 @@ test('builder: utm back to lon/lat agrees with the forward maths', () => {
 });
 
 function fakeRes() {
-  const res = new EventEmitter();
+  const chunks = [];
+  const res = new Writable({
+    write(chunk, _enc, cb) {
+      chunks.push(Buffer.from(chunk));
+      cb();
+    },
+  });
   res.headers = {};
-  res.setHeader = (k, v) => { res.headers[k] = v; };
-  res.end = (b) => { res.body = b; res.ended = true; };
+  res.setHeader = (k, v) => {
+    res.headers[k] = v;
+  };
+  const end = res.end.bind(res);
+  res.end = (b) => {
+    if (b !== undefined) chunks.push(Buffer.from(b));
+    end();
+    return res;
+  };
+  Object.defineProperty(res, 'body', { get: () => Buffer.concat(chunks) });
   return res;
 }
+const done = (res) => new Promise((r) => (res.writableFinished ? r() : res.once('finish', r)));
 
-test('api: needs identity, lists headers, serves one file, refuses path tricks', () => {
+test('api: needs identity, lists headers, serves one file, refuses path tricks', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'surf-'));
   try {
     const t = readGeoTiff(
@@ -164,7 +179,13 @@ test('api: needs identity, lists headers, serves one file, refuses path tricks',
       assert.equal(JSON.parse(ok.res.body).surfaces[0].id, 'ranch-1');
       const one = call('/api/byrdit/surfaces/ranch-1');
       assert.equal(one.res.statusCode, 200);
-      assert.equal(parseSurface(Uint8Array.from(one.res.body).buffer).id, 'ranch-1');
+      await done(one.res);
+      const bytes = one.res.body;
+      assert.equal(String(one.res.headers['content-length']), String(bytes.length));
+      assert.equal(
+        parseSurface(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length)).meta.id,
+        'ranch-1',
+      );
     }
     for (const bad of ['../etc/passwd', '..%2f..%2fetc', 'ranch-1.gevsurf', 'BROKEN', 'missing']) {
       const r = call(`/api/byrdit/surfaces/${bad}`);

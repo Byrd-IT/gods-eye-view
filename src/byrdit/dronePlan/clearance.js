@@ -29,8 +29,13 @@ export const MAX_CLEARANCE_SAMPLES = 60000;
 export const MAX_SPANS = 200;
 /** Spacing of the points a ring or path floor is read at, metres. */
 const PROBE_SPACING_M = 1.5;
+/** Point caps; the real spacing of a capped ring or segment is used. */
+const MAX_RING_POINTS = 2000;
+const MAX_SEGMENT_POINTS = 2000;
 /** How far a missing ground cell is looked for around a point, metres. */
 const GROUND_SEARCH_M = 4;
+/** Most lattice steps from the centre to the edge when looking for holes. */
+const UNKNOWN_LATTICE_MAX = 24;
 
 const newestFirst = (a, b) => {
   const ta = a.meta.capturedAt ? Date.parse(a.meta.capturedAt) : -Infinity;
@@ -117,6 +122,29 @@ function createSurfaceView(grids, lon0, lat0) {
   };
 
   /**
+   * True when something within `reachM` of a local point is not seen by any
+   * surface: a hole in the data, the edge of the model, or off it. A hole is
+   * not open air: an unseen tree may stand there, so a point that close to
+   * one is "not checked", never "clear". The disc is read on a lattice of
+   * one cell (wider for very large reaches, so the cost stays bounded).
+   */
+  const unknownWithin = (x, y, reachM) => {
+    let cell = Infinity;
+    for (const g of grids) cell = Math.min(cell, g.cellM);
+    const step = Math.max(cell, reachM / UNKNOWN_LATTICE_MAX);
+    const n = Math.ceil(reachM / step);
+    for (let j = -n; j <= n; j += 1) {
+      for (let k = -n; k <= n; k += 1) {
+        const dx = k * step;
+        const dy = j * step;
+        if (dx * dx + dy * dy > reachM * reachM) continue;
+        if (ownerAt(x + dx, y + dy) < 0) return true;
+      }
+    }
+    return false;
+  };
+
+  /**
    * Visit every cell (from the grid that owns it) within `reachM` of a local
    * point, skipping blocks and cells whose top is below `minTop()` (read
    * again for every block, so a closer hit tightens the search).
@@ -192,12 +220,14 @@ function createSurfaceView(grids, lon0, lat0) {
     distanceAt(x, y, aglM, limitM) {
       const own = ownerAt(x, y);
       if (own < 0) return null;
+      const ownGround = groundIn(own, x, y);
+      if (ownGround == null) return null;
+      if (unknownWithin(x, y, limitM)) return null;
       let best = limitM;
-      let ownGround = null;
       for (let i = 0; i < grids.length; i += 1) {
-        const ground = groundIn(i, x, y);
-        if (ground == null) continue;
-        if (i === own) ownGround = ground;
+        // An older surface without ground here is read against the ground of
+        // the surface that owns the point, so its trees are never dropped.
+        const ground = i === own ? ownGround : (groundIn(i, x, y) ?? ownGround);
         const z = ground + aglM;
         scan(
           i,
@@ -211,7 +241,6 @@ function createSurfaceView(grids, lon0, lat0) {
           },
         );
       }
-      if (ownGround == null) return null;
       const topHere = nearestTop(own, x, y);
       return {
         distM: best,
@@ -225,11 +254,14 @@ function createSurfaceView(grids, lon0, lat0) {
      * null when the surface does not cover the point.
      */
     floorAglAt(x, y, requiredM) {
-      if (ownerAt(x, y) < 0) return null;
+      const own = ownerAt(x, y);
+      if (own < 0) return null;
+      const ownGround = groundIn(own, x, y);
+      if (ownGround == null) return null;
+      if (unknownWithin(x, y, requiredM)) return null;
       let floor = null;
       for (let i = 0; i < grids.length; i += 1) {
-        const ground = groundIn(i, x, y);
-        if (ground == null) continue;
+        const ground = i === own ? ownGround : (groundIn(i, x, y) ?? ownGround);
         let top = -Infinity;
         scan(
           i,
@@ -262,6 +294,8 @@ function frameOf(lon0, lat0) {
 }
 
 const r1 = (v) => Math.round(v * 10) / 10;
+/** Round up to 0.1 m: a floor must never be rounded down. */
+const ceil1 = (v) => Math.ceil(v * 10 - 1e-9) / 10;
 
 /**
  * Check the route against the surface. For every waypoint and every
@@ -324,7 +358,10 @@ export function checkClearance({
 
   const result = { ...empty, stepM: r1(step) };
   const used = new Set();
-  const limit = requiredM;
+  // A very long route is sampled further apart than stepM: the distance to
+  // the surface changes by at most 1 m per metre, so half of the extra gap is
+  // added to what is looked for. (requiredM, as reported, stays the setting.)
+  const limit = requiredM + Math.max(0, step - stepM) / 2;
   let open = null;
   const closeSpan = () => {
     if (!open) return;
@@ -454,9 +491,10 @@ export function createSurfaceProbe(model, requiredM) {
   // The floor is read at points PROBE_SPACING_M apart, but the drone flies
   // between them. Distance to a surface changes by at most 1 m per metre
   // moved, so half the spacing of extra clearance covers every point between.
-  const req = wanted + PROBE_SPACING_M / 2;
   const ready = Boolean(model?.grids?.length);
-  const run = (points) => {
+  /** `spacingM` is the real gap between the points: half of it is added. */
+  const run = (points, spacingM) => {
+    const req = wanted + spacingM / 2;
     if (!ready || !points.length) return { aglM: null, covered: 'none' };
     const view = model.view(points[0].lon, points[0].lat);
     const f = frameOf(points[0].lon, points[0].lat);
@@ -474,7 +512,7 @@ export function createSurfaceProbe(model, requiredM) {
     }
     const covered =
       inside === 0 ? 'none' : inside === points.length ? 'full' : 'partial';
-    return { aglM: floor == null ? null : r1(floor), covered };
+    return { aglM: floor == null ? null : ceil1(floor), covered };
   };
   return {
     requiredM: wanted,
@@ -482,9 +520,10 @@ export function createSurfaceProbe(model, requiredM) {
     ringFloor(lon, lat, radiusM) {
       const r = Math.max(1, Number(radiusM) || 1);
       const n = Math.min(
-        720,
+        MAX_RING_POINTS,
         Math.max(16, Math.ceil((2 * Math.PI * r) / PROBE_SPACING_M)),
       );
+      const spacing = (2 * Math.PI * r) / n;
       const m = metersPerDegree(lat);
       const points = [];
       for (let k = 0; k < n; k += 1) {
@@ -494,7 +533,7 @@ export function createSurfaceProbe(model, requiredM) {
           lat: lat + (r * Math.sin(a)) / m.lat,
         });
       }
-      return run(points);
+      return run(points, spacing);
     },
     pathFloor(points) {
       const out = [];
@@ -502,6 +541,7 @@ export function createSurfaceProbe(model, requiredM) {
       const first = list[0];
       if (!first) return { aglM: null, covered: 'none' };
       const m = metersPerDegree(first.lat);
+      let spacing = PROBE_SPACING_M;
       for (let i = 0; i < list.length; i += 1) {
         out.push(list[i]);
         const nxt = list[i + 1];
@@ -510,7 +550,11 @@ export function createSurfaceProbe(model, requiredM) {
           (nxt.lon - list[i].lon) * m.lon,
           (nxt.lat - list[i].lat) * m.lat,
         );
-        const n = Math.min(400, Math.floor(len / PROBE_SPACING_M));
+        const n = Math.min(
+          MAX_SEGMENT_POINTS,
+          Math.floor(len / PROBE_SPACING_M),
+        );
+        spacing = Math.max(spacing, len / (n + 1));
         for (let k = 1; k <= n; k += 1) {
           const u = k / (n + 1);
           out.push({
@@ -519,7 +563,7 @@ export function createSurfaceProbe(model, requiredM) {
           });
         }
       }
-      return run(out);
+      return run(out, spacing);
     },
   };
 }

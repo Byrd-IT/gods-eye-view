@@ -149,6 +149,14 @@ export function angleRingsWithFloor({
       });
       if (ring.radiusM <= r + 0.05) break;
       r = ring.radiusM;
+      if (pass === 3) {
+        // Out of passes without settling: read the floor once more at the
+        // final radius and lift the ring to it (never lower it).
+        const last = floorFor(r, angleDeg);
+        source = last.source;
+        const lifted = Math.max(ring.aglM, Math.min(capAglM, last.aglM ?? 0));
+        ring = { ...ring, aglM: lifted };
+      }
     }
     rings.push({
       ...ring,

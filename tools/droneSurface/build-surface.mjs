@@ -29,6 +29,7 @@ const isNo = (v, nd) => !Number.isFinite(v) || (nd != null && v === nd) || v < -
  */
 export function buildSurface({ dsm, dtm, id, name, areaId, capturedAt, cellM, source, bounds }) {
   if (dsm.zone == null || dsm.zone !== dtm.zone) throw new Error('DSM and DTM need the same UTM zone');
+  if (Math.abs(dsm.cellX - dsm.cellY) > 1e-9 * dsm.cellX) throw new Error('The DSM needs square pixels');
   const cell = dsm.cellX;
   const f = Math.max(1, Math.round((cellM ?? cell) / cell));
   const cols = Math.ceil(dsm.width / f);

@@ -254,7 +254,8 @@ test('probe: ring and path floors from the surface', () => {
   // A ring of 10 m radius around the stand centre runs over the trees.
   const over = probe.ringFloor(LON, LAT, 10);
   assert.equal(over.covered, 'full');
-  assert.ok(over.aglM >= 29.1 && over.aglM <= 30.1, String(over.aglM));
+  // 20 m trees + 9.144 m wanted + half of the ~1.5 m probe spacing.
+  assert.ok(over.aglM >= 29.85 && over.aglM <= 30.0, String(over.aglM));
   // A ring 60 m out clears the trees sideways: only the ground floor is left.
   const far = probe.ringFloor(LON, LAT, 60);
   assert.equal(far.covered, 'full');
@@ -268,7 +269,7 @@ test('probe: ring and path floors from the surface', () => {
     covered: 'none',
   });
   const path = probe.pathFloor([ll(-50, 0), ll(50, 0)]);
-  assert.ok(path.aglM >= 29.1 && path.aglM <= 30.1);
+  assert.ok(path.aglM >= 29.85 && path.aglM <= 30.0, String(path.aglM));
   assert.deepEqual(createSurfaceProbe(null, 9).ringFloor(LON, LAT, 20), {
     aglM: null,
     covered: 'none',
@@ -285,4 +286,61 @@ test('spans are capped but the count stays exact', () => {
   assert.ok(r.spanCount >= 8);
   assert.ok(r.spans.length <= 200);
   assert.ok(r.spans[0].minDistM <= r.spans[r.spans.length - 1].minDistM);
+});
+
+test('a drone next to a hole in the data is not checked, never "clear"', () => {
+  // Trees everywhere but an unseen patch east of x = 6: a tree may stand there.
+  const grid = makeGrid({
+    topAt: (x) => (x > 6 ? NaN : 0),
+    groundAt: () => 0,
+  });
+  const near = run(grid, [leg(0, [[0, 0, 5]])]);
+  assert.equal(near.covered, 0, '6 m from the hole is inside the 9.1 m reach');
+  assert.equal(near.outside, 1);
+  const far = run(grid, [leg(0, [[-40, 0, 5]])]);
+  assert.equal(far.covered, 1, 'well clear of the hole it is a real verdict');
+  // The probe treats the hole the same way: partial, so the tree height
+  // setting still applies (the ring is not flown lower than it).
+  const probe = createSurfaceProbe(createSurfaceModel([grid]), 9.144);
+  assert.equal(probe.ringFloor(LON, LAT, 30).covered, 'partial');
+});
+
+test('a drone just inside the model edge is not checked either', () => {
+  const grid = makeGrid({ size: 100, topAt: () => 0 });
+  assert.equal(run(grid, [leg(0, [[48, 0, 5]])]).covered, 0, '2 m inside the edge');
+  assert.equal(run(grid, [leg(0, [[30, 0, 5]])]).covered, 1, 'clear of the edge');
+  const probe = createSurfaceProbe(createSurfaceModel([grid]), 9.144);
+  const edge = ll(45, 0);
+  assert.equal(probe.ringFloor(edge.lon, edge.lat, 3).covered, 'none');
+});
+
+test('two surfaces side by side: the seam is not a hole', () => {
+  const west = makeGrid({ id: 'w', origin: { lon: LON - 98 / M.lon, lat: LAT }, size: 200, topAt: () => 0 });
+  const east = makeGrid({ id: 'e', origin: { lon: LON + 98 / M.lon, lat: LAT }, size: 200, topAt: (x) => (x > 2 && x < 6 ? 25 : 0) });
+  // the grids overlap by a few metres around x = 0 (a real gap would be a hole); a tree stands at x = 100..104 in the east grid.
+  const seam = run([west, east], [leg(0, [[-5, 0, 20], [5, 0, 20]])]);
+  assert.equal(seam.outside, 0);
+  assert.equal(seam.spanCount, 0);
+  const tree = run([west, east], [leg(0, [[90, 0, 20], [96, 0, 20]])]);
+  assert.ok(tree.spanCount >= 1, 'the tree in the east grid warns from the west side of the seam');
+});
+
+test('a large ring is sampled further apart and asks for more clearance', () => {
+  const grid = makeGrid({ size: 700, topAt: (x, y) => (Math.hypot(x - 280, y) < 3 ? 20 : 0) });
+  const probe = createSurfaceProbe(createSurfaceModel([grid]), 9.144);
+  // radius 280 m: capped points would be ~2.4 m apart without the cap lifted.
+  const f = probe.ringFloor(LON, LAT, 280);
+  assert.equal(f.covered, 'full');
+  assert.ok(f.aglM >= 20 + 9.144 - 1e-6, String(f.aglM));
+});
+
+test('a very long route widens the search by half the extra sample gap', () => {
+  const grid = makeGrid({ size: 300, topAt: (x) => (Math.abs(x - 50) < 1 ? 20 : 0) });
+  const model = createSurfaceModel([grid]);
+  const legs = [leg(0, [[-140, 0, 20], [140, 0, 20]])];
+  const fine = checkClearance({ legs, model, minClearanceM: 6, errorMarginM: 3 });
+  const coarse = checkClearance({ legs, model, minClearanceM: 6, errorMarginM: 3, stepM: 0.0001 });
+  assert.equal(fine.requiredM, 9);
+  assert.ok(coarse.checked >= fine.checked);
+  assert.equal(coarse.requiredM, 9, 'the reported setting is unchanged');
 });

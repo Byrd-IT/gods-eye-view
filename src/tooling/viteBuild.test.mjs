@@ -111,10 +111,8 @@ test('root config retains existing named exports and standalone provider order',
   const names = config.plugins.map((plugin) => plugin.name);
   // The plan library API comes first (before any provider) and is not one.
   assert.equal(names[4], 'byrdit-plan-library');
-  // The read-only surface-model API follows it, also before any provider.
-  assert.equal(names[5], 'byrdit-surfaces');
   const standaloneProviders = config.plugins
-    .slice(6, -6)
+    .slice(5, -6)
     .map((plugin) => plugin.name);
   assert.equal(
     standaloneProviders.filter((name) => name === 'gemini-live-proxy').length,

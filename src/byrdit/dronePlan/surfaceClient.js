@@ -51,9 +51,12 @@ export function surfaceTouches(meta, box, padM = 0) {
   const b = meta?.bounds;
   if (!b || !box) return false;
   const pad = padM / 111320;
+  const mid = ((box.south + box.north) / 2) * (Math.PI / 180);
+  // A degree of longitude is shorter away from the equator.
+  const padLon = pad / Math.max(0.05, Math.cos(mid));
   return !(
-    b.east + pad < box.west ||
-    b.west - pad > box.east ||
+    b.east + padLon < box.west ||
+    b.west - padLon > box.east ||
     b.north + pad < box.south ||
     b.south - pad > box.north
   );

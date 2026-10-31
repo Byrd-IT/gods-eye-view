@@ -11,10 +11,10 @@
 
 import {
   closeSync,
+  createReadStream,
   existsSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readSync,
   readdirSync,
   statSync,
@@ -113,7 +113,10 @@ export function createSurfaceHandler({ env = process.env } = {}) {
       res.setHeader('content-length', String(size));
       res.setHeader('cache-control', 'private, no-cache');
       if (req.method === 'HEAD') return res.end();
-      return res.end(readFileSync(file));
+      // Streamed, so a few requests at once never hold whole files in memory.
+      const stream = createReadStream(file);
+      stream.on('error', () => res.destroy());
+      return stream.pipe(res);
     } catch (error) {
       // Never echo internals (paths) to the caller.
       console.error('surface api error:', error?.code ?? error?.name);
