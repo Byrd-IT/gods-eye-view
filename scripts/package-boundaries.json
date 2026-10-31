@@ -2116,6 +2116,8 @@
       "src/byrdit/dronePlan/obstacleLayer.js",
       "src/byrdit/dronePlan/areas.js",
       "src/byrdit/dronePlan/orbitTargets.js",
+      "src/byrdit/dronePlan/orbitRings.js",
+      "src/byrdit/dronePlan/conflicts.js",
       "src/byrdit/dronePlan/polygon.js",
       "src/byrdit/dronePlan/dronePlanVoice.js",
       "src/byrdit/dronePlan/format.js",
