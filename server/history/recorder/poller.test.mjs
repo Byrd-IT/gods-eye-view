@@ -83,16 +83,59 @@ describe('feed poller', () => {
     assert.match(warnings[0], /response too large/);
   });
 
-  it('start is idempotent and stop cancels the timer and waits for a poll in flight', async () => {
+  it('polls after the first delay, then every pollMs, never overlapping', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     let calls = 0;
-    const { pollers } = make(async () => {
+    const { pollers, taps } = make(async () => {
       calls += 1;
       return json(quakesPayload([]));
     });
     pollers.start();
-    pollers.start();
-    await pollers.stop();
+    pollers.start(); // idempotent
+    t.mock.timers.tick(4_999);
     assert.equal(calls, 0);
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 1);
+    t.mock.timers.tick(ADAPTERS.quakes.pollMs - 1);
+    assert.equal(calls, 1);
+    t.mock.timers.tick(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 2);
+    assert.equal(taps.length, 2);
+    await pollers.stop();
+  });
+
+  it('stop waits for a poll in flight and nothing follows it; a restart does not double the chain', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let release;
+    let calls = 0;
+    const { pollers } = make(() => {
+      calls += 1;
+      return new Promise((resolve) => {
+        release = () => resolve(json(quakesPayload([])));
+      });
+    });
+    pollers.start();
+    t.mock.timers.tick(5_000);
+    assert.equal(calls, 1);
+    let stopped = false;
+    const stopping = pollers.stop().then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(stopped, false);
+    pollers.start(); // restart while the old poll is still in flight
+    release();
+    await stopping;
+    assert.equal(stopped, true);
+    t.mock.timers.tick(5_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 2, 'one chain only');
+    release();
+    await pollers.stop();
+    t.mock.timers.tick(ADAPTERS.quakes.pollMs * 3);
+    assert.equal(calls, 2);
   });
 });
 

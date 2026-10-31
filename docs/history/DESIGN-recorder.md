@@ -5,17 +5,19 @@ How the optional history recorder fills the history store (`server/history/store
 ## Decision: tee, do not poll
 The app already fetches each source for its live layer. The recorder taps the normalised payload at the point where the
 route handler returns it to the client (after the existing cache and dedupe) and calls `store.append(feed, records)`. It never
-makes a request of its own. That adds no load on rate-limited public APIs, needs no second set of credentials, and makes the
+makes a request of its own, with one opt-in exception: a feed no route handler sees (USGS quakes) is fetched by the recorder's poller, only when that feed is switched on. A tee adds no load on rate-limited public APIs, needs no second set of credentials, and makes the
 history match what users saw. The cost is that nothing is recorded while nobody is looking at a layer, unless the feed has a
 server-side refresh loop. Each feed adapter declares one of:
 - `server-polled`: the feed refreshes on a server timer; every refresh is recorded.
 - `view-driven`: the feed refreshes only while a client views it; each upstream fetch is recorded, and gaps are real and shown by coverage.
+- `poller` (with `optIn: true`): no handler exists, so `recorder/poller.js` fetches `upstreamUrl` every `pollMs`; only when its own `HISTORY_RECORD_<FEED>=1` is set.
 - `bulk-archive`: backfill from the source's own archive (a later backend class).
 
 ## Modules
 - `server/history/recorder/index.js`: `createRecorder({ store, config, adapters })` with `tap(feed, payload, meta)`, `tapFailure`, `flush`, `close`, `health`.
   A tap on a feed that is not recording returns at once. `NOOP_RECORDER` is what a disabled recorder is.
 - `server/history/recorder/adapters/<feed>.js`: a pure `toRecords(payload) -> [{ id, t, lat, lon, props }]`, plus `feed`, `source`, `mode`, `cadenceMs`, `fields`, `entityKey`. No I/O.
+- `server/history/recorder/poller.js`: `createPollers({ recorder, adapters, feeds })` for adapters with `mode: 'poller'`; `start`, `stop`, `pollOnce`. Timers are unref'd and a poll never overlaps the next; a failed poll is recorded as a gap.
 - `server/history/recorder/config.js`: validation of the `HISTORY_RECORD*` and `HISTORY_MIN_INTERVAL_S*` settings.
 - `server/history/runtime.js`: opens the store only when recording is on; owns the flush and retention timers and shutdown.
 

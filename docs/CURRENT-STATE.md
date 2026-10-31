@@ -1263,9 +1263,9 @@ setting and never quotes its value. Contract suite:
 
 `server/history/recorder/` copies what a feed's route handler already returns into
 the history store. It is **off by default**: with no `HISTORY_RECORD*` variable set
-nothing is opened or created and a tap is one function call. It is a tee, not a
-poller for the feeds it tees: it makes no request of its own, so it adds no load on a rate-limited source
-and holds no credential. NASA FIRMS fires (`/api/firms`) is the first feed. USGS
+nothing is opened or created and a tap is one function call. For FIRMS it is a tee:
+it makes no request of its own, so it adds no load on a rate-limited source
+and holds no credential. Quakes are the one exception (below). NASA FIRMS fires (`/api/firms`) is the first feed. USGS
 earthquakes are fetched by the browser directly (unchanged: no new route, no change
 to what users see), so nothing server-side sees them; the quakes feed is therefore
 **opt-in** and is the one feed with a poller: only with `HISTORY_RECORD_QUAKES=1` the

@@ -59,6 +59,8 @@ export function createPollers({
   const polled = feeds.filter((feed) => adapters[feed]?.mode === 'poller');
   const timers = new Map();
   let stopped = true;
+  // Bumped by every start() and stop(), so a chain left over from an earlier run cannot reschedule.
+  let generation = 0;
   const running = new Set();
 
   async function pollOnce(feed) {
@@ -75,12 +77,12 @@ export function createPollers({
     }
   }
 
-  function schedule(feed, delay) {
-    if (stopped) return;
+  function schedule(feed, delay, chain) {
+    if (stopped || chain !== generation) return;
     const timer = setTimeout(() => {
       const job = pollOnce(feed).finally(() => {
         running.delete(job);
-        schedule(feed, adapters[feed].pollMs);
+        schedule(feed, adapters[feed].pollMs, chain);
       });
       running.add(job);
     }, delay);
@@ -94,10 +96,13 @@ export function createPollers({
     start() {
       if (!stopped) return;
       stopped = false;
-      for (const feed of polled) schedule(feed, FIRST_POLL_DELAY_MS);
+      generation += 1;
+      for (const feed of polled)
+        schedule(feed, FIRST_POLL_DELAY_MS, generation);
     },
     async stop() {
       stopped = true;
+      generation += 1;
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
       await Promise.allSettled([...running]);
