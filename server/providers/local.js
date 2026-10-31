@@ -5,6 +5,7 @@ import { firmsProxy } from './firms.js';
 import {
   getHistoryRecorder,
   historyRecorderLifecycle,
+  historyResponseTee,
 } from '../history/runtime.js';
 import { terrainHeightsProxy } from './terrain.js';
 import { adsbdbProxy } from './aircraft/enrichment.js';
@@ -40,6 +41,8 @@ import { windProxy } from './wind.js';
  */
 function localProviderPlugins({ realtime, gemini } = {}) {
   return [
+    // First, so it sees every answer the providers below send.
+    historyResponseTee(),
     openSkyProxy(),
     celestrakProxy(),
     tomtomProxy(),

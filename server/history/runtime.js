@@ -4,6 +4,8 @@
  * and a tap costs one function call.
  */
 import { HistoryConfigError } from './config.js';
+import { historyTeePlugin } from './recorder/tee.js';
+import { createFeedRoutes } from './recorder/routes.js';
 import { loadRecorderConfig, recordingRequested } from './recorder/config.js';
 import { ADAPTERS } from './recorder/adapters/index.js';
 import { NOOP_RECORDER, createRecorder } from './recorder/index.js';
@@ -141,4 +143,19 @@ export function historyRecorderLifecycle(runtime = getHistoryRuntime()) {
     configureServer: install,
     configurePreviewServer: install,
   };
+}
+
+/**
+ * Vite plugin: watches the proxy routes of the feeds that record (see
+ * recorder/routes.js) and hands each answer to the recorder. List it before the
+ * providers. With recording off it registers nothing.
+ */
+export function historyResponseTee(runtime = getHistoryRuntime()) {
+  const plugin = historyTeePlugin({
+    recorder: runtime.recorder,
+    routes: createFeedRoutes(),
+  });
+  if (runtime.recorder.enabled) return plugin;
+  // Off: the same two hooks (every provider plugin has both), but mounts nothing.
+  return { ...plugin, configureServer() {}, configurePreviewServer() {} };
 }

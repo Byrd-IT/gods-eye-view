@@ -216,4 +216,24 @@ describe('disabled recorder', () => {
     assert.deepEqual(NOOP_RECORDER.health(), { enabled: false });
     await NOOP_RECORDER.close();
   });
+
+  it('treats an entity that moved as changed even when its other fields did not', async () => {
+    const store = stubStore();
+    const adapters = { firms: { feed: 'firms', toRecords: (p) => p.records } };
+    const moving = createRecorder({
+      store,
+      config: recorderConfig({ feeds: { firms: { record: true, minIntervalMs: 60_000 } } }),
+      adapters,
+      clock: () => T0,
+      warn() {},
+    });
+    const at = (t, lat) => ({ records: [{ id: 'k', t, lat, lon: 2, props: { a: 1 } }] });
+    moving.tap('firms', at(T0, 10));
+    await moving.flush();
+    moving.tap('firms', at(T0 + 1000, 10)); // same place, same fields: skipped
+    await moving.flush();
+    moving.tap('firms', at(T0 + 2000, 11)); // moved: kept
+    await moving.flush();
+    assert.deepEqual(store.appended.flatMap((a) => a.rows.map((r) => r.lat)), [10, 11]);
+  });
 });

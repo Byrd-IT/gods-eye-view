@@ -29,8 +29,12 @@ export const NOOP_RECORDER = Object.freeze({
   health: () => ({ enabled: false }),
 });
 
-const digestOf = (props) =>
-  createHash('sha1').update(JSON.stringify(props)).digest('base64url');
+// A moving entity (an aircraft, a vessel) keeps its props but changes place, so
+// the place is part of what "unchanged" means.
+const digestOf = (lat, lon, props) =>
+  createHash('sha1')
+    .update(JSON.stringify([lat ?? null, lon ?? null, props]))
+    .digest('base64url');
 
 /**
  * @param {{
@@ -110,7 +114,7 @@ export function createRecorder({
       const prior = latest.get(key);
       if (
         prior &&
-        prior.digest === digestOf(props) &&
+        prior.digest === digestOf(lat, lon, props) &&
         Math.abs(t - prior.t) < minIntervalMs
       )
         continue;
@@ -124,7 +128,10 @@ export function createRecorder({
     for (const row of rows) {
       exact.add(`${row.key}\0${row.t}`);
       latest.delete(row.key); // re-insert so the map stays oldest-first
-      latest.set(row.key, { t: row.t, digest: digestOf(row.data) });
+      latest.set(row.key, {
+        t: row.t,
+        digest: digestOf(row.lat, row.lon, row.data),
+      });
     }
     for (const set of [exact, latest]) {
       if (set.size <= MAX_SEEN) continue;

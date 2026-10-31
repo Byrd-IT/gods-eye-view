@@ -229,7 +229,7 @@ async function main() {
     // 7. boot validation
     const bootFile = path.join(directory, 'boot.sqlite');
     const errors = [];
-    for (const env of [{ HISTORY_RECORD: '1', HISTORY_RECORD_FIRM: '1' }, { HISTORY_RECORD: 'maybe' }, { HISTORY_RECORD_AIRCRAFT: '1' }]) {
+    for (const env of [{ HISTORY_RECORD: '1', HISTORY_RECORD_FIRM: '1' }, { HISTORY_RECORD: 'maybe' }, { HISTORY_RECORD_WATER: '1' }]) {
       try {
         createHistoryRuntime({ ...env, HISTORY_SQLITE_PATH: bootFile });
         errors.push('accepted');

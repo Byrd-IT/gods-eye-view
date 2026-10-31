@@ -24,11 +24,17 @@ describe('recorder configuration', () => {
 
   it('HISTORY_RECORD=1 turns on every feed that has an adapter', () => {
     assert.equal(recordingRequested({ HISTORY_RECORD: '1' }), true);
-    assert.deepEqual(load({ HISTORY_RECORD: '1' }).active, ['firms']);
+    assert.deepEqual(load({ HISTORY_RECORD: '1' }).active, ['military', 'firms']);
+  });
+
+  it('a heavy feed records only when it is named, never from HISTORY_RECORD=1', () => {
+    assert.equal(load({ HISTORY_RECORD: '1' }).feeds.aircraft.record, false);
+    assert.deepEqual(load({ HISTORY_RECORD_AIRCRAFT: '1' }).active, ['aircraft']);
+    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_AIRCRAFT: '1' }).active, ['aircraft', 'military', 'firms']);
   });
 
   it('a per-feed setting overrides the global one', () => {
-    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0' }).active, []);
+    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0' }).active, ['military']);
     assert.deepEqual(load({ HISTORY_RECORD_FIRMS: '1' }).active, ['firms']);
   });
 
@@ -60,7 +66,7 @@ describe('recorder configuration', () => {
   });
 
   it('rejects a feed with no adapter and a misspelled feed', () => {
-    assert.match(problems({ HISTORY_RECORD_AIRCRAFT: '1' })[0], /no recorder adapter for aircraft/);
+    assert.match(problems({ HISTORY_RECORD_WATER: '1' })[0], /no recorder adapter for water/);
     assert.match(problems({ HISTORY_RECORD_FIRM: '1' })[0], /names no known feed/);
     assert.match(problems({ HISTORY_RECORD_QUEUE: '1' })[0], /names no known feed/);
   });
@@ -69,7 +75,7 @@ describe('recorder configuration', () => {
     const env = { HISTORY_RECORD: '1', HISTORY_STORE_FIRMS: 'elasticsearch' };
     const options = { adapters: ADAPTERS, available: ['sqlite', 'elasticsearch'], appendBackends: ['sqlite'] };
     assert.throws(() => loadRecorderConfig(env, options), /firms is set to record, but its backend cannot take new records/);
-    assert.deepEqual(loadRecorderConfig(env, { ...options, appendBackends: ['sqlite', 'elasticsearch'] }).active, ['firms']);
+    assert.deepEqual(loadRecorderConfig(env, { ...options, appendBackends: ['sqlite', 'elasticsearch'] }).active, ['military', 'firms']);
     assert.match(problems({ HISTORY_RECORD: '1', HISTORY_STORE_FIRMS: 'live' })[0], /HISTORY_STORE_FIRMS must be one of/);
   });
 
