@@ -1316,6 +1316,22 @@ a fresh fetch is timed by `X-TLE-Cached-At`; the proxy now also sets `x-tle-cach
 with `setHeader`, because Node's `getHeader` does not see headers passed only to `writeHead`. Default
 minimum interval is six hours (the proxy's TTL). Gate: `npm run qa:history-feeds` (fixtures in `server/history/recorder/feedFixtures/`).
 
+The transit and bikeshare group adds two more feeds on the same tee, both heavy (named, never
+from `HISTORY_RECORD=1` alone). `transit` watches `/api/transit/vehicles/<operator>`: each
+operator is its own poll and its own comparison with the last answer, a vehicle is keyed
+`<operator>:<vehicle id>`, and only the proxy's fresh fetch (`X-GEV-Cache: MISS`) is recorded;
+a cache hit, a shared in-flight fetch and a stale answer served during an outage are the same
+data again, while the proxy's 502/503/504 are failed polls. The MBTA 15-minute in-memory trail
+(`/api/transit/trail`) is untouched and not recorded. `bikeshare` watches `/api/gbfs/<URL>` under
+the same allowlist the proxy applies: a `station_information` answer is read only to learn
+positions (a bounded per-system directory, 64 systems of up to 20000 stations; it records
+nothing), and a `station_status` answer is recorded per station with the position and name
+learned for it, keyed `<operator host and path>#<station_id>`. A station whose position has
+not been seen yet is recorded without one (the browser caches `station_information`, so a
+server restart can hide it); a repeat is found by the bytes, not by the answer's `last_updated`,
+which some operators leave fixed. Gate: both have world-sized perf checks in `npm run
+qa:history-feeds`.
+
 `HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`
 switches one feed on or off, and `HISTORY_MIN_INTERVAL_S[_<FEED>]` skips an unchanged
 entity seen again inside that many seconds (default: the feed's cadence, 30 minutes

@@ -14,7 +14,7 @@
  *   - a failed answer is logged as a failed poll
  *   - synthetic secrets placed in fields the adapter does not know reach no stored byte
  * and, across the board:
- *   - a heavy feed (aircraft, vessels) records only when named, never from HISTORY_RECORD=1 alone;
+ *   - a heavy feed (aircraft, vessels, transit, bikeshare) records only when named, never from HISTORY_RECORD=1 alone;
  *     a light one (military, cyclones, perimeters, launches, satellites) records from HISTORY_RECORD=1
  *   - a path a fixture lists as ignored (catalogue-sized satellite groups) stores nothing
  *   - with recording off the tee mounts nothing and wraps nothing
@@ -31,7 +31,10 @@ import {
 } from '../server/history/runtime.js';
 import { ADAPTERS } from '../server/history/recorder/adapters/index.js';
 import { FIXTURES } from '../server/history/recorder/feedFixtures/index.mjs';
-import { request } from '../server/history/recorder/feedFixtures/http.mjs';
+import {
+  prime,
+  request,
+} from '../server/history/recorder/feedFixtures/http.mjs';
 
 const SCALE =
   Number(process.env.GEV_QA_BUDGET_SCALE) > 0
@@ -106,6 +109,7 @@ async function perfChecks(perf) {
       [`HISTORY_RECORD_${perf.feed.toUpperCase()}`]: '1',
     });
     const bigTee = middlewareOf(historyResponseTee(big));
+    await prime(bigTee, perf.perfPrime ?? perf.prime);
     const tick = () => new Promise((resolve) => setImmediate(resolve));
     let expectedQueued = 0;
     for (const variant of [0, 1]) {
@@ -230,6 +234,7 @@ async function main() {
       ...naming,
     });
     const tee = middlewareOf(historyResponseTee(runtime));
+    for (const fixture of FIXTURES) await prime(tee, fixture.prime);
     record(
       'every fixture feed has an adapter and a recording runtime',
       feeds.every((feed) => runtime.recorder.feeds.includes(feed)),

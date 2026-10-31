@@ -51,3 +51,13 @@ export async function request(middleware, url, handler, method = 'GET') {
   await new Promise((resolve) => setImmediate(resolve));
   return res;
 }
+
+/** Send a fixture's priming answers (for example station_information) through `middleware`. */
+export async function prime(middleware, requests) {
+  for (const { path, body } of requests ?? []) {
+    await request(middleware, path, (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
+    });
+  }
+}
