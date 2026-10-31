@@ -28,6 +28,25 @@ describe('history runtime', () => {
     }
   });
 
+  it('waits for the store to open at boot and names a failure without its detail', async () => {
+    const warnings = [];
+    const store = {
+      append: async () => {},
+      recordIngest: async () => {},
+      prune: async () => {},
+      close: async () => {},
+      config: {},
+      ready: async () => Promise.reject(Object.assign(new Error('password=hunter2'), { code: 'STORE_UNAVAILABLE' })),
+    };
+    const runtime = createHistoryRuntime(
+      { HISTORY_RECORD: '1' },
+      { createStore: () => store, warn: (line) => warnings.push(line) },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(warnings, ['[history-recorder] store not ready (STORE_UNAVAILABLE)']);
+    await runtime.close();
+  });
+
   it('records into a real SQLite store and closes it after a last flush', async () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'gev-runtime-'));
     try {

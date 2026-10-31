@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { HISTORY_FEEDS, HistoryConfigError } from '../config.js';
 import { ADAPTERS } from './adapters/index.js';
 import { loadRecorderConfig, recordingRequested } from './config.js';
+import { AVAILABLE_BACKENDS } from '../store/index.js';
 
 // The feeds HISTORY_RECORD=1 turns on: every adapter that is neither heavy nor opt-in, in feed order.
 const LIGHT = HISTORY_FEEDS.filter((feed) => feed in ADAPTERS && ADAPTERS[feed].defaultOn !== false && !ADAPTERS[feed].optIn);
@@ -87,6 +88,17 @@ describe('recorder configuration', () => {
     assert.throws(() => loadRecorderConfig(env, options), /firms is set to record, but its backend cannot take new records/);
     assert.deepEqual(loadRecorderConfig(env, { ...options, appendBackends: ['sqlite', 'elasticsearch'] }).active, LIGHT);
     assert.match(problems({ HISTORY_RECORD: '1', HISTORY_STORE_FIRMS: 'live' })[0], /HISTORY_STORE_FIRMS must be one of/);
+  });
+
+  it('lets the SQL backends record and still refuses the live backends', () => {
+    const url = 'postgres://u:pw@h/db';
+    const sql = { HISTORY_RECORD: '1', HISTORY_STORE: 'postgres', HISTORY_POSTGRES_URL: url };
+    assert.deepEqual(load(sql, AVAILABLE_BACKENDS).active, LIGHT);
+    const mysql = { HISTORY_RECORD: '1', HISTORY_STORE: 'mariadb', HISTORY_MYSQL_URL: 'mysql://u:pw@h/db' };
+    assert.deepEqual(load(mysql, AVAILABLE_BACKENDS).active, LIGHT);
+    for (const live of ['live-only', 'live-api']) {
+      assert.throws(() => load({ HISTORY_RECORD: '1', HISTORY_STORE: live }, AVAILABLE_BACKENDS), HistoryConfigError);
+    }
   });
 
   it('still reports unknown HISTORY_* names', () => {

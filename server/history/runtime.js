@@ -97,7 +97,11 @@ export function createHistoryRuntime(env = process.env, options = {}) {
   function start() {
     if (started) return;
     started = true;
-    openStore();
+    // Open the connection and create tables now, so a wrong password or an
+    // unreachable SQL server is named at boot, not first seen at the first flush.
+    Promise.resolve(openStore().ready?.()).catch((error) => {
+      warn(`[history-recorder] store not ready (${error?.code ?? 'error'})`);
+    });
     recorder.start();
     pollers.start();
     first = setTimeout(prune, RETENTION_FIRST_RUN_MS);

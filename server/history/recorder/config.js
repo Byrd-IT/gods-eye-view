@@ -5,7 +5,7 @@ import {
 } from '../config.js';
 
 /** Backends that can take `append`. A read-only backend is refused at boot. */
-export const APPEND_BACKENDS = Object.freeze(['sqlite', 'elasticsearch']);
+export const APPEND_BACKENDS = Object.freeze(['sqlite', 'elasticsearch', 'mysql', 'postgres']);
 
 export const DEFAULT_QUEUE_ROWS = 200_000;
 export const MIN_QUEUE_ROWS = 1_000;
