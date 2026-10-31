@@ -1,9 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { HistoryConfigError } from '../config.js';
+import { HISTORY_FEEDS, HistoryConfigError } from '../config.js';
 import { ADAPTERS } from './adapters/index.js';
 import { loadRecorderConfig, recordingRequested } from './config.js';
 
+// Feeds that record from HISTORY_RECORD=1 alone: every adapter except the heavy ones, in settings order.
+const light = HISTORY_FEEDS.filter((feed) => ADAPTERS[feed] && ADAPTERS[feed].defaultOn !== false);
+const without = (...names) => light.filter((feed) => !names.includes(feed));
 const load = (env, available) => loadRecorderConfig(env, { adapters: ADAPTERS, available });
 const problems = (env, available) => {
   try {
@@ -24,17 +27,17 @@ describe('recorder configuration', () => {
 
   it('HISTORY_RECORD=1 turns on every feed that has an adapter', () => {
     assert.equal(recordingRequested({ HISTORY_RECORD: '1' }), true);
-    assert.deepEqual(load({ HISTORY_RECORD: '1' }).active, ['military', 'firms']);
+    assert.deepEqual(load({ HISTORY_RECORD: '1' }).active, light);
   });
 
   it('a heavy feed records only when it is named, never from HISTORY_RECORD=1', () => {
     assert.equal(load({ HISTORY_RECORD: '1' }).feeds.aircraft.record, false);
     assert.deepEqual(load({ HISTORY_RECORD_AIRCRAFT: '1' }).active, ['aircraft']);
-    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_AIRCRAFT: '1' }).active, ['aircraft', 'military', 'firms']);
+    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_AIRCRAFT: '1' }).active, ['aircraft', ...light]);
   });
 
   it('a per-feed setting overrides the global one', () => {
-    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0' }).active, ['military']);
+    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0' }).active, without('firms'));
     assert.deepEqual(load({ HISTORY_RECORD_FIRMS: '1' }).active, ['firms']);
   });
 
@@ -75,7 +78,7 @@ describe('recorder configuration', () => {
     const env = { HISTORY_RECORD: '1', HISTORY_STORE_FIRMS: 'elasticsearch' };
     const options = { adapters: ADAPTERS, available: ['sqlite', 'elasticsearch'], appendBackends: ['sqlite'] };
     assert.throws(() => loadRecorderConfig(env, options), /firms is set to record, but its backend cannot take new records/);
-    assert.deepEqual(loadRecorderConfig(env, { ...options, appendBackends: ['sqlite', 'elasticsearch'] }).active, ['military', 'firms']);
+    assert.deepEqual(loadRecorderConfig(env, { ...options, appendBackends: ['sqlite', 'elasticsearch'] }).active, light);
     assert.match(problems({ HISTORY_RECORD: '1', HISTORY_STORE_FIRMS: 'live' })[0], /HISTORY_STORE_FIRMS must be one of/);
   });
 

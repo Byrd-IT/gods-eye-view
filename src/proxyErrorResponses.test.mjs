@@ -52,7 +52,7 @@ function fixture(name, overrides = {}, preview = false) {
   return {
     logs,
     async request(url = '/', method = 'GET') {
-      const response = { headersSent: false, writeHead(status, headers) { Object.assign(this, { status, headers, headersSent: true }); }, end(body) { this.body = body; } };
+      const response = { headersSent: false, setHeader() {}, writeHead(status, headers) { Object.assign(this, { status, headers, headersSent: true }); }, end(body) { this.body = body; } };
       await middleware({ url, method }, response);
       assert.doesNotMatch(response.body, /fixture-secret-token|internal\/example|<html>/);
       assert.doesNotMatch(logs.join('\n'), /fixture-secret-token|internal\/example|<html>/);

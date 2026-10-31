@@ -1276,7 +1276,16 @@ response is sent, ignores an answer whose own poll time it has already seen (the
 serving the same refresh again), and notes a 429 or 5xx answer as one failed poll a minute. The
 aircraft group is the first on it: `aircraft` (`/api/flights`) and `military` (`/api/military`).
 `aircraft` is heavy, so it records only when `HISTORY_RECORD_AIRCRAFT=1` names it. A moved
-entity counts as changed even when its other fields did not. Gate: `npm run qa:history-feeds`
+entity counts as changed even when its other fields did not. `satellites` (CelesTrak TLE text from
+`/api/celestrak/<group>`, tee `parse: 'text'` plus a `payload` hook) is a row per element set, not per
+position: key = NORAD number (Alpha-5 decoded), time = the set's own epoch, lat/lon null, data = name,
+both TLE lines and the elements read from them. Only `stations`, `visual`, `gps-ops`, `glo-ops`, `galileo`
+and `geo` are recorded; `starlink` and `active` (catalogue-sized) are not, and one answer stops at 5000 sets.
+A line must match the fixed TLE columns, pass its checksum and carry the same catalogue number as its
+partner; an epoch before 1970 is refused. The proxy's cache replays (`HIT`, `STALE-ERROR`) are skipped and
+a fresh fetch is timed by `X-TLE-Cached-At`; the proxy now also sets `x-tle-cache` and `X-TLE-Cached-At`
+with `setHeader`, because Node's `getHeader` does not see headers passed only to `writeHead`. Default
+minimum interval is six hours (the proxy's TTL). Gate: `npm run qa:history-feeds`
 (fixtures in `server/history/recorder/feedFixtures/`).
 
 `HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`

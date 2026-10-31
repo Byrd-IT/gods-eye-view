@@ -65,7 +65,7 @@ describe('history runtime', () => {
   });
 
   it('stays off when every feed is switched off', () => {
-    const runtime = createHistoryRuntime({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0', HISTORY_RECORD_MILITARY: '0' }, { createStore: () => assert.fail('opened') });
+    const runtime = createHistoryRuntime({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0', HISTORY_RECORD_MILITARY: '0', HISTORY_RECORD_SATELLITES: '0' }, { createStore: () => assert.fail('opened') });
     assert.equal(runtime.recorder.enabled, false);
   });
 

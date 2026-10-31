@@ -5,6 +5,7 @@ export const HISTORY_FEEDS = Object.freeze([
   'aircraft',
   'military',
   'vessels',
+  'satellites',
   'transit',
   'bikeshare',
   'firms',

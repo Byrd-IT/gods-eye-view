@@ -98,9 +98,12 @@ for (const fixture of FIXTURES) {
 
     it('skips an answer the proxy marks as a cache replay', async () => {
       const { store, recorder, tee } = setup(fixture);
-      const header = fixture.feed === 'aircraft' ? 'X-OpenSky-Cache' : 'X-Feed-Cache';
+      const [header, value] = fixture.replay ?? [
+        fixture.feed === 'aircraft' ? 'X-OpenSky-Cache' : 'X-Feed-Cache',
+        'HIT',
+      ];
       const replay = (req, res) => {
-        res.setHeader(header, 'HIT');
+        res.setHeader(header, value);
         replying(fixture, { clock: T0 })(req, res);
       };
       await request(tee, fixture.path, replay);
