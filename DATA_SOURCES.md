@@ -267,6 +267,9 @@ FIRMS active fires are **fetched live at runtime** (CC0 / U.S. public domain dat
 Suomi-NPP) and MODIS NRT (Terra + Aqua), clamped to the trailing 24 h, cached 30 min to respect the shared MAP_KEY
 transaction quota. Requires a free `FIRMS_MAP_KEY`
 (https://firms.modaps.eosdis.nasa.gov/api/map_key/); the layer is empty without it.
+When the opt-in history recorder is on (`HISTORY_RECORD=1`), each refresh of this proxy is also
+kept in the local history store (detections only: position, time, FRP, confidence, brightness,
+satellite and instrument; never the key or the request). Nothing is sent anywhere else.
 The former bundled 2026-05-25 snapshot was removed 2026-07-16.
 
 ### Natural Earth physical regions (`natural_earth/`)

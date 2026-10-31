@@ -2,6 +2,10 @@ import { openSkyProxy } from './aircraft/opensky.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
 import { tomtomProxy } from './traffic.js';
 import { firmsProxy } from './firms.js';
+import {
+  getHistoryRecorder,
+  historyRecorderLifecycle,
+} from '../history/runtime.js';
 import { terrainHeightsProxy } from './terrain.js';
 import { adsbdbProxy } from './aircraft/enrichment.js';
 import { overpassProxy } from './overpass.js';
@@ -41,7 +45,8 @@ function localProviderPlugins({ realtime, gemini } = {}) {
     openSkyProxy(),
     celestrakProxy(),
     tomtomProxy(),
-    firmsProxy(),
+    firmsProxy({ recorder: getHistoryRecorder() }),
+    historyRecorderLifecycle(),
     rocketLaunchesProxy(),
     terrainHeightsProxy(),
     adsbdbProxy(),

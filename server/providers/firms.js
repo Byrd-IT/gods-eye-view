@@ -302,6 +302,9 @@ function p16Annotate(error, fields) {
 
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
+/** Stands in when no history recorder is passed: records nothing. */
+const NO_RECORDER = Object.freeze({ tap() {}, tapFailure() {} });
+
 /**
  * The per-address connection errors behind a fetch failure, or null. Node 24
  * puts the AggregateError directly on `err.cause`; Node 26's fetch wraps it in
@@ -442,9 +445,15 @@ export async function fetchFirms(
  * Keyless (no FIRMS_MAP_KEY): /api/firms → 503 {error:'no_key'}; status →
  * {hasKey:false}. Upstream is never touched without a key.
  *
+ * History: when the composition root passes a history recorder (switched on by
+ * HISTORY_RECORD, off by default) every upstream refresh is also handed to it
+ * after the response is written; see server/history/recorder. The response is
+ * unchanged either way.
+ *
+ * @param {{ recorder?: { tap: Function, tapFailure: Function } }} [options]
  * @returns {import('vite').Plugin}
  */
-export function firmsProxy() {
+export function firmsProxy({ recorder = NO_RECORDER } = {}) {
   const TTL_MS = 30 * 60_000;
   const STATUS_TTL_MS = 5 * 60_000;
   const SOURCES = [
@@ -471,6 +480,9 @@ export function firmsProxy() {
   let statusCache = null;
   /** @type {?Promise<?{used: number, limit: number}>} */
   let statusInflight = null;
+
+  /** The refresh already handed to the recorder, so waiters sharing it do not repeat it. */
+  let recordedRefresh = null;
 
   const mapKey = () => String(process.env.FIRMS_MAP_KEY || '').trim();
 
@@ -758,14 +770,29 @@ export function firmsProxy() {
         }
         const pending = inflight;
         const fresh = await pending;
+        // Tee for history: once per refresh, after the live response is written.
+        // The recorder never throws and never waits for the store.
+        const record = (tap) => {
+          if (recordedRefresh === pending) return;
+          recordedRefresh = pending;
+          try {
+            tap();
+          } catch {
+            /* history must never change what the client gets */
+          }
+        };
         if (fresh) {
-          sendJson(200, buildPayload(fresh, false));
+          const payload = buildPayload(fresh, false);
+          sendJson(200, payload);
+          record(() => recorder.tap('firms', payload, { t: fresh.at }));
         } else if (entry) {
           sendJson(200, buildPayload(entry, true)); // upstream down — stale beats empty
+          record(() => recorder.tapFailure('firms', { t: Date.now() }));
         } else {
           sendJson(502, {
             error: 'firms fetch failed and no cache available',
           });
+          record(() => recorder.tapFailure('firms', { t: Date.now() }));
         }
       } catch (err) {
         console.warn('[firms-proxy] error:', err?.message || err);

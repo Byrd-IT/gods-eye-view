@@ -1237,6 +1237,65 @@ calibration edit. Failed refreshes preserve settled pixels for the same camera,
 while a newly selected camera never shows the prior camera's image. Disposal
 releases listeners, subscriptions, image handlers, summary timers and chip-hide timers.
 
+## History store
+
+`server/history/store/` is the storage layer recorded history uses (the recorder
+below writes to it; off by default). A store keeps timestamped
+observations per feed (`{ t, key, lat?, lon?, data? }`, with `(t, key)` unique per
+feed so a retried batch is safe) and answers `slice` (newest observation per key
+in a window, optionally inside a bounding box that may cross the antimeridian),
+`latestBefore`, `snapshots`, `coverage` (spans separated by gaps), `prune` and
+`health`. The SQLite backend uses Node's built-in `node:sqlite` (no dependency),
+a WAL journal, and one file, `./data/history.sqlite` unless `HISTORY_SQLITE_PATH`
+says otherwise.
+
+`HISTORY_STORE` picks the default backend and `HISTORY_STORE_<FEED>` overrides it
+for one feed; `HISTORY_RETENTION_DAYS` and `HISTORY_RETENTION_DAYS_<FEED>` set how
+many days are kept (0 keeps everything). `createHistoryStore(env)` validates all of
+it before opening a file and throws one error listing every problem: an unknown
+backend, a backend this build does not provide, a setting for a feed that does
+not exist, any other `HISTORY_*` name (a typo), or a retention that is not a whole number of days. Error text names the
+setting and never quotes its value. Contract suite:
+`server/history/store/historyStore.contract.test.mjs`; gate:
+`npm run qa:history-store`.
+
+## History recorder
+
+`server/history/recorder/` copies what a feed's route handler already returns into
+the history store. It is **off by default**: with no `HISTORY_RECORD*` variable set
+nothing is opened or created and a tap is one function call. For FIRMS it is a tee:
+it makes no request of its own, so it adds no load on a rate-limited source
+and holds no credential. Quakes are the one exception (below). NASA FIRMS fires (`/api/firms`) is the first feed. USGS
+earthquakes are fetched by the browser directly (unchanged: no new route, no change
+to what users see), so nothing server-side sees them; the quakes feed is therefore
+**opt-in** and is the one feed with a poller: only with `HISTORY_RECORD_QUAKES=1` the
+server makes one extra request to the keyless USGS all_day feed every 5 minutes and
+records the M2.5+ events (one row per event version: key = event id, time = `updated`).
+`HISTORY_RECORD=1` alone does not start it. It writes through the same store as every
+feed (SQLite today; the store interface also names an Elasticsearch backend, which is
+a separate change).
+
+`HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`
+switches one feed on or off, and `HISTORY_MIN_INTERVAL_S[_<FEED>]` skips an unchanged
+entity seen again inside that many seconds (default: the feed's cadence, 30 minutes
+for FIRMS; 0 keeps every one). `HISTORY_RECORD_QUEUE_ROWS` (200000) and
+`HISTORY_RECORD_FLUSH_S` (5) size the write queue. Retention runs once a minute after
+start and then daily while recording. A bad or misspelled setting stops the boot with
+every problem listed, without quoting any value.
+
+The handler hands over the refreshed payload after the client's response is written;
+a cache hit is not a new poll. The adapter (`adapters/firms.js`) maps each detection
+to `{ t = acquisition time, key = instrument:satellite:lat:lon, lat, lon, data }` and
+keeps only `frp`, `confidence`, `brightness`, `brightnessTi5`, `daynight`, `satellite`
+and `instrument`; request headers, URLs and keys are never copied. Rows go to a
+bounded queue and are written in batches of 2000 rows on a timer and at shutdown; a full
+queue drops the oldest poll and counts it (`recorder.health()`), and a store error
+is logged by feed and error code only and never reaches the response. Each poll also
+writes an ingest-log row (`ok`, `count`); a dropped or failed poll has none, which is
+how coverage tells a gap from an empty answer. FIRMS refreshes only while a client
+views the layer (`view-driven`), so gaps in the record are real. Gate:
+`npm run qa:history-recorder`. Design: `docs/history/DESIGN-recorder.md`.
+
 ## UI disposal
 
 UI disposal releases the CCTV subscription, command-dock observer, legacy drag
