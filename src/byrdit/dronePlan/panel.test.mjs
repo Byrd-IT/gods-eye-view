@@ -218,17 +218,35 @@ const deferred = () => {
   return { promise, resolve };
 };
 
-function setup({ sample = async (cartos) => flat(cartos), libraryClient } = {}) {
+// A browser's localStorage, in memory. The panel opens in feet unless this
+// browser chose otherwise; most tests here were written in metres.
+const memoryStorage = (initial = {}) => {
+  const map = new Map(Object.entries(initial));
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+    map,
+  };
+};
+
+function setup({
+  sample = async (cartos) => flat(cartos),
+  libraryClient,
+  storage = memoryStorage({ 'gev.dronePlan.units': 'm' }),
+} = {}) {
   resetPointerOwnership();
   const dom = makeDoc();
   const world = makeWorld({ sample: (cartos) => sample(cartos) });
   const downloads = [];
   const handle = initDronePlan({
+    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
     viewer: world.viewer,
     cesium: world.cesium,
     document: dom.doc,
     downloadFile: (name, bytes, type) => downloads.push({ name, bytes, type }),
     libraryClient,
+    unitStorage: storage,
   });
   const find = (pred) => all(dom.body, pred);
   const control = (label) =>
@@ -259,6 +277,7 @@ function setup({ sample = async (cartos) => flat(cartos), libraryClient } = {}) 
     buttons,
     stats,
     status,
+    storage,
   };
 }
 
@@ -963,6 +982,7 @@ test('orbit: building footprints from the provider become the recommended target
       lat: 30.27 + (dy + (b * s) / 2) / m.lat,
     }));
   const handle = initDronePlan({
+    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
     viewer: world.viewer,
     cesium: world.cesium,
     document: dom.doc,
@@ -1208,6 +1228,7 @@ test('orbit: the Overpass provider feeds the panel; targets get sized orbits and
     },
   });
   const handle = initDronePlan({
+    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
     viewer: world.viewer,
     cesium: world.cesium,
     document: dom.doc,
@@ -1241,6 +1262,8 @@ test('orbit: a failing or timed-out lookup falls back to the area centre', async
     const dom = makeDoc();
     const world = makeWorld({ sample: (c) => flat(c) });
     const handle = initDronePlan({
+      unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
+    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
       viewer: world.viewer,
       cesium: world.cesium,
       document: dom.doc,
@@ -1405,6 +1428,7 @@ function obstacleWorld(fetchObstacles) {
   const world = makeWorld({ sample: async (c) => flat(c) });
   const overlays = [];
   const handle = initDronePlan({
+    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
     viewer: world.viewer,
     cesium: world.cesium,
     document: dom.doc,
@@ -1627,53 +1651,114 @@ test('obstacles: an obstacle the operator added can be set to a tower, and the c
 const roleNode = (w, role) =>
   w.find((n) => n.getAttribute('data-role') === role)[0];
 
-test('Adjust: the section sits right after the plan buttons and the suite list, and holds the safety zone, orbit targets and obstacle heights', () => {
+test('Steps: nine numbered collapsible steps hold every control in the planned order', () => {
   const w = setup();
-  const adjust = roleNode(w, 'adjust');
-  assert.ok(adjust, 'Adjust section exists');
-  const kids = adjust.parentNode.children;
-  const at = (node) => kids.indexOf(node);
-  const suite = roleNode(w, 'suite');
-  const summary = roleNode(w, 'plan-summary');
-  assert.equal(at(summary), at(suite) + 1, 'summary right after the suite list');
-  assert.equal(at(adjust), at(summary) + 1, 'Adjust right after the summary');
-  const useRec = w
-    .buttons('data-action')
-    .find((b) => b.getAttribute('data-action') === 'use-recommended');
-  const planAll = w
-    .buttons('data-action')
-    .find((b) => b.getAttribute('data-action') === 'plan-suite');
-  assert.ok(at(useRec) < at(planAll) && at(planAll) < at(suite));
-  assert.equal(at(adjust) - at(useRec) <= 5, true, 'close under the buttons');
-  const inside = (node) => {
-    for (let n = node; n; n = n.parentNode) if (n === adjust) return true;
+  const steps = w.find((n) => n.tagName === 'DETAILS' && n.getAttribute('data-step'));
+  assert.deepEqual(
+    steps.map((n) => n.getAttribute('data-step')),
+    ['area', 'aircraft', 'shots', 'orbits', 'obstacles', 'flight', 'plan', 'check', 'export'],
+  );
+  const title = (n) => n.children[0].children[1].textContent;
+  const num = (n) => n.children[0].children[0].textContent;
+  assert.deepEqual(steps.map(num), ['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  assert.deepEqual(steps.map(title), [
+    'Area',
+    'Aircraft & camera',
+    'Shots',
+    'Orbits',
+    'Obstacles & safety',
+    'Flight & battery',
+    'Plan',
+    'Check (3D)',
+    'Save & export',
+  ]);
+  const inside = (step, node) => {
+    for (let n = node; n; n = n.parentNode) if (n === step) return true;
     return false;
   };
-  assert.ok(inside(roleNode(w, '3d-check')), 'safety zone (3D check)');
-  assert.ok(inside(checkSlider(w, 'width')), 'zone half-width slider');
-  assert.ok(inside(checkSlider(w, 'photo')), 'photo stepper');
-  assert.ok(inside(roleNode(w, 'check-readout')), 'readout');
-  assert.ok(
-    inside(w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'recommend-targets')),
-    'orbit targets',
-  );
-  assert.ok(
-    inside(w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'add-obstacle')),
-    'obstacle heights',
-  );
-  // Order inside: safety zone, orbit targets, obstacle heights.
-  const order = [
-    roleNode(w, '3d-check'),
-    w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'recommend-targets'),
-    w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'add-obstacle'),
-  ].map((n) => {
-    let top = n;
-    while (top.parentNode !== adjust) top = top.parentNode;
-    return adjust.children.indexOf(top);
-  });
-  assert.deepEqual(order, [...order].sort((a, b) => a - b));
-  assert.equal(new Set(order).size, 3);
+  const stepOf = (node) => steps.findIndex((s) => inside(s, node)) + 1;
+  const action = (name) =>
+    w.buttons('data-action').find((b) => b.getAttribute('data-action') === name);
+  assert.equal(stepOf(action('draw-box')), 1);
+  assert.equal(stepOf(action('draw-polygon')), 1);
+  assert.equal(stepOf(w.control('Aircraft')), 2);
+  assert.equal(stepOf(w.control('Shutter speed')), 2);
+  assert.equal(stepOf(w.control('DJI aircraft code in the mission file')), 2);
+  assert.equal(stepOf(w.control('Mode')), 3);
+  assert.equal(stepOf(action('use-recommended')), 3);
+  assert.equal(stepOf(w.control('Pattern')), 3);
+  assert.equal(stepOf(w.control('Height above ground')), 3);
+  assert.equal(stepOf(w.control('Front overlap')), 3);
+  assert.equal(stepOf(w.control('Camera tilt')), 3);
+  assert.equal(stepOf(w.control('Flight direction')), 3);
+  assert.equal(stepOf(w.control('Photos')), 3);
+  assert.equal(stepOf(w.control('Orbit radius')), 4);
+  assert.equal(stepOf(w.control('Target height')), 4);
+  assert.equal(stepOf(action('recommend-targets')), 4);
+  assert.equal(stepOf(w.control('Tree / obstacle height')), 5);
+  assert.equal(stepOf(action('add-obstacle')), 5);
+  assert.equal(stepOf(checkSlider(w, 'width')), 5);
+  assert.equal(stepOf(w.control('Speed')), 6);
+  assert.equal(stepOf(w.control('Usable flight time per battery (minutes)')), 6);
+  assert.equal(stepOf(w.control('Processing jobs')), 6);
+  assert.equal(stepOf(action('plan-suite')), 7);
+  assert.equal(stepOf(roleNode(w, 'suite')), 7);
+  assert.equal(stepOf(roleNode(w, 'plan-summary')), 7);
+  assert.equal(stepOf(roleNode(w, '3d-check')), 8);
+  assert.equal(stepOf(checkSlider(w, 'photo')), 8);
+  assert.equal(stepOf(checkBox(w, 'footprints')), 8);
+  assert.equal(stepOf(checkSlider(w, 'alpha-zone')), 8);
+  assert.equal(stepOf(roleNode(w, 'check-readout')), 8);
+  assert.equal(stepOf(w.find((n) => n.className.includes('gev-dp-library-host'))[0]), 9);
+  assert.equal(stepOf(w.find((n) => n.className === 'gev-dp-missions')[0]), 9);
   w.handle.destroy();
+});
+
+test('Steps: each header carries a one-line summary of its current values', async () => {
+  const w = setup();
+  const line = (key) =>
+    w.find((n) => n.getAttribute('data-step-line') === key)[0].textContent;
+  assert.match(line('area'), /Nothing drawn yet/);
+  assert.match(line('shots'), /Mapping grid.*Grid.*80 m.*80% \/ 70%/);
+  assert.match(line('flight'), /m\/s.*25 min battery/);
+  assert.match(line('plan'), /Not planned yet/);
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  assert.match(line('area'), /1 areas/);
+  assert.match(line('plan'), /\d+ photos.*1 missions/);
+  assert.match(line('check'), /on.*zone.*curtain.*footprints/);
+  w.handle.destroy();
+});
+
+test('Steps: the orbit step is hidden until orbits are in the plan', async () => {
+  const w = setup();
+  const orbits = () =>
+    w.find((n) => n.getAttribute('data-step') === 'orbits')[0].hidden;
+  assert.equal(orbits(), true);
+  pick(w, 'Mode', 'splat-orbit');
+  assert.equal(orbits(), false);
+  w.handle.destroy();
+});
+
+test('Steps: open or closed is remembered per browser', () => {
+  const storage = memoryStorage({ 'gev.dronePlan.units': 'm' });
+  const w = setup({ storage });
+  const step = (key) => w.find((n) => n.getAttribute('data-step') === key)[0];
+  assert.equal(step('area').getAttribute('open'), '');
+  assert.equal(step('flight').getAttribute('open'), null);
+  step('flight').setAttribute('open', '');
+  step('flight').dispatch('toggle');
+  step('area').removeAttribute('open');
+  step('area').dispatch('toggle');
+  w.handle.destroy();
+  const saved = JSON.parse(storage.getItem('gev.dronePlan.steps'));
+  assert.equal(saved.flight, true);
+  assert.equal(saved.area, false);
+  const again = setup({ storage });
+  const step2 = (key) => again.find((n) => n.getAttribute('data-step') === key)[0];
+  assert.equal(step2('flight').getAttribute('open'), '');
+  assert.equal(step2('area').getAttribute('open'), null);
+  again.handle.destroy();
 });
 
 test('Adjust: Orbit targets show for the Orbit pattern, and after PLAN ALL with a grid pattern, not for a plain grid', async () => {
@@ -1810,6 +1895,8 @@ test('PLAN ALL: a late building-footprint reply does not wipe the suite, and the
     const world = makeWorld({ sample: (cartos) => flat(cartos) });
     const late = deferred();
     const handle = initDronePlan({
+      unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
+    unitStorage: memoryStorage({ 'gev.dronePlan.units': 'm' }),
       viewer: world.viewer,
       cesium: world.cesium,
       document: dom.doc,
@@ -2100,4 +2187,191 @@ test('a request with no trusted identity gives the sign-in note and no list', as
 test('every compatibility code has a sentence', () => {
   const codes = ['read-empty', 'read-not-a-kmz', 'namespace', 'no-waylines', 'template-fallback', 'template-shape', 'no-template', 'no-config', 'no-drone', 'drone-mismatch', 'no-waypoints', 'too-many', 'index-gap', 'bad-coordinates', 'height-mode', 'no-height', 'height-range', 'speed-range', 'poi-missing', 'group-mode', 'group-ids', 'action-ids', 'far-apart'];
   for (const code of codes) assert.notEqual(warningText({ code, args: {} }), code, code);
+});
+
+// -------------------------------------------------------------------- units --
+const unitBtn = (w, system) =>
+  w.buttons('data-action').find((b) => b.getAttribute('data-action') === `units-${system}`);
+
+test('units: feet by default, the ft/m switch changes every shown length and speed', async () => {
+  const w = setup({ storage: memoryStorage() });
+  assert.equal(unitBtn(w, 'ft').getAttribute('aria-pressed'), 'true');
+  assert.equal(unitBtn(w, 'm').getAttribute('aria-pressed'), 'false');
+  const out = (label) =>
+    w.control(label).parentNode.children.find((n) => n.tagName === 'OUTPUT').textContent;
+  assert.equal(out('Height above ground'), '262 ft');
+  assert.equal(out('Speed'), `${(w.handle.getState().options.speedMs * 3.28084).toFixed(1)} ft/s`);
+  assert.equal(w.control('Height above ground').max, '390');
+  assert.equal(w.control('Height above ground').step, '10');
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  assert.match(w.stats().Speed, /ft\/s$/);
+  assert.match(w.stats().Route, / (ft|mi)$/);
+  unitBtn(w, 'm').click();
+  assert.equal(unitBtn(w, 'm').getAttribute('aria-pressed'), 'true');
+  assert.equal(out('Height above ground'), '80 m');
+  assert.match(w.stats().Speed, / m\/s$/);
+  assert.equal(w.control('Height above ground').max, '120');
+  assert.equal(w.storage.getItem('gev.dronePlan.units'), 'm');
+  unitBtn(w, 'ft').click();
+  assert.equal(out('Height above ground'), '262 ft');
+  assert.equal(w.storage.getItem('gev.dronePlan.units'), 'ft');
+  w.handle.destroy();
+});
+
+test('units: the choice is remembered per browser', () => {
+  const storage = memoryStorage();
+  const first = setup({ storage });
+  unitBtn(first, 'm').click();
+  first.handle.destroy();
+  const second = setup({ storage });
+  assert.equal(unitBtn(second, 'm').getAttribute('aria-pressed'), 'true');
+  const label = second.control('Height above ground').parentNode.children.find((n) => n.tagName === 'OUTPUT');
+  assert.equal(label.textContent, '80 m');
+  second.handle.destroy();
+});
+
+test('units: what is typed or slid in feet is stored in metres', async () => {
+  const w = setup({ storage: memoryStorage() });
+  const o = () => w.handle.getState().options;
+  const agl = w.control('Height above ground');
+  agl.value = '200';
+  agl.dispatch('input');
+  assert.equal(o().aglM, 60.96);
+  const speed = w.control('Speed');
+  speed.value = '10';
+  speed.dispatch('input');
+  assert.equal(o().speedMs, 3.048);
+  const radius = w.control('Orbit radius');
+  radius.value = '100';
+  radius.dispatch('input');
+  assert.equal(o().orbitRadiusM, 30.48);
+  const tree = w.control('Tree / obstacle height');
+  tree.value = '50';
+  tree.dispatch('input');
+  assert.equal(o().obstacleHeightM, 15.24);
+  const rings = w.control('Orbit heights');
+  rings.value = '130, 260';
+  rings.dispatch('change');
+  assert.deepEqual(o().orbitHeightsM, [39.62, 79.25]);
+  const width = checkSlider(w, 'width');
+  width.value = '50';
+  width.dispatch('input');
+  assert.equal(w.handle.getState().check.halfWidthM, 15.24);
+  // Back in the controls the same numbers are shown in feet.
+  assert.equal(w.control('Orbit heights').value, '130, 260');
+  w.handle.destroy();
+});
+
+test('units: an obstacle height box takes feet and the plan gets metres', async () => {
+  const w = setup({ storage: memoryStorage() });
+  w.handle.setBox(boxM(300, 200));
+  w.handle.addObstacle?.({ lon: -97.77, lat: 30.27 });
+  await w.handle.replan();
+  const box = w.find((n) => n.getAttribute('data-obstacle-height'))[0];
+  if (!box) {
+    w.handle.destroy();
+    return;
+  }
+  box.value = '100';
+  box.dispatch('input');
+  const stored = w.handle.getState().options.obstacles[0].heightM;
+  assert.equal(stored, 30.48);
+  w.handle.destroy();
+});
+
+// The KMZ stamps createTime from the clock; hold the clock still so two runs
+// of the same plan can be compared byte for byte.
+const frozenClock = async (fn) => {
+  const real = Date.now;
+  Date.now = () => 1_790_000_000_000;
+  try {
+    return await fn();
+  } finally {
+    Date.now = real;
+  }
+};
+
+test('units: the exported KMZ is byte-identical whichever unit is shown', async () => {
+  const when = new Date('2026-10-30T12:00:00Z');
+  const kmzFor = async (system, via) => {
+    const w = setup({ storage: memoryStorage({ 'gev.dronePlan.units': system }) });
+    w.handle.setBox(boxM(300, 200));
+    await w.handle.replan();
+    if (via) via(w);
+    await w.handle.replan();
+    w.handle.downloadMission(0, when);
+    const bytes = Buffer.from(w.downloads.at(-1).bytes);
+    w.handle.destroy();
+    return bytes;
+  };
+  const metres = await frozenClock(() => kmzFor('m'));
+  const feet = await frozenClock(() => kmzFor('ft'));
+  assert.ok(metres.length > 100);
+  assert.deepEqual(feet, metres, 'same plan, same bytes');
+  // Switching the unit back and forth on a live panel changes nothing either.
+  const toggled = await frozenClock(() =>
+    kmzFor('ft', (w) => {
+      unitBtn(w, 'm').click();
+      unitBtn(w, 'ft').click();
+      unitBtn(w, 'm').click();
+    }),
+  );
+  assert.deepEqual(toggled, metres);
+});
+
+test('units: a height typed in feet gives a KMZ in metres (DJI needs metres)', async () => {
+  const when = new Date('2026-10-30T12:00:00Z');
+  const run = async (system, value) => {
+    const w = setup({ storage: memoryStorage({ 'gev.dronePlan.units': system }) });
+    w.handle.setBox(boxM(300, 200));
+    const agl = w.control('Height above ground');
+    agl.value = value;
+    agl.dispatch('input');
+    await w.handle.replan();
+    w.handle.downloadMission(0, when);
+    const bytes = Buffer.from(w.downloads.at(-1).bytes);
+    const aglM = w.handle.getState().options.aglM;
+    w.handle.destroy();
+    return { bytes, aglM };
+  };
+  const ft = await frozenClock(() => run('ft', '200'));
+  assert.equal(ft.aglM, 60.96);
+  const m = await frozenClock(() => run('m', '60.96'));
+  assert.deepEqual(ft.bytes, m.bytes, '200 ft is the same file as 60.96 m');
+});
+
+// -------------------------------------------------------- transparency UI --
+test('transparency: four sliders, defaults are today\'s values, remembered per browser', async () => {
+  const storage = memoryStorage({ 'gev.dronePlan.units': 'm' });
+  const w = setup({ storage });
+  // The shared fake colour has no alpha: give this test one that reports it.
+  w.cesium.Color = {
+    fromCssColorString: (css) => ({ css, a: 1, withAlpha: (a) => ({ css, a }) }),
+  };
+  const val = (layer) => checkSlider(w, `alpha-${layer}`).value;
+  assert.deepEqual(
+    ['zone', 'curtain', 'footprint', 'view'].map(val),
+    ['16', '10', '5', '20'],
+  );
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const slider = checkSlider(w, 'alpha-footprint');
+  slider.value = '25';
+  slider.dispatch('input');
+  assert.equal(w.handle.getState().check.alpha.footprint, 0.25);
+  await wait(250);
+  assert.equal(checkOf(w, 'footprint')[0].polygon.material.a, 0.25);
+  assert.equal(checkOf(w, 'zone')[0].polylineVolume.material.a, 0.16);
+  w.handle.destroy();
+  assert.equal(JSON.parse(storage.getItem('gev.dronePlan.alpha')).footprint, 0.25);
+  const again = setup({ storage });
+  assert.equal(checkSlider(again, 'alpha-footprint').value, '25');
+  assert.equal(checkSlider(again, 'alpha-zone').value, '16');
+  again.buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'reset-transparency')
+    .click();
+  assert.equal(checkSlider(again, 'alpha-footprint').value, '5');
+  assert.equal(JSON.parse(storage.getItem('gev.dronePlan.alpha')).footprint, 0.05);
+  again.handle.destroy();
 });

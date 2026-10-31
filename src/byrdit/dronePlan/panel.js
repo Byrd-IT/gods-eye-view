@@ -41,7 +41,6 @@ import { recommendOrbitTargets, targetInsideAreas } from './orbitTargets.js';
 import {
   AGL_CAP_M,
   DEFAULT_OBSTACLE_HEIGHT_M,
-  FT_PER_M,
   MAX_ORBIT_TARGETS,
   MAX_TAKEOFF_FROM_BOX_M,
   MIN_AGL_M,
@@ -68,9 +67,32 @@ import {
   distanceText,
   durationText,
   heightText,
+  lengthText,
   planErrorText,
+  speedText,
   warningText,
 } from './format.js';
+import {
+  browserStorage,
+  lengthFromM,
+  lengthToM,
+  lengthUnit,
+  readUnitSystem,
+  setUnitSystem,
+  sliderRange,
+  speedFromMs,
+  speedToMs,
+  speedUnit,
+  writeUnitSystem,
+} from './units.js';
+import { ALPHA_RANGE, DEFAULT_ALPHA, clampAlpha } from './checkLayer.js';
+import {
+  STEP_KEYS,
+  readAlpha,
+  readStepsOpen,
+  writeAlpha,
+  writeStepsOpen,
+} from './prefs.js';
 
 export const PANEL_ID = 'drone-plan-panel';
 export const BODY_ID = 'drone-plan-panel-body';
@@ -145,6 +167,7 @@ export function initDronePlan({
   libraryClient,
   getBuildingFootprints = null,
   fetchObstacles = null,
+  unitStorage = browserStorage(doc?.defaultView ?? globalThis),
   overlay = {
     set: (entries) => setOverlayEntries(OBSTACLE_OVERLAY_SOURCE, entries),
     clear: () => clearOverlaySource(OBSTACLE_OVERLAY_SOURCE),
@@ -154,6 +177,10 @@ export function initDronePlan({
   const body = doc?.getElementById?.(BODY_ID);
   if (!viewer?.scene || !panel || !body) return null;
   const entry = panel.querySelector?.(ENTRY_SELECTOR) ?? null;
+  // Feet or metres, as this browser last chose. Only what is shown and typed
+  // changes: the plan and the KMZ stay in metres.
+  setUnitSystem(readUnitSystem(unitStorage));
+  const stepsOpen = readStepsOpen(unitStorage);
 
   const state = {
     box: null,
@@ -202,6 +229,8 @@ export function initDronePlan({
       footprints: true,
       frustum: 'one',
       index: 0,
+      // How see-through each layer is (0 = invisible): the sliders.
+      alpha: readAlpha(unitStorage),
     },
     suiteBusy: false,
     error: null,
@@ -772,7 +801,7 @@ export function initDronePlan({
         cls: 'gev-dp-area gev-dp-obstacle',
         attrs: { 'data-obstacle': o.id },
       });
-      const where = `${num(o.lat, 5)}, ${num(o.lon, 5)} · r ${num(o.radiusM)} m`;
+      const where = `${num(o.lat, 5)}, ${num(o.lon, 5)} · r ${lengthText(o.radiusM)}`;
       if (o.source === 'user') {
         // The operator placed it: they say what it is.
         const kind = el(doc, 'select', row, {
@@ -802,19 +831,19 @@ export function initDronePlan({
         attrs: {
           type: 'number',
           min: '0',
-          max: String(MAX_OBSTACLE_HEIGHT_M),
+          max: lengthField(MAX_OBSTACLE_HEIGHT_M),
           step: '1',
-          'aria-label': t('Obstacle height (m)'),
+          'aria-label': t('Obstacle height'),
           'data-obstacle-height': o.id,
         },
       });
-      height.value = String(Math.round(o.heightM * 10) / 10);
+      height.value = lengthField(o.heightM, 1);
       el(doc, 'span', row, {
         cls: 'gev-dp-obstacle-source',
         text:
           o.estimatedHeightM === null
             ? t('Set by you')
-            : `${t(SOURCE_NAMES[o.source] ?? o.source)}: ${num(o.estimatedHeightM)} m`,
+            : `${t(SOURCE_NAMES[o.source] ?? o.source)}: ${lengthText(o.estimatedHeightM)}`,
       });
       const reset = el(doc, 'button', row, {
         cls: 'data-toggle-chip',
@@ -835,12 +864,15 @@ export function initDronePlan({
         const now = obstacleStore.list().find((x) => x.id === o.id);
         if (!now) return;
         reset.disabled = !(now.userEdited && now.estimatedHeightM !== null);
-        if (commit) height.value = String(Math.round(now.heightM * 10) / 10);
+        if (commit) height.value = lengthField(now.heightM, 1);
       };
       height.addEventListener('input', () => {
         obstacleTyping = true;
         try {
-          obstacleStore.setHeight(o.id, height.value);
+          obstacleStore.setHeight(
+            o.id,
+            height.value.trim() === '' ? '' : lengthToM(height.value),
+          );
         } finally {
           obstacleTyping = false;
         }
@@ -1008,16 +1040,6 @@ export function initDronePlan({
     body.classList.add('gev-dp-body');
     const bar = el(doc, 'div', body, { cls: 'gev-dp-bar' });
     ui.bar = bar;
-    ui.drawButton = el(doc, 'button', bar, {
-      cls: 'data-toggle-chip',
-      text: t('DRAW BOX'),
-      attrs: {
-        type: 'button',
-        'data-action': 'draw-box',
-        'aria-pressed': 'false',
-        title: t('Drag a box over the area to map'),
-      },
-    });
     ui.closeButton = el(doc, 'button', bar, {
       cls: 'data-toggle-chip',
       text: t('CLOSE'),
@@ -1027,7 +1049,94 @@ export function initDronePlan({
         title: t('Close the Drone Flight Plan and clear it from the globe'),
       },
     });
-    ui.polygonButton = el(doc, 'button', bar, {
+    // Feet or metres: what the panel shows and accepts. The KMZ stays metres.
+    const unitBox = el(doc, 'span', bar, {
+      cls: 'gev-dp-units',
+      attrs: { role: 'group', 'aria-label': t('Units') },
+    });
+    ui.unitButtons = {};
+    for (const [system, label] of [
+      ['ft', t('FT')],
+      ['m', t('M')],
+    ]) {
+      ui.unitButtons[system] = el(doc, 'button', unitBox, {
+        cls: 'data-toggle-chip',
+        text: label,
+        attrs: {
+          type: 'button',
+          'data-action': `units-${system}`,
+          'aria-pressed': 'false',
+          title:
+            system === 'ft'
+              ? t('Show feet and ft/s. The mission file always stays in metres')
+              : t('Show metres and m/s. The mission file always stays in metres'),
+        },
+      });
+    }
+    ui.status = el(doc, 'p', body, {
+      cls: 'gev-dp-status',
+      attrs: { role: 'status', 'aria-live': 'polite' },
+    });
+
+    // ---- The nine numbered steps: <details>, each with a one-line summary
+    // of its current values while collapsed. Open or closed is remembered.
+    ui.steps = {};
+    const stepTitles = {
+      area: t('Area'),
+      aircraft: t('Aircraft & camera'),
+      shots: t('Shots'),
+      orbits: t('Orbits'),
+      obstacles: t('Obstacles & safety'),
+      flight: t('Flight & battery'),
+      plan: t('Plan'),
+      check: t('Check (3D)'),
+      export: t('Save & export'),
+    };
+    const makeStep = (key) => {
+      const n = STEP_KEYS.indexOf(key) + 1;
+      const details = el(doc, 'details', body, {
+        cls: 'gev-dp-step',
+        attrs: { 'data-step': key },
+      });
+      if (stepsOpen[key]) details.setAttribute('open', '');
+      const head = el(doc, 'summary', details, { cls: 'gev-dp-step-head' });
+      el(doc, 'span', head, { cls: 'gev-dp-step-num', text: String(n) });
+      el(doc, 'span', head, {
+        cls: 'gev-dp-step-title',
+        text: stepTitles[key],
+      });
+      const line = el(doc, 'span', head, {
+        cls: 'gev-dp-step-line',
+        attrs: { 'data-step-line': key },
+      });
+      const inner = el(doc, 'div', details, { cls: 'gev-dp-step-body' });
+      details.addEventListener('toggle', () => {
+        stepsOpen[key] = Boolean(
+          details.open ?? details.getAttribute('open') !== null,
+        );
+        writeStepsOpen(unitStorage, stepsOpen);
+      });
+      ui.steps[key] = { details, line, body: inner, head };
+    };
+    for (const key of STEP_KEYS) makeStep(key);
+    // Where the controls built below go: the body of the step being built.
+    let host = body;
+    const into = (key) => {
+      host = ui.steps[key].body;
+    };
+
+    into('area');
+    ui.drawButton = el(doc, 'button', host, {
+      cls: 'data-toggle-chip',
+      text: t('DRAW BOX'),
+      attrs: {
+        type: 'button',
+        'data-action': 'draw-box',
+        'aria-pressed': 'false',
+        title: t('Drag a box over the area to map'),
+      },
+    });
+    ui.polygonButton = el(doc, 'button', host, {
       cls: 'data-toggle-chip',
       text: t('DRAW POLYGON'),
       attrs: {
@@ -1039,22 +1148,20 @@ export function initDronePlan({
         ),
       },
     });
-    ui.status = el(doc, 'p', body, {
-      cls: 'gev-dp-status',
-      attrs: { role: 'status', 'aria-live': 'polite' },
+    ui.areas = el(doc, 'div', host, { cls: 'gev-dp-areas' });
+    ui.library = el(doc, 'div', ui.steps.export.body, {
+      cls: 'gev-dp-library-host',
     });
-    ui.areas = el(doc, 'div', body, { cls: 'gev-dp-areas' });
-    ui.library = el(doc, 'div', body, { cls: 'gev-dp-library-host' });
 
     const field = (label, control, { value } = {}) => {
-      const row = el(doc, 'label', body, { cls: 'gev-dp-row' });
-      el(doc, 'span', row, { cls: 'gev-dp-label', text: label });
+      const row = el(doc, 'label', host, { cls: 'gev-dp-row' });
+      const labelEl = el(doc, 'span', row, { cls: 'gev-dp-label', text: label });
       const wrap = el(doc, 'span', row, { cls: 'gev-dp-control' });
       wrap.append(control);
       let out = null;
       if (value !== false)
         out = el(doc, 'output', wrap, { cls: 'gev-slider-value' });
-      return { row, out };
+      return { row, out, labelEl };
     };
     const select = (items, label) => {
       const s = el(doc, 'select', null, {
@@ -1068,22 +1175,45 @@ export function initDronePlan({
     };
     const slider = (label, min, max, step) =>
       createSlider({ documentRef: doc, min, max, step, ariaLabel: label });
+    // A slider over a length or a speed: its range is kept in metres (m/s)
+    // and turned into the chosen unit by applyUnitRanges().
+    const unitSliders = [];
+    const lslider = (label, spec) => {
+      const control = slider(label, spec.minM, spec.maxM, spec.stepM);
+      unitSliders.push({ control, spec });
+      return control;
+    };
+    ui.applyUnitRanges = () => {
+      for (const { control, spec } of unitSliders) {
+        const range = sliderRange(spec);
+        control.min = String(range.min);
+        control.max = String(range.max);
+        control.step = String(range.step);
+      }
+    };
 
+    into('aircraft');
     ui.preset = select(
       listPresets().map((p) => [p.id, p.name]),
       t('Aircraft'),
     );
     field(t('Aircraft'), ui.preset, { value: false });
-    ui.presetInfo = el(doc, 'p', body, {
+    ui.presetInfo = el(doc, 'p', host, {
       cls: 'gev-dp-note gev-dp-preset-info',
       attrs: { 'data-role': 'preset-info' },
     });
+    ui.shutter = select(
+      SHUTTER_DENOMINATORS.map((n) => [String(n), `1/${n} s`]),
+      t('Shutter speed'),
+    );
+    field(t('Shutter speed'), ui.shutter, { value: false });
+    into('shots');
     ui.mode = select(
       MODES.map((m) => [m, modeLabel(m)]),
       t('Mode'),
     );
     field(t('Mode'), ui.mode, { value: false });
-    ui.useRecommended = el(doc, 'button', body, {
+    ui.useRecommended = el(doc, 'button', host, {
       cls: 'data-toggle-chip gev-dp-recommend',
       text: t('USE RECOMMENDED'),
       attrs: {
@@ -1094,7 +1224,12 @@ export function initDronePlan({
         ),
       },
     });
-    ui.suiteButton = el(doc, 'button', body, {
+    ui.recommended = el(doc, 'dl', host, {
+      cls: 'gev-dp-stats gev-dp-recommended',
+      attrs: { 'data-role': 'recommended' },
+    });
+    into('plan');
+    ui.suiteButton = el(doc, 'button', host, {
       cls: 'data-toggle-chip gev-dp-suite-button',
       text: t('PLAN ALL RECOMMENDED PASSES'),
       attrs: {
@@ -1106,16 +1241,17 @@ export function initDronePlan({
       },
     });
     ui.suiteButton.disabled = true;
-    ui.suite = el(doc, 'div', body, {
+    ui.suite = el(doc, 'div', host, {
       cls: 'gev-dp-missions gev-dp-suite',
       attrs: { 'data-role': 'suite' },
     });
-    ui.recommended = el(doc, 'dl', body, {
-      cls: 'gev-dp-stats gev-dp-recommended',
-      attrs: { 'data-role': 'recommended' },
+    into('shots');
+    ui.agl = lslider(t('Height above ground'), {
+      minM: MIN_AGL_M,
+      maxM: AGL_CAP_M,
+      stepM: 5,
+      stepFt: 10,
     });
-
-    ui.agl = slider(t('Height above ground'), MIN_AGL_M, AGL_CAP_M, 5);
     ({ row: ui.aglRow, out: ui.aglOut } = field(
       t('Height above ground'),
       ui.agl,
@@ -1134,15 +1270,6 @@ export function initDronePlan({
       t('Pattern'),
     );
     field(t('Pattern'), ui.pattern, { value: false });
-    ui.jobs = select(
-      [
-        ['per-area', t('One job per area')],
-        ['whole', t('One job for the whole plan')],
-      ],
-      t('Processing jobs'),
-    );
-    field(t('Processing jobs'), ui.jobs, { value: false });
-    ui.jobNote = el(doc, 'p', body, { cls: 'gev-dp-note gev-dp-job-note' });
     ui.direction = select(
       [
         ['auto', t('Along the long side')],
@@ -1156,7 +1283,13 @@ export function initDronePlan({
     }));
     ui.tilt = slider(t('Camera tilt'), -80, -45, 5);
     ({ row: ui.tiltRow, out: ui.tiltOut } = field(t('Camera tilt'), ui.tilt));
-    ui.radius = slider(t('Orbit radius'), 10, 300, 5);
+    into('orbits');
+    ui.radius = lslider(t('Orbit radius'), {
+      minM: 10,
+      maxM: 300,
+      stepM: 5,
+      stepFt: 10,
+    });
     ({ row: ui.radiusRow, out: ui.radiusOut } = field(
       t('Orbit radius'),
       ui.radius,
@@ -1172,23 +1305,36 @@ export function initDronePlan({
         placeholder: '40, 80',
       },
     });
-    ({ row: ui.ringsRow } = field(t('Orbit heights (m)'), ui.rings, {
-      value: false,
-    }));
-    ui.targetHeight = slider(t('Target height'), 0, 60, 1);
+    ({ row: ui.ringsRow, labelEl: ui.ringsLabel } = field(
+      t('Orbit heights ({unit})', { unit: lengthUnit() }),
+      ui.rings,
+      { value: false },
+    ));
+    ui.targetHeight = lslider(t('Target height'), {
+      minM: 0,
+      maxM: 60,
+      stepM: 1,
+      stepFt: 5,
+    });
     ({ row: ui.targetHeightRow, out: ui.targetHeightOut } = field(
       t('Target height'),
       ui.targetHeight,
     ));
-    ui.obstacle = slider(t('Tree / obstacle height'), 0, 60, 1);
+    into('obstacles');
+    ui.obstacle = lslider(t('Tree / obstacle height'), {
+      minM: 0,
+      maxM: 60,
+      stepM: 1,
+      stepFt: 5,
+    });
     ({ row: ui.obstacleRow, out: ui.obstacleOut } = field(
       t('Tree / obstacle height'),
       ui.obstacle,
     ));
-    ui.obstacleNote = el(doc, 'p', body, {
+    ui.obstacleNote = el(doc, 'p', host, {
       cls: 'gev-dp-note gev-dp-obstacle-note',
     });
-    ui.obstaclesBox = el(doc, 'div', body, {
+    ui.obstaclesBox = el(doc, 'div', host, {
       cls: 'gev-dp-targets gev-dp-obstacles',
     });
     const obstacleBar = el(doc, 'div', ui.obstaclesBox, {
@@ -1229,11 +1375,8 @@ export function initDronePlan({
     ui.obstacleList = el(doc, 'div', ui.obstaclesBox, {
       cls: 'gev-dp-target-list gev-dp-obstacle-list',
     });
-    el(doc, 'p', ui.obstaclesBox, {
+    ui.obstacleDisclaimer = el(doc, 'p', ui.obstaclesBox, {
       cls: 'gev-dp-note gev-dp-obstacle-disclaimer',
-      text: t(
-        'Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines and guy wires are in none of these sources. The plan keeps 5 m above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.',
-      ),
     });
     el(doc, 'p', ui.obstaclesBox, {
       cls: 'gev-dp-note gev-dp-obstacle-credit',
@@ -1241,7 +1384,8 @@ export function initDronePlan({
         'Data: tree canopy height by Meta and WRI (CC BY 4.0), towers from the FAA Digital Obstacle File, buildings from OpenStreetMap contributors.',
       ),
     });
-    ui.targetsBox = el(doc, 'div', body, {
+    into('orbits');
+    ui.targetsBox = el(doc, 'div', host, {
       cls: 'gev-dp-targets',
       attrs: { 'data-role': 'orbit-targets' },
     });
@@ -1284,6 +1428,7 @@ export function initDronePlan({
       ),
     });
 
+    into('shots');
     ui.photoMode = select(
       [
         ['waypoint', t('At every waypoint')],
@@ -1292,13 +1437,15 @@ export function initDronePlan({
       t('Photos'),
     );
     ({ row: ui.photoRow } = field(t('Photos'), ui.photoMode, { value: false }));
-    ui.speed = slider(t('Speed'), MIN_PLAN_SPEED_MS, 15, 0.1);
+    into('flight');
+    ui.speed = lslider(t('Speed'), {
+      minM: MIN_PLAN_SPEED_MS,
+      maxM: 15,
+      stepM: 0.1,
+      stepFt: 0.5,
+      kind: 'speed',
+    });
     ({ out: ui.speedOut } = field(t('Speed'), ui.speed));
-    ui.shutter = select(
-      SHUTTER_DENOMINATORS.map((n) => [String(n), `1/${n} s`]),
-      t('Shutter speed'),
-    );
-    field(t('Shutter speed'), ui.shutter, { value: false });
     ui.battery = el(doc, 'input', null, {
       cls: 'pp-text-input gev-dp-text',
       attrs: {
@@ -1310,8 +1457,18 @@ export function initDronePlan({
       },
     });
     field(t('Battery (min)'), ui.battery, { value: false });
+    ui.jobs = select(
+      [
+        ['per-area', t('One job per area')],
+        ['whole', t('One job for the whole plan')],
+      ],
+      t('Processing jobs'),
+    );
+    field(t('Processing jobs'), ui.jobs, { value: false });
+    ui.jobNote = el(doc, 'p', host, { cls: 'gev-dp-note gev-dp-job-note' });
 
-    const takeoffRow = el(doc, 'div', body, { cls: 'gev-dp-row' });
+    into('area');
+    const takeoffRow = el(doc, 'div', host, { cls: 'gev-dp-row' });
     el(doc, 'span', takeoffRow, { cls: 'gev-dp-label', text: t('Takeoff') });
     const takeoffWrap = el(doc, 'span', takeoffRow, {
       cls: 'gev-dp-control gev-dp-takeoff',
@@ -1338,19 +1495,18 @@ export function initDronePlan({
     });
 
     // ---- 3D check: shaded safety zone, height curtain, camera view.
-    ui.check = el(doc, 'details', body, {
-      cls: 'gev-dp-check',
-      attrs: { open: '', 'data-role': '3d-check' },
-    });
-    el(doc, 'summary', ui.check, { text: t('Safety zone') });
-    el(doc, 'p', ui.check, {
+    ui.check = ui.steps.check.details;
+    ui.check.setAttribute('data-role', '3d-check');
+    ui.check.classList.add('gev-dp-check');
+    host = ui.steps.check.body;
+    el(doc, 'p', host, {
       cls: 'gev-dp-note gev-dp-check-note',
       text: t(
         'Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.',
       ),
     });
     const checkBox = (label, key) => {
-      const row = el(doc, 'label', ui.check, { cls: 'gev-dp-row' });
+      const row = el(doc, 'label', host, { cls: 'gev-dp-row' });
       const box = el(doc, 'input', null, {
         attrs: { type: 'checkbox', 'data-check': key },
       });
@@ -1360,23 +1516,6 @@ export function initDronePlan({
     };
     ui.checkEnabled = checkBox(t('Show 3D check'), 'enabled');
     ui.checkZone = checkBox(t('Safety zone'), 'zone');
-    const widthRow = el(doc, 'label', ui.check, { cls: 'gev-dp-row' });
-    el(doc, 'span', widthRow, {
-      cls: 'gev-dp-label',
-      text: t('Zone half-width'),
-    });
-    const widthWrap = el(doc, 'span', widthRow, { cls: 'gev-dp-control' });
-    ui.checkWidth = slider(
-      t('Zone half-width'),
-      MIN_ZONE_HALF_WIDTH_M,
-      MAX_ZONE_HALF_WIDTH_M,
-      1,
-    );
-    ui.checkWidth.setAttribute('data-check-slider', 'width');
-    widthWrap.append(ui.checkWidth);
-    ui.checkWidthOut = el(doc, 'output', widthWrap, {
-      cls: 'gev-slider-value',
-    });
     ui.checkCurtain = checkBox(t('Height curtain'), 'curtain');
     ui.checkFootprints = checkBox(t('Photo footprints'), 'footprints');
     ui.checkView = select(
@@ -1388,21 +1527,62 @@ export function initDronePlan({
       t('Camera view'),
     );
     ui.checkView.setAttribute('data-check', 'frustum');
-    const viewRow = el(doc, 'label', ui.check, { cls: 'gev-dp-row' });
+    const viewRow = el(doc, 'label', host, { cls: 'gev-dp-row' });
     el(doc, 'span', viewRow, { cls: 'gev-dp-label', text: t('Camera view') });
     el(doc, 'span', viewRow, { cls: 'gev-dp-control' }).append(ui.checkView);
-    const photoRow = el(doc, 'label', ui.check, { cls: 'gev-dp-row' });
+    const photoRow = el(doc, 'label', host, { cls: 'gev-dp-row' });
     el(doc, 'span', photoRow, { cls: 'gev-dp-label', text: t('Step photos') });
     const photoWrap = el(doc, 'span', photoRow, { cls: 'gev-dp-control' });
     ui.checkPhoto = slider(t('Step through the photos'), 1, 1, 1);
     ui.checkPhoto.setAttribute('data-check-slider', 'photo');
     photoWrap.append(ui.checkPhoto);
-    ui.checkReadout = el(doc, 'p', ui.check, {
+    ui.checkReadout = el(doc, 'p', host, {
       cls: 'gev-dp-note gev-dp-check-readout',
       attrs: { 'data-role': 'check-readout', 'aria-live': 'polite' },
     });
+    // One see-through slider per layer type; 0 hides the layer's shading.
+    el(doc, 'p', host, {
+      cls: 'gev-dp-areas-label',
+      text: t('Transparency'),
+    });
+    ui.alphaSliders = {};
+    ui.alphaOuts = {};
+    for (const [layer, label] of [
+      ['zone', t('Safety zone')],
+      ['curtain', t('Height curtain')],
+      ['footprint', t('Photo footprints')],
+      ['view', t('Camera view pyramid')],
+    ]) {
+      const range = ALPHA_RANGE[layer];
+      const control = slider(
+        t('{layer} opacity', { layer: label }),
+        Math.round(range.min * 100),
+        Math.round(range.max * 100),
+        1,
+      );
+      control.setAttribute('data-check-slider', `alpha-${layer}`);
+      const row = el(doc, 'label', host, { cls: 'gev-dp-row' });
+      el(doc, 'span', row, { cls: 'gev-dp-label', text: label });
+      const wrap = el(doc, 'span', row, { cls: 'gev-dp-control' });
+      wrap.append(control);
+      ui.alphaOuts[layer] = el(doc, 'output', wrap, {
+        cls: 'gev-slider-value',
+      });
+      ui.alphaSliders[layer] = control;
+    }
+    ui.alphaReset = el(doc, 'button', host, {
+      cls: 'data-toggle-chip',
+      text: t('RESET TRANSPARENCY'),
+      attrs: {
+        type: 'button',
+        'data-action': 'reset-transparency',
+        title: t('Put the four layers back to their usual look'),
+      },
+    });
 
-    const advanced = el(doc, 'details', body, { cls: 'gev-dp-advanced' });
+    // DJI model code: part of the aircraft step.
+    host = ui.steps.aircraft.body;
+    const advanced = el(doc, 'details', host, { cls: 'gev-dp-advanced' });
     el(doc, 'summary', advanced, { text: t('DJI model code') });
     ui.enum = el(doc, 'input', null, {
       cls: 'pp-text-input gev-dp-text',
@@ -1424,42 +1604,45 @@ export function initDronePlan({
       ),
     });
 
-    ui.stats = el(doc, 'dl', body, { cls: 'gev-dp-stats' });
-    ui.warnings = el(doc, 'ul', body, { cls: 'gev-dp-warnings' });
-    ui.missions = el(doc, 'div', body, { cls: 'gev-dp-missions' });
-    ui.note = el(doc, 'p', body, {
+    // Safety zone width: step 5, next to the obstacle heights.
+    host = ui.steps.obstacles.body;
+    const widthRow = el(doc, 'label', host, { cls: 'gev-dp-row' });
+    el(doc, 'span', widthRow, {
+      cls: 'gev-dp-label',
+      text: t('Zone half-width'),
+    });
+    const widthWrap = el(doc, 'span', widthRow, { cls: 'gev-dp-control' });
+    ui.checkWidth = lslider(t('Zone half-width'), {
+      minM: MIN_ZONE_HALF_WIDTH_M,
+      maxM: MAX_ZONE_HALF_WIDTH_M,
+      stepM: 1,
+      stepFt: 5,
+    });
+    ui.checkWidth.setAttribute('data-check-slider', 'width');
+    widthWrap.append(ui.checkWidth);
+    ui.checkWidthOut = el(doc, 'output', widthWrap, {
+      cls: 'gev-slider-value',
+    });
+
+    // Plan step: totals, warnings. Export step: the KMZ buttons and the note.
+    host = ui.steps.plan.body;
+    ui.stats = el(doc, 'dl', host, { cls: 'gev-dp-stats' });
+    ui.warnings = el(doc, 'ul', host, { cls: 'gev-dp-warnings' });
+    host = ui.steps.export.body;
+    ui.missions = el(doc, 'div', host, { cls: 'gev-dp-missions' });
+    ui.note = el(doc, 'p', host, {
       cls: 'gev-dp-note',
       text: t(
         'NOT FLIGHT-TESTED: check airspace and local rules, keep the aircraft in sight, and fly the first mission short and supervised.',
       ),
     });
-
-    // The answer comes first: stats, warnings and downloads sit right under
-    // the status line, so they stay in view while the options scroll below.
-    ui.status.after(ui.areas, ui.stats, ui.warnings, ui.missions);
-
-    // Adjust: the controls people look for after planning sit right under the
-    // plan buttons and the all-passes list, not at the foot of a long panel:
-    // the safety zone (3D check), the orbit targets and the obstacle heights.
-    ui.adjust = el(doc, 'section', null, {
-      cls: 'gev-dp-adjust',
-      attrs: { 'data-role': 'adjust' },
-    });
-    el(doc, 'h4', ui.adjust, { cls: 'gev-dp-adjust-title', text: t('Adjust') });
-    ui.adjust.append(
-      ui.check,
-      ui.targetsBox,
-      ui.obstacleRow,
-      ui.obstacleNote,
-      ui.obstaclesBox,
-    );
     ui.summary = el(doc, 'div', null, {
       cls: 'gev-dp-summary',
       attrs: { 'data-role': 'plan-summary', 'aria-live': 'polite' },
     });
     ui.summary.hidden = true;
     ui.suite.after(ui.summary);
-    ui.summary.after(ui.adjust);
+    ui.applyUnitRanges();
 
     // ------------------------------------------------------ wiring --
     const o = state.options;
@@ -1494,11 +1677,30 @@ export function initDronePlan({
     });
     // The zone is rebuilt once the slider settles, not on every pixel.
     ui.checkWidth.addEventListener('input', () => {
-      c.halfWidthM = Number(ui.checkWidth.value);
+      c.halfWidthM = lengthToM(ui.checkWidth.value);
       ui.checkWidthOut.textContent = heightText(c.halfWidthM);
+      renderStepLines();
       clearTimeout(checkTimer);
       checkTimer = setTimeout(pushCheck, CHECK_SLIDER_DELAY_MS);
     });
+    for (const layer of Object.keys(ALPHA_RANGE)) {
+      ui.alphaSliders[layer].addEventListener('input', () => {
+        c.alpha[layer] = clampAlpha(layer, Number(ui.alphaSliders[layer].value) / 100);
+        writeAlpha(unitStorage, c.alpha);
+        ui.alphaOuts[layer].textContent = `${Math.round(c.alpha[layer] * 100)}%`;
+        clearTimeout(checkTimer);
+        checkTimer = setTimeout(pushCheck, CHECK_SLIDER_DELAY_MS);
+      });
+    }
+    ui.alphaReset.addEventListener('click', () => {
+      c.alpha = { ...DEFAULT_ALPHA };
+      writeAlpha(unitStorage, c.alpha);
+      pushCheck();
+      syncCheckUi();
+    });
+    for (const system of ['ft', 'm']) {
+      ui.unitButtons[system].addEventListener('click', () => chooseUnits(system));
+    }
     syncCheckUi();
     ui.preset.addEventListener('change', () => {
       o.presetId = ui.preset.value;
@@ -1529,7 +1731,7 @@ export function initDronePlan({
     ui.useRecommended.addEventListener('click', () => {
       useRecommended();
     });
-    onInput(ui.agl, () => (o.aglM = Number(ui.agl.value)));
+    onInput(ui.agl, () => (o.aglM = lengthToM(ui.agl.value)));
     onInput(ui.front, () => (o.frontOverlap = Number(ui.front.value)));
     onInput(ui.side, () => (o.sideOverlap = Number(ui.side.value)));
     ui.pattern.addEventListener('change', () => {
@@ -1546,12 +1748,12 @@ export function initDronePlan({
       schedule();
     });
     onInput(ui.tilt, () => (o.tiltPitchDeg = Number(ui.tilt.value)));
-    onInput(ui.radius, () => (o.orbitRadiusM = Number(ui.radius.value)));
+    onInput(ui.radius, () => (o.orbitRadiusM = lengthToM(ui.radius.value)));
     onInput(
       ui.targetHeight,
-      () => (o.orbitTargetHeightM = Number(ui.targetHeight.value)),
+      () => (o.orbitTargetHeightM = lengthToM(ui.targetHeight.value)),
     );
-    onInput(ui.obstacle, () => (o.obstacleHeightM = Number(ui.obstacle.value)));
+    onInput(ui.obstacle, () => (o.obstacleHeightM = lengthToM(ui.obstacle.value)));
     ui.targetRecommend.addEventListener('click', () => recommendTargets());
     ui.obstacleRefresh.addEventListener('click', () =>
       syncObstacles({ force: true }),
@@ -1562,7 +1764,8 @@ export function initDronePlan({
       const list = ui.rings.value
         .split(/[\s,;]+/)
         .map(Number)
-        .filter((n) => Number.isFinite(n) && n > 0);
+        .filter((n) => Number.isFinite(n) && n > 0)
+        .map((n) => lengthToM(n));
       o.orbitHeightsM = list.length ? list : null;
       syncControls();
       schedule();
@@ -1571,7 +1774,7 @@ export function initDronePlan({
       o.photoMode = ui.photoMode.value;
       schedule();
     });
-    onInput(ui.speed, () => (o.speedMs = Number(ui.speed.value)));
+    onInput(ui.speed, () => (o.speedMs = speedToMs(ui.speed.value)));
     ui.battery.addEventListener('change', () => {
       o.batteryMin = Number(ui.battery.value) || 25;
       syncControls();
@@ -1598,6 +1801,95 @@ export function initDronePlan({
     });
   }
 
+  /** The one-line summary each step shows while it is collapsed. */
+  function renderStepLines() {
+    if (destroyed || !ui.steps) return;
+    const o = state.options;
+    const preset = getPreset(o.presetId);
+    const dot = ' · ';
+    const count = state.areas.length;
+    const orbit = o.pattern === 'orbit';
+    const result = state.result;
+    const patternName = {
+      grid: t('Grid'),
+      double: t('Double grid'),
+      orbit: t('Orbit'),
+    }[o.pattern];
+    const targets = (o.orbitTargets ?? []).filter((x) => x.active !== false);
+    const lines = {
+      area: [
+        count
+          ? t('{n} areas', { n: num(count) })
+          : t('Nothing drawn yet'),
+        state.takeoff ? t('takeoff set') : t('takeoff at the centre'),
+      ],
+      aircraft: [preset.name, `1/${num(o.shutterDenominator)} s`],
+      shots: [
+        modeLabel(modeFor(o)),
+        patternName,
+        orbit ? '' : heightText(Math.min(o.aglM, AGL_CAP_M)),
+        orbit ? '' : `${num(o.frontOverlap)}% / ${num(o.sideOverlap)}%`,
+      ],
+      orbits: [
+        lengthText(
+          o.orbitRadiusM ?? result?.plan?.options?.orbitRadiusM ?? 40,
+        ),
+        t('{n} targets', { n: num(targets.length) }),
+      ],
+      obstacles: [
+        t('trees {h}', { h: heightText(o.obstacleHeightM) }),
+        t('{n} marked', { n: num(obstacleStore.list().length) }),
+        t('zone ±{w}', { w: heightText(state.check.halfWidthM) }),
+      ],
+      flight: [
+        speedText(o.speedMs),
+        t('{n} min battery', { n: num(o.batteryMin) }),
+        state.jobGrouping === 'whole' ? t('one job') : t('job per area'),
+      ],
+      plan: result
+        ? [
+            t('{n} photos', { n: num(result.totals.photoCount) }),
+            durationText(result.totals.durationS),
+            t('{n} missions', { n: num(result.totals.missionCount) }),
+          ]
+        : [t('Not planned yet')],
+      check: state.check.enabled
+        ? [
+            t('on'),
+            ...[
+              [state.check.zone, t('zone')],
+              [state.check.curtain, t('curtain')],
+              [state.check.footprints, t('footprints')],
+            ]
+              .filter(([on]) => on)
+              .map(([, name]) => name),
+          ]
+        : [t('off')],
+      export: result
+        ? [t('{n} missions', { n: num(result.totals.missionCount) })]
+        : [t('Nothing to save yet')],
+    };
+    for (const key of STEP_KEYS) {
+      ui.steps[key].line.textContent = lines[key].filter(Boolean).join(dot);
+    }
+  }
+
+  /** Switch between feet and metres: shown and typed values only. */
+  function chooseUnits(system) {
+    setUnitSystem(system);
+    writeUnitSystem(unitStorage, system);
+    ui.applyUnitRanges();
+    // Rebuild the obstacle list even while a height box has focus.
+    obstacleTyping = false;
+    render();
+  }
+
+  /** A length as typed in the chosen unit: a short plain number. */
+  const lengthField = (metres, digits = 0) =>
+    String(
+      Math.round(lengthFromM(metres) * 10 ** digits) / 10 ** digits,
+    );
+
   function modeLabel(mode) {
     switch (mode) {
       case 'splat-orbit':
@@ -1614,7 +1906,7 @@ export function initDronePlan({
       preset.sensorText,
       t('{shutter} shutter', { shutter: preset.shutterType }),
       t('photo every {s} s at best', { s: num(preset.minPhotoIntervalS) }),
-      t('up to {v} m/s', { v: num(preset.maxSpeedMs) }),
+      t('up to {v}', { v: speedText(preset.maxSpeedMs, 0) }),
       t('app: {app}', { app: preset.app }),
       t('data: {v}', { v: preset.verified }),
     ];
@@ -1633,9 +1925,13 @@ export function initDronePlan({
       el(doc, 'dt', ui.recommended, { text: label });
       el(doc, 'dd', ui.recommended, { text: value });
     };
-    row(t('Speed'), `${num(rec.speedMs, 1)} m/s`);
+    row(t('Speed'), speedText(rec.speedMs));
     if (rec.pattern !== 'orbit') row(t('Height'), heightText(rec.aglM));
-    else row(t('Orbit heights (m)'), rec.orbitHeightsM.join(', '));
+    else
+      row(
+        t('Orbit heights ({unit})', { unit: lengthUnit() }),
+        rec.orbitHeightsM.map((m) => lengthField(m)).join(', '),
+      );
     row(
       t('Overlap'),
       rec.sideOverlap === null
@@ -1677,6 +1973,7 @@ export function initDronePlan({
       frustum: c.frustum,
       index: c.index,
       frame: getPreset(state.options.presetId),
+      alpha: c.alpha,
     });
   }
 
@@ -1689,8 +1986,15 @@ export function initDronePlan({
     ui.checkCurtain.checked = c.curtain;
     ui.checkFootprints.checked = c.footprints;
     ui.checkView.value = c.frustum;
-    ui.checkWidth.value = String(c.halfWidthM);
+    ui.checkWidth.value = lengthField(c.halfWidthM);
     ui.checkWidthOut.textContent = heightText(c.halfWidthM);
+    for (const layer of Object.keys(ALPHA_RANGE)) {
+      ui.alphaSliders[layer].value = String(Math.round(c.alpha[layer] * 100));
+      ui.alphaOuts[layer].textContent = `${Math.round(c.alpha[layer] * 100)}%`;
+      ui.alphaSliders[layer].disabled = !c.enabled;
+    }
+    ui.alphaReset.disabled = !c.enabled;
+    renderStepLines();
     for (const control of [
       ui.checkZone,
       ui.checkWidth,
@@ -1741,12 +2045,28 @@ export function initDronePlan({
     ui.shutter.value = String(o.shutterDenominator);
     ui.presetInfo.textContent = presetSummary(preset);
     renderRecommended(preset, modeFor(o));
-    ui.agl.value = String(o.aglM);
+    for (const system of ['ft', 'm']) {
+      ui.unitButtons[system].setAttribute(
+        'aria-pressed',
+        String(lengthUnit() === system),
+      );
+    }
+    ui.agl.value = lengthField(o.aglM);
     ui.aglOut.textContent = heightText(Math.min(o.aglM, AGL_CAP_M));
-    ui.aglRow.title = t('Hard cap {m} m / {ft} ft above ground', {
-      m: num(AGL_CAP_M),
-      ft: num(AGL_CAP_M * FT_PER_M),
+    ui.aglRow.title = t('Hard cap {cap} above ground', {
+      cap: lengthText(AGL_CAP_M),
     });
+    ui.ringsLabel.textContent = t('Orbit heights ({unit})', {
+      unit: lengthUnit(),
+    });
+    ui.rings.setAttribute?.(
+      'placeholder',
+      [40, 80].map((m) => lengthField(m)).join(', '),
+    );
+    ui.obstacleDisclaimer.textContent = t(
+      'Heights are estimates from open data or numbers you set, not a survey. Trees grow. Power lines and guy wires are in none of these sources. The plan keeps {margin} above each column. Drag the yellow dot on a column, or type a height. Compare the columns with the 3D view by eye. This is a visual check, not flight-tested.',
+      { margin: lengthText(OBSTACLE_MARGIN_M) },
+    );
     ui.front.value = String(o.frontOverlap);
     ui.frontOut.textContent = `${num(o.frontOverlap)}%`;
     ui.side.value = String(o.sideOverlap);
@@ -1757,16 +2077,18 @@ export function initDronePlan({
     ui.tiltOut.textContent = `${num(o.tiltPitchDeg)}°`;
     const radius =
       o.orbitRadiusM ?? state.result?.plan?.options?.orbitRadiusM ?? 40;
-    ui.radius.value = String(radius);
-    ui.radiusOut.textContent = `${num(radius)} m`;
-    ui.rings.value = (o.orbitHeightsM ?? []).join(', ');
-    ui.targetHeight.value = String(o.orbitTargetHeightM);
-    ui.targetHeightOut.textContent = `${num(o.orbitTargetHeightM)} m`;
-    ui.obstacle.value = String(o.obstacleHeightM);
-    ui.obstacleOut.textContent = `${num(o.obstacleHeightM)} m`;
+    ui.radius.value = lengthField(radius);
+    ui.radiusOut.textContent = lengthText(radius);
+    ui.rings.value = (o.orbitHeightsM ?? []).map((m) => lengthField(m)).join(', ');
+    ui.targetHeight.value = lengthField(o.orbitTargetHeightM);
+    ui.targetHeightOut.textContent = lengthText(o.orbitTargetHeightM);
+    ui.obstacle.value = lengthField(o.obstacleHeightM);
+    ui.obstacleOut.textContent = lengthText(o.obstacleHeightM);
     ui.photoMode.value = o.photoMode;
-    ui.speed.value = String(o.speedMs);
-    ui.speedOut.textContent = `${num(o.speedMs, 1)} m/s`;
+    ui.speed.value = String(
+      Math.round(speedFromMs(o.speedMs) * 10) / 10,
+    );
+    ui.speedOut.textContent = speedText(o.speedMs);
     ui.battery.value = String(o.batteryMin);
     ui.enum.value = String(
       state.wpml.droneEnumValue ?? preset.wpml?.droneEnumValue ?? '',
@@ -1784,12 +2106,16 @@ export function initDronePlan({
     ui.obstacleRow.hidden = !orbits;
     ui.obstacleNote.hidden = !orbits;
     ui.targetsBox.hidden = !orbits;
+    // Step 4 only exists while orbits are in the plan.
+    ui.steps.orbits.details.hidden = !orbits;
     if (orbits) {
       ui.obstacleNote.textContent = t(
-        'Orbits fly at least {min} m above ground: tree height plus {margin} m, so the drone clears the trees.',
+        'Orbits fly at least {min} above ground: tree height plus {margin}, so the drone clears the trees.',
         {
-          min: num(Math.max(MIN_AGL_M, o.obstacleHeightM + OBSTACLE_MARGIN_M)),
-          margin: OBSTACLE_MARGIN_M,
+          min: lengthText(
+            Math.max(MIN_AGL_M, o.obstacleHeightM + OBSTACLE_MARGIN_M),
+          ),
+          margin: lengthText(OBSTACLE_MARGIN_M),
         },
       );
     }
@@ -1816,6 +2142,7 @@ export function initDronePlan({
     renderTargets();
     renderObstacleStatus();
     renderObstacles();
+    renderStepLines();
   }
 
   function renderTargets() {
@@ -1853,7 +2180,7 @@ export function initDronePlan({
         attrs: {
           title:
             `${num(target.lat, 5)}, ${num(target.lon, 5)}` +
-            (target.radiusM != null ? ` · r ${num(target.radiusM)} m` : ''),
+            (target.radiusM != null ? ` · r ${lengthText(target.radiusM)}` : ''),
         },
       });
       const remove = el(doc, 'button', row, {
@@ -1937,6 +2264,7 @@ export function initDronePlan({
     }
     if (!state.busy) reading = false;
     const result = state.result;
+    renderStepLines();
     if (!result) return;
     const { totals, missions, warnings, plan } = result;
     stat(t('Photos'), num(totals.photoCount));
@@ -1963,19 +2291,19 @@ export function initDronePlan({
       );
       stat(
         t('Fly-over height'),
-        t('{min} m min over {obstacle} m trees', {
-          min: num(plan.orbit.minAglM),
-          obstacle: num(plan.orbit.obstacleHeightM),
+        t('{min} min over {obstacle} trees', {
+          min: lengthText(plan.orbit.minAglM),
+          obstacle: lengthText(plan.orbit.obstacleHeightM),
         }),
       );
-      stat(t('Tree-free zone'), `${num(worst)} m ${t('around each target')}`);
+      stat(t('Tree-free zone'), `${lengthText(worst)} ${t('around each target')}`);
       stat(t('Orbit targets'), num(plan.orbit.targets.length));
     }
     stat(t('Waypoints'), missions.map((m) => num(m.waypointCount)).join(' / '));
-    stat(t('Speed'), `${num(plan.speedMs, 1)} m/s`);
+    stat(t('Speed'), speedText(plan.speedMs));
     stat(
       t('Terrain range'),
-      result.ground.known ? `${num(totals.terrainRangeM)} m` : t('unknown'),
+      result.ground.known ? lengthText(totals.terrainRangeM) : t('unknown'),
     );
     for (const w of warnings) {
       const text = warningText(w);

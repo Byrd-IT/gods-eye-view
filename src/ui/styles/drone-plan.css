@@ -277,23 +277,61 @@ body.gev-drone-box .cesium-widget canvas {
   margin: 0;
   font-weight: 600;
 }
-.gev-dp-adjust {
-  margin: 10px 0 0;
-  padding: 8px 0 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.18);
+.gev-dp-units {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
 }
-.gev-dp-adjust-title {
-  margin: 0 0 4px;
-  font-size: 0.95em;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+/* The nine numbered steps: a header with the number, the title and, while
+   collapsed, a one-line summary of the current values. */
+.gev-dp-step {
+  margin: 6px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  padding-top: 4px;
+}
+.gev-dp-step[hidden] {
+  display: none;
+}
+.gev-dp-step-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+  padding: 3px 0;
+}
+.gev-dp-step-num {
+  flex: 0 0 auto;
+  min-width: 1.5em;
+  text-align: center;
+  border-radius: 999px;
+  background: rgba(0, 212, 255, 0.22);
+  font-size: 10px;
+  font-weight: 700;
+}
+.gev-dp-step-title {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.gev-dp-step-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim, #8a94a0);
+  font-size: 10px;
+}
+.gev-dp-step[open] > summary .gev-dp-step-line {
+  display: none;
+}
+.gev-dp-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 2px;
 }
 .gev-dp-check {
   margin: 8px 0 0;
-}
-.gev-dp-check > summary {
-  cursor: pointer;
-  font-weight: 600;
 }
 .gev-dp-check-note {
   margin-bottom: 4px;

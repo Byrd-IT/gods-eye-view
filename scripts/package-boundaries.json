@@ -1915,6 +1915,8 @@
       "src/byrdit/dronePlan/polygon.js",
       "src/byrdit/dronePlan/dronePlanVoice.js",
       "src/byrdit/dronePlan/format.js",
+      "src/byrdit/dronePlan/units.js",
+      "src/byrdit/dronePlan/prefs.js",
       "src/byrdit/dronePlan/geo.js",
       "src/byrdit/dronePlan/limits.js",
       "src/byrdit/dronePlan/panel.js",

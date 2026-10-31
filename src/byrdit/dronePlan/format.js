@@ -3,7 +3,8 @@
  * sentences. Every sentence is a literal t() call so the i18n scanner sees it.
  */
 import { formatNumber, t } from '../../i18n/index.js';
-import { FT_PER_M } from './planner.js';
+import { OBSTACLE_MARGIN_M } from './planner.js';
+import { lengthFromM, lengthUnit, speedFromMs, speedUnit } from './units.js';
 
 const fixed = (value, digits = 0) =>
   formatNumber(value, {
@@ -11,13 +12,29 @@ const fixed = (value, digits = 0) =>
     maximumFractionDigits: digits,
   });
 
-/** `80 m · 262 ft` */
-export function heightText(metres) {
-  return `${fixed(metres)} m · ${fixed(metres * FT_PER_M)} ft`;
+/** `262 ft` or `80 m`, in the unit the person chose. */
+export function lengthText(metres, digits = 0) {
+  return `${fixed(lengthFromM(metres), digits)} ${lengthUnit()}`;
 }
 
-/** `1.2 km` or `640 m` */
+/** Same as lengthText: a height, radius or width. */
+export function heightText(metres) {
+  return lengthText(metres);
+}
+
+/** `16.4 ft/s` or `5.0 m/s`. */
+export function speedText(ms, digits = 1) {
+  return `${fixed(speedFromMs(ms), digits)} ${speedUnit()}`;
+}
+
+/** `1.2 km` or `640 m`; in feet `2100 ft` or `1.2 mi`. */
 export function distanceText(metres) {
+  if (lengthUnit() === 'ft') {
+    const feet = lengthFromM(metres);
+    return feet >= 5280
+      ? `${fixed(feet / 5280, 2)} mi`
+      : `${fixed(feet)} ft`;
+  }
   return metres >= 1000
     ? `${fixed(metres / 1000, 2)} km`
     : `${fixed(metres)} m`;
@@ -37,36 +54,35 @@ export function warningText(warning) {
   switch (warning.code) {
     case 'agl-capped':
       return t(
-        'Height capped at {cap} m ({ft} ft) above ground; you asked for {requested} m',
+        'Height capped at {cap} above ground; you asked for {requested}',
         {
-          cap: fixed(p.cap),
-          ft: fixed(p.cap * FT_PER_M),
-          requested: fixed(p.requested),
+          cap: lengthText(p.cap),
+          requested: lengthText(p.requested),
         },
       );
     case 'speed-camera-limited':
       return t(
-        'Speed lowered from {requested} to {limited} m/s so the camera can keep up with the photo spacing',
-        { requested: fixed(p.requested, 1), limited: fixed(p.limited, 1) },
+        'Speed lowered from {requested} to {limited} so the camera can keep up with the photo spacing',
+        { requested: speedText(p.requested), limited: speedText(p.limited) },
       );
     case 'speed-blur-limited':
       return t(
-        'Speed lowered from {requested} to {limited} m/s so photos stay sharp at a 1/{shutter} s shutter',
+        'Speed lowered from {requested} to {limited} so photos stay sharp at a 1/{shutter} s shutter',
         {
-          requested: fixed(p.requested, 1),
-          limited: fixed(p.limited, 1),
+          requested: speedText(p.requested),
+          limited: speedText(p.limited),
           shutter: fixed(p.shutter),
         },
       );
     case 'speed-below-minimum':
       return t(
-        'This camera cannot keep up even at {min} m/s with these settings (limit {limit} m/s): lower the overlap or fly higher',
-        { min: fixed(p.minMs, 1), limit: fixed(p.limitMs, 2) },
+        'This camera cannot keep up even at {min} with these settings (limit {limit}): lower the overlap or fly higher',
+        { min: speedText(p.minMs), limit: speedText(p.limitMs, 2) },
       );
     case 'vlos':
       return t(
-        'The furthest waypoint is {distance} m from takeoff: keep the aircraft in sight',
-        { distance: fixed(p.distanceM) },
+        'The furthest waypoint is {distance} from takeoff: keep the aircraft in sight',
+        { distance: lengthText(p.distanceM) },
       );
     case 'terrain-unknown':
       return t(
@@ -74,11 +90,11 @@ export function warningText(warning) {
       );
     case 'rel-height-over-limit':
       return t(
-        'The ground varies by {range} m: this plan reaches {max} m above the takeoff point, over the {limit} m height limit DJI Fly starts with. Lower the height, take off from higher ground, or raise the limit in DJI Fly',
+        'The ground varies by {range}: this plan reaches {max} above the takeoff point, over the {limit} height limit DJI Fly starts with. Lower the height, take off from higher ground, or raise the limit in DJI Fly',
         {
-          range: fixed(p.terrainRangeM),
-          max: fixed(p.maxRelM),
-          limit: fixed(p.limitM),
+          range: lengthText(p.terrainRangeM),
+          max: lengthText(p.maxRelM),
+          limit: lengthText(p.limitM),
         },
       );
     case 'terrain-partial':
@@ -88,8 +104,8 @@ export function warningText(warning) {
       );
     case 'below-takeoff':
       return t(
-        'Part of the route is only {min} m above the takeoff point. Take off from lower ground or raise the height',
-        { min: fixed(p.minRelM, 1) },
+        'Part of the route is only {min} above the takeoff point. Take off from lower ground or raise the height',
+        { min: lengthText(p.minRelM, 1) },
       );
     case 'steep-segment':
       return t(
@@ -107,28 +123,32 @@ export function warningText(warning) {
       );
     case 'takeoff-too-far':
       return t(
-        'That takeoff point is {distance} m from the box; keep it within {limit} m. The box centre is used instead',
-        { distance: fixed(p.distanceM), limit: fixed(p.limitM) },
+        'That takeoff point is {distance} from the box; keep it within {limit}. The box centre is used instead',
+        { distance: lengthText(p.distanceM), limit: lengthText(p.limitM) },
       );
     case 'areas-spread':
       return t(
-        'Some areas are more than {limit} m from the takeoff point, so those flights are a longer transit',
-        { limit: fixed(p.limitM) },
+        'Some areas are more than {limit} from the takeoff point, so those flights are a longer transit',
+        { limit: lengthText(p.limitM) },
       );
     case 'orbit-raised-for-obstacles':
       return t(
-        'Orbit heights were raised to {min} m: the trees are {obstacle} m tall and the drone keeps a margin above them',
-        { min: fixed(p.minAglM), obstacle: fixed(p.obstacleHeightM) },
+        'Orbit heights were raised to {min}: the trees are {obstacle} tall and the drone keeps a margin above them',
+        { min: lengthText(p.minAglM), obstacle: lengthText(p.obstacleHeightM) },
       );
     case 'obstacle-raised':
       return t(
-        '{count} waypoints were raised to clear an obstacle column (its height plus 5 m)',
-        { count: fixed(p.count) },
+        '{count} waypoints were raised to clear an obstacle column (its height plus {margin})',
+        { count: fixed(p.count), margin: lengthText(OBSTACLE_MARGIN_M) },
       );
     case 'obstacle-blocked':
       return t(
-        '{count} waypoints cannot clear an obstacle: they would need {need} m but the limit is {cap} m above ground. Those legs are red on the globe. Lower the column, move the route or skip the area',
-        { count: fixed(p.count), need: fixed(p.needM), cap: fixed(p.capM) },
+        '{count} waypoints cannot clear an obstacle: they would need {need} but the limit is {cap} above ground. Those legs are red on the globe. Lower the column, move the route or skip the area',
+        {
+          count: fixed(p.count),
+          need: lengthText(p.needM),
+          cap: lengthText(p.capM),
+        },
       );
     case 'obstacle-list-cut':
       return t(

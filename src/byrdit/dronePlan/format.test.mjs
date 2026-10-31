@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getCatalog } from '../../i18n/index.js';
+import { setUnitSystem } from './units.js';
 import {
   distanceText,
   durationText,
   heightText,
+  lengthText,
   planErrorText,
+  speedText,
   warningText,
 } from './format.js';
+
+// The sentences below were written in metres; feet have their own tests.
+setUnitSystem('m');
 
 const CODES = [
   ['agl-capped', { requested: 200, cap: 120 }],
@@ -35,7 +41,7 @@ test('every warning code has a sentence with its numbers filled in', () => {
   }
   assert.match(
     warningText({ code: 'agl-capped', params: { requested: 200, cap: 120 } }),
-    /120 m \(394 ft\)/,
+    /capped at 120 m above ground; you asked for 200 m/,
   );
   assert.match(
     warningText({ code: 'vlos', params: { distanceM: 640 } }),
@@ -64,10 +70,37 @@ test('plan errors map to their own sentence', () => {
 });
 
 test('number formatting', () => {
-  assert.equal(heightText(120), '120 m · 394 ft');
-  assert.equal(heightText(80), '80 m · 262 ft');
+  assert.equal(heightText(120), '120 m');
+  assert.equal(heightText(80), '80 m');
   assert.equal(distanceText(640), '640 m');
   assert.equal(distanceText(1234), '1.23 km');
   assert.equal(durationText(14 * 60), '14 min');
   assert.equal(durationText(65 * 60), '1 h 05 min');
+});
+
+test('feet: every length, speed and warning is in the chosen unit', () => {
+  setUnitSystem('ft');
+  try {
+    assert.equal(heightText(120), '394 ft');
+    assert.equal(lengthText(80), '262 ft');
+    assert.equal(lengthText(1.5, 1), '4.9 ft');
+    assert.equal(speedText(5), '16.4 ft/s');
+    assert.equal(distanceText(640), '2,100 ft');
+    assert.equal(distanceText(2000), '1.24 mi');
+    assert.match(
+      warningText({ code: 'agl-capped', params: { requested: 200, cap: 120 } }),
+      /capped at 394 ft above ground; you asked for 656 ft/,
+    );
+    assert.match(
+      warningText({ code: 'speed-camera-limited', params: { requested: 5, limited: 4 } }),
+      /from 16\.4 ft\/s to 13\.1 ft\/s/,
+    );
+    for (const [code, params] of CODES) {
+      const text = warningText({ code, params });
+      assert.doesNotMatch(text, /\d\s?m\b(?!i)/, `${code} still says metres: ${text}`);
+      assert.doesNotMatch(text, /m\/s/, `${code} still says m/s: ${text}`);
+    }
+  } finally {
+    setUnitSystem('m');
+  }
 });

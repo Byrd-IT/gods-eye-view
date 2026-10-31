@@ -5,9 +5,16 @@
  *   zone       a see-through box corridor along every flight leg, at the real
  *              flight height, `halfWidthM` to each side, above and below
  *   curtain    a faint vertical wall from the flight path down to the ground
- *   footprints the ground area of each photo, shaded (thinned to a cap)
+ *   footprints the ground area each photo really sees (its camera frame on
+ *              the ground, never stretched to the horizon), shaded (thinned
+ *              to a cap)
+ *   current    the footprint of the photo being stepped through, drawn
+ *              stronger with an outline on top of the shaded ones
  *   frustums   the camera view pyramid from the drone to its footprint: ONE,
  *              stepped with an index, or a thinned set shown all at once
+ *
+ * Each of zone, curtain, footprints and the view pyramid has its own
+ * see-through level (`options.alpha`), set by the panel's sliders.
  *
  * VISUAL AID ONLY: nothing here detects a collision, and OpenStreetMap
  * buildings have no trees or power lines. Look at it over the Google 3D mesh.
@@ -33,7 +40,36 @@ export const CHECK_NAMES = Object.freeze({
   curtain: '3D check curtain',
   footprint: '3D check footprint',
   view: '3D check view',
+  current: '3D check current photo',
 });
+
+/** Today's look of each layer: the slider defaults. */
+export const DEFAULT_ALPHA = Object.freeze({
+  zone: 0.16,
+  curtain: 0.1,
+  footprint: 0.05,
+  view: 0.2,
+});
+/** The slider range of each layer (0 = invisible). */
+export const ALPHA_RANGE = Object.freeze({
+  zone: Object.freeze({ min: 0, max: 0.6 }),
+  curtain: Object.freeze({ min: 0, max: 0.6 }),
+  footprint: Object.freeze({ min: 0, max: 0.4 }),
+  view: Object.freeze({ min: 0, max: 0.5 }),
+});
+/** The pyramid's edges keep today's 0.9 : 0.2 ratio to its fill. */
+export const VIEW_EDGE_PER_FILL = 0.9 / 0.2;
+/** The footprint of the photo in view: at least this strong. */
+export const CURRENT_FILL_ALPHA = 0.3;
+export const CURRENT_OUTLINE_ALPHA = 0.95;
+
+/** A level, clamped into the layer's range; the default when unusable. */
+export function clampAlpha(layer, value) {
+  const range = ALPHA_RANGE[layer];
+  const n = Number(value);
+  if (!range || !Number.isFinite(n)) return DEFAULT_ALPHA[layer];
+  return Math.min(range.max, Math.max(range.min, n));
+}
 
 export const DEFAULT_CHECK_OPTIONS = Object.freeze({
   enabled: true,
@@ -44,9 +80,10 @@ export const DEFAULT_CHECK_OPTIONS = Object.freeze({
   frustum: 'one',
   index: 0,
   frame: null,
+  alpha: DEFAULT_ALPHA,
 });
 
-const LAYERS = ['zone', 'curtain', 'footprints', 'frustums'];
+const LAYERS = ['zone', 'curtain', 'footprints', 'current', 'frustums'];
 
 /** Drop consecutive duplicates and thin a path that is far too long. */
 function pathOf(waypoints) {
@@ -79,11 +116,19 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
   let version = 0;
   let items = [];
   let itemsVersion = -1;
-  const lists = { zone: [], curtain: [], footprints: [], frustums: [] };
+  const lists = {
+    zone: [],
+    curtain: [],
+    footprints: [],
+    current: [],
+    frustums: [],
+  };
   const keys = {};
 
   const color = (css, alpha) =>
     cesium.Color.fromCssColorString(css).withAlpha(alpha);
+  /** The level of one layer: the panel's slider, else today's look. */
+  const level = (layer) => clampAlpha(layer, options.alpha?.[layer]);
   const add = (list, entity) => list.push(dataSource.entities.add(entity));
   const drop = (name) => {
     for (const entity of lists[name]) dataSource.entities.remove(entity);
@@ -207,7 +252,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
             ),
             shape,
             cornerType: cesium.CornerType?.BEVELED,
-            material: color(pass.color, 0.16),
+            material: color(pass.color, level('zone')),
             outline: false,
           },
         });
@@ -227,7 +272,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
               wps.flatMap((p) => [p.lon, p.lat, flightHeightM(p)]),
             ),
             minimumHeights: wps.map((p) => p.groundM ?? 0),
-            material: color(pass.color, 0.1),
+            material: color(pass.color, level('curtain')),
             outline: false,
           },
         });
@@ -248,6 +293,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     for (const k of thinIndexes(all.length, MAX_FOOTPRINTS)) {
       const item = all[k];
       const fp = cornersOf(item);
+      if (fp.empty) continue;
       add(lists.footprints, {
         name: `${CHECK_NAMES.footprint}: ${item.pass.id}`,
         polygon: {
@@ -255,19 +301,59 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
             fp.corners.flatMap((c) => [c.lon, c.lat]),
           ),
           // Faint: an 80/70 % overlap stacks about six of these on every spot.
-          material: color(item.pass.color, 0.05),
+          material: color(item.pass.color, level('footprint')),
           classificationType: cesium.ClassificationType.BOTH,
         },
       });
     }
   }
 
+  /**
+   * The photo being stepped through: its footprint stronger than the rest,
+   * with a bright outline, so it stands out of the faint stack.
+   */
+  function buildCurrent() {
+    const all = photoItems();
+    if (!all.length) return;
+    const item = all[clampIndex()];
+    const fp = cornersOf(item);
+    if (fp.empty) return;
+    add(lists.current, {
+      name: `${CHECK_NAMES.current}: ${item.pass.id}`,
+      polygon: {
+        hierarchy: cesium.Cartesian3.fromDegreesArray(
+          fp.corners.flatMap((c) => [c.lon, c.lat]),
+        ),
+        material: color(
+          item.pass.color,
+          Math.max(CURRENT_FILL_ALPHA, level('footprint')),
+        ),
+        classificationType: cesium.ClassificationType.BOTH,
+      },
+    });
+    const ring = [...fp.corners, fp.corners[0]];
+    add(lists.current, {
+      name: `${CHECK_NAMES.current}: ${item.pass.id} outline`,
+      polyline: {
+        positions: cesium.Cartesian3.fromDegreesArray(
+          ring.flatMap((c) => [c.lon, c.lat]),
+        ),
+        width: 3,
+        clampToGround: true,
+        classificationType: cesium.ClassificationType.BOTH,
+        material: color('#ffffff', CURRENT_OUTLINE_ALPHA),
+      },
+    });
+  }
+
   function buildPyramid(item) {
     const fp = cornersOf(item);
+    if (fp.empty) return;
     const apex = [item.wp.lon, item.wp.lat, fp.heightM];
     const base = fp.corners.map((c) => [c.lon, c.lat, fp.groundM]);
     const pos = (p) => cesium.Cartesian3.fromDegrees(p[0], p[1], p[2]);
-    const material = color(item.pass.color, 0.2);
+    const fill = level('view');
+    const material = color(item.pass.color, fill);
     for (let k = 0; k < 4; k += 1) {
       const a = base[k];
       const b = base[(k + 1) % 4];
@@ -300,7 +386,10 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
           base[3],
         ].map(pos),
         width: 2,
-        material: color(item.pass.color, 0.9),
+        material: color(
+          item.pass.color,
+          Math.min(1, fill * VIEW_EDGE_PER_FILL),
+        ),
       },
     });
   }
@@ -331,13 +420,22 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     const on = options.enabled && passes;
     const wantFrame = on && options.frame;
     return {
-      zone: on && options.zone ? `${version}|${options.halfWidthM}` : '',
-      curtain: on && options.curtain ? `${version}` : '',
+      zone:
+        on && options.zone
+          ? `${version}|${options.halfWidthM}|${level('zone')}`
+          : '',
+      curtain: on && options.curtain ? `${version}|${level('curtain')}` : '',
       footprints:
-        wantFrame && options.footprints ? `${version}|${frameKey()}` : '',
+        wantFrame && options.footprints
+          ? `${version}|${frameKey()}|${level('footprint')}`
+          : '',
+      current:
+        wantFrame && (options.footprints || options.frustum === 'thinned')
+          ? `${version}|${frameKey()}|${level('footprint')}|${clampIndex()}`
+          : '',
       frustums:
         wantFrame && options.frustum !== 'off'
-          ? `${version}|${frameKey()}|${options.frustum}|${
+          ? `${version}|${frameKey()}|${options.frustum}|${level('view')}|${
               options.frustum === 'one' ? clampIndex() : ''
             }`
           : '',
@@ -348,6 +446,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     zone: buildZone,
     curtain: buildCurtain,
     footprints: buildFootprints,
+    current: buildCurrent,
     frustums: buildFrustums,
   };
 
@@ -373,6 +472,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     },
     setOptions(patch = {}) {
       options = { ...options, ...patch };
+      if (patch.alpha) options.alpha = { ...DEFAULT_ALPHA, ...patch.alpha };
       sync();
     },
     options: () => ({ ...options }),
@@ -399,6 +499,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
                 widthM: (fp.widthNearM + fp.widthFarM) / 2,
                 depthM: fp.depthM,
                 clipped: fp.clipped,
+                empty: fp.empty,
               }
             : null,
         },
@@ -408,6 +509,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
       zone: lists.zone.length,
       curtain: lists.curtain.length,
       footprints: lists.footprints.length,
+      current: lists.current.length,
       frustums: lists.frustums.length,
     }),
     /** Remove every 3D check entity; the options stay. */

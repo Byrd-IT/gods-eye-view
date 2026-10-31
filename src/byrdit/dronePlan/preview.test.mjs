@@ -13,11 +13,15 @@ import { suiteOptions } from './suite.js';
 import {
   MAX_FOOTPRINTS,
   MAX_FRUSTUMS,
+  MAX_REACH_M,
+  footprintReachM,
+  pointInFrame,
   photoFootprint,
   photoHeadingDeg,
   thinIndexes,
 } from './checkGeometry.js';
 import { getPreset } from './presets.js';
+import { ALPHA_RANGE, DEFAULT_ALPHA } from './checkLayer.js';
 
 function fakeCesium() {
   const paint = (css, a = 1) => ({ css, a, withAlpha: (x) => paint(css, x) });
@@ -656,4 +660,164 @@ test('obstacles: columns are drawn with the plan, and a leg the cap cannot lift 
   preview.clear();
   assert.equal(source.entities.values.length, 0);
   assert.equal(preview.obstacleCount(), 0);
+});
+
+// ----------------------------------------------- footprint = camera frame --
+const groundXY = (wp, corner) => {
+  const m = metersPerDegree(wp.lat);
+  return {
+    x: (corner.lon - wp.lon) * m.lon,
+    y: (corner.lat - wp.lat) * m.lat,
+  };
+};
+
+test('footprints: every corner and edge point of a tilted or orbit shot lies inside the camera frame', () => {
+  for (const frame of [FRAME, getPreset('dji-air-3')]) {
+    for (const pitchDeg of [-90, -80, -60, -45, -35, -30, -25, -20, -10]) {
+      for (const heading of [0, 37, 90, 200, 315]) {
+        for (const aglM of [15, 40, 100, 120]) {
+          const wp = { lon: -97.77, lat: 30.27, aglM, groundM: 0, pitchDeg };
+          const fp = photoFootprint(wp, heading, frame);
+          const label = `${frame.id} pitch ${pitchDeg} hdg ${heading} agl ${aglM}`;
+          if (fp.empty) {
+            assert.equal(fp.corners.length, 0, label);
+            continue;
+          }
+          assert.equal(fp.corners.length, 4, label);
+          const pts = fp.corners.map((c) => groundXY(wp, c));
+          for (let i = 0; i < 4; i += 1) {
+            const a = pts[i];
+            const b = pts[(i + 1) % 4];
+            for (const k of [0, 0.25, 0.5, 0.75, 1]) {
+              const x = a.x + (b.x - a.x) * k;
+              const y = a.y + (b.y - a.y) * k;
+              // Straight edges between ground points of the frame edge sit
+              // a hair outside a curved frame edge only by rounding.
+              assert.ok(
+                pointInFrame(wp, heading, frame, x, y, 0.02) ||
+                  Math.hypot(x, y) < 0.5,
+                `${label}: edge ${i} at ${k} outside the frame`,
+              );
+            }
+          }
+          assert.ok(
+            fp.depthM <= fp.reachM + 1e-6 + Math.hypot(fp.widthFarM, 0),
+            label,
+          );
+          for (const p of pts) {
+            assert.ok(Math.hypot(p.x, p.y) <= fp.reachM + 0.5, `${label}: reach`);
+          }
+        }
+      }
+    }
+  }
+});
+
+test('footprints: no stretch to the horizon, the reach is tied to the shot height', () => {
+  const wp = { lon: -97.77, lat: 30.27, aglM: 100, groundM: 0, pitchDeg: -20 };
+  const fp = photoFootprint(wp, 0, FRAME);
+  assert.equal(fp.clipped, true);
+  assert.equal(fp.reachM, footprintReachM(100));
+  assert.ok(fp.reachM < MAX_REACH_M / 2, 'nowhere near 1000 m');
+  assert.ok(fp.depthM <= fp.reachM);
+  // Even the far side stays within the reach.
+  const far = groundXY(wp, fp.corners[2]);
+  assert.ok(Math.hypot(far.x, far.y) <= fp.reachM + 0.5);
+  // The ceiling still holds for a very high shot.
+  assert.equal(footprintReachM(5000), MAX_REACH_M);
+  assert.ok(footprintReachM(1) >= 40, 'a low shot still shows ground');
+});
+
+test('footprints: 45 and 60 degree shots are whole frames, not clipped, and shorter than before', () => {
+  for (const pitchDeg of [-45, -60]) {
+    const wp = { lon: -97.77, lat: 30.27, aglM: 80, groundM: 0, pitchDeg };
+    const fp = photoFootprint(wp, 90, FRAME);
+    assert.equal(fp.clipped, false, `pitch ${pitchDeg}`);
+    const half = Math.atan(FRAME.sensorHeightMm / 2 / FRAME.focalMm);
+    const tilt = (-pitchDeg * Math.PI) / 180;
+    const near = 80 / Math.tan(tilt + half);
+    const far = 80 / Math.tan(tilt - half);
+    assert.ok(Math.abs(fp.depthM - (far - near)) < 1, `${fp.depthM}`);
+  }
+});
+
+test('footprints: a shot whose whole frame is beyond the reach draws nothing', () => {
+  // Looking up: no ground at all.
+  const up = photoFootprint(
+    { lon: -97.77, lat: 30.27, aglM: 80, groundM: 0, pitchDeg: 30 },
+    0,
+    FRAME,
+  );
+  assert.equal(up.empty, true);
+  assert.deepEqual(up.corners, []);
+});
+
+// ------------------------------------------------- per-layer transparency --
+const alphaOf = (e) =>
+  (e.polygon ?? e.polylineVolume ?? e.polyline ?? e.wall)?.material?.a;
+
+test('transparency: the defaults are today\'s values on every layer', () => {
+  const { source } = checkRig({ frustum: 'one' });
+  assert.equal(zones(source).length > 0, true);
+  assert.equal(alphaOf(zones(source)[0]), 0.16);
+  assert.equal(alphaOf(curtains(source)[0]), 0.1);
+  assert.equal(alphaOf(footprints(source)[0]), 0.05);
+  const fills = views(source).filter((e) => e.polygon);
+  assert.ok(fills.length > 0);
+  assert.equal(alphaOf(fills[0]), 0.2);
+  const edges = views(source).filter((e) => e.polyline);
+  assert.ok(edges.length > 0);
+  assert.ok(Math.abs(alphaOf(edges[0]) - 0.9) < 1e-9);
+});
+
+test('transparency: each layer follows its own level and the others stay put', () => {
+  const { preview, source } = checkRig({ frustum: 'one' });
+  preview.setCheck({ alpha: { ...DEFAULT_ALPHA, footprint: 0.3 } });
+  assert.equal(alphaOf(footprints(source)[0]), 0.3);
+  assert.equal(alphaOf(zones(source)[0]), 0.16);
+  assert.equal(alphaOf(curtains(source)[0]), 0.1);
+  preview.setCheck({ alpha: { ...DEFAULT_ALPHA, zone: 0.5, curtain: 0, view: 0.4 } });
+  assert.equal(alphaOf(zones(source)[0]), 0.5);
+  assert.equal(alphaOf(curtains(source)[0]), 0);
+  assert.equal(alphaOf(views(source).find((e) => e.polygon)), 0.4);
+  assert.ok(
+    Math.abs(alphaOf(views(source).find((e) => e.polyline)) - 1) < 1e-9,
+    'edges keep their 4.5 : 1 ratio, capped at 1',
+  );
+  assert.equal(alphaOf(footprints(source)[0]), 0.05);
+});
+
+test('transparency: levels are clamped to the slider range', () => {
+  const { preview, source } = checkRig({ frustum: 'off' });
+  preview.setCheck({ alpha: { ...DEFAULT_ALPHA, footprint: 7, zone: -1 } });
+  assert.equal(alphaOf(footprints(source)[0]), ALPHA_RANGE.footprint.max);
+  assert.equal(alphaOf(zones(source)[0]), 0);
+});
+
+// ------------------------------------------- the photo being stepped through --
+const currents = (source) => layerOf(source, '3D check current photo');
+
+test('current photo: its footprint is drawn stronger with an outline, and follows the stepper', () => {
+  const { preview, source } = checkRig({ frustum: 'one', index: 0 });
+  const fillOf = () => currents(source).find((e) => e.polygon);
+  const lineOf = () => currents(source).find((e) => e.polyline);
+  assert.ok(fillOf(), 'a highlighted footprint');
+  assert.ok(lineOf(), 'and its outline');
+  assert.ok(fillOf().polygon.material.a >= 0.3, 'stronger than the faint stack');
+  assert.ok(fillOf().polygon.material.a > alphaOf(footprints(source)[0]));
+  assert.ok(lineOf().polyline.material.a > 0.9);
+  const first = fillOf().polygon.hierarchy.join(',');
+  preview.setCheck({ index: 5 });
+  assert.equal(currents(source).length, 2, 'still one photo highlighted');
+  assert.notEqual(fillOf().polygon.hierarchy.join(','), first, 'it moved');
+  assert.equal(preview.checkCounts().current, 2);
+});
+
+test('current photo: it is not drawn when the 3D check or footprints are off', () => {
+  const { preview, source } = checkRig({ frustum: 'off', footprints: false });
+  assert.equal(currents(source).length, 0);
+  preview.setCheck({ footprints: true });
+  assert.equal(currents(source).length, 2);
+  preview.setCheck({ enabled: false });
+  assert.equal(checkEntities(source).length, 0);
 });
