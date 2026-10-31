@@ -4,9 +4,13 @@
  *   discoveredTime, updatedTime, cause, behavior, personnel, county, costToDate,
  *   complexity, complexName, polygons }] }.
  *
- * A perimeter changes shape instead of moving, so it is keyed by the incident id
- * and timed by the agency's own update time (an unchanged perimeter served again
- * on the next poll is the same observation). The polygon itself is NOT stored:
+ * A perimeter changes shape instead of moving, so it is keyed by the incident id.
+ * The agency's `updatedTime` is the date of the last polygon edit only; acres,
+ * containment and personnel come from the incident record and change on their own
+ * schedule without moving it. So the row is timed by the hour of the fetch, and an
+ * unchanged fire is skipped by the recorder's change check (for the feed's minimum
+ * interval, 12 hours unless set), while a fire whose details changed is stored
+ * within the hour. The polygon edit time is kept in the row as polygonUpdatedAt. The polygon itself is NOT stored:
  * one fire can be tens of thousands of vertices (the store caps a row at 64 KiB)
  * and a season holds thousands of them. The row keeps the size, containment and
  * dates, plus the bounding box and the vertex count, which is enough to place
@@ -17,7 +21,8 @@
 export const feed = 'perimeters';
 export const source = 'NIFC WFIGS';
 export const mode = 'server-polled';
-export const cadenceMs = 300_000;
+// An unchanged fire is not stored again for this long; a changed one is stored at once.
+export const cadenceMs = 12 * 3_600_000;
 export const fields = Object.freeze([
   'name',
   'acres',
@@ -32,6 +37,7 @@ export const fields = Object.freeze([
   'costToDate',
   'complexity',
   'complexName',
+  'polygonUpdatedAt',
   'bbox',
   'polygonCount',
   'vertexCount',
@@ -40,6 +46,7 @@ export const fields = Object.freeze([
 // WFIGS never holds a perimeter older than this; anything before is a bad stamp.
 const EARLIEST_MS = Date.UTC(2000, 0, 1);
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 
 const num = (value) =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -112,8 +119,10 @@ export function toRecords(payload) {
     const box = measure(row.polygons);
     if (!box) continue;
     const ceiling = (fetchedAt ?? Date.now()) + DAY_MS;
-    const t = epoch(row.updatedTime, ceiling) ?? fetchedAt;
-    if (t === null) continue;
+    const polygonUpdated = epoch(row.updatedTime, ceiling);
+    const polled = fetchedAt ?? polygonUpdated;
+    if (polled === null) continue;
+    const t = Math.floor(polled / HOUR_MS) * HOUR_MS;
     const discovered = epoch(row.discoveredTime, ceiling);
     const props = {
       name: text(row.name),
@@ -122,6 +131,7 @@ export function toRecords(payload) {
       state: text(row.state, 16),
       category: text(row.category, 32),
       discoveredAt: discovered === null ? null : discovered,
+      polygonUpdatedAt: polygonUpdated,
       cause: text(row.cause, 48),
       behavior: text(row.behavior, 64),
       personnel: num(row.personnel),

@@ -166,7 +166,7 @@ export const hazardFixtures = [
     build({ clock, variant = 0, noise = {} }) {
       const updated = clock - 6 * HOUR + variant * HOUR;
       return {
-        fetchedAt: clock + variant * 15_000,
+        fetchedAt: clock + variant * HOUR,
         rows: [
           fire(
             '2026-CASHF-000123',

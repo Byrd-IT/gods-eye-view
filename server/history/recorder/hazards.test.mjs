@@ -17,7 +17,9 @@ function setup(feed) {
   const recorder = createRecorder({
     store,
     config: {
-      feeds: { [feed]: { record: true, minIntervalMs: 300_000 } },
+      feeds: {
+        [feed]: { record: true, minIntervalMs: ADAPTERS[feed].cadenceMs },
+      },
       queueRows: 100_000,
       flushMs: 5_000,
     },
@@ -89,11 +91,34 @@ describe('perimeters: size bound', () => {
     assert.equal(store.ingests.length, 2);
   });
 
-  it('uses the agency update time as the observation time, never a later one', () => {
+  it('stores a fire again when its containment changed but its polygon edit time did not', async () => {
+    const { store, recorder, tee, clock } = setup('perimeters');
+    const fixture = byFeed.perimeters;
+    const first = fixture.build({ clock: T0 });
+    await request(tee, fixture.path, send(first));
+    await recorder.flush();
+    clock.now += 3_600_000;
+    const later = structuredClone(first);
+    later.fetchedAt = T0 + 3_600_000;
+    later.rows[0].containedPct = 60;
+    later.rows[0].acres += 50;
+    await request(tee, fixture.path, send(later));
+    await recorder.flush();
+    const mine = rows(store).filter((r) => r.key === first.rows[0].stableId);
+    assert.deepEqual(
+      mine.map((r) => r.data.containedPct),
+      [20, 60],
+    );
+    assert.equal(mine[0].data.polygonUpdatedAt, mine[1].data.polygonUpdatedAt);
+    assert.equal(rows(store).length, 3);
+  });
+
+  it('keeps the agency polygon edit time in the row', () => {
     const [record] = ADAPTERS.perimeters.toRecords(
       byFeed.perimeters.build({ clock: T0 }),
     );
-    assert.ok(record.t < T0);
+    assert.ok(record.props.polygonUpdatedAt < T0);
+    assert.ok(record.t <= T0);
   });
 
   it('ignores a stale answer', async () => {

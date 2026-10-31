@@ -1277,11 +1277,14 @@ serving the same refresh again), and notes a 429 or 5xx answer as one failed pol
 aircraft group is the first on it: `aircraft` (`/api/flights`) and `military` (`/api/military`).
 The hazards group follows: `cyclones` (`/api/cyclones`, keyed by NHC storm id, timed by the storm's
 position time; forecast points kept, track and cone not), `perimeters` (`/api/fire-perimeters`, keyed
-by the incident id, timed by the agency's update time, so an unchanged perimeter on the next poll
-writes nothing; the row holds acres, containment, dates, bounding box and vertex count but never the
-polygon, which can run to tens of thousands of vertices against the store's 64 KiB row cap) and
+by the incident id and timed by the hour of the fetch, because the agency's update time is only the
+last polygon edit while acres and containment change on their own; the recorder's change check skips
+an unchanged fire for 12 hours and stores a changed one at once; the row holds acres, containment,
+dates, the polygon edit time, bounding box and vertex count but never the polygon, which can run to
+tens of thousands of vertices against the store's 64 KiB row cap; a perimeter across the antimeridian
+has no box or position) and
 `launches` (`/api/launches`, keyed by the Launch Library 2 id, timed by its `last_updated`). All three
-are light and follow `HISTORY_RECORD=1`. A cyclone answer the proxy marks stale is ignored, and an
+are light and follow `HISTORY_RECORD=1`. A storm whose forecast points are not attached yet is held back until they are (up to 90 minutes), so a later complete answer for the same advisory is not shadowed. A cyclone answer the proxy marks stale is ignored, and an
 unavailable one is noted as a failed poll. A launch answer the proxy serves from cache (`X-GEV-Cache`
 HIT, INFLIGHT or STALE-ERROR) is ignored. A fire perimeter answer is parsed in full after the response
 is sent (about 100 ms for a few MiB); the tee still skips a body over 32 MiB.
