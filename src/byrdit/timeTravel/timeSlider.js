@@ -576,7 +576,8 @@ export function createTimeSlider(options = {}) {
  * @param {object} options  createTimeSlider options, plus
  *   items            [{value, label?, ms?}] ascending (oldest first)
  *   index            starting index (default: the last)
- *   tickLabels       true: a label under the bar for every item
+ *   tickLabels       true: labels under the bar (the ends plus an even
+ *                    spread, at most TS_MAX_TICK_LABELS)
  *   onChange(index, {source})  an index change the user made
  *   timers, baseIntervalMs
  */

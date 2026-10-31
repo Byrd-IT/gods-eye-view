@@ -4,6 +4,7 @@ import {
   createDiscreteSlider,
   createTimeSlider,
   tickLabelShown,
+  TS_MAX_TICK_LABELS,
   parsePickerValue,
   pickerValue,
   timeSliderCss,
@@ -254,10 +255,25 @@ test('tick labels: all shown for a few items, ends plus a spread for many, none 
   const shown = Array.from({ length: n }, (_, i) => i).filter((i) =>
     tickLabelShown(i, n),
   );
-  assert.ok(shown.length <= 7, `labels: ${shown}`);
   assert.equal(shown[0], 0);
   assert.equal(shown.at(-1), n - 1);
-  const step = Math.ceil((n - 1) / 5);
-  for (let k = 1; k < shown.length; k++)
-    assert.ok(shown[k] - shown[k - 1] >= step / 2, 'no two labels touch');
+  assert.deepEqual(shown, [0, 3, 6, 9, 11]);
+  assert.ok(shown.length <= TS_MAX_TICK_LABELS);
+});
+
+test('discrete: 12 items render 12 tick marks but only the thinned labels', () => {
+  const doc = fakeDocument();
+  const s = createDiscreteSlider({
+    document: doc,
+    parent: doc.body,
+    tickLabels: true,
+    items: Array.from({ length: 12 }, (_, i) => ({
+      value: 2010 + i,
+      label: String(2010 + i),
+    })),
+  });
+  const ticks = s.scrub.children.filter((c) => /-tick$/.test(c.className));
+  const labels = s.root.findAll((n) => /-ticklabel$/.test(n.className));
+  assert.equal(ticks.length, 12);
+  assert.equal(labels.length, 5);
 });
