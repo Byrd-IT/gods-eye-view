@@ -92,12 +92,19 @@ test('feet: every length, speed and warning is in the chosen unit', () => {
       /capped at 394 ft above ground; you asked for 656 ft/,
     );
     assert.match(
-      warningText({ code: 'speed-camera-limited', params: { requested: 5, limited: 4 } }),
+      warningText({
+        code: 'speed-camera-limited',
+        params: { requested: 5, limited: 4 },
+      }),
       /from 16\.4 ft\/s to 13\.1 ft\/s/,
     );
     for (const [code, params] of CODES) {
       const text = warningText({ code, params });
-      assert.doesNotMatch(text, /\d\s?m\b(?!i)/, `${code} still says metres: ${text}`);
+      assert.doesNotMatch(
+        text,
+        /\d\s?m\b(?!i)/,
+        `${code} still says metres: ${text}`,
+      );
       assert.doesNotMatch(text, /m\/s/, `${code} still says m/s: ${text}`);
     }
   } finally {

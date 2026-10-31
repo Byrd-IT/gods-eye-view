@@ -1069,7 +1069,9 @@ export function initDronePlan({
           title:
             system === 'ft'
               ? t('Show feet and ft/s. The mission file always stays in metres')
-              : t('Show metres and m/s. The mission file always stays in metres'),
+              : t(
+                  'Show metres and m/s. The mission file always stays in metres',
+                ),
         },
       });
     }
@@ -1155,7 +1157,10 @@ export function initDronePlan({
 
     const field = (label, control, { value } = {}) => {
       const row = el(doc, 'label', host, { cls: 'gev-dp-row' });
-      const labelEl = el(doc, 'span', row, { cls: 'gev-dp-label', text: label });
+      const labelEl = el(doc, 'span', row, {
+        cls: 'gev-dp-label',
+        text: label,
+      });
       const wrap = el(doc, 'span', row, { cls: 'gev-dp-control' });
       wrap.append(control);
       let out = null;
@@ -1685,9 +1690,13 @@ export function initDronePlan({
     });
     for (const layer of Object.keys(ALPHA_RANGE)) {
       ui.alphaSliders[layer].addEventListener('input', () => {
-        c.alpha[layer] = clampAlpha(layer, Number(ui.alphaSliders[layer].value) / 100);
+        c.alpha[layer] = clampAlpha(
+          layer,
+          Number(ui.alphaSliders[layer].value) / 100,
+        );
         writeAlpha(unitStorage, c.alpha);
-        ui.alphaOuts[layer].textContent = `${Math.round(c.alpha[layer] * 100)}%`;
+        ui.alphaOuts[layer].textContent =
+          `${Math.round(c.alpha[layer] * 100)}%`;
         clearTimeout(checkTimer);
         checkTimer = setTimeout(pushCheck, CHECK_SLIDER_DELAY_MS);
       });
@@ -1699,7 +1708,9 @@ export function initDronePlan({
       syncCheckUi();
     });
     for (const system of ['ft', 'm']) {
-      ui.unitButtons[system].addEventListener('click', () => chooseUnits(system));
+      ui.unitButtons[system].addEventListener('click', () =>
+        chooseUnits(system),
+      );
     }
     syncCheckUi();
     ui.preset.addEventListener('change', () => {
@@ -1753,7 +1764,10 @@ export function initDronePlan({
       ui.targetHeight,
       () => (o.orbitTargetHeightM = lengthToM(ui.targetHeight.value)),
     );
-    onInput(ui.obstacle, () => (o.obstacleHeightM = lengthToM(ui.obstacle.value)));
+    onInput(
+      ui.obstacle,
+      () => (o.obstacleHeightM = lengthToM(ui.obstacle.value)),
+    );
     ui.targetRecommend.addEventListener('click', () => recommendTargets());
     ui.obstacleRefresh.addEventListener('click', () =>
       syncObstacles({ force: true }),
@@ -1818,9 +1832,7 @@ export function initDronePlan({
     const targets = (o.orbitTargets ?? []).filter((x) => x.active !== false);
     const lines = {
       area: [
-        count
-          ? t('{n} areas', { n: num(count) })
-          : t('Nothing drawn yet'),
+        count ? t('{n} areas', { n: num(count) }) : t('Nothing drawn yet'),
         state.takeoff ? t('takeoff set') : t('takeoff at the centre'),
       ],
       aircraft: [preset.name, `1/${num(o.shutterDenominator)} s`],
@@ -1831,9 +1843,7 @@ export function initDronePlan({
         orbit ? '' : `${num(o.frontOverlap)}% / ${num(o.sideOverlap)}%`,
       ],
       orbits: [
-        lengthText(
-          o.orbitRadiusM ?? result?.plan?.options?.orbitRadiusM ?? 40,
-        ),
+        lengthText(o.orbitRadiusM ?? result?.plan?.options?.orbitRadiusM ?? 40),
         t('{n} targets', { n: num(targets.length) }),
       ],
       obstacles: [
@@ -1886,9 +1896,7 @@ export function initDronePlan({
 
   /** A length as typed in the chosen unit: a short plain number. */
   const lengthField = (metres, digits = 0) =>
-    String(
-      Math.round(lengthFromM(metres) * 10 ** digits) / 10 ** digits,
-    );
+    String(Math.round(lengthFromM(metres) * 10 ** digits) / 10 ** digits);
 
   function modeLabel(mode) {
     switch (mode) {
@@ -2079,15 +2087,15 @@ export function initDronePlan({
       o.orbitRadiusM ?? state.result?.plan?.options?.orbitRadiusM ?? 40;
     ui.radius.value = lengthField(radius);
     ui.radiusOut.textContent = lengthText(radius);
-    ui.rings.value = (o.orbitHeightsM ?? []).map((m) => lengthField(m)).join(', ');
+    ui.rings.value = (o.orbitHeightsM ?? [])
+      .map((m) => lengthField(m))
+      .join(', ');
     ui.targetHeight.value = lengthField(o.orbitTargetHeightM);
     ui.targetHeightOut.textContent = lengthText(o.orbitTargetHeightM);
     ui.obstacle.value = lengthField(o.obstacleHeightM);
     ui.obstacleOut.textContent = lengthText(o.obstacleHeightM);
     ui.photoMode.value = o.photoMode;
-    ui.speed.value = String(
-      Math.round(speedFromMs(o.speedMs) * 10) / 10,
-    );
+    ui.speed.value = String(Math.round(speedFromMs(o.speedMs) * 10) / 10);
     ui.speedOut.textContent = speedText(o.speedMs);
     ui.battery.value = String(o.batteryMin);
     ui.enum.value = String(
@@ -2180,7 +2188,9 @@ export function initDronePlan({
         attrs: {
           title:
             `${num(target.lat, 5)}, ${num(target.lon, 5)}` +
-            (target.radiusM != null ? ` · r ${lengthText(target.radiusM)}` : ''),
+            (target.radiusM != null
+              ? ` · r ${lengthText(target.radiusM)}`
+              : ''),
         },
       });
       const remove = el(doc, 'button', row, {
@@ -2296,7 +2306,10 @@ export function initDronePlan({
           obstacle: lengthText(plan.orbit.obstacleHeightM),
         }),
       );
-      stat(t('Tree-free zone'), `${lengthText(worst)} ${t('around each target')}`);
+      stat(
+        t('Tree-free zone'),
+        `${lengthText(worst)} ${t('around each target')}`,
+      );
       stat(t('Orbit targets'), num(plan.orbit.targets.length));
     }
     stat(t('Waypoints'), missions.map((m) => num(m.waypointCount)).join(' / '));

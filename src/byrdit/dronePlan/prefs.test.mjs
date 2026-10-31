@@ -20,7 +20,7 @@ const memory = (initial) => {
   };
 };
 
-test('transparency defaults are today\'s values', () => {
+test("transparency defaults are today's values", () => {
   assert.deepEqual(DEFAULT_ALPHA, {
     zone: 0.16,
     curtain: 0.1,
@@ -32,13 +32,19 @@ test('transparency defaults are today\'s values', () => {
 
 test('transparency: saved levels come back, clamped, per layer', () => {
   const store = memory();
-  assert.equal(writeAlpha(store, { ...DEFAULT_ALPHA, footprint: 0.3, zone: 0 }), true);
+  assert.equal(
+    writeAlpha(store, { ...DEFAULT_ALPHA, footprint: 0.3, zone: 0 }),
+    true,
+  );
   const back = readAlpha(store);
   assert.equal(back.footprint, 0.3);
   assert.equal(back.zone, 0);
   assert.equal(back.curtain, 0.1);
   assert.equal(back.view, 0.2);
-  store.setItem(ALPHA_STORAGE_KEY, JSON.stringify({ zone: 9, curtain: -3, view: 'x', footprint: null }));
+  store.setItem(
+    ALPHA_STORAGE_KEY,
+    JSON.stringify({ zone: 9, curtain: -3, view: 'x', footprint: null }),
+  );
   const clamped = readAlpha(store);
   assert.equal(clamped.zone, ALPHA_RANGE.zone.max);
   assert.equal(clamped.curtain, 0);
@@ -48,7 +54,10 @@ test('transparency: saved levels come back, clamped, per layer', () => {
 
 test('transparency and steps: junk or a blocked store gives the defaults', () => {
   for (const raw of ['not json', '[1,2]', '"x"', 'null', '']) {
-    const store = memory({ [ALPHA_STORAGE_KEY]: raw, [STEPS_STORAGE_KEY]: raw });
+    const store = memory({
+      [ALPHA_STORAGE_KEY]: raw,
+      [STEPS_STORAGE_KEY]: raw,
+    });
     assert.deepEqual(readAlpha(store), { ...DEFAULT_ALPHA });
     assert.deepEqual(readStepsOpen(store), { ...DEFAULT_STEPS_OPEN });
   }
