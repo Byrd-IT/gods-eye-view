@@ -15,8 +15,7 @@
  *   - synthetic secrets placed in fields the adapter does not know reach no stored byte
  * and, across the board:
  *   - a heavy feed (aircraft, vessels, transit, bikeshare) records only when named, never from HISTORY_RECORD=1 alone;
- *     a light one (military, cyclones, perimeters, launches, satellites) records from HISTORY_RECORD=1
- *   - a path a fixture lists as ignored (catalogue-sized satellite groups) stores nothing
+ *     a light one (military, cyclones, perimeters, launches) records from HISTORY_RECORD=1
  *   - with recording off the tee mounts nothing and wraps nothing
  *   - a world-sized poll is tapped within a time budget and flushed without stalling the event loop
  * Exits non-zero on the first failed check; the report names each check.

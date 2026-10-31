@@ -5,7 +5,6 @@
  */
 import { answerClockMs } from './adapters/military.js';
 import { NOT_LIVE } from './adapters/vessels.js';
-import { GROUPS, fromText } from './adapters/satellites.js';
 import { createStationDirectory, statusInput, systemKeyOf } from './adapters/bikeshare.js';
 import { FAILED, SKIP } from './tee.js';
 import { isAllowedGbfsHost, isAllowedGbfsPath } from '../../../src/data/gbfsSource.js';
@@ -64,23 +63,6 @@ const cachedAt = (res) => {
   return Number.isFinite(ms) && ms > 0 ? ms : null;
 };
 
-const GROUP_PATH = /^\/api\/celestrak\/([a-z0-9-]+)\/?$/;
-
-/**
- * CelesTrak TLE text, one route entry for the recorded groups. The proxy sets
- * `X-TLE-Cached-At` to the time of the upstream fetch on every answer, so two
- * answers with the same value are one refresh; HIT and STALE-ERROR answers are
- * the cache replaying one.
- */
-const celestrakGroup = (url) => {
-  const group = GROUP_PATH.exec(url.pathname)?.[1];
-  return group && GROUPS.includes(group) ? { key: group } : null;
-};
-const tleCachedAt = (_parsed, _context, { res }) => {
-  const at = Date.parse(String(res.getHeader?.('x-tle-cached-at') ?? ''));
-  return Number.isSafeInteger(at) && at > 0 ? at : null;
-};
-const REPLAYED_TLE = new Set(['HIT', 'STALE-ERROR']);
 
 // The transit proxy marks every answer: MISS is a fresh fetch from the operator;
 // HIT, INFLIGHT (shared with a fetch already counted) and STALE-ERROR (the old
@@ -217,22 +199,6 @@ export function createFeedRoutes() {
         fetchedAt: cachedAt(res),
       }),
       pollAt: (_body, _context, { res }) => cachedAt(res),
-    },
-    {
-      feed: 'satellites',
-      name: 'celestrak',
-      match: celestrakGroup,
-      isReplay: (res) =>
-        REPLAYED_TLE.has(
-          String(res.getHeader?.('x-tle-cache') ?? '').toUpperCase(),
-        ),
-      parse: 'text',
-      // A 200 without one valid element set is not a TLE answer: a failed poll.
-      payload: (text) => {
-        const input = fromText(text);
-        return input.sets.length ? input : FAILED;
-      },
-      pollAt: tleCachedAt,
     },
     {
       // One operator's snapshot; each operator is its own poll.

@@ -37,7 +37,7 @@ describe('history store router', () => {
 
   it('rejects a feed the settings do not cover', async () => {
     const store = createHistoryStore({ HISTORY_SQLITE_PATH: ':memory:' });
-    for (const feed of ['satellite', 'constructor', 'toString', 'hasownproperty']) {
+    for (const feed of ['satellites', 'constructor', 'toString', 'hasownproperty']) {
       await assert.rejects(store.slice(feed, { t: T0 }), (error) => error.code === 'INVALID_ARGUMENT', feed);
     }
     await store.close();

@@ -6,7 +6,6 @@ import launches from './launches.js';
 import military from './military.js';
 import perimeters from './perimeters.js';
 import quakes from './quakes.js';
-import satellites from './satellites.js';
 import transit from './transit.js';
 import vessels from './vessels.js';
 
@@ -20,7 +19,6 @@ export const ADAPTERS = Object.freeze({
   military,
   perimeters,
   quakes,
-  satellites,
   transit,
   vessels,
 });

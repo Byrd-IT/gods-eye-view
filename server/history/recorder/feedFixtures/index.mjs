@@ -2,7 +2,6 @@
 import { aircraftFixtures } from './aircraft.mjs';
 import { bikeshareFixtures } from './bikeshare.mjs';
 import { hazardFixtures } from './hazards.mjs';
-import { satelliteFixtures } from './satellites.mjs';
 import { transitFixtures } from './transit.mjs';
 import { vesselsFixtures } from './vessels.mjs';
 
@@ -12,5 +11,4 @@ export const FIXTURES = Object.freeze([
   ...transitFixtures,
   ...vesselsFixtures,
   ...hazardFixtures,
-  ...satelliteFixtures,
 ]);

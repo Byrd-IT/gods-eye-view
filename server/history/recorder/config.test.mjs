@@ -42,7 +42,7 @@ describe('recorder configuration', () => {
 
   it('a per-feed setting overrides the global one', () => {
     assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0' }).active, LIGHT.filter((feed) => feed !== 'firms'));
-    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_QUAKES: '1' }).active, [...LIGHT, 'quakes']);
+    assert.deepEqual(load({ HISTORY_RECORD: '1', HISTORY_RECORD_QUAKES: '1' }).active, HISTORY_FEEDS.filter((feed) => feed === 'quakes' || LIGHT.includes(feed)));
     assert.deepEqual(load({ HISTORY_RECORD_QUAKES: '1' }).active, ['quakes']);
     assert.deepEqual(load({ HISTORY_RECORD_FIRMS: '1' }).active, ['firms']);
   });

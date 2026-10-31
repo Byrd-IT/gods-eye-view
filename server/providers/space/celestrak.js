@@ -863,12 +863,6 @@ export function celestrakProxy() {
         // went out routing into the catch's send): writeHead after headersSent
         // throws "Cannot set headers after they are sent".
         if (res.headersSent) return;
-        // Node's getHeader() does not see headers passed only to writeHead(), so
-        // set these two the readable way as well: the history recorder's response
-        // tee reads them to tell a fresh fetch from a cache replay.
-        res.setHeader('x-tle-cache', cacheStatus);
-        if (entry)
-          res.setHeader('X-TLE-Cached-At', new Date(entry.at).toISOString());
         res.writeHead(status, {
           'Content-Type': 'text/plain',
           'x-tle-cache': cacheStatus,

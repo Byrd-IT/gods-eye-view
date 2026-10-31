@@ -1,4 +1,4 @@
-import { describe, it, mock } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRecorder } from './index.js';
 import { createHistoryTee } from './tee.js';
@@ -262,22 +262,17 @@ describe('cyclones', () => {
   });
 
   it('notes a continuing outage once a minute, not once', async () => {
-    const { store, recorder, tee } = setup('cyclones');
+    const { store, recorder, tee, clock } = setup('cyclones');
     const down = {
       unavailable: true,
       stale: true,
       fetchedAt: null,
       storms: [],
     };
-    const now = mock.method(Date, 'now', () => T0);
-    try {
-      await request(tee, '/api/cyclones', send(down));
-      await request(tee, '/api/cyclones', send(down));
-      now.mock.mockImplementation(() => T0 + 61_000);
-      await request(tee, '/api/cyclones', send(down));
-    } finally {
-      now.mock.restore();
-    }
+    await request(tee, '/api/cyclones', send(down));
+    await request(tee, '/api/cyclones', send(down));
+    clock.now += 61_000;
+    await request(tee, '/api/cyclones', send(down));
     await recorder.flush();
     assert.deepEqual(
       store.ingests.map((i) => i.ok),
