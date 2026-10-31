@@ -122,7 +122,8 @@ function checkArea(area, frame) {
     if (selfIntersects(ringXY(area.ring, frame))) {
       return {
         error: 'self-intersecting',
-        message: 'That polygon crosses itself. Remove a corner or draw it again.',
+        message:
+          'That polygon crosses itself. Remove a corner or draw it again.',
       };
     }
   }
@@ -172,7 +173,8 @@ function tagLegs(plan, job, blockId) {
 function withJob(plan, areas, grouping) {
   const job = {
     id: 'job-1',
-    name: grouping === 'whole' && areas.length > 1 ? 'Whole plan' : areas[0].name,
+    name:
+      grouping === 'whole' && areas.length > 1 ? 'Whole plan' : areas[0].name,
     areaIds: areas.map((area) => area.id),
     areaNames: areas.map((area) => area.name),
   };
@@ -332,10 +334,15 @@ function clipShell(shell, members, frame, margin, lookAhead) {
 }
 
 function orderingTakeoff(box, takeoff) {
-  if (!takeoff || !Number.isFinite(takeoff.lon) || !Number.isFinite(takeoff.lat)) {
+  if (
+    !takeoff ||
+    !Number.isFinite(takeoff.lon) ||
+    !Number.isFinite(takeoff.lat)
+  ) {
     return null;
   }
-  if (takeoffDistanceFromBoxM(box, takeoff) > MAX_TAKEOFF_FROM_BOX_M) return null;
+  if (takeoffDistanceFromBoxM(box, takeoff) > MAX_TAKEOFF_FROM_BOX_M)
+    return null;
   return { lon: takeoff.lon, lat: takeoff.lat };
 }
 
@@ -357,15 +364,20 @@ function reverseLegPoints(leg) {
  */
 function orientLegsToward(legs, takeoff, lookAhead) {
   if (!takeoff || !legs?.length) return legs;
-  if (legs.some((leg) => leg.kind === 'orbit' || (leg.waypoints?.length ?? 0) < 2)) {
+  if (
+    legs.some((leg) => leg.kind === 'orbit' || (leg.waypoints?.length ?? 0) < 2)
+  ) {
     return legs;
   }
   const startOf = (list) => list[0].waypoints[0];
   const away = (w) => groundDistanceM(takeoff, w);
   const flipped = lookAhead > 0 ? null : legs.map(reverseLegPoints);
-  const candidates = [legs, flipped, [...legs].reverse(), flipped ? [...flipped].reverse() : null].filter(
-    Boolean,
-  );
+  const candidates = [
+    legs,
+    flipped,
+    [...legs].reverse(),
+    flipped ? [...flipped].reverse() : null,
+  ].filter(Boolean);
   let best = legs;
   let bestD = away(startOf(legs));
   for (const list of candidates) {
@@ -382,8 +394,15 @@ function planCluster(members, rawOptions, sharedTakeoff) {
   if (members.length === 1 && members[0].kind === 'rect') {
     const box = members[0].box;
     const forOrder = orderingTakeoff(box, sharedTakeoff);
-    const planned = planFlight(box, forOrder ? { ...rawOptions, takeoff: forOrder } : rawOptions);
-    if (planned.error || !planned.legs?.length || planned.legs[0].kind === 'orbit') {
+    const planned = planFlight(
+      box,
+      forOrder ? { ...rawOptions, takeoff: forOrder } : rawOptions,
+    );
+    if (
+      planned.error ||
+      !planned.legs?.length ||
+      planned.legs[0].kind === 'orbit'
+    ) {
       return planned;
     }
     planned.legs = orientLegsToward(
@@ -423,7 +442,13 @@ function planCluster(members, rawOptions, sharedTakeoff) {
   // No custom takeoff: sharedTakeoff is the first area's centre, so a polygon
   // or group turns toward that point, the same as a single rectangle.
   const turned = orientLegsToward(shell.legs, sharedTakeoff, lookAhead);
-  const clipped = clipShell({ ...shell, legs: turned }, members, frame, margin, lookAhead);
+  const clipped = clipShell(
+    { ...shell, legs: turned },
+    members,
+    frame,
+    margin,
+    lookAhead,
+  );
   if (!clipped.legs.length) {
     return {
       error: 'too-narrow',
@@ -556,7 +581,8 @@ export function planAreas(areas, rawOptions = {}) {
   const list = (areas ?? []).map((area) => ({
     ...area,
     box: area.kind === 'polygon' ? bboxOfPoints(area.ring) : { ...area.box },
-    ring: area.kind === 'polygon' ? area.ring.map((p) => ({ ...p })) : undefined,
+    ring:
+      area.kind === 'polygon' ? area.ring.map((p) => ({ ...p })) : undefined,
   }));
   if (!list.length) {
     return { error: 'bad-box', message: 'Draw a box on the globe first' };
@@ -628,9 +654,7 @@ export function planAreas(areas, rawOptions = {}) {
     first ??= planned;
     if (grouping === 'whole' || members.length === 1) {
       const job =
-        grouping === 'whole'
-          ? whole
-          : perArea[list.indexOf(members[0])];
+        grouping === 'whole' ? whole : perArea[list.indexOf(members[0])];
       pushLegs(
         planned,
         job,
@@ -651,11 +675,7 @@ export function planAreas(areas, rawOptions = {}) {
       );
       members.forEach((area, i) => {
         if (!buckets[i].length) return;
-        pushLegs(
-          { legs: buckets[i] },
-          perArea[list.indexOf(area)],
-          [area.id],
-        );
+        pushLegs({ legs: buckets[i] }, perArea[list.indexOf(area)], [area.id]);
       });
     }
     for (const note of planned.notes ?? []) {
@@ -686,7 +706,10 @@ export function planAreas(areas, rawOptions = {}) {
   );
   const planNotes = notes.filter((note) => note.code !== 'vlos');
   if (farthest > VLOS_WARN_M) {
-    planNotes.push({ code: 'vlos', params: { distanceM: Math.round(farthest) } });
+    planNotes.push({
+      code: 'vlos',
+      params: { distanceM: Math.round(farthest) },
+    });
   }
   const anyPolygon = list.some((area) => area.kind === 'polygon');
   const preset = getPreset(options.presetId) ?? getPreset(DEFAULT_PRESET_ID);
@@ -717,7 +740,12 @@ function missionFromLegs(legs, job, plan) {
       waypoints.push({ ...w, index: waypoints.length });
     });
   });
-  const est = estimateMission(waypoints, plan.takeoff, plan.speedMs, legs.length);
+  const est = estimateMission(
+    waypoints,
+    plan.takeoff,
+    plan.speedMs,
+    legs.length,
+  );
   return {
     index: 0,
     legs,
@@ -763,7 +791,9 @@ function splitByJob(mission, plan) {
 
 function areaStatRows(plan, missions) {
   return (plan.areas ?? []).map((area) => {
-    const job = (plan.jobs ?? []).find((item) => item.areaIds.includes(area.id));
+    const job = (plan.jobs ?? []).find((item) =>
+      item.areaIds.includes(area.id),
+    );
     const sole = (job?.areaIds ?? []).length === 1;
     const mine = sole
       ? missions.filter((mission) => mission.jobId === job.id)
@@ -791,7 +821,13 @@ function areaStatRows(plan, missions) {
  */
 export function assembleAreaPlan(plan, ground) {
   if (plan?.error) {
-    return { plan, missions: [], totals: null, warnings: [], terrainComplete: false };
+    return {
+      plan,
+      missions: [],
+      totals: null,
+      warnings: [],
+      terrainComplete: false,
+    };
   }
   if (!plan.jobs?.length) return assembleMissions(plan, ground);
   const built = assembleMissions(plan, ground);
@@ -802,7 +838,10 @@ export function assembleAreaPlan(plan, ground) {
     missions = missions.slice(0, MAX_MISSIONS);
     truncated = true;
     if (!warnings.some((w) => w.code === 'too-many-missions')) {
-      warnings.push({ code: 'too-many-missions', params: { count: MAX_MISSIONS } });
+      warnings.push({
+        code: 'too-many-missions',
+        params: { count: MAX_MISSIONS },
+      });
     }
   }
   missions.forEach((mission, index) => {
@@ -813,7 +852,10 @@ export function assembleAreaPlan(plan, ground) {
     photoCount: missions.reduce((sum, mission) => sum + mission.photoCount, 0),
     distanceM: missions.reduce((sum, mission) => sum + mission.distanceM, 0),
     durationS: missions.reduce((sum, mission) => sum + mission.durationS, 0),
-    waypointCount: missions.reduce((sum, mission) => sum + mission.waypointCount, 0),
+    waypointCount: missions.reduce(
+      (sum, mission) => sum + mission.waypointCount,
+      0,
+    ),
     missionCount: missions.length,
   };
   return {
@@ -848,13 +890,19 @@ export function distanceToAreasM(areas, point) {
   const here = { x: 0, y: 0 };
   let best = Infinity;
   for (const area of areas) {
-    if (area.kind !== 'polygon' && takeoffDistanceFromBoxM(area.box, point) === 0) {
+    if (
+      area.kind !== 'polygon' &&
+      takeoffDistanceFromBoxM(area.box, point) === 0
+    ) {
       return 0;
     }
     const ring = ringXY(areaRing(area), frame);
     if (area.kind === 'polygon' && pointInRing(here, ring)) return 0;
     for (let i = 0; i < ring.length; i += 1) {
-      best = Math.min(best, distanceToSegment(here, ring[i], ring[(i + 1) % ring.length]));
+      best = Math.min(
+        best,
+        distanceToSegment(here, ring[i], ring[(i + 1) % ring.length]),
+      );
     }
   }
   return best;

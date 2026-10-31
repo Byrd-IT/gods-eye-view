@@ -23,6 +23,8 @@ import {
   toLegacyShareState,
 } from './legacyShareState.js';
 
+import { BYRDIT_FORK_LAYER_IDS } from '../byrdit/forkLayers.js';
+
 const DEG = Math.PI / 180;
 
 function stubViewer(camera = {}) {
@@ -242,6 +244,12 @@ function generatedLegacyHash(random) {
   });
   if (random() < 0.8) {
     const layerState = randomLayerState(random);
+    // Byrd-IT fork: the compact-size ratio below is an upstream property of the
+    // published layer set; the fork's own water layers (round-trip tested
+    // elsewhere) would only skew it.
+    layerState.enabledLayerIds = layerState.enabledLayerIds.filter(
+      (id) => !BYRDIT_FORK_LAYER_IDS.includes(id),
+    );
     manager.setLayerStateProvider(() => layerState);
   }
   if (random() < 0.8) {

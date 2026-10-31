@@ -31,9 +31,7 @@ export function speedText(ms, digits = 1) {
 export function distanceText(metres) {
   if (lengthUnit() === 'ft') {
     const feet = lengthFromM(metres);
-    return feet >= 5280
-      ? `${fixed(feet / 5280, 2)} mi`
-      : `${fixed(feet)} ft`;
+    return feet >= 5280 ? `${fixed(feet / 5280, 2)} mi` : `${fixed(feet)} ft`;
   }
   return metres >= 1000
     ? `${fixed(metres / 1000, 2)} km`
@@ -170,8 +168,6 @@ export function planErrorText(code) {
   if (code === 'no-orbit-targets')
     return t('Turn on at least one orbit target');
   if (code === 'self-intersecting')
-    return t(
-      'That polygon crosses itself. Remove a corner or draw it again.',
-    );
+    return t('That polygon crosses itself. Remove a corner or draw it again.');
   return t('Draw a box on the globe first');
 }

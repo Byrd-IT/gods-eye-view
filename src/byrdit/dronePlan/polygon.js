@@ -60,8 +60,7 @@ function edgesCross(a, b, c, d) {
   const o2 = orient(a, b, d);
   const o3 = orient(c, d, a);
   const o4 = orient(c, d, b);
-  const scale =
-    Math.max(hypot(sub(b, a)), hypot(sub(d, c)), 1) * 1e-9;
+  const scale = Math.max(hypot(sub(b, a)), hypot(sub(d, c)), 1) * 1e-9;
   const s1 = Math.abs(o1) <= scale ? 0 : Math.sign(o1);
   const s2 = Math.abs(o2) <= scale ? 0 : Math.sign(o2);
   const s3 = Math.abs(o3) <= scale ? 0 : Math.sign(o3);
@@ -103,8 +102,7 @@ export function selfIntersects(ring) {
   if (n < 4) return false;
   for (let i = 0; i < n; i += 1) {
     for (let j = i + 1; j < n; j += 1) {
-      const adjacent =
-        Math.abs(i - j) <= 1 || (i === 0 && j === n - 1);
+      const adjacent = Math.abs(i - j) <= 1 || (i === 0 && j === n - 1);
       if (adjacent) continue;
       // Edges (i, i+1) and (j, j+1). The closing edge is (n-1, 0).
       const a = pts[i];
@@ -122,7 +120,10 @@ function distanceToSegment(p, a, b) {
   const aby = b.y - a.y;
   const len2 = abx * abx + aby * aby;
   if (len2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);
-  const t = Math.min(1, Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2));
+  const t = Math.min(
+    1,
+    Math.max(0, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2),
+  );
   return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
 }
 
@@ -136,7 +137,10 @@ export function pointWithinMargin(p, ring, margin) {
   if (pointInRing(p, pts)) return true;
   if (!(margin > 0)) return false;
   for (let i = 0; i < pts.length; i += 1) {
-    if (distanceToSegment(p, pts[i], pts[(i + 1) % pts.length]) <= margin + 1e-4) {
+    if (
+      distanceToSegment(p, pts[i], pts[(i + 1) % pts.length]) <=
+      margin + 1e-4
+    ) {
       return true;
     }
   }
@@ -237,14 +241,18 @@ function specContains(spec, p) {
 function distanceToRing(p, ring) {
   let best = Infinity;
   for (let i = 0; i < ring.length; i += 1) {
-    best = Math.min(best, distanceToSegment(p, ring[i], ring[(i + 1) % ring.length]));
+    best = Math.min(
+      best,
+      distanceToSegment(p, ring[i], ring[(i + 1) % ring.length]),
+    );
   }
   return best;
 }
 
 /** Index of the first ring that contains `point`, or -1. A ring may be `{ ring, margin }`. */
 export function areaIndexForPoint(point, rings) {
-  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return -1;
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y))
+    return -1;
   for (let i = 0; i < (rings ?? []).length; i += 1) {
     const spec = ringSpec(rings[i]);
     if (spec.ring.length < 3) continue;
@@ -375,7 +383,8 @@ export function clipSegmentCovered(a, b, rings) {
   for (const raw of rings) {
     const spec = ringSpec(raw);
     if (spec.ring.length < 3) continue;
-    if (spec.margin > 0) pieces.push(...clipSegmentToMargin(a, b, spec.ring, spec.margin));
+    if (spec.margin > 0)
+      pieces.push(...clipSegmentToMargin(a, b, spec.ring, spec.margin));
     else pieces.push(...clipSegmentToRing(a, b, spec.ring));
   }
   return mergeCollinearSegments(pieces);

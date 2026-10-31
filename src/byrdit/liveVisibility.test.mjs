@@ -153,6 +153,8 @@ function geometryQueueHarness({ heightM = 20_000 } = {}) {
     _enabled: true,
     _records: [onScreen, offScreen, farSide],
     _geoQueue: [],
+    _viewRecords: [],
+    _coverageVisibleIds: new Set(),
     _geoQueueTimer: 0,
   };
   const parts = {
@@ -244,6 +246,7 @@ test('UI state does not build frame URLs for every catalog camera', () => {
   const records = Array.from({ length: 500 }, (_, i) => rec(`c${i}`, -97, 30));
   const state = {
     _records: records,
+    _viewRecords: records,
     _healthById: new Map(),
     _cardIds: new Set(),
     _listeners: new Set(),
