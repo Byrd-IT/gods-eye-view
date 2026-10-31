@@ -114,7 +114,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run the history store tests
-        run: node --test server/history/
+        run: node --test 'server/history/**/*.test.mjs'
 
   street-level-browser:
     # Hermetic: every Mapillary request is answered from fixtures, so the

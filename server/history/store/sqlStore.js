@@ -29,7 +29,7 @@ export function driverErrorCode(error) {
       : 'unknown';
 }
 
-/** Split rows into statements of at most `max` rows and about 4 MiB of payload. */
+/** Split rows into statements of at most `max` rows and about 4 million characters of payload (UTF-16 units, not bytes). */
 function* chunksOf(rows, max) {
   let chunk = [];
   let bytes = 0;
@@ -208,6 +208,7 @@ export function createSqlStore({
         if (rows.length === 0) return { written: 0 };
         await adapter.withConnection(async (connection) => {
           await connection.query(dialect.begin, []);
+          let rolledBack = true;
           try {
             await connection.query(dialect.insertFeed(feedsTable, ph(1)), [
               feed,
@@ -232,8 +233,12 @@ export function createSqlStore({
             try {
               await connection.query('ROLLBACK', []);
             } catch {
-              /* the connection is already gone; the server rolls back */
+              /* handled below */
+              rolledBack = false;
             }
+            // A connection that may still hold an open transaction must not be
+            // reused: on MySQL the next START TRANSACTION would commit it.
+            if (!rolledBack) connection.discard();
             throw error;
           }
         });

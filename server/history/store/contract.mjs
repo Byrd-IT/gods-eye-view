@@ -133,6 +133,10 @@ export function defineHistoryStoreContract(label, makeStore) {
           () => store.append('aircraft', [obs(T0, 'a\0b', 0, 0)]),
         ],
         [
+          'a key with an unpaired surrogate',
+          () => store.append('aircraft', [obs(T0, 'a\ud800', 0, 0)]),
+        ],
+        [
           'latestBefore with a NUL key',
           () => store.latestBefore('aircraft', { t: T0, key: 'a\0' }),
         ],

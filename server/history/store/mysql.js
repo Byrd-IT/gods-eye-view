@@ -37,6 +37,8 @@ export const mysqlDialect = Object.freeze({
     `INSERT INTO ${table} (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)`,
   insertFeed: (table, placeholder) =>
     `INSERT IGNORE INTO ${table} (feed) VALUES (${placeholder})`,
+  // VALUES(col) is deprecated since MySQL 8.0.20 (a warning on 8.4) but MariaDB has
+  // no alias form, so it is kept on purpose; it works on both.
   upsertObservations: (table, tuples) =>
     `INSERT INTO ${table} (feed, t, obs_key, lat, lon, data) VALUES ${tuples}
      ON DUPLICATE KEY UPDATE lat = VALUES(lat), lon = VALUES(lon), data = VALUES(data)`,

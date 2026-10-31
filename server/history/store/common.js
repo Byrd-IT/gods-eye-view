@@ -64,17 +64,22 @@ function positiveInt(value, name, fallback, max) {
   return value;
 }
 
-/** Validate and normalise one observation. Returns a fresh plain object. */
-/** Keys are text in every backend; PostgreSQL text cannot hold U+0000, so none may. */
+/**
+ * Keys are text in every backend. PostgreSQL text cannot hold U+0000, and an
+ * unpaired surrogate is stored as U+FFFD by every driver (two different keys
+ * would become one), so neither is allowed.
+ */
 function validKey(key) {
   return (
     typeof key === 'string' &&
     key.length > 0 &&
     key.length <= MAX_KEY_LENGTH &&
-    !key.includes('\0')
+    !key.includes('\0') &&
+    key.isWellFormed()
   );
 }
 
+/** Validate and normalise one observation. Returns a fresh plain object. */
 export function normalizeObservation(raw, index = 0) {
   const where = `observations[${index}]`;
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -84,7 +89,7 @@ export function normalizeObservation(raw, index = 0) {
   const key = raw.key;
   if (!validKey(key)) {
     throw invalid(
-      `${where}.key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters without a NUL character`,
+      `${where}.key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters, without a NUL character or an unpaired surrogate`,
     );
   }
   const hasLat = raw.lat !== undefined && raw.lat !== null;
@@ -216,7 +221,7 @@ export function normalizeLatestBefore(options) {
   const key = options.key;
   if (!validKey(key)) {
     throw invalid(
-      `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters without a NUL character`,
+      `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters, without a NUL character or an unpaired surrogate`,
     );
   }
   return { t, key };

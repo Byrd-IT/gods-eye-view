@@ -308,6 +308,47 @@ describe('sql backend schema lock', () => {
   });
 });
 
+describe('sql backend failed transactions', () => {
+  function scripted(rollbackFails) {
+    const ended = [];
+    const driver = {
+      createPool: () => ({
+        async getConnection() {
+          return {
+            async query(sql) {
+              if (/GET_LOCK/.test(sql)) return [[{ lock: 1 }]];
+              if (/^\s*INSERT INTO \S+_observations/.test(sql)) throw new Error('disk full');
+              if (/ROLLBACK/.test(sql) && rollbackFails) throw new Error('connection lost');
+              if (/SELECT value/.test(sql)) return [[]];
+              return [{ affectedRows: 0 }];
+            },
+            release: () => ended.push('release'),
+            destroy: () => ended.push('destroy')
+          };
+        },
+        async end() {}
+      })
+    };
+    return { driver, ended };
+  }
+
+  it('keeps a connection after a clean rollback', async () => {
+    const { driver, ended } = scripted(false);
+    const store = createMysqlStore({ url: MY, driver });
+    await assert.rejects(store.append('aircraft', [{ t: 1, key: 'a' }]), (error) => error.code === 'BACKEND');
+    assert.deepEqual(ended.slice(1), ['release']);
+    await store.close();
+  });
+
+  it('destroys a connection whose rollback failed', async () => {
+    const { driver, ended } = scripted(true);
+    const store = createMysqlStore({ url: MY, driver });
+    await assert.rejects(store.append('aircraft', [{ t: 1, key: 'a' }]), (error) => error.code === 'BACKEND');
+    assert.deepEqual(ended.slice(1), ['destroy']);
+    await store.close();
+  });
+});
+
 describe('sql backend settings: sockets', () => {
   it('accepts a PostgreSQL socket directory through the host parameter', () => {
     const config = loadHistoryConfig(
