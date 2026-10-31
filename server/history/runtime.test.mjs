@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { HistoryConfigError } from './config.js';
 import { createHistoryRuntime, historyRecorderLifecycle } from './runtime.js';
+import { ADAPTERS } from './recorder/adapters/index.js';
 import { fire, firmsPayload } from './recorder/fixtures.mjs';
 
 describe('history runtime', () => {
@@ -65,7 +66,8 @@ describe('history runtime', () => {
   });
 
   it('stays off when every feed is switched off', () => {
-    const runtime = createHistoryRuntime({ HISTORY_RECORD: '1', HISTORY_RECORD_FIRMS: '0', HISTORY_RECORD_MILITARY: '0' }, { createStore: () => assert.fail('opened') });
+    const off = Object.fromEntries(Object.keys(ADAPTERS).map((feed) => [`HISTORY_RECORD_${feed.toUpperCase()}`, '0']));
+    const runtime = createHistoryRuntime({ HISTORY_RECORD: '1', ...off }, { createStore: () => assert.fail('opened') });
     assert.equal(runtime.recorder.enabled, false);
   });
 
