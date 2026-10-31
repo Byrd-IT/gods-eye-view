@@ -42,6 +42,8 @@
  */
 import { loadHistoryConfig } from '../config.js';
 import { HistoryStoreError, assertFeed, assertTime } from './common.js';
+import { createMysqlStore } from './mysql.js';
+import { createPostgresStore } from './postgres.js';
 import { createSqliteStore } from './sqlite.js';
 
 export { HistoryStoreError } from './common.js';
@@ -49,6 +51,16 @@ export { HistoryStoreError } from './common.js';
 /** Backends this build implements. */
 const BACKENDS = Object.freeze({
   sqlite: (config) => createSqliteStore({ path: config.sqlitePath }),
+  mysql: (config) =>
+    createMysqlStore({
+      url: config.mysqlUrl,
+      tablePrefix: config.sqlTablePrefix,
+    }),
+  postgres: (config) =>
+    createPostgresStore({
+      url: config.postgresUrl,
+      tablePrefix: config.sqlTablePrefix,
+    }),
 });
 
 export const AVAILABLE_BACKENDS = Object.freeze(Object.keys(BACKENDS));
@@ -106,6 +118,11 @@ export function createHistoryStore(env = process.env, options = {}) {
   for (const method of METHODS)
     router[method] = async (feed, options) =>
       route(feed)[method](feed, options);
+  // Opens the connections and creates the tables now rather than at the first
+  // write, so a wrong password or an unreachable server fails the boot.
+  router.ready = async () => {
+    await Promise.all([...opened.values()].map((backend) => backend.ready?.()));
+  };
   router.health = async () => {
     const parts = await Promise.all(
       [...opened.entries()].map(async ([name, backend]) => [

@@ -67,6 +67,21 @@ function positiveInt(value, name, fallback, max) {
   return value;
 }
 
+/**
+ * Keys are text in every backend. PostgreSQL text cannot hold U+0000, and an
+ * unpaired surrogate is stored as U+FFFD by every driver (two different keys
+ * would become one), so neither is allowed.
+ */
+function validKey(key) {
+  return (
+    typeof key === 'string' &&
+    key.length > 0 &&
+    key.length <= MAX_KEY_LENGTH &&
+    !key.includes('\0') &&
+    key.isWellFormed()
+  );
+}
+
 /** Validate and normalise one observation. Returns a fresh plain object. */
 export function normalizeObservation(raw, index = 0) {
   const where = `observations[${index}]`;
@@ -75,13 +90,9 @@ export function normalizeObservation(raw, index = 0) {
   }
   const t = assertTime(raw.t, `${where}.t`);
   const key = raw.key;
-  if (
-    typeof key !== 'string' ||
-    key.length === 0 ||
-    key.length > MAX_KEY_LENGTH
-  ) {
+  if (!validKey(key)) {
     throw invalid(
-      `${where}.key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`,
+      `${where}.key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters, without a NUL character or an unpaired surrogate`,
     );
   }
   const hasLat = raw.lat !== undefined && raw.lat !== null;
@@ -253,13 +264,9 @@ export function normalizeLatestBefore(options) {
     throw invalid('latestBefore options must be an object');
   const t = assertTime(options.t, 't');
   const key = options.key;
-  if (
-    typeof key !== 'string' ||
-    key.length === 0 ||
-    key.length > MAX_KEY_LENGTH
-  ) {
+  if (!validKey(key)) {
     throw invalid(
-      `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`,
+      `key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters, without a NUL character or an unpaired surrogate`,
     );
   }
   return { t, key };
@@ -282,6 +289,57 @@ export function buildSpans(times, maxGapMs) {
     }
   }
   return spans;
+}
+
+/**
+ * The spans of a feed's snapshot times, worked out inside the database so the
+ * server never holds one row per snapshot: consecutive distinct times closer
+ * than `maxGapMs` fall in the same span (the same rule as `buildSpans`). One
+ * row comes back per span. Window functions need SQLite 3.25, MySQL 8,
+ * MariaDB 10.2 or PostgreSQL (any supported version).
+ *
+ * Bind order: the gap placeholder appears first in the SQL text, then the feed,
+ * then the range clause, so a `?` dialect must pass its params in that order.
+ */
+export function coverageSql({
+  table,
+  feedPlaceholder,
+  clause,
+  gapPlaceholder,
+}) {
+  return `SELECT MIN(t) AS from_t, MAX(t) AS to_t, COUNT(*) AS snapshots, SUM(n) AS n
+    FROM (
+      SELECT t, n, SUM(brk) OVER (ORDER BY t) AS grp
+      FROM (
+        SELECT t, n,
+          CASE WHEN LAG(t) OVER (ORDER BY t) IS NULL
+                 OR t - LAG(t) OVER (ORDER BY t) > ${gapPlaceholder}
+               THEN 1 ELSE 0 END AS brk
+        FROM (
+          SELECT t, COUNT(*) AS n FROM ${table}
+          WHERE feed = ${feedPlaceholder}${clause} GROUP BY t
+        ) AS per_time
+      ) AS marked
+    ) AS grouped
+    GROUP BY grp ORDER BY grp`;
+}
+
+/** Shape the rows of `coverageSql` into the store's coverage answer. */
+export function coverageResult(feed, maxGapMs, rows) {
+  const spans = rows.map((row) => ({
+    from: Number(row.from_t),
+    to: Number(row.to_t),
+    snapshots: Number(row.snapshots),
+  }));
+  return {
+    feed,
+    count: rows.reduce((sum, row) => sum + Number(row.n), 0),
+    snapshots: spans.reduce((sum, span) => sum + span.snapshots, 0),
+    firstT: spans.length ? spans[0].from : null,
+    lastT: spans.length ? spans[spans.length - 1].to : null,
+    maxGapMs,
+    spans,
+  };
 }
 
 export function decodeRow(row) {

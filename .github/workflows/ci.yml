@@ -59,6 +59,63 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+  history-sql:
+    # The history store contract against real PostgreSQL, MySQL and MariaDB servers.
+    # The containers exist only for this job.
+    name: History store (PostgreSQL, MySQL, MariaDB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GEV_REQUIRE_SQL_BACKENDS: '1'
+      GEV_TEST_POSTGRES_URL: postgres://postgres:ci@127.0.0.1:5432/gev
+      GEV_TEST_MYSQL_URL: mysql://root:ci@127.0.0.1:3306/gev
+      GEV_TEST_MARIADB_URL: mysql://root:ci@127.0.0.1:3307/gev
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: gev
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d gev" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci
+          MYSQL_DATABASE: gev
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pci" --health-interval 5s
+          --health-timeout 5s --health-retries 30
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: ci
+          MARIADB_DATABASE: gev
+        ports: ['3307:3306']
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s
+          --health-timeout 5s --health-retries 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.14.0
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run the history store tests
+        run: node --test 'server/history/**/*.test.mjs'
+
   street-level-browser:
     # Hermetic: every Mapillary request is answered from fixtures, so the
     # dummy token below never leaves the page.

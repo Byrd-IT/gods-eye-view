@@ -4,7 +4,8 @@ import {
   HistoryStoreError,
   assertFeed,
   assertTime,
-  buildSpans,
+  coverageResult,
+  coverageSql,
   DEFAULT_SQLITE_PATH,
   decodeRow,
   invalid,
@@ -284,25 +285,18 @@ export function createSqliteStore(options = {}) {
       assertFeed(feed);
       const { from, to, maxGapMs } = normalizeCoverageOptions(options);
       return guard('coverage', () => {
-        const params = [feed];
+        // The gap comes first: `?` placeholders bind in text order.
+        const params = [maxGapMs, feed];
         const clause = rangeClause({ from, to }, params);
-        const times = [];
-        let count = 0;
-        for (const row of prepared(
-          `SELECT t, COUNT(*) AS n FROM observations WHERE feed = ?${clause} GROUP BY t ORDER BY t`,
-        ).iterate(...params)) {
-          times.push(Number(row.t));
-          count += Number(row.n);
-        }
-        return {
-          feed,
-          count,
-          snapshots: times.length,
-          firstT: times.length ? times[0] : null,
-          lastT: times.length ? times[times.length - 1] : null,
-          maxGapMs,
-          spans: buildSpans(times, maxGapMs),
-        };
+        const rows = prepared(
+          coverageSql({
+            table: 'observations',
+            feedPlaceholder: '?',
+            clause,
+            gapPlaceholder: '?',
+          }),
+        ).all(...params);
+        return coverageResult(feed, maxGapMs, rows);
       });
     },
 

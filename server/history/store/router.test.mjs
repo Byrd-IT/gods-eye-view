@@ -9,7 +9,7 @@ const memory = (name) => () => ({ ...createSqliteStore({ path: ':memory:' }), ba
 
 describe('history store router', () => {
   it('builds sqlite stores from the environment', async () => {
-    assert.deepEqual([...AVAILABLE_BACKENDS], ['sqlite']);
+    assert.deepEqual([...AVAILABLE_BACKENDS], ['sqlite', 'mysql', 'postgres']);
     const store = createHistoryStore({ HISTORY_SQLITE_PATH: ':memory:' });
     await store.append('aircraft', [{ t: T0, key: 'a', lat: 0, lon: 0 }]);
     assert.equal((await store.coverage('aircraft')).count, 1);

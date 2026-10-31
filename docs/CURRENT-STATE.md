@@ -1343,6 +1343,34 @@ writes an ingest-log row (`ok`, `count`); a dropped or failed poll has none, whi
 how coverage tells a gap from an empty answer. FIRMS refreshes only while a client
 views the layer (`view-driven`), so gaps in the record are real. Gate:
 `npm run qa:history-recorder`. Design: `docs/history/DESIGN-recorder.md`.
+PostgreSQL and MySQL/MariaDB backends (`postgres`, `mysql`, and `mariadb` as another
+name for `mysql`) keep the same contract in tables `gev_history_observations`,
+`gev_history_feeds` and `gev_history_meta` (prefix `HISTORY_SQL_TABLE_PREFIX`),
+created on first use under a database lock. Select one with `HISTORY_STORE=postgres`
+or `mysql` (or per feed) and give its connection string in `HISTORY_POSTGRES_URL` or
+`HISTORY_MYSQL_URL`. The drivers `pg` and `mysql2` are optional peer dependencies,
+loaded only when a feed uses the backend; a missing driver, a missing or malformed
+connection string, or a string for a backend no feed uses stops the boot with a
+named problem. A connection string holds a password: it is never printed, never in
+an error (failures show only the driver's short error code), and not an enumerable
+field of the loaded config. `store.ready()` (and the router's) opens the connection
+and creates the tables at boot rather than at the first write. The contract suite
+runs against all three servers in CI (`GEV_TEST_POSTGRES_URL`,
+`GEV_TEST_MYSQL_URL`, `GEV_TEST_MARIADB_URL`; `GEV_REQUIRE_SQL_BACKENDS=1` makes a
+missing server a failure instead of a skip). Keys are compared byte-wise on every
+backend (MySQL stores them as `VARBINARY`, which does not ignore trailing spaces);
+a key may not contain a NUL character (PostgreSQL text cannot hold it) or an unpaired surrogate (drivers would store it as U+FFFD). A
+PostgreSQL socket directory is given as `postgres://user@localhost/db?host=%2Fvar%2Frun%2Fpostgresql`.
+
+Coverage is computed in the database (window functions: SQLite 3.25 or later,
+MySQL 8, MariaDB 10.2 or later, PostgreSQL), so only one row per span, not one per
+snapshot, reaches the server. The PostgreSQL schema lock is
+`pg_advisory_xact_lock` taken inside the schema transaction, so that lock works
+behind PgBouncer in transaction-pooling mode (the other statements are plain
+unnamed queries and use no session state). The MySQL/MariaDB schema lock
+(`GET_LOCK`) is a session lock and does not: point `HISTORY_MYSQL_URL` at the
+database directly, or at a proxy in session mode, not at a transaction-pooling
+proxy such as ProxySQL multiplexing.
 
 ## UI disposal
 

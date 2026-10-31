@@ -1,0 +1,114 @@
+import { createRequire } from 'node:module';
+import { HistoryStoreError } from './common.js';
+import { createSqlStore } from './sqlStore.js';
+
+export const postgresDialect = Object.freeze({
+  placeholder: (i) => `$${i}`,
+  begin: 'BEGIN',
+  insertChunk: 5000, // six parameters a row; the protocol allows 65535
+  // Transaction-scoped, so it is released by COMMIT/ROLLBACK and works behind
+  // PgBouncer in transaction-pooling mode (a session lock would not).
+  transactionLock: true,
+  lock: (prefix) =>
+    `SELECT pg_advisory_xact_lock(hashtext('gev_history_schema_${prefix}'))`,
+  schema: ({ obs, feedsTable, metaTable }) => [
+    `CREATE TABLE IF NOT EXISTS ${obs} (
+       feed TEXT COLLATE "C" NOT NULL,
+       t BIGINT NOT NULL,
+       obs_key TEXT COLLATE "C" NOT NULL,
+       lat DOUBLE PRECISION,
+       lon DOUBLE PRECISION,
+       data TEXT NOT NULL,
+       PRIMARY KEY (feed, t, obs_key))`,
+    `CREATE INDEX IF NOT EXISTS ${obs}_by_key ON ${obs} (feed, obs_key, t)`,
+    `CREATE TABLE IF NOT EXISTS ${feedsTable} (feed TEXT COLLATE "C" PRIMARY KEY)`,
+    `CREATE TABLE IF NOT EXISTS ${metaTable} (name TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+  ],
+  upsertMeta: (table) =>
+    `INSERT INTO ${table} (name, value) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value`,
+  insertFeed: (table, placeholder) =>
+    `INSERT INTO ${table} (feed) VALUES (${placeholder}) ON CONFLICT DO NOTHING`,
+  upsertObservations: (table, tuples) =>
+    `INSERT INTO ${table} (feed, t, obs_key, lat, lon, data) VALUES ${tuples}
+     ON CONFLICT (feed, t, obs_key) DO UPDATE SET lat = EXCLUDED.lat, lon = EXCLUDED.lon, data = EXCLUDED.data`,
+});
+
+/** Load the optional `pg` driver; a missing one is a boot-time CONFIG error. */
+function loadDriver(load = createRequire(import.meta.url)) {
+  try {
+    return load('pg');
+  } catch {
+    throw new HistoryStoreError(
+      'CONFIG',
+      'the postgres history backend needs the optional "pg" package; install it with: npm install pg',
+    );
+  }
+}
+
+/**
+ * PostgreSQL history backend. The connection string comes from the caller and is
+ * never logged or put in an error.
+ *
+ * @param {{ url: string, tablePrefix?: string, driver?: object, load?: Function, poolSize?: number, dialectOverrides?: object }} options
+ */
+export function createPostgresStore({
+  url,
+  tablePrefix,
+  driver,
+  load,
+  poolSize = 4,
+  dialectOverrides,
+}) {
+  if (typeof url !== 'string' || url.trim() === '')
+    throw new HistoryStoreError(
+      'CONFIG',
+      'postgres connection string must be a non-empty string',
+    );
+  const { Pool } = driver ?? loadDriver(load);
+  const pool = new Pool({
+    connectionString: url,
+    max: poolSize,
+    connectionTimeoutMillis: 10_000,
+    idleTimeoutMillis: 30_000,
+    statement_timeout: 60_000,
+    application_name: 'gev-history',
+  });
+  // An idle connection dropped by the server is replaced on demand; the event
+  // must be handled or it would crash the process.
+  pool.on('error', () => {});
+  const adapter = {
+    async withConnection(fn) {
+      const client = await pool.connect();
+      let discarded = false;
+      // The pool listens to idle clients only; an error on a checked-out client
+      // with no listener would crash the process. The failing query reports it.
+      const ignore = () => {
+        discarded = true;
+      };
+      client.on?.('error', ignore);
+      try {
+        return await fn({
+          discard: () => {
+            discarded = true;
+          },
+          query: async (sql, params) => {
+            const result = await client.query(sql, params);
+            return { rows: result.rows ?? [], affected: result.rowCount ?? 0 };
+          },
+        });
+      } finally {
+        client.removeListener?.('error', ignore);
+        client.release(discarded);
+      }
+    },
+    end: () => pool.end(),
+  };
+  return createSqlStore({
+    backend: 'postgres',
+    dialect: dialectOverrides
+      ? { ...postgresDialect, ...dialectOverrides }
+      : postgresDialect,
+    adapter,
+    tablePrefix,
+  });
+}
