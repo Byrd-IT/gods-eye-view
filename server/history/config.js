@@ -1,3 +1,8 @@
+import {
+  LIVE_API_SUPPORT,
+  liveApiRefusal,
+  supportsLiveApi,
+} from './live/support.js';
 import { DEFAULT_SQLITE_PATH, HistoryStoreError } from './store/common.js';
 
 /** Feeds history can be kept for. A typo in HISTORY_STORE_<FEED> is a boot error. */
@@ -12,10 +17,19 @@ export const HISTORY_FEEDS = Object.freeze([
   'cyclones',
   'launches',
   'water',
+  'quakes',
 ]);
 
 /** Every backend name the settings recognise. A build supplies which ones it implements. */
-export const KNOWN_BACKENDS = Object.freeze(['sqlite', 'elasticsearch']);
+export const KNOWN_BACKENDS = Object.freeze([
+  'sqlite',
+  'elasticsearch',
+  'live-api',
+  'live-only',
+]);
+
+/** Backends that keep nothing. See live/support.js for which feeds may use live-api. */
+export const LIVE_BACKEND_NAMES = Object.freeze(['live-api', 'live-only']);
 
 export const DEFAULT_BACKEND = 'sqlite';
 export const DEFAULT_RETENTION_DAYS = 30;
@@ -80,7 +94,7 @@ function parseRetention(env, name, problems) {
  * Read and validate the history settings. Pure: takes the environment, touches
  * nothing. Collects every problem before throwing so one boot shows them all.
  *
- *   HISTORY_STORE                 default backend (sqlite | elasticsearch); sqlite when unset
+ *   HISTORY_STORE                 default backend (sqlite | elasticsearch | live-api | live-only); sqlite when unset
  *   HISTORY_STORE_<FEED>          backend for one feed, e.g. HISTORY_STORE_AIRCRAFT
  *   HISTORY_RETENTION_DAYS        default retention in days (30); 0 keeps everything
  *   HISTORY_RETENTION_DAYS_<FEED> retention for one feed
@@ -91,7 +105,7 @@ function parseRetention(env, name, problems) {
  */
 export function loadHistoryConfig(env = process.env, options = {}) {
   const feeds = options.feeds ?? HISTORY_FEEDS;
-  const available = options.available ?? ['sqlite'];
+  const available = options.available ?? ['sqlite', ...LIVE_BACKEND_NAMES];
   const problems = [];
   const warnings = [];
 
@@ -124,10 +138,36 @@ export function loadHistoryConfig(env = process.env, options = {}) {
   const perFeed = {};
   for (const feed of feeds) {
     const suffix = feed.toUpperCase();
+    const explicit = parseBackend(
+      env,
+      STORE_PREFIX + suffix,
+      available,
+      problems,
+    );
+    let store = explicit ?? defaultStore;
+    if (store === 'live-api' && !supportsLiveApi(feed)) {
+      if (explicit) {
+        problems.push(
+          `${STORE_PREFIX + suffix} cannot be live-api: ${liveApiRefusal(feed)} Use live-only or a stored backend.`,
+        );
+      } else {
+        // HISTORY_STORE=live-api is a default: feeds without a source history
+        // API drop to live-only and say so, rather than stopping the boot.
+        store = 'live-only';
+        warnings.push(
+          `${feed} has no source history API, so it uses live-only instead of live-api. ${liveApiRefusal(feed)}`,
+        );
+      }
+    }
+    if (store === 'live-api') {
+      const needed = LIVE_API_SUPPORT[feed]?.env;
+      if (needed && text(env, needed) === '')
+        warnings.push(
+          `${feed} uses live-api but ${needed} is not set, so its history questions will fail.`,
+        );
+    }
     perFeed[feed] = Object.freeze({
-      store:
-        parseBackend(env, STORE_PREFIX + suffix, available, problems) ??
-        defaultStore,
+      store,
       retentionDays:
         parseRetention(env, RETENTION_PREFIX + suffix, problems) ??
         defaultRetention,
