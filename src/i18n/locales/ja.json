@@ -3290,5 +3290,51 @@
   "Too close to the surface model in {n} places. The closest point is {worst} away; {need} is wanted ({min} clearance plus {margin} position error). The route is not changed: raise it, move it or accept the risk. Red on the globe.": "サーフェスモデルに近すぎる箇所が {n} 件あります。最も近い地点は {worst} 離れており、必要なのは {need} です({min} のクリアランスと {margin} の位置誤差)。ルートは変更されません。高くする、動かす、またはリスクを承知で飛行してください。地球上では赤で表示されます。",
   "Clearance: {length} of the route comes within {dist} of the canopy or a roof (it is {top} high there, the drone {agl} above ground)": "クリアランス: ルートのうち {length} が樹冠または屋根から {dist} 以内を通ります(そこの高さは {top}、機体は地上 {agl})",
   "And {n} more places": "ほか {n} 件",
-  "{n}% of the route is outside the surface model and is not checked.": "ルートの {n}% がサーフェスモデルの外にあり、確認されません。"
+  "{n}% of the route is outside the surface model and is not checked.": "ルートの {n}% がサーフェスモデルの外にあり、確認されません。",
+  "PHOTO CHECK AFTER FLIGHT": "飛行後の写真チェック",
+  "Choose the photos from the flight. They are read in this browser only: nothing is uploaded or saved. Straight JPEG files from the aircraft or its card work; copies sent through a chat app have lost their position.": "飛行の写真を選んでください。読み取りはこのブラウザ内だけです。アップロードも保存もされません。機体またはそのカードのそのままのJPEGファイルは使えます。チャットアプリ経由のコピーは位置を失っています。",
+  "CHOOSE PHOTOS": "写真を選ぶ",
+  "CLEAR PHOTOS": "写真を消去",
+  "ZOOM TO PHOTOS": "写真にズーム",
+  "SAVE REPORT (CSV)": "レポートを保存 (CSV)",
+  "A table of positions and numbers. It holds no photos.": "位置と数値の表です。写真は含まれません。",
+  "Match distance": "一致距離",
+  "A planned photo point counts as photographed when a photo was taken within this distance": "計画した撮影点は、この距離以内で写真が撮られていれば撮影済みになります",
+  "{count} photos read": {
+    "other": "{count}枚の写真を読み取りました"
+  },
+  "{count} copies of the same photos were counted once": {
+    "other": "同じ写真のコピー{count}件は1回だけ数えました"
+  },
+  "{count} files have no position in them and were skipped": {
+    "other": "{count}件のファイルに位置がなく、スキップしました"
+  },
+  "{count} files are not JPEGs and were skipped": {
+    "other": "{count}件のファイルはJPEGではないためスキップしました"
+  },
+  "Only the first {max} photos were read": "最初の{max}枚の写真だけを読み取りました",
+  "{covered} of {total} planned photo points have a photo within {dist}": "計画した撮影点{total}件のうち{covered}件は{dist}以内に写真があります",
+  "{count} planned photo points have no photo (red on the map)": {
+    "other": "写真のない計画撮影点が{count}件あります（地図上で赤）"
+  },
+  "{count} photos were taken away from the plan (orange on the map)": {
+    "other": "計画から外れて撮られた写真が{count}枚あります（地図上でオレンジ）"
+  },
+  "Photos near a planned point: typically {typical} off, at most {max}": "計画した撮影点付近の写真：通常{typical}ずれ、最大{max}",
+  "No plan on the panel, so only the spacing and the ground detail are checked. Plan the flight first to see which points are missing.": "パネルに計画がないため、間隔と地面の詳細だけを確認します。欠けている点を見るには、先に飛行を計画してください。",
+  "{count} places where neighbouring photos are over {factor} times further apart than usual ({usual}); red lines on the map": {
+    "other": "隣り合う写真が通常（{usual}）の{factor}倍より離れている箇所が{count}件あります。地図上の赤い線"
+  },
+  "No spacing gaps: photos are about {usual} apart": "間隔の欠けはありません。写真は約{usual}離れています",
+  "{count} long pauses between photos (new legs or batteries) are not counted as gaps": {
+    "other": "写真の間の長い休止{count}件（新しい区間またはバッテリー）は欠けとして数えません"
+  },
+  "Ground detail measured from the photos: {min} to {max} cm/px, typically {median} cm/px, at about {height} above the ground": "写真から測った地面の詳細：{min}〜{max} cm/px、通常{median} cm/px、対地約{height}",
+  "For photos that matched no planned point the height is measured from the takeoff point, so on higher or lower ground the real ground detail differs": "計画した撮影点に一致しなかった写真は、高度を離陸点から測るため、地面が高いまたは低いと実際の地面の詳細は異なります",
+  "The plan says {planned} cm/px but the photos measure {measured} cm/px. Check the picture size and camera in Aircraft & camera.": "計画は{planned} cm/pxですが、写真の測定値は{measured} cm/pxです。機体とカメラで画像サイズとカメラを確認してください。",
+  "{count} photos have no height or camera data, so no ground detail": {
+    "other": "高度またはカメラのデータがない写真が{count}枚あるため、地面の詳細はありません"
+  },
+  "Reading photos: {done} of {total}": "写真を読み取り中：{done}/{total}",
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "どのファイルにも位置がありません。チャットアプリ経由のコピーではなく、元のJPEGファイルを使ってください。"
 }

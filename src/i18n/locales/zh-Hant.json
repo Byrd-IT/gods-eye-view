@@ -3290,5 +3290,51 @@
   "Too close to the surface model in {n} places. The closest point is {worst} away; {need} is wanted ({min} clearance plus {margin} position error). The route is not changed: raise it, move it or accept the risk. Red on the globe.": "有 {n} 處離表面模型太近。最近的點距離為 {worst};需要 {need}({min} 淨空加 {margin} 位置誤差)。航線不會被更改:請抬高、移開或自行承擔風險。在地球上以紅色顯示。",
   "Clearance: {length} of the route comes within {dist} of the canopy or a roof (it is {top} high there, the drone {agl} above ground)": "淨空:航線有 {length} 靠近樹冠或屋頂不足 {dist}(此處高 {top},無人機離地 {agl})",
   "And {n} more places": "另有 {n} 處",
-  "{n}% of the route is outside the surface model and is not checked.": "航線有 {n}% 在表面模型之外,未被檢查。"
+  "{n}% of the route is outside the surface model and is not checked.": "航線有 {n}% 在表面模型之外,未被檢查。",
+  "PHOTO CHECK AFTER FLIGHT": "飛行後照片檢查",
+  "Choose the photos from the flight. They are read in this browser only: nothing is uploaded or saved. Straight JPEG files from the aircraft or its card work; copies sent through a chat app have lost their position.": "選擇本次飛行的照片。僅在此瀏覽器中讀取：不會上傳或保存。來自飛行器或其記憶卡的原始 JPEG 文件可用；經聊天應用傳送的副本已遺失位置。",
+  "CHOOSE PHOTOS": "選擇照片",
+  "CLEAR PHOTOS": "清除照片",
+  "ZOOM TO PHOTOS": "縮放到照片",
+  "SAVE REPORT (CSV)": "保存報告 (CSV)",
+  "A table of positions and numbers. It holds no photos.": "位置和數字的表格。不含照片。",
+  "Match distance": "匹配距離",
+  "A planned photo point counts as photographed when a photo was taken within this distance": "計劃拍照點在此距離內拍了照片，即算已拍攝",
+  "{count} photos read": {
+    "other": "已讀取 {count} 張照片"
+  },
+  "{count} copies of the same photos were counted once": {
+    "other": "相同照片的 {count} 份副本只計了一次"
+  },
+  "{count} files have no position in them and were skipped": {
+    "other": "{count} 個文件沒有位置，已跳過"
+  },
+  "{count} files are not JPEGs and were skipped": {
+    "other": "{count} 個文件不是 JPEG，已跳過"
+  },
+  "Only the first {max} photos were read": "只讀取了前 {max} 張照片",
+  "{covered} of {total} planned photo points have a photo within {dist}": "{total} 個計劃拍照點中有 {covered} 個在 {dist} 內有照片",
+  "{count} planned photo points have no photo (red on the map)": {
+    "other": "{count} 個計劃拍照點沒有照片（在地圖上為紅色）"
+  },
+  "{count} photos were taken away from the plan (orange on the map)": {
+    "other": "{count} 張照片偏離計劃拍攝（在地圖上為橙色）"
+  },
+  "Photos near a planned point: typically {typical} off, at most {max}": "計劃拍照點附近的照片：通常偏差 {typical}，最大 {max}",
+  "No plan on the panel, so only the spacing and the ground detail are checked. Plan the flight first to see which points are missing.": "面板上沒有計劃，因此只檢查間距和地面細節。請先規劃飛行，以查看缺少哪些點。",
+  "{count} places where neighbouring photos are over {factor} times further apart than usual ({usual}); red lines on the map": {
+    "other": "{count} 處相鄰照片的間距超過通常（{usual}）的 {factor} 倍；地圖上為紅線"
+  },
+  "No spacing gaps: photos are about {usual} apart": "沒有間距空隙：照片大約相距 {usual}",
+  "{count} long pauses between photos (new legs or batteries) are not counted as gaps": {
+    "other": "{count} 次照片之間的長停頓（新航段或換電池）不計為空隙"
+  },
+  "Ground detail measured from the photos: {min} to {max} cm/px, typically {median} cm/px, at about {height} above the ground": "從照片測得的地面細節：{min} 至 {max} cm/px，通常 {median} cm/px，約在離地 {height}",
+  "For photos that matched no planned point the height is measured from the takeoff point, so on higher or lower ground the real ground detail differs": "未匹配任何計劃拍照點的照片，高度從起飛點量起，因此在更高或更低的地面上，實際地面細節會不同",
+  "The plan says {planned} cm/px but the photos measure {measured} cm/px. Check the picture size and camera in Aircraft & camera.": "計劃為 {planned} cm/px，但照片測得 {measured} cm/px。請在飛行器與相機中檢查照片尺寸和相機。",
+  "{count} photos have no height or camera data, so no ground detail": {
+    "other": "{count} 張照片沒有高度或相機數據，因此沒有地面細節"
+  },
+  "Reading photos: {done} of {total}": "正在讀取照片：{done}/{total}",
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "所有文件都沒有位置。請使用原始 JPEG 文件，不要使用經聊天應用傳送的副本。"
 }

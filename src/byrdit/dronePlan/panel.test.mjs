@@ -2641,3 +2641,92 @@ test('surface model: an orbit plan inside the model takes its ring heights from 
   assert.equal(JSON.stringify(w.handle.getState().options).includes('ringFloor'), false);
   w.handle.destroy();
 });
+
+// ------------------------------------------------------------ photo check --
+test('photo check: reads photos in the browser, plots them against the plan, flags missing points, saves a CSV', async () => {
+  const { jpeg, tiff, xmpText } = await import('./photoFixtures.mjs');
+  const { plannedPhotoPoints } = await import('./photoCheck.js');
+  const w = setup();
+  w.handle.setBox(boxM(300, 150));
+  await w.handle.replan();
+  const planned = plannedPhotoPoints({ result: w.handle.getResult() });
+  assert.ok(planned.length > 10);
+  const shot = (p, i) => ({
+    name: `DJI_${i}.jpg`,
+    bytes: jpeg({
+      exif: tiff({ gps: { lat: p.lat, lon: p.lon, alt: 200 }, time: `2026:10:30 13:${String(10 + (i >> 6)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}` }),
+      xmp: xmpText({ lat: p.lat, lon: p.lon, abs: 200, rel: p.aglM ?? 50 }),
+    }),
+  });
+  // every planned point photographed except the 4th
+  const files = planned.filter((_, i) => i !== 3).map(shot);
+  files.push({ name: 'notes.txt', bytes: new TextEncoder().encode('hello') });
+  const pc = w.handle.photoCheck();
+  const a = await pc.addFiles(files);
+  assert.equal(a.summary.plannedCount, planned.length);
+  assert.equal(a.summary.missingCount, 1);
+  assert.equal(a.planned.findIndex((p) => !p.covered), 3);
+  assert.ok(a.summary.gsdMedianCm > 0);
+  const texts = () => w.find((n) => n.getAttribute?.('data-role') === 'photo-results')[0].textContent ?? '';
+  const shown = w.find((n) => n.getAttribute?.('data-level'))
+    .map((n) => n.textContent).join('\n');
+  assert.match(shown, /1 planned photo point has no photo/);
+  assert.match(shown, /1 file is not a JPEG/);
+  // the globe got the layer
+  const src = w.viewer.dataSources.sources.find((x) => x.name === 'gev-drone-plan');
+  assert.ok(src.entities.values.length > planned.length);
+  // report
+  w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'photos-report').click();
+  const csv = new TextDecoder().decode(w.downloads.at(-1).bytes);
+  assert.equal(w.downloads.at(-1).name, 'photo-check.csv');
+  assert.equal(csv.split('\n').length, 1 + a.photos.length + planned.length);
+  // clear drops everything, photos and map layer
+  w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'photos-clear').click();
+  assert.equal(pc.analysis(), null);
+  void texts;
+  w.handle.destroy();
+});
+
+test('photo check: with no plan it still checks spacing and ground detail; copies and bad files are reported', async () => {
+  const { jpeg, tiff, xmpText } = await import('./photoFixtures.mjs');
+  const w = setup();
+  const pc = w.handle.photoCheck();
+  const mk = (i, lat) => ({
+    name: `p${i}.jpg`,
+    bytes: jpeg({
+      exif: tiff({ gps: { lat, lon: -97.5, alt: 200 }, time: `2026:10:30 13:00:${String(i).padStart(2, '0')}` }),
+      xmp: xmpText({ lat, lon: -97.5, abs: 200, rel: 60 }),
+    }),
+  });
+  const files = [0, 1, 2, 3].map((i) => mk(i, 30.1 + i * 0.0001));
+  files.push({ ...files[0], name: 'p0 (1).jpg' });
+  files.push({ name: 'nopos.jpg', bytes: jpeg({ exif: tiff({ gps: 'empty' }) }) });
+  const a = await pc.addFiles(files);
+  assert.equal(a.summary.photoCount, 4);
+  assert.equal(a.duplicates, 1);
+  assert.equal(a.summary.plannedCount, 0);
+  assert.ok(Math.abs(a.summary.gsdMedianCm - (60 / 2730.6667) * 100) < 0.01);
+  const shown = w.find((n) => n.getAttribute?.('data-level')).map((n) => n.textContent).join('\n');
+  assert.match(shown, /1 file has no position/);
+  assert.match(shown, /No plan on the panel/);
+  w.handle.destroy();
+});
+
+test('photo check: nothing is stored or sent anywhere', async () => {
+  const { jpeg, tiff, xmpText } = await import('./photoFixtures.mjs');
+  const storage = memoryStorage({ 'gev.dronePlan.units': 'm' });
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (...args) => { calls.push(args); return Promise.reject(new Error('no network')); };
+  try {
+    const w = setup({ storage });
+    const before = JSON.stringify([...storage.map]);
+    const calls0 = calls.length; // the panel's own plan library asks for its list on open
+    await w.handle.photoCheck().addFiles([{ name: 'a.jpg', bytes: jpeg({ exif: tiff({ gps: { lat: 30.1, lon: -97.5, alt: 1 } }), xmp: xmpText({ lat: 30.1, lon: -97.5, abs: 1, rel: 50 }) }) }]);
+    assert.equal(JSON.stringify([...storage.map]), before);
+    assert.equal(calls.length, calls0);
+    w.handle.destroy();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

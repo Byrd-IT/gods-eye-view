@@ -77,6 +77,7 @@ import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
 import { buildSuiteZip, suiteOptions } from './suite.js';
 import { readPlan, serializePlan } from './planDoc.js';
 import { mountLibrary } from './libraryPanel.js';
+import { mountPhotoCheck } from './photoCheckPanel.js';
 import {
   distanceText,
   durationText,
@@ -1435,6 +1436,9 @@ export function initDronePlan({
     ui.areas = el(doc, 'div', host, { cls: 'gev-dp-areas' });
     ui.library = el(doc, 'div', ui.steps.export.body, {
       cls: 'gev-dp-library-host',
+    });
+    ui.photoCheck = el(doc, 'div', ui.steps.export.body, {
+      cls: 'gev-dp-photocheck-host',
     });
 
     const field = (label, control, { value } = {}) => {
@@ -3079,6 +3083,7 @@ export function initDronePlan({
     renderSuite();
     renderSummary();
     renderConflicts();
+    photoCheck?.refresh();
     panel.dataset.state = state.busy ? 'busy' : state.result ? 'ready' : 'idle';
     if (state.error) {
       status(planErrorText(state.error), 'warn');
@@ -3726,6 +3731,7 @@ export function initDronePlan({
 
   // ---------------------------------------------------------- plan library --
   let library = null;
+  let photoCheck = null;
 
   /** Restore a stored plan (already validated by readPlan) and plan again. */
   async function loadPlanDocument(raw) {
@@ -3798,6 +3804,19 @@ export function initDronePlan({
         state.controllerIds = ids;
       },
       showOnMap: (items) => preview.showImports(items),
+      download: (name, bytes, type) => downloadFile(name, bytes, type),
+    },
+  });
+
+  // ------------------------------------------------------- photo check --
+  photoCheck = mountPhotoCheck({
+    doc,
+    container: ui.photoCheck,
+    host: {
+      planned: () => ({ suite: state.suite, result: state.result }),
+      plannedGsdCm: () => state.result?.totals?.gsdCm ?? null,
+      showOnMap: (data) => preview.showPhotoCheck(data),
+      flyToMap: () => preview.flyToPhotoCheck(),
       download: (name, bytes, type) => downloadFile(name, bytes, type),
     },
   });
@@ -3978,6 +3997,7 @@ export function initDronePlan({
     getResult: () => state.result,
     getState: () => state,
     library: () => library,
+    photoCheck: () => photoCheck,
     loadPlan: loadPlanDocument,
     setBox(box) {
       const checked = validateDroneBox(box);
@@ -4040,6 +4060,7 @@ export function initDronePlan({
       obstacleTool?.destroy();
       resetObstacles();
       library?.destroy();
+      photoCheck?.destroy();
       preview.destroy();
       body.replaceChildren();
     },

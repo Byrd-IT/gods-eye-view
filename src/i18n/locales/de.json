@@ -3360,5 +3360,60 @@
   "Too close to the surface model in {n} places. The closest point is {worst} away; {need} is wanted ({min} clearance plus {margin} position error). The route is not changed: raise it, move it or accept the risk. Red on the globe.": "An {n} Stellen zu nah am Oberflächenmodell. Der nächste Punkt ist {worst} entfernt; gewünscht sind {need} ({min} Abstand plus {margin} Positionsfehler). Die Route wird nicht geändert: Erhöhe oder verschiebe sie oder nimm das Risiko in Kauf. Auf dem Globus rot.",
   "Clearance: {length} of the route comes within {dist} of the canopy or a roof (it is {top} high there, the drone {agl} above ground)": "Abstand: {length} der Route kommt auf {dist} an das Kronendach oder ein Dach heran (dort {top} hoch, die Drohne {agl} über Grund)",
   "And {n} more places": "Und {n} weitere Stellen",
-  "{n}% of the route is outside the surface model and is not checked.": "{n}% der Route liegen außerhalb des Oberflächenmodells und werden nicht geprüft."
+  "{n}% of the route is outside the surface model and is not checked.": "{n}% der Route liegen außerhalb des Oberflächenmodells und werden nicht geprüft.",
+  "PHOTO CHECK AFTER FLIGHT": "FOTOPRÜFUNG NACH DEM FLUG",
+  "Choose the photos from the flight. They are read in this browser only: nothing is uploaded or saved. Straight JPEG files from the aircraft or its card work; copies sent through a chat app have lost their position.": "Fotos des Flugs wählen. Sie werden nur in diesem Browser gelesen: nichts wird hochgeladen oder gespeichert. Direkte JPEG-Dateien vom Luftfahrzeug oder seiner Speicherkarte funktionieren; Kopien aus einer Chat-App haben ihre Position verloren.",
+  "CHOOSE PHOTOS": "FOTOS WÄHLEN",
+  "CLEAR PHOTOS": "FOTOS LÖSCHEN",
+  "ZOOM TO PHOTOS": "ZOOM AUF FOTOS",
+  "SAVE REPORT (CSV)": "BERICHT SPEICHERN (CSV)",
+  "A table of positions and numbers. It holds no photos.": "Eine Tabelle mit Positionen und Zahlen. Sie enthält keine Fotos.",
+  "Match distance": "Trefferabstand",
+  "A planned photo point counts as photographed when a photo was taken within this distance": "Ein geplanter Fotopunkt gilt als fotografiert, wenn innerhalb dieses Abstands ein Foto aufgenommen wurde",
+  "{count} photos read": {
+    "one": "{count} Foto gelesen",
+    "other": "{count} Fotos gelesen"
+  },
+  "{count} copies of the same photos were counted once": {
+    "one": "{count} Kopie desselben Fotos wurde einmal gezählt",
+    "other": "{count} Kopien derselben Fotos wurden einmal gezählt"
+  },
+  "{count} files have no position in them and were skipped": {
+    "one": "{count} Datei enthält keine Position und wurde übersprungen",
+    "other": "{count} Dateien enthalten keine Position und wurden übersprungen"
+  },
+  "{count} files are not JPEGs and were skipped": {
+    "one": "{count} Datei ist kein JPEG und wurde übersprungen",
+    "other": "{count} Dateien sind keine JPEGs und wurden übersprungen"
+  },
+  "Only the first {max} photos were read": "Nur die ersten {max} Fotos wurden gelesen",
+  "{covered} of {total} planned photo points have a photo within {dist}": "{covered} von {total} geplanten Fotopunkten haben ein Foto innerhalb von {dist}",
+  "{count} planned photo points have no photo (red on the map)": {
+    "one": "{count} geplanter Fotopunkt hat kein Foto (rot auf der Karte)",
+    "other": "{count} geplante Fotopunkte haben kein Foto (rot auf der Karte)"
+  },
+  "{count} photos were taken away from the plan (orange on the map)": {
+    "one": "{count} Foto wurde abseits des Plans aufgenommen (orange auf der Karte)",
+    "other": "{count} Fotos wurden abseits des Plans aufgenommen (orange auf der Karte)"
+  },
+  "Photos near a planned point: typically {typical} off, at most {max}": "Fotos nahe einem geplanten Fotopunkt: typisch {typical} daneben, höchstens {max}",
+  "No plan on the panel, so only the spacing and the ground detail are checked. Plan the flight first to see which points are missing.": "Kein Plan im Bereich, daher werden nur der Fotoabstand und das Bodendetail geprüft. Zuerst den Flug planen, um zu sehen, welche Punkte fehlen.",
+  "{count} places where neighbouring photos are over {factor} times further apart than usual ({usual}); red lines on the map": {
+    "one": "{count} Stelle, an der benachbarte Fotos mehr als {factor}-mal weiter auseinanderliegen als üblich ({usual}); rote Linie auf der Karte",
+    "other": "{count} Stellen, an denen benachbarte Fotos mehr als {factor}-mal weiter auseinanderliegen als üblich ({usual}); rote Linien auf der Karte"
+  },
+  "No spacing gaps: photos are about {usual} apart": "Keine Lücken im Fotoabstand: die Fotos liegen etwa {usual} auseinander",
+  "{count} long pauses between photos (new legs or batteries) are not counted as gaps": {
+    "one": "{count} lange Pause zwischen Fotos (neuer Abschnitt oder neuer Akku) zählt nicht als Lücke",
+    "other": "{count} lange Pausen zwischen Fotos (neue Abschnitte oder neue Akkus) zählen nicht als Lücken"
+  },
+  "Ground detail measured from the photos: {min} to {max} cm/px, typically {median} cm/px, at about {height} above the ground": "Bodendetail aus den Fotos gemessen: {min} bis {max} cm/px, typisch {median} cm/px, bei etwa {height} über Grund",
+  "For photos that matched no planned point the height is measured from the takeoff point, so on higher or lower ground the real ground detail differs": "Bei Fotos ohne Zuordnung zu einem geplanten Fotopunkt wird die Höhe vom Startpunkt gemessen; auf höherem oder niedrigerem Gelände weicht das tatsächliche Bodendetail ab",
+  "The plan says {planned} cm/px but the photos measure {measured} cm/px. Check the picture size and camera in Aircraft & camera.": "Der Plan gibt {planned} cm/px an, die Fotos messen {measured} cm/px. Bildgröße und Kamera in Luftfahrzeug und Kamera prüfen.",
+  "{count} photos have no height or camera data, so no ground detail": {
+    "one": "{count} Foto hat keine Höhen- oder Kameradaten, daher kein Bodendetail",
+    "other": "{count} Fotos haben keine Höhen- oder Kameradaten, daher kein Bodendetail"
+  },
+  "Reading photos: {done} of {total}": "Fotos werden gelesen: {done} von {total}",
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "Keine der Dateien enthält eine Position. Original-JPEG-Dateien verwenden, keine Kopien aus einer Chat-App."
 }

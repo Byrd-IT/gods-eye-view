@@ -3500,5 +3500,78 @@
   "Too close to the surface model in {n} places. The closest point is {worst} away; {need} is wanted ({min} clearance plus {margin} position error). The route is not changed: raise it, move it or accept the risk. Red on the globe.": "Занадто близько до моделі поверхні в місцях: {n}. Найближча точка — {worst}; потрібно {need} ({min} зазору плюс {margin} похибки позиції). Маршрут не змінюється: підніміть його, посуньте або прийміть ризик. На глобусі червоним.",
   "Clearance: {length} of the route comes within {dist} of the canopy or a roof (it is {top} high there, the drone {agl} above ground)": "Зазор: {length} маршруту проходить ближче {dist} до крон або даху (там висота {top}, дрон на {agl} над землею)",
   "And {n} more places": "І ще місць: {n}",
-  "{n}% of the route is outside the surface model and is not checked.": "{n}% маршруту поза моделлю поверхні й не перевіряється."
+  "{n}% of the route is outside the surface model and is not checked.": "{n}% маршруту поза моделлю поверхні й не перевіряється.",
+  "PHOTO CHECK AFTER FLIGHT": "ПЕРЕВІРКА ФОТО ПІСЛЯ ПОЛЬОТУ",
+  "Choose the photos from the flight. They are read in this browser only: nothing is uploaded or saved. Straight JPEG files from the aircraft or its card work; copies sent through a chat app have lost their position.": "Оберіть фото польоту. Вони читаються лише в цьому браузері: нічого не завантажується і не зберігається. Підходять оригінальні файли JPEG з апарата або його картки; копії, надіслані через чат, втратили положення.",
+  "CHOOSE PHOTOS": "ОБРАТИ ФОТО",
+  "CLEAR PHOTOS": "СКИНУТИ ФОТО",
+  "ZOOM TO PHOTOS": "МАСШТАБ ДО ФОТО",
+  "SAVE REPORT (CSV)": "ЗБЕРЕГТИ ЗВЕДЕННЯ (CSV)",
+  "A table of positions and numbers. It holds no photos.": "Таблиця положень і чисел. Фото в ній немає.",
+  "Match distance": "Відстань збігу",
+  "A planned photo point counts as photographed when a photo was taken within this distance": "Запланована точка зйомки вважається знятою, якщо фото зроблено в межах цієї відстані",
+  "{count} photos read": {
+    "few": "Прочитано {count} фотографії",
+    "many": "Прочитано {count} фотографій",
+    "one": "Прочитана {count} фотографія",
+    "other": "Прочитано {count} фотографії"
+  },
+  "{count} copies of the same photos were counted once": {
+    "few": "Враховано {count} копії тих самих фото один раз",
+    "many": "Враховано {count} копій тих самих фото один раз",
+    "one": "Враховано {count} копію тих самих фото один раз",
+    "other": "Враховано {count} копії тих самих фото один раз"
+  },
+  "{count} files have no position in them and were skipped": {
+    "few": "Пропущено {count} файли без положення",
+    "many": "Пропущено {count} файлів без положення",
+    "one": "Пропущено {count} файл без положення",
+    "other": "Пропущено {count} файла без положення"
+  },
+  "{count} files are not JPEGs and were skipped": {
+    "few": "Пропущено {count} файли: це не JPEG",
+    "many": "Пропущено {count} файлів: це не JPEG",
+    "one": "Пропущено {count} файл: це не JPEG",
+    "other": "Пропущено {count} файла: це не JPEG"
+  },
+  "Only the first {max} photos were read": "Прочитано лише перші {max} фото",
+  "{covered} of {total} planned photo points have a photo within {dist}": "{covered} з {total} запланованих точок зйомки мають фото в межах {dist}",
+  "{count} planned photo points have no photo (red on the map)": {
+    "few": "{count} заплановані точки зйомки без фото (червоним на карті)",
+    "many": "{count} запланованих точок зйомки без фото (червоним на карті)",
+    "one": "{count} запланована точка зйомки без фото (червоним на карті)",
+    "other": "{count} запланованої точки зйомки без фото (червоним на карті)"
+  },
+  "{count} photos were taken away from the plan (orange on the map)": {
+    "few": "{count} фотографії зняті поза планом (помаранчевим на карті)",
+    "many": "{count} фотографій знято поза планом (помаранчевим на карті)",
+    "one": "{count} фотографія знята поза планом (помаранчевим на карті)",
+    "other": "{count} фотографії знято поза планом (помаранчевим на карті)"
+  },
+  "Photos near a planned point: typically {typical} off, at most {max}": "Фото біля запланованої точки зйомки: зазвичай на {typical}, щонайбільше {max}",
+  "No plan on the panel, so only the spacing and the ground detail are checked. Plan the flight first to see which points are missing.": "На панелі немає плану, тож перевіряються лише інтервал і деталь на землі. Спершу сплануйте політ, щоб побачити, яких точок бракує.",
+  "{count} places where neighbouring photos are over {factor} times further apart than usual ({usual}); red lines on the map": {
+    "few": "{count} місця, де сусідні фото далі за звичайне ({usual}) більш ніж у {factor} разів; червоні лінії на карті",
+    "many": "{count} місць, де сусідні фото далі за звичайне ({usual}) більш ніж у {factor} разів; червоні лінії на карті",
+    "one": "{count} місце, де сусідні фото далі за звичайне ({usual}) більш ніж у {factor} разів; червона лінія на карті",
+    "other": "{count} місця, де сусідні фото далі за звичайне ({usual}) більш ніж у {factor} разів; червоні лінії на карті"
+  },
+  "No spacing gaps: photos are about {usual} apart": "Пропусків інтервалу немає: фото приблизно через {usual}",
+  "{count} long pauses between photos (new legs or batteries) are not counted as gaps": {
+    "few": "{count} довгі паузи між фото (нові ділянки або акумулятори) не рахуються як пропуск",
+    "many": "{count} довгих пауз між фото (нові ділянки або акумулятори) не рахуються як пропуск",
+    "one": "{count} довга пауза між фото (нова ділянка або акумулятор) не рахується як пропуск",
+    "other": "{count} довгої паузи між фото (нова ділянка або акумулятор) не рахується як пропуск"
+  },
+  "Ground detail measured from the photos: {min} to {max} cm/px, typically {median} cm/px, at about {height} above the ground": "Деталь на землі за фото: від {min} до {max} cm/px, зазвичай {median} cm/px, приблизно на {height} над землею",
+  "For photos that matched no planned point the height is measured from the takeoff point, so on higher or lower ground the real ground detail differs": "Для фото, що не збіглися з жодною запланованою точкою зйомки, висоту міряють від точки зльоту, тож на вищій або нижчій землі реальна деталь на землі інша",
+  "The plan says {planned} cm/px but the photos measure {measured} cm/px. Check the picture size and camera in Aircraft & camera.": "У плані {planned} cm/px, а за фото виходить {measured} cm/px. Перевірте розмір знімка і камеру в «Апарат і камера».",
+  "{count} photos have no height or camera data, so no ground detail": {
+    "few": "{count} фотографії без висоти чи даних камери, тож деталь на землі не визначається",
+    "many": "{count} фотографій без висоти чи даних камери, тож деталь на землі не визначається",
+    "one": "{count} фотографія без висоти чи даних камери, тож деталь на землі не визначається",
+    "other": "{count} фотографії без висоти чи даних камери, тож деталь на землі не визначається"
+  },
+  "Reading photos: {done} of {total}": "Читання фото: {done} з {total}",
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "У жодному файлі немає положення. Використовуйте оригінальні файли JPEG, а не копії, надіслані через чат."
 }

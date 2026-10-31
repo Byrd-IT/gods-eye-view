@@ -3500,5 +3500,78 @@
   "Too close to the surface model in {n} places. The closest point is {worst} away; {need} is wanted ({min} clearance plus {margin} position error). The route is not changed: raise it, move it or accept the risk. Red on the globe.": "Слишком близко к модели поверхности в местах: {n}. Ближайшая точка — {worst}; нужно {need} ({min} зазора плюс {margin} ошибки позиции). Маршрут не меняется: поднимите его, сдвиньте или примите риск. На глобусе красным.",
   "Clearance: {length} of the route comes within {dist} of the canopy or a roof (it is {top} high there, the drone {agl} above ground)": "Зазор: {length} маршрута проходит ближе {dist} к кронам или крыше (там высота {top}, дрон на {agl} над землёй)",
   "And {n} more places": "И ещё мест: {n}",
-  "{n}% of the route is outside the surface model and is not checked.": "{n}% маршрута вне модели поверхности и не проверяется."
+  "{n}% of the route is outside the surface model and is not checked.": "{n}% маршрута вне модели поверхности и не проверяется.",
+  "PHOTO CHECK AFTER FLIGHT": "ПРОВЕРКА ФОТО ПОСЛЕ ПОЛЁТА",
+  "Choose the photos from the flight. They are read in this browser only: nothing is uploaded or saved. Straight JPEG files from the aircraft or its card work; copies sent through a chat app have lost their position.": "Выберите фото полёта. Они читаются только в этом браузере: ничего не загружается и не сохраняется. Подходят исходные файлы JPEG с дрона или его карты памяти; копии, отправленные через чат, потеряли координаты.",
+  "CHOOSE PHOTOS": "ВЫБРАТЬ ФОТО",
+  "CLEAR PHOTOS": "СБРОСИТЬ ФОТО",
+  "ZOOM TO PHOTOS": "МАСШТАБ К ФОТО",
+  "SAVE REPORT (CSV)": "СОХРАНИТЬ СВОДКУ (CSV)",
+  "A table of positions and numbers. It holds no photos.": "Таблица координат и чисел. Фото в ней нет.",
+  "Match distance": "Расстояние совпадения",
+  "A planned photo point counts as photographed when a photo was taken within this distance": "Запланированная точка съёмки считается снятой, если фото сделано в пределах этого расстояния",
+  "{count} photos read": {
+    "few": "Прочитано {count} фотографии",
+    "many": "Прочитано {count} фотографий",
+    "one": "Прочитана {count} фотография",
+    "other": "Прочитано {count} фотографии"
+  },
+  "{count} copies of the same photos were counted once": {
+    "few": "Учтено {count} копии тех же фото один раз",
+    "many": "Учтено {count} копий тех же фото один раз",
+    "one": "Учтена {count} копия тех же фото один раз",
+    "other": "Учтено {count} копии тех же фото один раз"
+  },
+  "{count} files have no position in them and were skipped": {
+    "few": "Пропущено {count} файла без координат",
+    "many": "Пропущено {count} файлов без координат",
+    "one": "Пропущен {count} файл без координат",
+    "other": "Пропущено {count} файла без координат"
+  },
+  "{count} files are not JPEGs and were skipped": {
+    "few": "Пропущено {count} файла: это не JPEG",
+    "many": "Пропущено {count} файлов: это не JPEG",
+    "one": "Пропущен {count} файл: это не JPEG",
+    "other": "Пропущено {count} файла: это не JPEG"
+  },
+  "Only the first {max} photos were read": "Прочитаны только первые {max} фото",
+  "{covered} of {total} planned photo points have a photo within {dist}": "У {covered} из {total} запланированных точек съёмки есть фото в пределах {dist}",
+  "{count} planned photo points have no photo (red on the map)": {
+    "few": "{count} запланированные точки съёмки без фото (красным на карте)",
+    "many": "{count} запланированных точек съёмки без фото (красным на карте)",
+    "one": "{count} запланированная точка съёмки без фото (красным на карте)",
+    "other": "{count} запланированной точки съёмки без фото (красным на карте)"
+  },
+  "{count} photos were taken away from the plan (orange on the map)": {
+    "few": "{count} фотографии сняты вне плана (оранжевым на карте)",
+    "many": "{count} фотографий снято вне плана (оранжевым на карте)",
+    "one": "{count} фотография снята вне плана (оранжевым на карте)",
+    "other": "{count} фотографии снято вне плана (оранжевым на карте)"
+  },
+  "Photos near a planned point: typically {typical} off, at most {max}": "Фото у запланированной точки съёмки: обычно в {typical}, не дальше {max}",
+  "No plan on the panel, so only the spacing and the ground detail are checked. Plan the flight first to see which points are missing.": "На панели нет плана, поэтому проверяются только шаг и детализация на земле. Сначала спланируйте полёт, чтобы увидеть, каких точек не хватает.",
+  "{count} places where neighbouring photos are over {factor} times further apart than usual ({usual}); red lines on the map": {
+    "few": "{count} места, где соседние фото дальше обычного ({usual}) более чем в {factor} раз; красные линии на карте",
+    "many": "{count} мест, где соседние фото дальше обычного ({usual}) более чем в {factor} раз; красные линии на карте",
+    "one": "{count} место, где соседние фото дальше обычного ({usual}) более чем в {factor} раз; красная линия на карте",
+    "other": "{count} места, где соседние фото дальше обычного ({usual}) более чем в {factor} раз; красные линии на карте"
+  },
+  "No spacing gaps: photos are about {usual} apart": "Пропусков шага нет: фото примерно через {usual}",
+  "{count} long pauses between photos (new legs or batteries) are not counted as gaps": {
+    "few": "{count} длинные паузы между фото (новые участки или батареи) не считаются пропуском",
+    "many": "{count} длинных пауз между фото (новые участки или батареи) не считаются пропуском",
+    "one": "{count} длинная пауза между фото (новый участок или батарея) не считается пропуском",
+    "other": "{count} длинной паузы между фото (новый участок или батарея) не считается пропуском"
+  },
+  "Ground detail measured from the photos: {min} to {max} cm/px, typically {median} cm/px, at about {height} above the ground": "Детализация на земле по фото: от {min} до {max} cm/px, обычно {median} cm/px, примерно на {height} над землёй",
+  "For photos that matched no planned point the height is measured from the takeoff point, so on higher or lower ground the real ground detail differs": "У фото, не совпавших ни с одной запланированной точкой съёмки, высота меряется от точки взлёта, поэтому на более высокой или низкой местности реальная детализация на земле другая",
+  "The plan says {planned} cm/px but the photos measure {measured} cm/px. Check the picture size and camera in Aircraft & camera.": "В плане {planned} cm/px, а по фото выходит {measured} cm/px. Проверьте размер снимка и камеру в «Дрон и камера».",
+  "{count} photos have no height or camera data, so no ground detail": {
+    "few": "{count} фотографии без высоты или данных камеры, поэтому детализация на земле не определяется",
+    "many": "{count} фотографий без высоты или данных камеры, поэтому детализация на земле не определяется",
+    "one": "{count} фотография без высоты или данных камеры, поэтому детализация на земле не определяется",
+    "other": "{count} фотографии без высоты или данных камеры, поэтому детализация на земле не определяется"
+  },
+  "Reading photos: {done} of {total}": "Чтение фото: {done} из {total}",
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "Ни в одном файле нет координат. Используйте исходные файлы JPEG, а не копии, отправленные через чат."
 }

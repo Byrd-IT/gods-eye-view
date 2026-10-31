@@ -85,6 +85,8 @@ export function createDronePlanPreview({
   let planEntities = [];
   let suiteEntities = [];
   let importEntities = [];
+  let photoEntities = [];
+  let photoBounds = null;
   let clearanceEntities = [];
   let suitePasses = null;
   const drop = (list) => {
@@ -489,6 +491,122 @@ export function createDronePlanPreview({
         }
       }
       requestRender();
+    },
+    /**
+     * Photo check: planned photo points (green when a photo is near, red when
+     * not), the photos (cyan on the plan, orange away from it) and the spacing
+     * gaps (red lines). `data` is { planned: [{lon,lat,covered}], photos:
+     * [{lon,lat,onPlan}], gaps: [[{lon,lat},{lon,lat}]] }; null clears it.
+     * Problems are always drawn; only the fine ones are thinned past
+     * MAX_MARKERS. Returns how many markers were drawn.
+     */
+    showPhotoCheck(data) {
+      photoEntities = drop(photoEntities);
+      photoBounds = null;
+      if (!data || destroyed) {
+        requestRender();
+        return 0;
+      }
+      const lons = [];
+      const lats = [];
+      const dot = (p, size, fill, outline) => {
+        lons.push(p.lon);
+        lats.push(p.lat);
+        photoEntities.push(
+          dataSource.entities.add({
+            position: cesium.Cartesian3.fromDegrees(p.lon, p.lat),
+            point: {
+              pixelSize: size,
+              color: fill,
+              outlineColor: outline,
+              outlineWidth: 1,
+              heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: 1500,
+            },
+          }),
+        );
+      };
+      const planned = data.planned ?? [];
+      const photos = data.photos ?? [];
+      const step = Math.max(
+        1,
+        Math.ceil((planned.length + photos.length) / MAX_MARKERS),
+      );
+      const keep = (problem, i) => problem || i % step === 0;
+      const dark = color('#000000', 0.6);
+      planned.forEach((p, i) => {
+        if (!keep(!p.covered, i)) return;
+        dot(
+          p,
+          p.covered ? 9 : 12,
+          p.covered ? color('#2ecc71', 0.55) : color('#ff3b30'),
+          dark,
+        );
+      });
+      photos.forEach((p, i) => {
+        if (!keep(p.onPlan === false, i)) return;
+        dot(
+          p,
+          5,
+          p.onPlan === false ? color('#ff9f1c') : color('#00d1ff'),
+          dark,
+        );
+      });
+      for (const [a, b] of (data.gaps ?? []).slice(0, 500)) {
+        lons.push(a.lon, b.lon);
+        lats.push(a.lat, b.lat);
+        photoEntities.push(
+          dataSource.entities.add({
+            name: 'Photo spacing gap',
+            polyline: {
+              positions: cesium.Cartesian3.fromDegreesArray([
+                a.lon,
+                a.lat,
+                b.lon,
+                b.lat,
+              ]),
+              width: 4,
+              ...ground,
+              material: color('#ff3b30', 0.95),
+            },
+          }),
+        );
+      }
+      if (lons.length) {
+        photoBounds = {
+          west: Math.min(...lons),
+          east: Math.max(...lons),
+          south: Math.min(...lats),
+          north: Math.max(...lats),
+        };
+      }
+      requestRender();
+      return photoEntities.length;
+    },
+    /** Fly the camera over what showPhotoCheck drew. */
+    flyToPhotoCheck() {
+      const b = photoBounds;
+      if (
+        !b ||
+        destroyed ||
+        !viewer.camera?.flyTo ||
+        !cesium.Rectangle?.fromDegrees
+      )
+        return false;
+      const pad = Math.max(
+        0.0005,
+        (b.east - b.west + (b.north - b.south)) * 0.15,
+      );
+      viewer.camera.flyTo({
+        destination: cesium.Rectangle.fromDegrees(
+          b.west - pad,
+          b.south - pad,
+          b.east + pad,
+          b.north + pad,
+        ),
+        duration: 1.2,
+      });
+      return true;
     },
     /** Redraw the current suite with only `hiddenIds` left out. */
     setSuiteHidden(hiddenIds = []) {

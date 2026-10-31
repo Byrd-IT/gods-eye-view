@@ -3430,5 +3430,69 @@
   "Too close to the surface model in {n} places. The closest point is {worst} away; {need} is wanted ({min} clearance plus {margin} position error). The route is not changed: raise it, move it or accept the risk. Red on the globe.": "Demasiado cerca del modelo de superficie en {n} lugares. El punto más cercano está a {worst}; se desean {need} ({min} de distancia más {margin} de error de posición). La ruta no se modifica: súbela, muévela o asume el riesgo. En rojo en el globo.",
   "Clearance: {length} of the route comes within {dist} of the canopy or a roof (it is {top} high there, the drone {agl} above ground)": "Distancia: {length} de la ruta pasa a menos de {dist} de las copas o de un tejado (allí mide {top} de alto y el dron está a {agl} sobre el suelo)",
   "And {n} more places": "Y {n} lugares más",
-  "{n}% of the route is outside the surface model and is not checked.": "El {n}% de la ruta está fuera del modelo de superficie y no se comprueba."
+  "{n}% of the route is outside the surface model and is not checked.": "El {n}% de la ruta está fuera del modelo de superficie y no se comprueba.",
+  "PHOTO CHECK AFTER FLIGHT": "CONTROL DE FOTOS TRAS EL VUELO",
+  "Choose the photos from the flight. They are read in this browser only: nothing is uploaded or saved. Straight JPEG files from the aircraft or its card work; copies sent through a chat app have lost their position.": "Elige las fotos del vuelo. Se leen solo en este navegador: no se sube ni se guarda nada. Valen los archivos JPEG directos de la aeronave o de su tarjeta; las copias enviadas por una app de chat han perdido la posición.",
+  "CHOOSE PHOTOS": "ELEGIR FOTOS",
+  "CLEAR PHOTOS": "BORRAR FOTOS",
+  "ZOOM TO PHOTOS": "ZOOM A FOTOS",
+  "SAVE REPORT (CSV)": "GUARDAR INFORME (CSV)",
+  "A table of positions and numbers. It holds no photos.": "Una tabla de posiciones y números. No contiene fotos.",
+  "Match distance": "Distancia de coincidencia",
+  "A planned photo point counts as photographed when a photo was taken within this distance": "Un punto de foto planificado cuenta como fotografiado cuando se tomó una foto dentro de esta distancia",
+  "{count} photos read": {
+    "many": "{count} de fotos leídas",
+    "one": "{count} foto leída",
+    "other": "{count} fotos leídas"
+  },
+  "{count} copies of the same photos were counted once": {
+    "many": "{count} de copias de las mismas fotos se contaron una sola vez",
+    "one": "{count} copia de la misma foto se contó una sola vez",
+    "other": "{count} copias de las mismas fotos se contaron una sola vez"
+  },
+  "{count} files have no position in them and were skipped": {
+    "many": "{count} de archivos no tienen posición y se omitieron",
+    "one": "{count} archivo no tiene posición y se omitió",
+    "other": "{count} archivos no tienen posición y se omitieron"
+  },
+  "{count} files are not JPEGs and were skipped": {
+    "many": "{count} de archivos no son JPEG y se omitieron",
+    "one": "{count} archivo no es un JPEG y se omitió",
+    "other": "{count} archivos no son JPEG y se omitieron"
+  },
+  "Only the first {max} photos were read": "Solo se leyeron las primeras {max} fotos",
+  "{covered} of {total} planned photo points have a photo within {dist}": "{covered} de {total} puntos de foto planificados tienen una foto dentro de {dist}",
+  "{count} planned photo points have no photo (red on the map)": {
+    "many": "{count} de puntos de foto planificados no tienen foto (en rojo en el mapa)",
+    "one": "{count} punto de foto planificado no tiene foto (en rojo en el mapa)",
+    "other": "{count} puntos de foto planificados no tienen foto (en rojo en el mapa)"
+  },
+  "{count} photos were taken away from the plan (orange on the map)": {
+    "many": "{count} de fotos se tomaron fuera del plan (en naranja en el mapa)",
+    "one": "{count} foto se tomó fuera del plan (en naranja en el mapa)",
+    "other": "{count} fotos se tomaron fuera del plan (en naranja en el mapa)"
+  },
+  "Photos near a planned point: typically {typical} off, at most {max}": "Fotos cerca de un punto de foto planificado: normalmente a {typical}, como máximo {max}",
+  "No plan on the panel, so only the spacing and the ground detail are checked. Plan the flight first to see which points are missing.": "No hay plan en el panel, así que solo se comprueban el espaciado y el detalle en el suelo. Planifica el vuelo primero para ver qué puntos faltan.",
+  "{count} places where neighbouring photos are over {factor} times further apart than usual ({usual}); red lines on the map": {
+    "many": "{count} de lugares donde las fotos vecinas están más de {factor} veces más separadas de lo habitual ({usual}); líneas rojas en el mapa",
+    "one": "{count} lugar donde las fotos vecinas están más de {factor} veces más separadas de lo habitual ({usual}); línea roja en el mapa",
+    "other": "{count} lugares donde las fotos vecinas están más de {factor} veces más separadas de lo habitual ({usual}); líneas rojas en el mapa"
+  },
+  "No spacing gaps: photos are about {usual} apart": "Sin huecos de espaciado: las fotos están a unos {usual}",
+  "{count} long pauses between photos (new legs or batteries) are not counted as gaps": {
+    "many": "{count} de pausas largas entre fotos (tramos nuevos o baterías) no cuentan como huecos",
+    "one": "{count} pausa larga entre fotos (un tramo nuevo o una batería) no cuenta como hueco",
+    "other": "{count} pausas largas entre fotos (tramos nuevos o baterías) no cuentan como huecos"
+  },
+  "Ground detail measured from the photos: {min} to {max} cm/px, typically {median} cm/px, at about {height} above the ground": "Detalle en el suelo medido en las fotos: de {min} a {max} cm/px, normalmente {median} cm/px, a unos {height} sobre el suelo",
+  "For photos that matched no planned point the height is measured from the takeoff point, so on higher or lower ground the real ground detail differs": "En las fotos que no coincidieron con ningún punto de foto planificado, la altura se mide desde el punto de despegue, así que en terreno más alto o más bajo el detalle en el suelo real es distinto",
+  "The plan says {planned} cm/px but the photos measure {measured} cm/px. Check the picture size and camera in Aircraft & camera.": "El plan indica {planned} cm/px, pero las fotos miden {measured} cm/px. Revisa el tamaño de imagen y la cámara en Aeronave y cámara.",
+  "{count} photos have no height or camera data, so no ground detail": {
+    "many": "{count} de fotos no tienen datos de altura ni de cámara, así que no hay detalle en el suelo",
+    "one": "{count} foto no tiene datos de altura ni de cámara, así que no hay detalle en el suelo",
+    "other": "{count} fotos no tienen datos de altura ni de cámara, así que no hay detalle en el suelo"
+  },
+  "Reading photos: {done} of {total}": "Leyendo fotos: {done} de {total}",
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "Ningún archivo tiene posición. Usa los archivos JPEG originales, no copias enviadas por una app de chat."
 }
