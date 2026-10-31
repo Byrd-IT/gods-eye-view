@@ -63,8 +63,9 @@ export function angleRings({
 }) {
   const aim = Math.max(0, Number(aimM) || 0);
   const baseR = Math.max(1, Number(radiusM) || 1);
-  const floor = Math.max(0, Number(floorAglM) || 0);
-  const cap = Math.max(floor, Number(capAglM) || RING_MAX_AGL_M);
+  const cap = Number(capAglM) || RING_MAX_AGL_M;
+  // A floor above the cap cannot be met: the cap wins (never above it).
+  const floor = Math.min(cap, Math.max(0, Number(floorAglM) || 0));
   const rings = [];
   for (const angleDeg of normalizeRingAngles(anglesDeg)) {
     const tan = Math.tan(angleDeg * DEG);

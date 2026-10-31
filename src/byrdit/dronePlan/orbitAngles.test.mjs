@@ -451,17 +451,43 @@ test('saved plans keep the new options and paths', () => {
   assert.equal(back.lookAtPaths[0].points.length, 2);
 });
 
-test('heading: each plain orbit photo sets its planned heading first, then shoots', () => {
-  const targets = flightTargets({ radiusM: 30 }).slice(0, 1);
-  const p = plan({ orbitTargets: targets, orbitOutward: false });
+test('heading: every orbit and look-at photo halts at its point, so the heading has settled', () => {
+  const t = buildingTarget({ id: 'T', radiusM: 20 });
+  const p = plan({
+    orbitTargets: [t],
+    orbitOutward: false,
+    lookAtPaths: [{ id: 'r', points: [at(-60, -40), at(-60, 40)], targetId: 'T', aglM: 45 }],
+  });
   const ids = p.legs.flatMap((l) => l.waypoints.map((w) => w.id));
   const result = assembleMissions(p, { known: true, takeoffM: 100, wpM: ids.map(() => 100) });
   const { waylinesWpml } = buildMissionFiles(result.missions[0], result.plan);
-  const groups = waylinesWpml.split('<wpml:actionGroup>').slice(1);
-  const seq = groups.filter((g) => g.includes('<wpml:actionActuatorFunc>rotateYaw<'));
-  assert.ok(seq.length >= 36);
-  for (const g of seq) {
-    const funcs = [...g.matchAll(/<wpml:actionActuatorFunc>(\w+)</g)].map((m) => m[1]);
-    assert.ok(funcs.indexOf('rotateYaw') < funcs.indexOf('takePhoto'));
+  const marks = waylinesWpml.split('<Placemark>').slice(1);
+  const photoMarks = marks.filter((m) => m.includes('takePhoto'));
+  assert.ok(photoMarks.length > 36);
+  for (const m of photoMarks) {
+    assert.ok(m.includes('toPointAndStopWithDiscontinuityCurvature'), 'stops at the photo point');
   }
+});
+
+test('outward: the turn goes the short way round in both directions', () => {
+  const p = plan({ orbitTargets: [buildingTarget()] });
+  const ids = p.legs.flatMap((l) => l.waypoints.map((w) => w.id));
+  const result = assembleMissions(p, { known: true, takeoffM: 100, wpM: ids.map(() => 100) });
+  const { waylinesWpml } = buildMissionFiles(result.missions[0], result.plan);
+  const modes = [...waylinesWpml.matchAll(/<wpml:aircraftPathMode>(\w+)</g)].map((m) => m[1]);
+  assert.ok(modes.length >= 24);
+  assert.ok(modes.every((m) => m === 'clockwise' || m === 'counterClockwise'));
+});
+
+test('look-at: paths alone with no target to resolve say so, not "box too small"', () => {
+  const p = plan({
+    orbitTargets: [],
+    lookAtPaths: [{ id: 'r', points: [at(-60, -40), at(-60, 40)], targetId: 'x' }],
+  });
+  assert.equal(p.error, 'no-orbit-targets');
+});
+
+test('rings: a floor above the cap is held to the cap, never lifted past it', () => {
+  const rings = angleRings({ aimM: 0, radiusM: 30, anglesDeg: [40], floorAglM: 150, capAglM: 120 });
+  assert.equal(rings[0].aglM, 120);
 });

@@ -657,7 +657,7 @@ export function planFlight(box, rawOptions = {}) {
           floorAglM: Math.min(ringCapM, Math.max(floorAgl, need)),
           capAglM: ringCapM,
         });
-        return { rings, belowRoofClearance: need > AGL_CAP_M + 1e-9 };
+        return { rings, belowRoofClearance: need > ringCapM + 1e-9 };
       }
       const { heights, belowRoofClearance } = targetRingHeights(
         stop,
@@ -1004,6 +1004,12 @@ export function planFlight(box, rawOptions = {}) {
       return { error: 'too-large', message: 'Plan needs too many waypoints' };
     }
     if (!legs.length) {
+      if (activePaths.length && !stops.length) {
+        return {
+          error: 'no-orbit-targets',
+          message: 'Turn on at least one orbit target for the look-at path',
+        };
+      }
       return { error: 'empty', message: 'Box is too small to plan a flight' };
     }
     if (widenedCount) {

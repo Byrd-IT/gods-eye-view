@@ -140,9 +140,10 @@ ${actions.join('\n')}
 
 function placemark(wp, speedMs, groups) {
   const orbit = wp.headingDeg != null;
-  // A stop that turns round for the outward photo halts at the point, so the
-  // photo is taken from the place and heading planned, not mid-curve.
-  const stops = wp.outwardHeadingDeg != null;
+  // Every orbit or look-at photo halts at its point, so the heading has
+  // settled on the planned value (smoothTransition blends it mid-curve) and
+  // the outward turn happens standing still.
+  const stops = wp.photo && (wp.outwardHeadingDeg != null || orbit);
   return `      <Placemark>
         <Point>
           <coordinates>
@@ -232,22 +233,6 @@ function placemarks(mission, speedMs) {
               photoAction(actionId++),
               yawAction(actionId++, wp.headingDeg, wp.outwardHeadingDeg),
               gimbalAction(actionId++, wp.pitchDeg),
-            ],
-          });
-        } else if (wp.photo && wp.headingDeg != null) {
-          // Orbit photo: smoothTransition blends the heading towards the
-          // next point while the aircraft flies the curve, which left the
-          // camera yawed off the target (2026-10-30 flight: +4 to +11
-          // degrees). Set the planned heading explicitly, then shoot.
-          groups += actionGroup({
-            id: groupId++,
-            start: wp.index,
-            end: wp.index,
-            trigger: 'reachPoint',
-            mode: 'sequence',
-            actions: [
-              yawAction(actionId++, wp.headingDeg, wp.headingDeg),
-              photoAction(actionId++),
             ],
           });
         } else if (wp.photo) {
