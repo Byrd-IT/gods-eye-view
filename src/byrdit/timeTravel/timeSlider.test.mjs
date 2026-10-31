@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createDiscreteSlider,
   createTimeSlider,
+  tickLabelShown,
   parsePickerValue,
   pickerValue,
   timeSliderCss,
@@ -242,4 +243,21 @@ test('component: a cancelled pan (pointercancel) commits the position it touched
     ['scrub', 0.25, 'start'],
     ['scrub', 0.25, 'end'],
   ]);
+});
+
+test('tick labels: all shown for a few items, ends plus a spread for many, none overprint', () => {
+  assert.deepEqual(
+    [0, 1, 2].map((i) => tickLabelShown(i, 3)),
+    [true, true, true],
+  );
+  const n = 12; // NAIP years
+  const shown = Array.from({ length: n }, (_, i) => i).filter((i) =>
+    tickLabelShown(i, n),
+  );
+  assert.ok(shown.length <= 7, `labels: ${shown}`);
+  assert.equal(shown[0], 0);
+  assert.equal(shown.at(-1), n - 1);
+  const step = Math.ceil((n - 1) / 5);
+  for (let k = 1; k < shown.length; k++)
+    assert.ok(shown[k] - shown[k - 1] >= step / 2, 'no two labels touch');
 });

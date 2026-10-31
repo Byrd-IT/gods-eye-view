@@ -33,6 +33,17 @@ export const TS_ARIA_MAX = 1000;
 export const TS_BIG_STEP = 10;
 /** More items than this and the discrete slider draws no tick marks. */
 export const TS_MAX_TICKS = 40;
+/** At most this many labels under the bar (a narrow panel cannot fit more). */
+export const TS_MAX_TICK_LABELS = 6;
+
+/** Whether item i of n gets a label: the ends and an even spread between. */
+export function tickLabelShown(i, n, max = TS_MAX_TICK_LABELS) {
+  if (n <= max) return true;
+  if (i === 0 || i === n - 1) return true;
+  const step = Math.ceil((n - 1) / (max - 1));
+  // a spread label too close to the last one would overprint it
+  return i % step === 0 && n - 1 - i >= step / 2;
+}
 /** One discrete item per tick at 1x (ms). */
 export const TS_DISCRETE_BASE_MS = 1500;
 const TICK_MS = 250;
@@ -708,7 +719,7 @@ export function createDiscreteSlider(options = {}) {
         ? []
         : items.map((it, i) => ({
             fraction: fractionOf(i),
-            ...(tickLabels
+            ...(tickLabels && tickLabelShown(i, items.length)
               ? { label: String(it.label ?? it.value ?? '') }
               : {}),
           })),
