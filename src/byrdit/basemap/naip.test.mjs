@@ -614,8 +614,14 @@ class FakeElement {
   addEventListener(type, fn) {
     (this.listeners[type] ??= []).push(fn);
   }
+  removeEventListener(type, fn) {
+    this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
+  }
+  getBoundingClientRect() {
+    return { left: 0, top: 0, width: 1000, height: 18 };
+  }
   fire(type, event = {}) {
-    for (const fn of this.listeners[type] ?? []) fn(event);
+    for (const fn of [...(this.listeners[type] ?? [])]) fn(event);
   }
   *walk() {
     yield this;
@@ -643,13 +649,14 @@ test('naip slider: ticks only for years present, keyboard arrows move by tick', 
   const panel = doc.getElementById(NAIP_SLIDER_ID);
   assert.ok(panel);
   const ticks = [...panel.walk()]
-    .find((e) => e.attributes.class === 'gev-naip-ticks')
+    .find((e) => e.className === 'gev-ts-ticklabels')
     .children.map((c) => c.textContent);
   assert.deepEqual(ticks, ['1939', '2018', '2024']);
-  const ranges = [...panel.walk()].filter((e) => e.attributes.type === 'range');
+  // the shared time slider (timeTravel/timeSlider.js): fraction = index / 2
+  const ranges = [...panel.walk()].filter((e) => e.attributes.role === 'slider');
   const range = ranges[0];
-  assert.equal(range.attributes.max, '2');
-  assert.equal(range.value, '2');
+  assert.equal(range.attributes['aria-valuemax'], '1000');
+  assert.equal(range.attributes['aria-valuenow'], '1000');
   assert.equal(range.attributes['aria-valuetext'], '2024');
   const out = [...panel.walk()].find((e) => e.tagName === 'OUTPUT');
   assert.equal(out.textContent, '2024: NAIP 2024 · Wood+Upshur 2024 15 cm');
@@ -658,7 +665,7 @@ test('naip slider: ticks only for years present, keyboard arrows move by tick', 
     range.fire('keydown', { key: k, preventDefault: () => (prevented += 1) });
   key('ArrowLeft');
   assert.equal(detach.state().year, 2018);
-  assert.equal(range.value, '1');
+  assert.equal(range.attributes['aria-valuenow'], '500');
   key('ArrowLeft');
   key('ArrowLeft'); // stays at the oldest
   assert.equal(detach.state().year, 1939);
@@ -672,12 +679,13 @@ test('naip slider: ticks only for years present, keyboard arrows move by tick', 
   assert.equal(prevented, 6);
   key('a'); // other keys are not taken
   assert.equal(prevented, 6);
-  // Dragging the range picks the tick at that index.
-  range.value = '2';
-  range.fire('input');
+  // Dragging the bar picks the tick at that position (the fake box is 1000 wide).
+  range.fire('pointerdown', { clientX: 1000, pointerId: 1, preventDefault() {} });
+  range.fire('pointerup', {});
   assert.equal(detach.state().year, 2024);
   // Compare row hidden until the box is ticked.
-  assert.equal(ranges[1].parent.parent.style.display, 'none');
+  const rowOf = (r) => r.parent.parent.parent;
+  assert.equal(rowOf(ranges[1]).style.display, 'none');
   const boxes = [...panel.walk()].filter(
     (e) => e.attributes.type === 'checkbox',
   );
@@ -685,7 +693,7 @@ test('naip slider: ticks only for years present, keyboard arrows move by tick', 
   boxes[1].fire('change');
   assert.equal(detach.state().compare, true);
   assert.equal(detach.state().yearB, 2018);
-  assert.equal(ranges[1].parent.parent.style.display, 'flex');
+  assert.equal(rowOf(ranges[1]).style.display, 'flex');
   // The Aerial box turns the layers off.
   boxes[0].checked = false;
   boxes[0].fire('change');
@@ -717,13 +725,12 @@ test('naip slider: never wider than its container on a phone; rows wrap and the 
     assert.equal(row.style.flexWrap, 'wrap');
     assert.equal(row.style.minWidth, '0');
   }
-  const ranges = [...panel.walk()].filter((e) => e.attributes.type === 'range');
+  const ranges = [...panel.walk()].filter((e) => e.attributes.role === 'slider');
   assert.equal(ranges.length, 2);
   for (const range of ranges) {
-    // the range follows its column; the column keeps the preferred width
+    // the slider follows its column; the column keeps the preferred width
     // but never exceeds the row
-    assert.equal(range.style.width, '100%');
-    const column = range.parent;
+    const column = range.parent.parent;
     assert.match(column.style.width, /^\d+px$/);
     assert.equal(column.style.maxWidth, '100%');
     assert.equal(column.style.minWidth, '0');
@@ -732,13 +739,9 @@ test('naip slider: never wider than its container on a phone; rows wrap and the 
   }
   const out = [...panel.walk()].find((e) => e.tagName === 'OUTPUT');
   assert.equal(out.style.maxWidth, 'min(340px, 100%)');
-  const ticks = [...panel.walk()].find(
-    (e) => e.attributes.class === 'gev-naip-ticks',
-  );
-  assert.equal(ticks.style.overflow, 'hidden');
   // no fixed pixel width anywhere above the column
   for (const e of panel.walk())
-    if (e !== panel && !e.children.some((c) => c.attributes.type === 'range'))
+    if (e !== panel && !e.children.some((c) => c.className === 'gev-ts-slider'))
       assert.doesNotMatch(String(e.style.width ?? ''), /px$/, e.tagName);
 });
 

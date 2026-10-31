@@ -29,6 +29,7 @@ import {
   snapBlockedAt,
 } from './coverageRibbon.js';
 import { createFeedChips } from './feedChips.js';
+import { createTimeSlider } from '../timeTravel/timeSlider.js';
 import {
   DEFAULT_PRESET,
   HISTORY_SPAN_MS,
@@ -159,72 +160,45 @@ function build(doc) {
   });
   top.append(presets, readout, live);
 
-  const scrub = el(doc, 'div', {
-    cls: 'gev-hist-scrub',
-    attrs: {
-      role: 'slider',
-      tabindex: '0',
-      'aria-label': 'History time',
-      'aria-valuemin': '0',
-      'aria-valuemax': '1000',
-      'aria-valuenow': '1000',
+  // The scrub, edges and transport are the shared time slider (one look on
+  // every Time travel control); History keeps its own class names. The
+  // handlers are late-bound: mount wires them once its state exists.
+  const hooks = {};
+  const call =
+    (name) =>
+    (...args) =>
+      hooks[name]?.(...args);
+  const slider = createTimeSlider({
+    document: doc,
+    classPrefix: 'gev-hist',
+    ariaLabel: 'History time',
+    rates: RATES,
+    picker: {
+      kind: 'datetime-local',
+      zone: 'utc',
+      label: 'Go to date and time (UTC)',
+      unit: 'UTC',
     },
+    attrs: { play: {} },
+    onScrub: call('scrub'),
+    onStep: call('step'),
+    onJump: call('jump'),
+    onPlay: call('play'),
+    onRate: call('rate'),
+    onPick: call('pick'),
   });
-  const thumb = el(doc, 'div', { cls: 'gev-hist-thumb' });
-  scrub.append(thumb);
-  const edges = el(doc, 'div', { cls: 'gev-hist-row gev-hist-edges' });
-  const edgeFrom = el(doc, 'span', { cls: 'gev-hist-edge' });
-  const edgeTo = el(doc, 'span', { cls: 'gev-hist-edge' });
-  edges.append(edgeFrom, edgeTo);
+  const { scrub, thumb, edgeFrom, edgeTo, back, play, fwd, rateButtons } =
+    slider;
   const ribbon = el(doc, 'div', {
     cls: 'gev-hist-ribbon',
     attrs: { 'aria-label': 'Recording coverage' },
   });
 
-  const controls = el(doc, 'div', { cls: 'gev-hist-row gev-hist-controls' });
-  const back = el(doc, 'button', {
-    cls: 'gev-hist-btn',
-    text: '\u2190',
-    attrs: {
-      type: 'button',
-      title: 'Step back (Shift = 10)',
-      'aria-label': 'Step back',
-    },
-  });
-  const play = el(doc, 'button', {
-    cls: 'gev-hist-btn gev-hist-play',
-    text: '\u25B6',
-    attrs: { type: 'button', 'aria-label': 'Play', 'aria-pressed': 'false' },
-  });
-  const fwd = el(doc, 'button', {
-    cls: 'gev-hist-btn',
-    text: '\u2192',
-    attrs: {
-      type: 'button',
-      title: 'Step forward (Shift = 10)',
-      'aria-label': 'Step forward',
-    },
-  });
-  const rates = el(doc, 'div', {
-    cls: 'gev-hist-rates',
-    attrs: { role: 'group', 'aria-label': 'Speed' },
-  });
-  const rateButtons = new Map();
-  for (const r of RATES) {
-    const b = el(doc, 'button', {
-      cls: 'gev-hist-btn',
-      text: `${r}x`,
-      attrs: { type: 'button', 'data-rate': r, 'aria-pressed': 'false' },
-    });
-    rateButtons.set(r, b);
-    rates.append(b);
-  }
   const hud = el(doc, 'div', {
     cls: 'gev-hist-hud',
     attrs: { role: 'status', 'aria-live': 'polite' },
   });
-  controls.append(back, play, fwd, rates);
-  panel.append(top, scrub, edges, ribbon, controls, hud);
+  panel.append(top, scrub, slider.edges, ribbon, slider.controls, hud);
   root.append(bar, panel);
   return {
     root,
@@ -244,6 +218,8 @@ function build(doc) {
     play,
     fwd,
     rateButtons,
+    slider,
+    hooks,
     hud,
   };
 }
@@ -520,6 +496,7 @@ export function mountHistoryControl({
     );
     dom.play.setAttribute('aria-pressed', String(history && s.playing));
     dom.play.disabled = !history;
+    if (history) dom.slider.setPickerValue(s.timeMs);
     dom.fwd.disabled = !history;
     dom.live.disabled = !history;
     if (s.win) {
@@ -878,46 +855,40 @@ export function mountHistoryControl({
 
   listen(dom.badge, 'click', () => expand());
   listen(dom.live, 'click', () => leave());
-  listen(dom.play, 'click', () => toggle());
-  listen(dom.back, 'click', (e) => step(-1, e?.shiftKey ? 10 : 1));
-  listen(dom.fwd, 'click', (e) => step(1, e?.shiftKey ? 10 : 1));
   for (const [id, b] of dom.presetButtons)
     listen(b, 'click', () => setPreset(id));
-  for (const [r, b] of dom.rateButtons) listen(b, 'click', () => setRate(r));
 
-  listen(dom.scrub, 'pointerdown', (e) => {
-    const f = fractionAt(e.clientX);
-    if (f === null || !s.win) return;
-    dragging = true;
-    try {
-      dom.scrub.setPointerCapture?.(e.pointerId);
-    } catch {
-      /* synthetic events have no capture */
-    }
-    seekGen++;
-    seek(fractionToTime(f, s.win));
-    e.preventDefault?.();
-  });
-  listen(dom.scrub, 'pointermove', (e) => {
-    if (!dragging || !s.win) return;
-    const f = fractionAt(e.clientX);
-    if (f === null) return;
-    // the window stays put while dragging; no request until release
-    s.timeMs = clampTime(fractionToTime(f, s.win), now());
-    s.reachedNow = false;
-    render();
-    emit();
-  });
-  const release = () => {
-    if (!dragging) return;
-    dragging = false;
-    lastTick = monotonic();
-    updateWindow();
-    writeUrl();
-    snapNow();
+  // pointer / keyboard / buttons come from the shared slider (timeSlider.js)
+  dom.hooks.play = () => toggle();
+  dom.hooks.rate = (r) => setRate(r);
+  dom.hooks.step = (dir, count) => step(dir, count);
+  dom.hooks.jump = (which) => {
+    if (!s.win) return;
+    if (which === 'end') leave();
+    else seek(s.win.from, { snap: true });
   };
-  listen(dom.scrub, 'pointerup', release);
-  listen(dom.scrub, 'pointercancel', release);
+  dom.hooks.pick = (ms) => seek(clampTime(ms, now()), { snap: true });
+  dom.hooks.scrub = (f, phase) => {
+    if (!s.win) return;
+    if (phase === 'start') {
+      dragging = true;
+      seekGen++;
+      seek(fractionToTime(f, s.win));
+    } else if (phase === 'move') {
+      if (!dragging) return;
+      // the window stays put while dragging; no request until release
+      s.timeMs = clampTime(fractionToTime(f, s.win), now());
+      s.reachedNow = false;
+      render();
+      emit();
+    } else if (dragging) {
+      dragging = false;
+      lastTick = monotonic();
+      updateWindow();
+      writeUrl();
+      snapNow();
+    }
+  };
 
   const isEditable = (t) =>
     Boolean(
@@ -953,7 +924,7 @@ export function mountHistoryControl({
     if (isEditable(target) || inSky(target)) return;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       // widgets that own their arrow keys keep them
-      if (target?.closest?.(ARROW_OWNERS)) return;
+      if (target === dom.scrub || target?.closest?.(ARROW_OWNERS)) return;
       e.preventDefault();
       step(e.key === 'ArrowRight' ? 1 : -1, e.shiftKey ? 10 : 1);
     }

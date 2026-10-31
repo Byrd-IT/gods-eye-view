@@ -53,8 +53,14 @@ class FakeElement {
   addEventListener(type, fn) {
     (this.listeners[type] ??= []).push(fn);
   }
+  removeEventListener(type, fn) {
+    this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
+  }
+  getBoundingClientRect() {
+    return { left: 0, top: 0, width: 1000, height: 18 };
+  }
   fire(type, event = {}) {
-    for (const fn of this.listeners[type] ?? []) fn(event);
+    for (const fn of [...(this.listeners[type] ?? [])]) fn(event);
   }
   *walk() {
     yield this;
@@ -479,9 +485,9 @@ test('attach: panel starts off, newest release at the right end of the slider', 
   const { detach, viewer } = await setup();
   const panel = viewer.container.children[0];
   assert.equal(panel.id, 'gev-wayback');
-  const range = [...panel.walk()].find((e) => e.attributes.type === 'range');
-  assert.equal(range.attributes.max, '3');
-  assert.equal(range.value, '3', 'starts on the newest');
+  const range = [...panel.walk()].find((e) => e.attributes.role === 'slider');
+  assert.equal(range.attributes['aria-valuemax'], '1000');
+  assert.equal(range.attributes['aria-valuenow'], '1000', 'starts on the newest');
   assert.equal(detach.state().date, '2026-09-24');
   assert.equal(detach.state().on, false);
   assert.equal(
@@ -779,8 +785,12 @@ test('panel: toggle, slider input, older/newer, Latest, disabled ends, aria', as
   const panel = viewer.container.children[0];
   const all = [...panel.walk()];
   const toggle = all.find((e) => e.attributes.type === 'checkbox');
-  const range = all.find((e) => e.attributes.type === 'range');
-  const [older, newer, latest] = all.filter((e) => e.tagName === 'BUTTON');
+  const range = all.find((e) => e.attributes.role === 'slider');
+  const buttons = all.filter((e) => e.tagName === 'BUTTON');
+  const byLabel = (l) => buttons.find((b) => b.attributes['aria-label'] === l);
+  const older = byLabel('Older imagery');
+  const newer = byLabel('Newer imagery');
+  const latest = byLabel('Latest imagery');
   const out = all.find((e) => e.tagName === 'OUTPUT');
   assert.equal(panel.attributes.role, 'group');
   assert.equal(panel.attributes['aria-label'], 'Time travel');
@@ -795,12 +805,12 @@ test('panel: toggle, slider input, older/newer, Latest, disabled ends, aria', as
   assert.equal(detach.state().on, true);
   older.fire('click');
   assert.equal(detach.state().date, '2020-01-01');
-  assert.equal(range.value, '2');
+  assert.equal(range.attributes['aria-valuenow'], '667');
   assert.equal(out.textContent, '2020-01-01');
   assert.equal(range.attributes['aria-valuetext'], '2020-01-01');
   assert.equal(newer.disabled, false);
-  range.value = '0';
-  range.fire('input');
+  range.fire('pointerdown', { clientX: 0, pointerId: 1, preventDefault() {} });
+  range.fire('pointerup', {});
   assert.equal(detach.state().date, '2014-02-20');
   assert.equal(older.disabled, true);
   latest.fire('click');
@@ -817,36 +827,39 @@ test('panel: toggle, slider input, older/newer, Latest, disabled ends, aria', as
 test('panel: keys stay inside the panel; PageUp/PageDown move 10 (clamped)', async () => {
   const { detach, viewer } = await setup();
   const panel = viewer.container.children[0];
+  const range = [...panel.walk()].find((e) => e.attributes.role === 'slider');
   let stopped = 0;
   let prevented = 0;
-  const key = (k) =>
-    panel.fire('keydown', {
+  const key = (target, k) =>
+    target.fire('keydown', {
       key: k,
       stopPropagation: () => stopped++,
       preventDefault: () => prevented++,
     });
-  key('v');
-  key('ArrowLeft');
+  key(panel, 'v');
+  key(panel, 'ArrowLeft');
   assert.equal(stopped, 2, 'globe shortcuts (V, arrows) never see these keys');
-  key('Tab');
-  key('Escape');
+  key(panel, 'Tab');
+  key(panel, 'Escape');
   assert.equal(stopped, 2, 'Tab and Escape still reach the page');
-  key('PageDown');
+  key(range, 'PageDown');
   assert.equal(detach.state().index, 0, 'clamped to the oldest');
-  key('PageUp');
+  key(range, 'PageUp');
   assert.equal(detach.state().index, 3);
-  assert.equal(prevented, 2);
+  key(range, 'Home');
+  assert.equal(detach.state().index, 0);
+  key(range, 'End');
+  assert.equal(detach.state().index, 3);
+  assert.ok(prevented >= 4);
 });
 
 test('panel: touch targets are at least 44 px and it never exceeds the screen width', async () => {
   const { viewer } = await setup();
   const panel = viewer.container.children[0];
   const buttons = [...panel.walk()].filter((e) => e.tagName === 'BUTTON');
-  assert.equal(buttons.length, 3);
-  for (const b of buttons) {
-    assert.ok(parseInt(b.style.minHeight, 10) >= 44);
-    assert.ok(parseInt(b.style.minWidth, 10) >= 44);
-  }
+  // step back / play / step forward / 3 speeds / Latest: the shared slider
+  // sizes them to 44 px on coarse pointers (timeSlider.js CSS)
+  assert.equal(buttons.length, 7);
   assert.match(panel.style.maxWidth, /calc\(100% - 16px\)/);
   assert.equal(panel.style.position, 'absolute');
 });

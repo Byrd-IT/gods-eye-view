@@ -11,6 +11,10 @@
  */
 import { SKY_RATES } from './skyClock.js';
 import { PRESETS, presetTime } from './skyPresets.js';
+import { createTimeSlider } from '../timeTravel/timeSlider.js';
+
+/** The scrub bar spans this much around the time it was last centred on. */
+export const SCRUB_HALF_SPAN_MS = 12 * 3_600_000;
 
 /** Step size: 1 minute; Shift = 1 hour. */
 export const STEP_MS = 60_000;
@@ -63,6 +67,7 @@ function el(doc, tag, attrs = {}, text) {
 }
 
 export function buildTimeDom(doc) {
+  const hooks = {};
   const root = el(doc, 'div', {
     className: 'gev-sky-time',
     role: 'group',
@@ -104,40 +109,6 @@ export function buildTimeDom(doc) {
     },
     'Live',
   );
-  const back = el(
-    doc,
-    'button',
-    {
-      type: 'button',
-      'data-sky': 'step-back',
-      'aria-label': 'Step back 1 minute (Shift: 1 hour)',
-      title: 'Step back 1 min (Shift: 1 h)',
-    },
-    '◀',
-  );
-  const play = el(
-    doc,
-    'button',
-    {
-      type: 'button',
-      'data-sky': 'play',
-      'aria-pressed': 'false',
-      'aria-label': 'Play',
-      title: 'Play / pause (Space in the sky)',
-    },
-    '▶ Play',
-  );
-  const fwd = el(
-    doc,
-    'button',
-    {
-      type: 'button',
-      'data-sky': 'step-fwd',
-      'aria-label': 'Step forward 1 minute (Shift: 1 hour)',
-      title: 'Step forward 1 min (Shift: 1 h)',
-    },
-    '▶',
-  );
   const rate = el(doc, 'select', {
     'data-sky': 'rate',
     'aria-label': 'Play speed',
@@ -158,12 +129,53 @@ export function buildTimeDom(doc) {
     },
     '⇄',
   );
-  const time = el(doc, 'input', {
-    type: 'datetime-local',
-    'data-sky': 'time',
-    'aria-label': 'Sky time (your browser time zone)',
+  // The scrub bar, step / play buttons and the date-time picker are the
+  // shared time slider (same look as History, Wayback and NAIP). Sky keeps
+  // its own semantics: the bar spans +-12 h around the last jump, steps are
+  // 1 min (Shift: 1 h), the picker is in the browser's zone.
+  const slider = createTimeSlider({
+    document: doc,
+    ariaLabel: 'Sky time',
+    rates: [],
+    playText: { play: '▶ Play', pause: '❚❚ Pause' },
+    picker: {
+      kind: 'datetime-local',
+      zone: 'local',
+      label: 'Sky time (your browser time zone)',
+    },
+    before: [live],
+    extra: [rate, reverse],
+    labels: {
+      back: 'Step back 1 min (Shift: 1 h)',
+      fwd: 'Step forward 1 min (Shift: 1 h)',
+      play: 'Play',
+      pause: 'Pause',
+    },
+    attrs: {
+      scrub: { 'data-sky': 'time-slider' },
+      back: {
+        'data-sky': 'step-back',
+        'aria-label': 'Step back 1 minute (Shift: 1 hour)',
+      },
+      play: {
+        'data-sky': 'play',
+        title: 'Play / pause (Space in the sky)',
+      },
+      fwd: {
+        'data-sky': 'step-fwd',
+        'aria-label': 'Step forward 1 minute (Shift: 1 hour)',
+      },
+      picker: { 'data-sky': 'time' },
+    },
+    // handlers are bound by createTimeControl
+    onScrub: (f, phase) => hooks.scrub?.(f, phase),
+    onStep: (dir, count, event) => hooks.step?.(dir, count, event),
+    onJump: (which) => hooks.jump?.(which),
+    onPlay: () => hooks.play?.(),
   });
-  scrub.append(live, back, play, fwd, rate, reverse, time);
+  const { back, play, fwd } = slider;
+  const time = slider.picker;
+  scrub.append(slider.root);
   const chip = el(
     doc,
     'span',
@@ -226,6 +238,8 @@ export function buildTimeDom(doc) {
     rate,
     reverse,
     time,
+    slider,
+    hooks,
     chip,
     presetRow,
     presets,
@@ -266,6 +280,7 @@ export function createTimeControl({
   let lastZone = '';
   let lastBanners = '';
   let presetToken = 0;
+  let scrubFrom = Number.NaN;
   const setText = (node, text) => {
     if (node.textContent !== text) node.textContent = text;
   };
@@ -308,6 +323,16 @@ export function createTimeControl({
     tick(source.getTime());
   }
 
+  /** The scrub bar: centre it on `ms` when the time left its window. */
+  function renderScrub(ms) {
+    const span = 2 * SCRUB_HALF_SPAN_MS;
+    // a drag keeps its window; a jump / play past an edge re-centres
+    if (!Number.isFinite(scrubFrom) || ms < scrubFrom || ms > scrubFrom + span)
+      scrubFrom = ms - SCRUB_HALF_SPAN_MS;
+    dom.slider.setFraction((ms - scrubFrom) / span, fmtLocal(ms));
+    dom.slider.setEdges(fmtLocal(scrubFrom), fmtLocal(scrubFrom + span));
+  }
+
   /** One-line summary for the folded control (narrow screens). */
   function summary(ms) {
     const d = new Date(ms);
@@ -326,6 +351,7 @@ export function createTimeControl({
   function tick(ms) {
     if (!Number.isFinite(ms)) return;
     setText(dom.fold, summary(ms));
+    renderScrub(ms);
     const value = toLocalInputValue(ms);
     // never overwrite what the user is typing
     if (value !== lastTimeValue && doc.activeElement !== dom.time) {
@@ -394,14 +420,18 @@ export function createTimeControl({
     setStatus('');
     clock.setLive();
   });
-  listen(dom.play, 'click', () => {
+  // play, steps and the scrub bar come from the shared slider
+  dom.hooks.play = () => {
     if (clock.mode === 'play') clock.pause();
     else clock.play();
-  });
-  const step = (sign) => (event) =>
-    clock.step(sign * (event?.shiftKey ? STEP_SHIFT_MS : STEP_MS));
-  listen(dom.back, 'click', step(-1));
-  listen(dom.fwd, 'click', step(1));
+  };
+  // Shift or PageUp / PageDown = 1 hour, else 1 minute
+  dom.hooks.step = (dir, count, event) =>
+    clock.step(dir * (event?.shiftKey || count > 1 ? STEP_SHIFT_MS : STEP_MS));
+  dom.hooks.jump = (which) =>
+    jumpTo(which === 'start' ? scrubFrom : scrubFrom + 2 * SCRUB_HALF_SPAN_MS);
+  dom.hooks.scrub = (f) =>
+    jumpTo(scrubFrom + Math.round(f * 2 * SCRUB_HALF_SPAN_MS));
   listen(dom.rate, 'change', () => {
     const abs = Number(dom.rate.value);
     clock.setRate(clock.rate < 0 ? -abs : abs);

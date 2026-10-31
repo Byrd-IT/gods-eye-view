@@ -3,9 +3,12 @@
  * no stylesheet import in an upstream file (DESIGN.md 4.1: one touch point).
  * Uses the app's glass/mono design tokens like navControl.css.
  */
+import { timeSliderCss } from '../timeTravel/timeSlider.js';
+
 export const HISTORY_STYLE_ID = 'gev-history-style';
 
-export const HISTORY_CSS = `
+// the shared slider rules first: History's own rules below win on a tie
+export const HISTORY_CSS = `${timeSliderCss('gev-hist')}
 .gev-hist {
   position: fixed;
   /* bottom-left, above the coordinate readout and clear of the bottom-centre

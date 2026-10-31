@@ -1,6 +1,7 @@
 import { createImagerySplit } from '../../ui/imagerySplit.js';
 import { t } from '../../i18n/index.js';
 import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
+import { createDiscreteSlider } from '../timeTravel/timeSlider.js';
 
 /**
  * The NAIP year slider panel (BASEMAP N6): a small bar at the bottom centre
@@ -12,9 +13,10 @@ import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
  *
  * Ticks are exactly the years attachNaip() was given (discovered from
  * config.json). The range is an index into the ticks, so every stop is a
- * real year. Keyboard: ArrowLeft/ArrowDown older, ArrowRight/ArrowUp newer,
- * Home oldest, End newest (handled here, so the step is one tick and the
- * globe's own key bindings never see the key).
+ * real year. The control is the shared time slider (timeTravel/timeSlider.js):
+ * arrows step one tick, PageUp / PageDown ten, Home oldest, End newest (the
+ * globe's own key bindings never see the key), plus play / pause through the
+ * years and the 1x / 2x / 4x speed group.
  *
  * Narrow screens (t_37cf1f79): the panel is never wider than its container
  * (max-width calc(100% - 16px), centred), the rows wrap and the year range
@@ -30,13 +32,6 @@ import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
  *
  * Plain DOM with inline styles (no stylesheet), text via textContent only.
  */
-
-const KEYS = Object.freeze({
-  ArrowLeft: -1,
-  ArrowDown: -1,
-  ArrowRight: 1,
-  ArrowUp: 1,
-});
 
 export const NAIP_SLIDER_ID = 'gev-naip-slider';
 
@@ -75,8 +70,17 @@ function el(doc, tag, parent, { text, style, attrs } = {}) {
   return node;
 }
 
-/** One year range (index into ticks) + its label; keyboard steps by tick. */
-function yearRange(doc, parent, { ticks, label, onYear, showTicks = false }) {
+/**
+ * One year slider over the ticks: the shared discrete time slider
+ * (timeTravel/timeSlider.js) plus its label. `transport` adds play / pause
+ * (one year per tick) and the speed group; the Compare slider is scrub and
+ * step only.
+ */
+function yearRange(
+  doc,
+  parent,
+  { ticks, label, onYear, showTicks = false, transport = false },
+) {
   const row = el(doc, 'div', parent, {
     style: {
       display: 'flex',
@@ -89,7 +93,7 @@ function yearRange(doc, parent, { ticks, label, onYear, showTicks = false }) {
     },
   });
   // preferred width; shrinks to the panel on narrow screens
-  const width = `${Math.max(160, Math.min(520, ticks.length * 40))}px`;
+  const width = `${Math.max(220, Math.min(520, ticks.length * 40))}px`;
   const column = el(doc, 'div', row, {
     style: {
       display: 'flex',
@@ -100,31 +104,34 @@ function yearRange(doc, parent, { ticks, label, onYear, showTicks = false }) {
       flex: '0 1 auto',
     },
   });
-  const range = el(doc, 'input', column, {
-    attrs: {
-      type: 'range',
-      min: '0',
-      max: String(Math.max(0, ticks.length - 1)),
-      step: '1',
-      'aria-label': label,
-    },
-    style: { width: '100%', minWidth: '0', margin: '0' },
+  const items = ticks.map((year) => {
+    const ms = Date.UTC(Number(year), 0, 1);
+    return {
+      value: year,
+      label: String(year),
+      ms: Number.isFinite(ms) ? ms : NaN,
+    };
   });
-  if (showTicks) {
-    // One label per stop, spread like the range's stops.
-    const marks = el(doc, 'div', column, {
-      attrs: { 'aria-hidden': 'true', class: 'gev-naip-ticks' },
-      style: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        gap: '2px',
-        overflow: 'hidden',
-        opacity: '0.75',
-        fontSize: '10px',
-      },
-    });
-    for (const year of ticks) el(doc, 'span', marks, { text: String(year) });
-  }
+  let year = null;
+  const slider = createDiscreteSlider({
+    document: doc,
+    parent: column,
+    ariaLabel: label,
+    items,
+    tickLabels: showTicks,
+    steps: true,
+    play: transport,
+    rates: transport ? [1, 2, 4] : [],
+    labels: { back: t('Older imagery'), fwd: t('Newer imagery') },
+    attrs: {
+      back: { 'aria-label': t('Older imagery') },
+      fwd: { 'aria-label': t('Newer imagery') },
+    },
+    onChange: (index) => {
+      const y = ticks[index];
+      if (y !== undefined && y !== year) onYear(y);
+    },
+  });
   const out = el(doc, 'output', row, {
     style: {
       maxWidth: 'min(340px, 100%)',
@@ -134,30 +141,15 @@ function yearRange(doc, parent, { ticks, label, onYear, showTicks = false }) {
       whiteSpace: 'nowrap',
     },
   });
-  let year = null;
-  const pick = (index) => {
-    const y = ticks[Math.max(0, Math.min(ticks.length - 1, index))];
-    if (y !== undefined && y !== year) onYear(y);
-  };
-  range.addEventListener('input', () => pick(Number(range.value)));
-  range.addEventListener('keydown', (event) => {
-    let index = ticks.indexOf(year);
-    if (event.key in KEYS) index += KEYS[event.key];
-    else if (event.key === 'Home') index = 0;
-    else if (event.key === 'End') index = ticks.length - 1;
-    else return;
-    event.preventDefault?.();
-    event.stopPropagation?.();
-    pick(index);
-  });
   return {
     row,
-    range,
+    range: slider.scrub,
+    slider,
     update(y, text) {
       year = y;
       const i = ticks.indexOf(y);
-      if (i >= 0) range.value = String(i);
-      range.setAttribute('aria-valuetext', String(y ?? ''));
+      if (i >= 0) slider.setIndex(i);
+      slider.setValueText(String(y ?? ''));
       out.textContent = text;
       out.setAttribute('title', text);
     },
@@ -221,6 +213,7 @@ export function createNaipSlider({
     label: t('Aerial imagery year'),
     onYear,
     showTicks: true,
+    transport: true,
   });
   const bottom = el(doc, 'div', panel, {
     style: ROW_STYLE,
@@ -250,6 +243,8 @@ export function createNaipSlider({
       panel.style.display = visible ? 'flex' : 'none';
     },
     destroy() {
+      a.slider.destroy();
+      b.slider.destroy();
       panel.remove();
     },
   };

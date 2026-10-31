@@ -431,8 +431,7 @@ export async function attachWayback({
         count: releases.length,
         onToggle: (on) => (on ? enable() : disable()),
         onIndex: (i) => setIndex(i),
-        onStep: (delta) => api.step(delta),
-        onLatest: () => api.latest(),
+        dates: releases.map((entry) => entry.date),
       })
     : null;
   paint();
