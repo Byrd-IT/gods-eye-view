@@ -54,6 +54,7 @@
     "check:boundaries": "node scripts/check-import-directions.mjs && node scripts/check-package-boundaries.mjs",
     "qa:history-store": "node scripts/qa-history-store.mjs",
     "qa:history-recorder": "node scripts/qa-history-recorder.mjs",
+    "qa:history-feeds": "node scripts/qa-history-feeds.mjs",
     "qa:transit": "node scripts/qa-transit.mjs",
     "mcp": "node server/mcp/stdio.js"
   },

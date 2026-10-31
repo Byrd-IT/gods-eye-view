@@ -52,8 +52,9 @@ function parseWhole(env, name, [min, max], unit, problems) {
  * Read and validate the recorder settings. Pure. Collects every problem before
  * it throws, and never quotes a configured value.
  *
- *   HISTORY_RECORD=1               record every feed that has an adapter, except opt-in feeds
- *                                  such as quakes, which need their own flag (default off)
+ *   HISTORY_RECORD=1               record every feed that has an adapter, except heavy ones
+ *                                  (aircraft, vessels) and opt-in ones such as quakes, which must
+ *                                  be named with their own HISTORY_RECORD_<FEED>=1; default off
  *   HISTORY_RECORD_<FEED>=1|0      switch one feed on or off, overriding HISTORY_RECORD
  *   HISTORY_MIN_INTERVAL_S[_<FEED>] skip an unchanged entity seen again within this many
  *                                  seconds (default: the feed's cadence; 0 keeps every one)
@@ -121,7 +122,8 @@ export function loadRecorderConfig(
       continue;
     }
     if (!adapter) continue;
-    const on = own ?? (adapter.optIn ? false : globalOn);
+    // A heavy feed (adapter.defaultOn === false) or an opt-in feed (adapter.optIn) records only when named.
+    const on = own ?? (adapter.optIn || adapter.defaultOn === false ? false : globalOn);
     const store = history?.feeds?.[feed]?.store;
     if (on && store && !appendBackends.includes(store)) {
       problems.push(

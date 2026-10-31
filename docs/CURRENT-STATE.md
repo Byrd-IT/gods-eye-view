@@ -1275,6 +1275,16 @@ records the M2.5+ events (one row per event version: key = event id, time = `upd
 feed (SQLite today; the store interface also names an Elasticsearch backend, which is
 a separate change).
 
+Routes whose answer is a finished JSON body are watched by a response tee
+(`server/history/recorder/tee.js`, route table in `routes.js`, listed first in
+`server/providers/local.js`). It copies the bytes on their way out, parses after the
+response is sent, ignores an answer whose own poll time it has already seen (the proxy's cache
+serving the same refresh again), and notes a 429 or 5xx answer as one failed poll a minute. The
+aircraft group is the first on it: `aircraft` (`/api/flights`) and `military` (`/api/military`).
+`aircraft` is heavy, so it records only when `HISTORY_RECORD_AIRCRAFT=1` names it. A moved
+entity counts as changed even when its other fields did not. Gate: `npm run qa:history-feeds`
+(fixtures in `server/history/recorder/feedFixtures/`).
+
 `HISTORY_RECORD=1` records every feed that has an adapter, `HISTORY_RECORD_<FEED>=1|0`
 switches one feed on or off, and `HISTORY_MIN_INTERVAL_S[_<FEED>]` skips an unchanged
 entity seen again inside that many seconds (default: the feed's cadence, 30 minutes
