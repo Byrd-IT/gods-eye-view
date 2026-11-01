@@ -20,24 +20,37 @@ import {
   referenceStats,
   seedLibrary,
 } from '../src/byrdit/dronePlan/rerunSeed.js';
-import { createStore, defaultRoot } from '../server/byrdit/planLibrary/store.js';
+import {
+  createStore,
+  defaultRoot,
+} from '../server/byrdit/planLibrary/store.js';
 
 function args(argv) {
   const out = { user: 'byrdit' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') out.dryRun = true;
-    else if (a.startsWith('--')) out[a.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = argv[++i];
+    else if (a.startsWith('--'))
+      out[a.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] =
+        argv[++i];
   }
   return out;
 }
 
 const opt = args(process.argv.slice(2));
 if (!opt.spec) {
-  console.error('usage: seed-suggested-reruns.mjs --spec <spec.json> [options]');
+  console.error(
+    'usage: seed-suggested-reruns.mjs --spec <spec.json> [options]',
+  );
   process.exit(2);
 }
-const spec = JSON.parse(readFileSync(opt.spec, 'utf8'));
+let spec;
+try {
+  spec = JSON.parse(readFileSync(opt.spec, 'utf8'));
+} catch {
+  console.error('the spec file could not be read as JSON');
+  process.exit(2);
+}
 const root = opt.root ?? defaultRoot();
 
 const failures = [];
@@ -49,24 +62,49 @@ for (const entry of spec.plans) {
   }
   let line = `${entry.name}: ${stats.waypointCount} wp, ${stats.photoCount} photos, speed ${stats.speedMs.toFixed(2)}`;
   if (opt.kmzDir && entry.reference) {
-    const file = path.join(opt.kmzDir, entry.reference);
-    const mission = await parseDjiKmz(new Uint8Array(readFileSync(file)), { fileName: entry.reference });
-    const problems = compareToReference(stats, referenceStats(mission, spec.center));
-    line += problems.length ? `  MISMATCH ${problems.join('; ')}` : '  matches reference';
+    // Errors name the plan, never the path or the system message.
+    let mission;
+    try {
+      const file = path.join(opt.kmzDir, entry.reference);
+      mission = await parseDjiKmz(new Uint8Array(readFileSync(file)), {
+        fileName: path.basename(entry.reference),
+      });
+    } catch {
+      failures.push(`${entry.name}: reference KMZ could not be read`);
+      continue;
+    }
+    if (mission.error) {
+      failures.push(`${entry.name}: reference KMZ unusable (${mission.error})`);
+      continue;
+    }
+    const problems = compareToReference(
+      stats,
+      referenceStats(mission, spec.center),
+    );
+    line += problems.length
+      ? `  MISMATCH ${problems.join('; ')}`
+      : '  matches reference';
     if (problems.length) failures.push(`${entry.name}: ${problems.join('; ')}`);
   }
   console.log(line);
 }
 if (failures.length) {
-  console.error(`\n${failures.length} plan(s) failed; nothing written:\n  ${failures.join('\n  ')}`);
+  console.error(
+    `\n${failures.length} plan(s) failed; nothing written:\n  ${failures.join('\n  ')}`,
+  );
   process.exit(1);
 }
 
 const items = spec.plans.map((e) => buildItem(spec, e));
 if (!opt.dryRun && existsSync(root)) {
-  const backup = opt.backupDir ?? `${root}-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  const backup =
+    opt.backupDir ??
+    `${root}-backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   cpSync(root, backup, { recursive: true });
   console.log(`backup: ${backup}`);
 }
-const results = seedLibrary(createStore({ root }), opt.user, items, { dryRun: opt.dryRun });
-for (const r of results) console.log(`${r.action.padEnd(9)} ${r.id ?? ''} ${r.name}`);
+const results = seedLibrary(createStore({ root }), opt.user, items, {
+  dryRun: opt.dryRun,
+});
+for (const r of results)
+  console.log(`${r.action.padEnd(9)} ${r.id ?? ''} ${r.name}`);
