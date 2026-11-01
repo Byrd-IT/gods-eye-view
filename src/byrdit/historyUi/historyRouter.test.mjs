@@ -713,3 +713,17 @@ test('own time null = LIVE for that layer while the shared time keeps the others
   assert.equal(off.left, true);
   assert.equal(router.getState().active, false);
 });
+
+test('moving only an unlocked row while the shared time plays does not clear the cache or re-ask the locked layers', () => {
+  const { router } = setup();
+  router.install();
+  router.setHistory({ active: true, timeMs: T, playing: true, layerTimes: {} });
+  const a = router.setHistory({ active: true, timeMs: T, playing: true, layerTimes: { military: T - 3_600_000 } });
+  assert.deepEqual(a.layersChanged, ['military']);
+  assert.equal(a.moved, true);
+  assert.equal(a.seeked, false, 'the shared group did not jump');
+  router.setHistory({ active: true, timeMs: T, playing: false, layerTimes: { military: T - 3_600_000 } });
+  const b = router.setHistory({ active: true, timeMs: T, playing: false, layerTimes: { military: T - 7_200_000 } });
+  assert.equal(b.seeked, false, 'paused: still only the one row');
+  assert.deepEqual(b.layersChanged, ['military']);
+});

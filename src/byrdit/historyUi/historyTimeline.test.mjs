@@ -36,7 +36,7 @@ import {
 
 const NOW = Date.parse('2026-10-14T16:00:00Z');
 
-test('presets, speeds and the 2-year span match DESIGN 4.5', () => {
+test('presets and speeds match DESIGN 4.5; no retention clamp', () => {
   assert.deepEqual(
     PRESETS.map((p) => p.id),
     ['1h', '24h', '7d', '30d', '90d', 'all'],

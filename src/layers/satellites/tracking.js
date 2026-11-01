@@ -95,7 +95,7 @@ export function createTracking({ state: layerState, services, parts, source }) {
         layerState._trackedNorad,
         layerState._catalog.get(layerState._trackedNorad)?.group,
       );
-      lastPos.show = true;
+      lastPos.show = !layerState._historyHidden?.has(clearedNorad);
       lastPos.pixelSize = style.pixelSize;
       lastPos.color = style.color;
       lastPos.outlineColor = style.outlineColor;
@@ -406,6 +406,8 @@ export function createTracking({ state: layerState, services, parts, source }) {
     const point = layerState._points.get(noradId);
     const sat = layerState._catalog.get(noradId);
     if (!point || !sat) return;
+    // History time: no recorded element set, nothing is drawn, so nothing to follow
+    if (layerState._historyHidden?.has(noradId)) return;
 
     layerState._trackedNorad = noradId;
     layerState._trackedFrameNumber = -1;

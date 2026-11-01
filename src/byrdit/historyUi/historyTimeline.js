@@ -19,7 +19,6 @@ export { HT_PARAM };
 export const MINUTE_MS = 60_000;
 export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
-/** Slider span: 2 years (owner R1). The API keeps 731 days. */
 /** Earliest instant the API accepts (Sputnik 1; Space-Track GP starts 1962). */
 export const HISTORY_FLOOR_MS = Date.UTC(1957, 9, 4);
 

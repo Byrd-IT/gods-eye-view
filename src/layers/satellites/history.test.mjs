@@ -108,3 +108,20 @@ test('satellites history: a live catalog reload while in history is replaced by 
   await h.methods.setHistoryTime(null);
   assert.equal(state._catalog.get(25544).satrec, live.get(25544), 'LIVE restores the NEW live sets, not stale ones');
 });
+
+test('satellites history: a satellite with no elset cannot be tracked and a tracked one is untracked; a truncated answer is reported', async () => {
+  const cleared = [];
+  const mk = make(() => csv(row(25544, '2025-03-01T12:00:00.000000', 10)));
+  const { state } = mk;
+  const h = createHistory({ state, parts: { tracking: { _clearTracking: (...a) => { cleared.push(a); } } } });
+  state._trackedNorad = 99999; // has no recorded set at that time
+  await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  assert.equal(cleared.length, 1, 'the hidden tracked satellite is untracked');
+  assert.equal(state._historyHidden.has(99999), true);
+  assert.equal(state._historyHidden.has(25544), false);
+  await h.methods.setHistoryTime(null);
+  assert.equal(state._historyHidden.size, 0);
+  globalThis.fetch = async () => ({ ok: true, headers: { get: (k) => (k === 'x-history-truncated' ? '1' : null) }, text: async () => csv(row(25544, '2025-03-01T12:00:00.000000', 10)) });
+  const out = await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  assert.equal(out.status, 'truncated');
+});

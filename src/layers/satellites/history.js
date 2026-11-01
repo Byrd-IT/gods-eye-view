@@ -21,7 +21,7 @@ export const ELSET_REUSE_MS = 12 * 3_600_000;
 export const ELSET_MAX_AHEAD_MS = 3 * 86_400_000;
 const MAX_ROWS = 15_000; // the API maximum
 
-export function createHistory({ state: layerState }) {
+export function createHistory({ state: layerState, parts = null }) {
   /** NORAD -> satrec the live catalog had, while a history time is set. */
   const liveSatrecs = new Map();
   let fetchedAt = NaN;
@@ -32,7 +32,17 @@ export function createHistory({ state: layerState }) {
   /** The tracked satellite's dot is drawn by its entity (tracking.js). */
   const drawnByPoint = (id) => id !== layerState._trackedNorad;
 
+  /** ids with no recorded element set at the history time (never drawn) */
+  const hidden = () => (layerState._historyHidden ??= new Set());
+
+  /** A satellite that is tracked cannot stay tracked once it is not drawn. */
+  function untrackIfHidden() {
+    const id = layerState._trackedNorad;
+    if (id && hidden().has(id)) parts?.tracking?._clearTracking?.(false, { origin: 'programmatic' });
+  }
+
   function restore() {
+    hidden().clear();
     for (const [id, satrec] of liveSatrecs) {
       const sat = layerState._catalog.get(id);
       if (sat) sat.satrec = satrec;
@@ -44,7 +54,11 @@ export function createHistory({ state: layerState }) {
 
   /** No element sets known for the time: draw nothing, never a wrong place. */
   function hideAll() {
-    for (const point of layerState._points.values()) point.show = false;
+    for (const [id, point] of layerState._points) {
+      point.show = false;
+      hidden().add(id);
+    }
+    untrackIfHidden();
     fetchedAt = NaN;
   }
 
@@ -63,11 +77,14 @@ export function createHistory({ state: layerState }) {
       if (!liveSatrecs.has(id)) liveSatrecs.set(id, sat.satrec);
       if (next) {
         sat.satrec = next;
+        hidden().delete(id);
         if (point) point.show = drawnByPoint(id);
-      } else if (point) {
-        point.show = false;
+      } else {
+        hidden().add(id);
+        if (point) point.show = false;
       }
     }
+    untrackIfHidden();
     return byId.size;
   }
 
@@ -77,6 +94,7 @@ export function createHistory({ state: layerState }) {
     )}`;
     const res = await globalThis.fetch(url);
     const text = res.ok ? await res.text() : '';
+    const truncated = res.headers?.get?.('x-history-truncated') === '1';
     if (mine !== token) return { status: 'superseded' };
     const rows = parseGP(text);
     if (!rows.length) {
@@ -84,7 +102,7 @@ export function createHistory({ state: layerState }) {
       return { status: res.ok ? 'empty' : 'unavailable' };
     }
     fetchedAt = tMs;
-    return { status: 'ok', count: apply(rows, tMs) };
+    return { status: truncated ? 'truncated' : 'ok', count: apply(rows, tMs) };
   }
 
 
@@ -134,6 +152,5 @@ export function createHistory({ state: layerState }) {
       }),
     },
     /** The date the layer propagates at: the history time, else now. */
-    nowDate: () => new Date(layerState._historyMs ?? Date.now()),
   };
 }

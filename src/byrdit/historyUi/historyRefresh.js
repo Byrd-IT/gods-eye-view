@@ -426,8 +426,17 @@ export function createRefreshDriver({
     if (change.layersChanged?.length) {
       const enabled = enabledIds();
       for (const a of adapters) {
-        if (!change.layersChanged.includes(a.id) || router.timeOf(a) !== null)
+        if (!change.layersChanged.includes(a.id)) continue;
+        if (router.timeOf(a) !== null) {
+          // moved to its own time while the group plays (the play loop skips
+          // own-time layers): ask again at the new time now
+          if (router.hasOwnTime?.(a.id) && state.playing) {
+            frameT.delete(a.id);
+            lastFrame.delete(a.id);
+            if (enabled.has(a.layerId)) refresh(a, 1);
+          }
           continue;
+        }
         if (lastMode.has(a.id) || wasSwapped.has(a.id)) resetLayer(a, null);
         lastMode.delete(a.id);
         frameT.delete(a.id);

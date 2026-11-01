@@ -494,3 +494,14 @@ test('R6: a second history session does not inherit the first session swaps', as
   await driver.settle();
   assert.deepEqual(dm.calls, [], 'not served in this session');
 });
+
+test('own time: moving one unlocked row while the group plays redraws only that layer at once', async () => {
+  const { clock, dm, driver } = setup();
+  driver.onHistory({ active: true, timeMs: T, playing: true, layerTimes: {} });
+  await clock.run(RELEASE_DEBOUNCE_MS + 1);
+  await driver.settle();
+  dm.calls.length = 0;
+  driver.onHistory({ active: true, timeMs: T, playing: true, layerTimes: { military: T - 3_600_000 } });
+  await driver.settle();
+  assert.deepEqual(dm.calls, ['military'], 'only the moved row refreshes; flights keeps playing');
+});

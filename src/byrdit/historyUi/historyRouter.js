@@ -675,11 +675,18 @@ export function createHistoryRouter({
       clearTrack();
     } else if (out.layersChanged.length) {
       out.moved = true;
+      // only unlocked rows moved (the shared time and play state are as they
+      // were): answers are cached per URL, which holds the time, so locked
+      // layers keep theirs and nothing is cleared or re-asked for them
+      const sharedSame =
+        wasPlaying === playing &&
+        (timeMs === prev || (!Number.isFinite(timeMs) && !Number.isFinite(prev)));
       const jump =
-        !(wasPlaying && playing) ||
+        !sharedSame &&
+        (!(wasPlaying && playing) ||
         (Number.isFinite(prev) && Number.isFinite(timeMs)
           ? timeMs < prev || timeMs - prev > PLAY_JUMP_MS
-          : true);
+          : true));
       if (jump) {
         out.seeked = true;
         gen++;

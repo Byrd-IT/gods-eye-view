@@ -271,3 +271,21 @@ test('shell mounts History into the menu and releases the section on destroy', (
   handle.destroy();
   assert.equal(menu.root.hidden, true);
 });
+
+test('shell mounts the History menu under the control; the shared time reaches the menu rows, a lock-all link stays ht=-only', async () => {
+  const doc = fakeDocument();
+  const win = fakeWindow(HREF, fixtureFetch(fixtureWorld(NOW)));
+  const handle = mountHistoryForShell(null, { window: win, document: doc });
+  const menu = doc.body.find((n) => n.id === 'gev-history-menu');
+  assert.ok(menu, 'History menu is in the Time travel card');
+  assert.equal(menu.parentNode, ensureTimeTravelMenu(doc).slot('history'));
+  const rows = menu.findAll((n) => n.className === 'gev-hm-row' && !n.hidden);
+  assert.ok(rows.length >= 11, `router rows are listed (${rows.length})`);
+  handle.enter(NOW - 3 * 86_400_000);
+  await handle.settle?.();
+  const flights = menu.find((n) => n.getAttribute?.('data-row') === 'flights');
+  assert.notEqual(flights.find((n) => n.className === 'gev-hm-time').textContent, 'LIVE', 'locked row follows the shared time');
+  assert.doesNotMatch(win.location.href, /hl=/);
+  handle.destroy();
+  assert.equal(doc.body.find((n) => n.id === 'gev-history-menu'), null, 'menu removed on destroy');
+});
