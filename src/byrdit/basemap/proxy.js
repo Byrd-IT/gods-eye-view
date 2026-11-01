@@ -1,6 +1,13 @@
 import { CONFIG_BUDGET, DEFAULT_BUILDINGS, DEFAULT_SWITCH } from './config.js';
-import { composeNaip, naipEnabled, resolveNaipTile } from './naipProxy.js';
+import { layerCap } from './layerCap.js';
 import {
+  DEFAULT_MAX_LAYERS as DEFAULT_NAIP_MAX_LAYERS,
+  composeNaip,
+  naipEnabled,
+  resolveNaipTile,
+} from './naipProxy.js';
+import {
+  DEFAULT_OVERLAY_MAX_LAYERS,
   composeOverlays,
   overlaysEnabled,
   resolveOverlayTile,
@@ -75,6 +82,8 @@ import {
  *                                      above 1.25x)
  *   GEV_BASEMAP_NAIP=1                 NAIP time slider (default OFF), with
  *   GEV_BASEMAP_NAIP_CONFIG=x[,y]      NAIP config.json (URL or absolute path)
+ *   GEV_BASEMAP_NAIP_MAX_LAYERS=n      per-list NAIP layer cap (default 600, max 2000)
+ *   GEV_BASEMAP_OVERLAYS_MAX_LAYERS=n  overlay layer cap (default 200, max 2000)
  *   GEV_BASEMAP_NAIP_URLS=a,b          statewide NAIP tile servers
  *   GEV_BASEMAP_HIRES_URLS=a,b         regional (Wood+Upshur) tile servers
  *   GEV_BASEMAP_AUTO=0|1               auto-switch (default 1)
@@ -145,6 +154,14 @@ export function basemapSettingsFromEnv(env = process.env) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    naipMaxLayers: layerCap(
+      env.GEV_BASEMAP_NAIP_MAX_LAYERS,
+      DEFAULT_NAIP_MAX_LAYERS,
+    ),
+    overlaysMaxLayers: layerCap(
+      env.GEV_BASEMAP_OVERLAYS_MAX_LAYERS,
+      DEFAULT_OVERLAY_MAX_LAYERS,
+    ),
     overlays: overlaysEnabled(env),
     overlaysConfig: String(env.GEV_BASEMAP_OVERLAYS_CONFIG ?? '')
       .split(',')
@@ -676,6 +693,7 @@ export function createBasemapHandler(
         const naip = composeNaip(raw, {
           statewide: naipUrls.length > 0,
           regional: hiresUrls.length > 0,
+          maxLayers: settings.naipMaxLayers,
         });
         if (naip.browser.available) return naip;
         throw new Error('invalid naip config');
@@ -711,7 +729,9 @@ export function createBasemapHandler(
             await beforeDeadline(readFileImpl(source, 'utf8'), deadline),
           );
         }
-        const overlays = composeOverlays(raw);
+        const overlays = composeOverlays(raw, {
+          maxLayers: settings.overlaysMaxLayers,
+        });
         if (overlays.browser.available) return overlays;
         throw new Error('invalid overlays config');
       } catch (error) {

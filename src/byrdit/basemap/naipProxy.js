@@ -30,6 +30,7 @@
  *                                      regional entry's edge.port, when present,
  *                                      replaces the port of these hosts
  */
+import { layerCap } from './layerCap.js';
 
 export const NAIP_TILE_ROUTE =
   /^\/basemap\/naip\/(\d{4})\/(\d{1,2})\/(\d{1,8})\/(\d{1,8})\.webp$/;
@@ -45,7 +46,8 @@ const ID = /^[A-Za-z0-9._-]{1,64}$/;
 const DATE = /^\d{4}-\d\d-\d\d$/;
 /** Credit text is plain words only: no markup, no URLs. */
 const CREDIT_TEXT = /^[A-Za-z0-9 /&+().,'-]{1,80}$/;
-const MAX_LAYERS = 200;
+/** Default per-list cap (raised from 200 on 2026-11-01); env-tunable via GEV_BASEMAP_NAIP_MAX_LAYERS. */
+export const DEFAULT_MAX_LAYERS = 600;
 
 export function naipEnabled(env = process.env) {
   return String(env.GEV_BASEMAP_NAIP ?? '').trim() === '1';
@@ -88,9 +90,13 @@ function zooms(raw) {
  * /basemap/config.json; `routes` maps statewide years and regional ids to
  * their upstream archive (and edge port) for the tile routes.
  * @param {unknown} raw
- * @param {{statewide?: boolean, regional?: boolean}} [have] which tile servers are configured
+ * @param {{statewide?: boolean, regional?: boolean, maxLayers?: number}} [have] which tile servers are configured
  */
-export function composeNaip(raw, { statewide = true, regional = true } = {}) {
+export function composeNaip(
+  raw,
+  { statewide = true, regional = true, maxLayers = DEFAULT_MAX_LAYERS } = {},
+) {
+  const MAX_LAYERS = layerCap(maxLayers, DEFAULT_MAX_LAYERS);
   const routes = { years: new Map(), regional: new Map() };
   const years = [];
   if (statewide)

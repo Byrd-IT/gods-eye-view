@@ -26,6 +26,7 @@
  *   GEV_BASEMAP_HIRES_URLS=a,b          tile servers (go-pmtiles :12353); a layer's
  *                                       edge.port, when present, replaces the port
  */
+import { layerCap } from './layerCap.js';
 
 export const OVERLAY_TILE_ROUTE =
   /^\/basemap\/overlay\/([a-z0-9][a-z0-9-]{0,31})\/(\d{1,2})\/(\d{1,8})\/(\d{1,8})\.(webp|mvt)$/;
@@ -38,7 +39,8 @@ const KINDS = Object.freeze({
   'overlay-raster': { kind: 'raster', format: 'webp' },
   'overlay-vector': { kind: 'vector', format: 'mvt' },
 });
-const MAX_LAYERS = 50;
+/** Default cap (raised from 50 on 2026-11-01); env-tunable via GEV_BASEMAP_OVERLAYS_MAX_LAYERS. */
+export const DEFAULT_OVERLAY_MAX_LAYERS = 200;
 
 const archiveOk = (value) => {
   const parts = String(value).split('/');
@@ -84,7 +86,11 @@ function vectorLayers(raw) {
  * file extension and edge port.
  * @param {unknown} raw
  */
-export function composeOverlays(raw) {
+export function composeOverlays(
+  raw,
+  { maxLayers = DEFAULT_OVERLAY_MAX_LAYERS } = {},
+) {
+  const MAX_LAYERS = layerCap(maxLayers, DEFAULT_OVERLAY_MAX_LAYERS);
   const routes = new Map();
   const layers = [];
   for (const entry of (Array.isArray(raw?.layers) ? raw.layers : []).slice(
