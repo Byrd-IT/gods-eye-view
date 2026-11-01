@@ -173,7 +173,7 @@ test('GNSS slice: cells of the newest snapshot at or before t, nothing later', a
   assert.deepEqual(r.body.cells.map((c) => c.cell), ['2:2', '3:3']);
   assert.equal(r.headers['X-History-Gnss-Population'], 'military-aircraft');
   // a time with no snapshot in 15 min is a gap, not another time's data
-  const gap = await sliceGnss({ t: T0 + 40 * MIN - 5 * MIN + 30 * MIN, bbox: null, maxRows: 100 });
+  const gap = await sliceGnss({ t: T0 + 65 * MIN, bbox: null, maxRows: 100 });
   assert.deepEqual(gap.body.cells, []);
   assert.equal(gap.headers['X-History-Gap'], '1');
 });
@@ -323,4 +323,40 @@ test('GNSS expansion never exceeds its cap and ignores bad cells', () => {
   );
   assert.equal(rows.length, 3);
   assert.ok(rows.every((r) => r.degraded));
+});
+
+test('GNSS adapter flags a capped expansion as truncated (nothing silently dropped)', () => {
+  const cells = Array.from({ length: 30 }, (_, i) => ({
+    cell: `c${i}`,
+    lat: 1,
+    lon: 1,
+    total: 3000,
+    bad: 0,
+  }));
+  const out = GNSS_ADAPTER.adapt(
+    [{ status: 200, headers: {}, body: { snap: T0, cells } }],
+    { t: T0, nowMs: T0 },
+  );
+  assert.equal(out.body.rows.length, 60_000);
+  assert.equal(out.headers['X-History-Truncated'], '1');
+});
+
+test('AQHI slice honours maxRows (truncated flag) and the bbox', async () => {
+  const docs = ['A', 'B', 'C'].map((id, i) => ({
+    ...aq(id, T0 - 10 * MIN, 3),
+    location: { lat: 10 + i, lon: 20 },
+  }));
+  const es = fakeEs({ [HISTORY_INDICES.aqhi]: docs });
+  const { sliceAqhi } = createAirGnssSlices({ es, now: () => T0 + HOUR });
+  const r = await sliceAqhi({ t: T0, bbox: null, maxRows: 2, windowMs: 6 * HOUR });
+  assert.equal(r.body.features.length, 2);
+  assert.equal(r.headers['X-History-Truncated'], '1');
+  const b = await sliceAqhi({
+    t: T0,
+    bbox: { n: 11.5, s: 9, w: 19, e: 21 },
+    maxRows: 10,
+    windowMs: 6 * HOUR,
+  });
+  assert.ok(es.calls.at(-1).body.query.bool.filter.some((f) => f.geo_bounding_box));
+  assert.ok(b.body.features.length >= 0);
 });

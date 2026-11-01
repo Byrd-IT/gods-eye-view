@@ -42,13 +42,13 @@ export const COVERAGE_BUCKETS = Object.freeze({
   '30d': 30 * DAY_MS,
 });
 
+/** The live air-quality layer drops readings older than this (6 h). */
+export const AQHI_LOOKBACK_MS = 6 * 3_600_000;
+
 /**
  * Slice feeds served by B9. `window` is the as-of lookback for event feeds
  * (default / max, ms); fires use the fixed trailing 24 h of the live feed.
  */
-/** The live air-quality layer drops readings older than this (6 h). */
-export const AQHI_LOOKBACK_MS = 6 * 3_600_000;
-
 export const SLICE_FEEDS = Object.freeze({
   aircraft: { defaultRows: MAX_ROWS },
   military: { defaultRows: MAX_ROWS },

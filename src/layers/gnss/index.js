@@ -271,6 +271,7 @@ export function createGnssIntegrityLayer({
       _cells = [];
       _lastQueryKey = null;
       _retryAt = 0;
+      render();
     },
 
     async update(_viewerArg, { signal } = {}) {

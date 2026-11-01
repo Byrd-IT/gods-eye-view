@@ -123,6 +123,9 @@ function adaptGnss(answers, { t, nowMs }) {
   const ok = a.status !== 404 && a.body && Array.isArray(a.body.cells);
   const snap = ok && Number.isFinite(a.body.snap) ? a.body.snap : null;
   const rows = ok ? expandGnssCells(a.body.cells) : [];
+  const expected = ok
+    ? a.body.cells.reduce((n, c) => n + (Math.floor(Number(c?.total)) || 0), 0)
+    : 0;
   const chip =
     emptyChipOf(a, rows.length) ?? {
       state: HISTORY_NOTE_STATE,
@@ -141,6 +144,7 @@ function adaptGnss(answers, { t, nowMs }) {
       'Content-Type': JSON_TYPE,
       ...passHeaders(answers),
       'X-History-Rows': String(rows.length),
+      ...(rows.length < expected ? { 'X-History-Truncated': '1' } : {}),
       ...(rows.length ? {} : { 'X-History-Gap': '1' }),
     },
     chip,
