@@ -358,10 +358,11 @@ export function createB12cSlices({
   }
 
   /** All NORAD ids the recorder has ever put in `group` (cached 1 h). */
-  let refMembers = null;
+  const refMembers = new Map();
   async function referenceMembers(groupFilter) {
-    if (refMembers && now() - refMembers.at < GP_MEMBERS_TTL_MS)
-      return refMembers.value;
+    const key = groupFilter.term.group;
+    const hit = refMembers.get(key);
+    if (hit && now() - hit.at < GP_MEMBERS_TTL_MS) return hit.value;
     const r = await collapseNumeric(es, IDX.gp, {
       filter: [groupFilter],
       field: 'norad_cat_id',
@@ -374,7 +375,7 @@ export function createB12cSlices({
         .sort((x, y) => x - y),
       truncated: r.truncated,
     };
-    refMembers = { at: now(), value };
+    refMembers.set(key, { at: now(), value });
     return value;
   }
 
@@ -442,7 +443,7 @@ export function createB12cSlices({
     }
     const ids = members.ids;
     const histNear =
-      firstHist !== null && t + GP_HIST_AHEAD_MS >= firstHist && ids.length > 0;
+      firstHist !== null && ids.length > 0;
     const histFilter = [
       { terms: { [field]: ids } },
       range('epoch', Math.max(GP_HIST_MIN_EPOCH_MS, tBefore - GP_HIST_LOOKBACK_MS), tBefore),
@@ -507,7 +508,11 @@ export function createB12cSlices({
         const g = out.get(id);
         const he = dateMs(h.doc.epoch);
         const ge = g ? dateMs(g.doc.epoch) : null;
-        if (!g || (he !== null && ge !== null && (newer ? he > ge : he < ge)))
+        if (
+          !g ||
+          (he !== null &&
+            (ge === null || (newer ? he > ge : he < ge)))
+        )
           out.set(id, h);
       }
       return out;

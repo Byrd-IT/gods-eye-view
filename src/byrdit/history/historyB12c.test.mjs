@@ -2370,3 +2370,30 @@ test('gp slice (gp-hist): archive docs missing an element are skipped like recor
   const r = await call(api, slice(`feed=gp&t=${iso(t)}&group=active`));
   assert.deepEqual(parseGP(r.body), []);
 });
+
+test('gp slice (gp-hist): an archive candidate beats a recorder doc whose epoch does not parse; archive older than 30 d before t is ignored', async () => {
+  const P1 = NOW - 10 * DAY;
+  const t = NOW - 2 * DAY;
+  const docs = {
+    'gev-history-gp': [
+      elset(1, t - HOUR, P1, { epoch: 'not-a-date' }),
+      elset(2, t - HOUR, P1),
+    ],
+    'gev-history-gp-hist-2026': [
+      histDoc(1, t - 2 * HOUR),
+      histDoc(2, t - 31 * DAY), // too old to be used
+    ],
+  };
+  const { api, fake } = makeApi(docs);
+  const r = await call(api, slice(`feed=gp&t=${iso(t)}&group=active`));
+  const rows = parseGP(r.body);
+  assert.ok(rows.some((e) => e.gp.NORAD_CAT_ID === '1'));
+  assert.equal(
+    rows.find((e) => e.gp.NORAD_CAT_ID === '2')?.gp.EPOCH,
+    iso(t - HOUR).replace('Z', ''),
+  );
+  assert.ok(
+    esSearches(fake).some((c) => c.path.includes('gev-history-gp-hist-*')),
+    'archive read through the allowlisted pattern',
+  );
+});
