@@ -243,6 +243,7 @@ test('a failed recorded slice falls back to NWIS inside its reach, else the erro
   const near = await mk(r).sliceWater({ t: T, bbox: box, maxRows: 5, windowMs: HOUR });
   assert.equal(r.calls.length, 1);
   assert.equal(near.headers['X-History-Source'], 'usgs-nwis-iv');
+  assert.equal(near.noStore, true, 'a stand-in answer is not cached');
   const r2 = { ...reader(), earliestMs: () => NOW }; // NWIS cannot reach back to T
   await assert.rejects(
     mk(r2).sliceWater({ t: T, bbox: box, maxRows: 5, windowMs: HOUR }),
@@ -257,6 +258,7 @@ test('truncation counts the buckets, a recent time is not cached, an old one is'
   const { sliceWater } = createWaterSlices({ reader: reader(), es, now: () => NOW });
   const cut = await sliceWater({ t: T, bbox: box, maxRows: 2, windowMs: HOUR });
   assert.equal(cut.headers['X-History-Truncated'], '1');
+  assert.equal(cut.body.features.length, 2);
   assert.equal(cut.noStore, undefined);
   const recent = await sliceWater({
     t: NOW - RECORDED_SETTLE_MS + 60_000,
@@ -265,4 +267,33 @@ test('truncation counts the buckets, a recent time is not cached, an old one is'
     windowMs: HOUR,
   });
   assert.equal(recent.noStore, true);
+});
+
+test('a full ES queue during the first-record refresh still answers, and keeps the known start', async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  let gated = false;
+  const es = {
+    async search(_i, body) {
+      if (!body.aggs?.first && gated) await gate;
+      return body.aggs?.first
+        ? { aggregations: { first: { value: FIRST } } }
+        : { aggregations: { sites: { buckets: [] } } };
+    },
+  };
+  const r = reader();
+  let clock = NOW;
+  const { sliceWater } = createWaterSlices({ reader: r, es, now: () => clock });
+  const ask = (t) => sliceWater({ t, bbox: box, maxRows: 5, windowMs: HOUR });
+  await ask(T); // warm: first record known
+  gated = true;
+  const held = Array.from({ length: 4 + WATER_ES_MAX_QUEUED }, () => ask(T));
+  await new Promise((res) => setTimeout(res, 20));
+  clock += 11 * 60_000; // cache expired: the refresh finds the limiter full
+  const old = await ask(FIRST - 5 * DAY);
+  assert.equal(r.calls.length, 1, 'NWIS answered the older time');
+  assert.equal(old.headers['X-History-Source'], 'usgs-nwis-iv');
+  assert.equal(old.headers['X-History-Recording-Start'], new Date(FIRST).toISOString());
+  release();
+  await Promise.all(held);
 });

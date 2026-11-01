@@ -90,7 +90,7 @@ export const RECORDED_SETTLE_MS = 20 * 60_000;
 const RECORDED_CODES = WATER_READINGS.map((r) => r.parameter_code);
 const SPEC_BY_CODE = new Map(WATER_READINGS.map((r) => [r.parameter_code, r]));
 
-/** Every geo_point form Elasticsearch keeps in _source: object, "lat,lon", [lon, lat]. */
+/** The geo_point forms read from _source: object, "lat,lon" string, [lon, lat] array (not geohash or WKT). */
 export function geoPoint(v) {
   let lat;
   let lon;
@@ -168,8 +168,10 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
   let firstValue = null;
   let firstPending = null;
   async function lookupFirst() {
-    await esTurn();
+    let took = false;
     try {
+      await esTurn();
+      took = true;
       const json = await es.search(IDX.water, {
         size: 0,
         aggs: { first: { min: { field: 'observed_time' } } },
@@ -177,10 +179,10 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
       firstValue = fin(json?.aggregations?.first?.value);
       firstAt = now();
     } catch {
-      firstValue = null;
+      // keep the start time we already knew; only the next try is pushed out
       firstAt = now() - FIRST_RECORD_TTL_MS + FIRST_FAIL_BACKOFF_MS;
     } finally {
-      esRelease();
+      if (took) esRelease();
     }
     return firstValue;
   }
@@ -285,6 +287,7 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
     if (!bbox) return notRecorded('area_required');
     // an unreadable copy of ours degrades to the NWIS reader (still true data; the lookup remembers a failure for a minute)
     const first = es ? await firstRecorded() : null;
+    let fellBack = false;
     if (first !== null && t >= first) {
       try {
         return await sliceRecorded(q, first);
@@ -292,6 +295,7 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
         // our copy failed after answering before: NWIS can still answer for
         // about the last 120 days; further back the error stands
         if (!reader || t < reader.earliestMs(now())) throw error;
+        fellBack = true;
       }
     }
     if (!reader) {
@@ -327,6 +331,8 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
     );
     const kept = features.slice(0, maxRows);
     return {
+      // a stand-in for our own copy must not outlive its outage in the cache
+      ...(fellBack ? { noStore: true } : {}),
       body: { type: 'FeatureCollection', features: kept },
       headers: {
         'X-History-Rows': String(kept.length),
