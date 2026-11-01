@@ -1075,9 +1075,9 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // drawn/compare/waybackOff speaking rule adds 151 characters (36468 -> 36619).
   // waybackStillOn and starting speaking rule adds 115 characters (36619 -> 36734).
   // Drone Flight Plan voice adds control_droneplan (+3754: 36734 -> 40488).
-  // Orbit height bounds match the planner cap (+1: 40488 -> 40489).
+  // Orbit height bounds match the planner cap (+1: 40488 -> 40520).
   // Existing tool shapes are unchanged apart from that cap; the new tool is appended.
-  assert.equal(block.length, 40489, 'serialized tool schema length drifted');
+  assert.equal(block.length, 40520, 'serialized tool schema length drifted');
   // Description-only edits of tool text are allowed. Re-pin both the length
   // (with a changelog line above) and this hash when they land.
   assert.equal(
