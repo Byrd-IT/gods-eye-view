@@ -37,6 +37,14 @@ import { DAY_MS } from './historyParams.js';
 
 /** Epochs further ahead of the wall clock than this are never used. */
 export const GP_FUTURE_EPOCH_SLACK_MS = 3_600_000;
+/** Archive (gp-hist) element sets older than this before t are not used. */
+export const GP_HIST_LOOKBACK_MS = 30 * DAY_MS;
+/** Archive element sets after t are only candidates this far ahead (the layer ignores later ones). */
+export const GP_HIST_AHEAD_MS = 3 * DAY_MS;
+/** The archive holds a few bogus 1962/1968 epochs: never coverage. */
+export const GP_HIST_MIN_EPOCH_MS = Date.UTC(2024, 0, 1);
+/** The group's ever-recorded id list is cached this long. */
+export const GP_MEMBERS_TTL_MS = 60 * 60_000;
 
 /** gev-history src/feeds/celestrak.js RECORDED_GROUP: the only group with docs. */
 export const GP_RECORDED_GROUPS = Object.freeze(['active']);
@@ -349,18 +357,48 @@ export function createB12cSlices({
     return value;
   }
 
+  /** All NORAD ids the recorder has ever put in `group` (cached 1 h). */
+  let refMembers = null;
+  async function referenceMembers(groupFilter) {
+    if (refMembers && now() - refMembers.at < GP_MEMBERS_TTL_MS)
+      return refMembers.value;
+    const r = await collapseNumeric(es, IDX.gp, {
+      filter: [groupFilter],
+      field: 'norad_cat_id',
+      sort: [{ snap: 'desc' }],
+      _source: ['norad_cat_id'],
+    });
+    const value = {
+      ids: [...new Set(r.hits.map((h) => sourceOf(h).norad_cat_id))]
+        .filter((id) => Number.isFinite(id))
+        .sort((x, y) => x - y),
+      truncated: r.truncated,
+    };
+    refMembers = { at: now(), value };
+    return value;
+  }
+
   async function sliceGp({ t, group, maxRows }) {
     if (!GP_RECORDED_GROUPS.includes(group))
       return notRecorded('group_not_recorded', {
         'X-History-Recorded-Groups': GP_RECORDED_GROUPS.join(','),
       });
     const groupFilter = { term: { group } };
-    const first = await firstRecord(
-      `gp:${group}`,
-      IDX.gp,
-      [groupFilter],
-      'snap',
-    );
+    // Two stores: the live recorder (gev-history-gp, group-tagged, snap in
+    // ms) and the Space-Track GP_HISTORY archive (gev-history-gp-hist-*, no
+    // group, snap in s, epochs from 2024-11-01). Epochs before 2024-01-01
+    // in the archive are bad rows and never count as coverage.
+    const [firstGp, firstHist] = await Promise.all([
+      firstRecord(`gp:${group}`, IDX.gp, [groupFilter], 'snap'),
+      firstRecord(
+        'gp-hist',
+        IDX.gpHist,
+        [range('epoch', GP_HIST_MIN_EPOCH_MS, undefined)],
+        'epoch',
+      ),
+    ]);
+    const starts = [firstGp, firstHist].filter((v) => v !== null);
+    const first = starts.length ? Math.min(...starts) : null;
     const base = {
       'Content-Type': 'text/plain; charset=utf-8',
       'X-History-Gp-Rule': 'nearest-epoch-prefer-at-or-before',
@@ -377,17 +415,42 @@ export function createB12cSlices({
         },
       };
     const field = 'norad_cat_id';
-    // membership as of t: objects the recorder had seen in the group by t;
-    // elsets: newest epoch <= t and oldest epoch > t of ANY recording time
-    const [members, before, after] = await Promise.all([
-      collapseNumeric(es, IDX.gp, {
+    // an element set dated after now is a bad / future-dated epoch (gp max
+    // epoch was 2026-11-02 on 2026-11-01): never a candidate, for either side
+    const horizon = now() + GP_FUTURE_EPOCH_SLACK_MS;
+    const tBefore = Math.min(t, horizon);
+    const recordedByT = firstGp !== null && t >= firstGp;
+    // membership: with the recorder running, the objects it had seen in the
+    // group by t; earlier (archive-only times) the objects the recorder has
+    // ever seen in the group, because the archive has no group column
+    let members;
+    if (recordedByT) {
+      const r = await collapseNumeric(es, IDX.gp, {
         filter: [groupFilter, { range: { snap: { lte: t } } }],
         field,
         sort: [{ snap: 'desc' }],
         _source: [field],
-      }),
+      });
+      members = {
+        ids: [...new Set(r.hits.map((h) => sourceOf(h)[field]))]
+          .filter((id) => Number.isFinite(id))
+          .sort((x, y) => x - y),
+        truncated: r.truncated,
+      };
+    } else {
+      members = await referenceMembers(groupFilter);
+    }
+    const ids = members.ids;
+    const histNear =
+      firstHist !== null && t + GP_HIST_AHEAD_MS >= firstHist && ids.length > 0;
+    const histFilter = [
+      { terms: { [field]: ids } },
+      range('epoch', Math.max(GP_HIST_MIN_EPOCH_MS, tBefore - GP_HIST_LOOKBACK_MS), tBefore),
+    ];
+    const empty = { hits: [], truncated: false };
+    const [before, after, histBefore, histAfter] = await Promise.all([
       collapseNumeric(es, IDX.gp, {
-        filter: [groupFilter, range('epoch', undefined, t)],
+        filter: [groupFilter, range('epoch', undefined, tBefore)],
         field,
         sort: [{ epoch: 'desc' }],
         _source: GP_SOURCE,
@@ -395,15 +458,9 @@ export function createB12cSlices({
       collapseNumeric(es, IDX.gp, {
         filter: [
           groupFilter,
-          // an element set dated after now is a bad / future-dated epoch
-          // (gp max epoch was 2026-11-02 on 2026-11-01): never a candidate
           {
             range: {
-              epoch: {
-                gt: t,
-                lte: now() + GP_FUTURE_EPOCH_SLACK_MS,
-                format: 'epoch_millis',
-              },
+              epoch: { gt: t, lte: horizon, format: 'epoch_millis' },
             },
           },
         ],
@@ -411,28 +468,77 @@ export function createB12cSlices({
         sort: [{ epoch: 'asc' }],
         _source: GP_SOURCE,
       }),
+      histNear
+        ? collapseNumeric(es, IDX.gpHist, {
+            filter: histFilter,
+            field,
+            sort: [{ epoch: 'desc' }],
+            _source: GP_SOURCE,
+          })
+        : empty,
+      histNear
+        ? collapseNumeric(es, IDX.gpHist, {
+            filter: [
+              { terms: { [field]: ids } },
+              {
+                range: {
+                  epoch: {
+                    gt: t,
+                    lte: Math.min(horizon, t + GP_HIST_AHEAD_MS),
+                    format: 'epoch_millis',
+                  },
+                },
+              },
+            ],
+            field,
+            sort: [{ epoch: 'asc' }],
+            _source: GP_SOURCE,
+          })
+        : empty,
     ]);
-    const byId = (r) =>
-      new Map(r.hits.map((h) => [sourceOf(h)[field], sourceOf(h)]));
-    const b = byId(before);
-    const a = byId(after);
-    const ids = [...new Set(members.hits.map((h) => sourceOf(h)[field]))]
-      .filter((id) => Number.isFinite(id))
-      .sort((x, y) => x - y);
+    const byId = (r, tag) =>
+      new Map(
+        r.hits.map((h) => [sourceOf(h)[field], { doc: sourceOf(h), tag }]),
+      );
+    /** Per object the better of the recorder's and the archive's candidate. */
+    const merge = (gpMap, histMap, newer) => {
+      const out = new Map(gpMap);
+      for (const [id, h] of histMap) {
+        const g = out.get(id);
+        const he = dateMs(h.doc.epoch);
+        const ge = g ? dateMs(g.doc.epoch) : null;
+        if (!g || (he !== null && ge !== null && (newer ? he > ge : he < ge)))
+          out.set(id, h);
+      }
+      return out;
+    };
+    const b = merge(byId(before, 'gp'), byId(histBefore, 'gp-hist'), true);
+    const a = merge(byId(after, 'gp'), byId(histAfter, 'gp-hist'), false);
     let nBefore = 0;
     let nAfter = 0;
+    let nHist = 0;
     const chosen = [];
     for (const id of ids) {
-      const pick = pickNearestEpoch(t, b.get(id) ?? null, a.get(id) ?? null);
+      const pick = pickNearestEpoch(
+        t,
+        b.get(id)?.doc ?? null,
+        a.get(id)?.doc ?? null,
+      );
       if (!pick || !gpCsvRow(pick.doc)) continue;
-      chosen.push(pick);
+      const src = (pick.side === 'before' ? b : a).get(id);
+      chosen.push({ ...pick, hist: src?.tag === 'gp-hist' });
     }
     const kept = chosen.slice(0, maxRows);
-    for (const p of kept) p.side === 'before' ? (nBefore += 1) : (nAfter += 1);
+    for (const p of kept) {
+      p.side === 'before' ? (nBefore += 1) : (nAfter += 1);
+      if (p.hist) nHist += 1;
+    }
     const truncated =
       members.truncated ||
       before.truncated ||
       after.truncated ||
+      histBefore.truncated ||
+      histAfter.truncated ||
       chosen.length > maxRows;
     return {
       text: gpCsv(kept.map((p) => p.doc)),
@@ -441,6 +547,10 @@ export function createB12cSlices({
         'X-History-Rows': String(kept.length),
         'X-History-Gp-Epoch-Before': String(nBefore),
         'X-History-Gp-Epoch-After': String(nAfter),
+        'X-History-Gp-Membership': recordedByT
+          ? 'recorded-by-t'
+          : 'reference-ever-recorded',
+        'X-History-Gp-Archive-Rows': String(nHist),
         ...(truncated ? { 'X-History-Truncated': '1' } : {}),
       },
     };

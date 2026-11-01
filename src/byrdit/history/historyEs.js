@@ -42,6 +42,8 @@ export const HISTORY_INDICES = Object.freeze({
   // B12c: CelesTrak GP (recorded group 'active'), USGS quakes + the B13
   // archive, wind cycle ids (no grids), imagery availability metadata
   gp: 'gev-history-gp',
+  // t_fb39d790: Space-Track GP_HISTORY archive (no group column; snap in s)
+  gpHist: 'gev-history-gp-hist-*',
   quakes: 'gev-history-quakes,gev-history-quakes-hist-*',
   // t_a49a1f4a (2B, decision B): the live collector alone and the B13
   // archive alone, for the archive-only revised-later fallback

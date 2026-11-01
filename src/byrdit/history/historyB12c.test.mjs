@@ -2245,3 +2245,128 @@ test('every B12c ES request targets an allowlisted index or the auth endpoint', 
     assert.ok(allowed.has(c.path.slice(1, -8)), c.path);
   }
 });
+
+
+// ---------------------------------------------- t_fb39d790: gp + gp-hist
+// Space-Track GP_HISTORY archive: no group column, snap in SECONDS, epochs
+// from 2024-11-01. The recorder (gev-history-gp) started 2026-10-12.
+const histDoc = (id, epochMs, extra = {}) => ({
+  ...elset(id, epochMs, 0),
+  group: undefined,
+  snap: Math.floor(epochMs / 1000),
+  source: 'space-track-gp-history',
+  ...extra,
+});
+
+test('gp slice (gp-hist): a time before the recorder reads the archive; members = ever recorded in the group', async () => {
+  const P1 = Date.UTC(2026, 9, 12, 18);
+  const t = Date.UTC(2026, 2, 1, 12);
+  const docs = {
+    'gev-history-gp': [
+      elset(1, P1 - HOUR, P1),
+      elset(2, P1 - HOUR, P1),
+      elset(6, P1 - HOUR, P1, { group: 'other' }),
+    ],
+    'gev-history-gp-hist-2026': [
+      histDoc(1, t - 5 * HOUR),
+      histDoc(1, t - 30 * HOUR),
+      histDoc(2, t + 3 * HOUR),
+      histDoc(7, t - HOUR), // never in the group: not a member
+      histDoc(6, t - HOUR), // only in group "other": not a member
+    ],
+  };
+  const { api } = makeApi(docs);
+  const r = await call(api, slice(`feed=gp&t=${iso(t)}&group=active`));
+  assert.equal(r.status, 200);
+  assert.deepEqual(
+    parseGP(r.body).map((e) => [e.gp.NORAD_CAT_ID, e.gp.EPOCH]),
+    [
+      ['1', iso(t - 5 * HOUR).replace('Z', '')],
+      ['2', iso(t + 3 * HOUR).replace('Z', '')],
+    ],
+  );
+  assert.equal(r.headers['x-history-gp-membership'], 'reference-ever-recorded');
+  assert.equal(r.headers['x-history-gp-archive-rows'], '2');
+  assert.equal(r.headers['x-history-empty-reason'], undefined);
+  // recording start is the OLDER of the two stores
+  assert.equal(r.headers['x-history-recording-start'], iso(t - 30 * HOUR));
+});
+
+test('gp slice (gp-hist): archive and recorder compete per object by nearest epoch', async () => {
+  const P1 = Date.UTC(2026, 9, 12, 18);
+  const t = P1 + 2 * DAY;
+  const docs = {
+    'gev-history-gp': [
+      elset(1, t - 20 * HOUR, P1), // recorder older
+      elset(2, t - 2 * HOUR, P1), // recorder newer
+    ],
+    'gev-history-gp-hist-2026': [
+      histDoc(1, t - 3 * HOUR), // archive newer: wins
+      histDoc(2, t - 10 * HOUR), // archive older: loses
+    ],
+  };
+  const { api } = makeApi(docs, { now: t + 10 * DAY });
+  const r = await call(api, slice(`feed=gp&t=${iso(t)}&group=active`));
+  assert.deepEqual(
+    parseGP(r.body).map((e) => [e.gp.NORAD_CAT_ID, e.gp.EPOCH]),
+    [
+      ['1', iso(t - 3 * HOUR).replace('Z', '')],
+      ['2', iso(t - 2 * HOUR).replace('Z', '')],
+    ],
+  );
+  assert.equal(r.headers['x-history-gp-membership'], 'recorded-by-t');
+  assert.equal(r.headers['x-history-gp-archive-rows'], '1');
+});
+
+test('gp slice (gp-hist): a future-dated archive epoch is never used; bogus pre-2024 epochs are not coverage', async () => {
+  const P1 = NOW - 10 * DAY;
+  const t = NOW - 3 * DAY;
+  const docs = {
+    'gev-history-gp': [elset(1, t - HOUR, P1), elset(2, t - HOUR, P1)],
+    'gev-history-gp-hist-2026': [
+      histDoc(2, NOW + 30 * HOUR), // future-dated
+      histDoc(1, Date.UTC(1962, 0, 1)), // bogus
+    ],
+  };
+  const { api } = makeApi(docs);
+  const r = await call(api, slice(`feed=gp&t=${iso(t)}&group=active`));
+  const rows = parseGP(r.body);
+  assert.deepEqual(
+    rows.map((e) => [e.gp.NORAD_CAT_ID, e.gp.EPOCH]),
+    [
+      ['1', iso(t - HOUR).replace('Z', '')],
+      ['2', iso(t - HOUR).replace('Z', '')],
+    ],
+  );
+  assert.equal(r.headers['x-history-recording-start'], iso(P1));
+});
+
+test('gp slice (gp-hist): before BOTH stores -> header only + before_recording_start', async () => {
+  const docs = {
+    'gev-history-gp': [elset(1, NOW - DAY, NOW - DAY)],
+    'gev-history-gp-hist-2026': [histDoc(1, Date.UTC(2024, 10, 1, 1))],
+  };
+  const { api } = makeApi(docs);
+  const r = await call(
+    api,
+    slice(`feed=gp&t=${iso(Date.UTC(2024, 9, 1))}&group=active`),
+  );
+  assert.equal(r.status, 200);
+  assert.deepEqual(parseGP(r.body), []);
+  assert.equal(r.headers['x-history-empty-reason'], 'before_recording_start');
+  assert.equal(r.headers['x-history-recording-start'], iso(Date.UTC(2024, 10, 1, 1)));
+});
+
+test('gp slice (gp-hist): archive docs missing an element are skipped like recorder docs', async () => {
+  const P1 = Date.UTC(2026, 9, 12, 18);
+  const t = Date.UTC(2026, 2, 1, 12);
+  const docs = {
+    'gev-history-gp': [elset(1, P1, P1)],
+    'gev-history-gp-hist-2026': [
+      histDoc(1, t - HOUR, { mean_motion: undefined }),
+    ],
+  };
+  const { api } = makeApi(docs);
+  const r = await call(api, slice(`feed=gp&t=${iso(t)}&group=active`));
+  assert.deepEqual(parseGP(r.body), []);
+});
