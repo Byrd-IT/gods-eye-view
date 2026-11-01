@@ -149,3 +149,21 @@ test('satellites history: while the sets for a new time load, nothing is drawn f
   await p;
   assert.equal(state._points.get(25544).show, true);
 });
+
+test('satellites history: the followed satellite stays followed when its set exists at the new time (also while loading)', async () => {
+  const cleared = [];
+  const mk = make(() => csv(row(25544, '2025-03-01T12:00:00.000000', 10)));
+  const { state } = mk;
+  const h = createHistory({ state, parts: { tracking: { _clearTracking: (...a) => { cleared.push(a); state._trackedNorad = null; } } } });
+  state._trackedNorad = 25544;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const f = globalThis.fetch;
+  globalThis.fetch = async (u) => { await gate; return f(u); };
+  const p = h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  assert.equal(cleared.length, 0, 'not untracked while the answer is pending');
+  release();
+  await p;
+  assert.equal(cleared.length, 0, 'its set exists: still followed');
+  assert.equal(state._trackedNorad, 25544);
+});

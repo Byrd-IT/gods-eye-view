@@ -268,7 +268,7 @@ export function mountHistoryMenu({
       // a locked row in a gap (before its first release) is not LIVE: leave it
       // but the layer must not keep a newer release: show the oldest one
       if (locked && eff === null && sharedOn) {
-        const gapKey = `G${lastDetail.timeMs}`;
+        const gapKey = 'G'; // a release row in a gap shows its oldest release: once
         if (applied.get(def.id) !== gapKey) {
           applied.set(def.id, gapKey);
           try {

@@ -158,7 +158,9 @@ export function layerDriver(getDataManager, layerId) {
  * (a gap), never a wrong one. status(ms) names that gap for the menu.
  */
 export function weatherDriver(getClock) {
-  let wasPlaying = null; // the radar loop's state before the menu first moved it
+  // The radar loop's state before the menu first moved the clock. Only that
+  // state resumes on LIVE; a loop the user starts during history is not restored.
+  let wasPlaying = null;
   const clock = () => {
     try {
       return getClock() ?? null;
@@ -180,7 +182,7 @@ export function weatherDriver(getClock) {
         wasPlaying = null;
         const out = c.latest?.();
         // a radar loop the user had playing before history plays again
-        if (resume) Promise.resolve(out).then(() => c.play?.());
+        if (resume) Promise.resolve(out).then(() => c.play?.(), () => {});
         return out;
       }
       if (wasPlaying === null) wasPlaying = Boolean(c.getState?.().playing);

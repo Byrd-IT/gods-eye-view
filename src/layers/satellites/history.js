@@ -74,13 +74,15 @@ export function createHistory({ state: layerState, parts = null }) {
   }
 
   /** No element sets known for the time: draw nothing, never a wrong place. */
-  function hideAll() {
+  function hideAll({ untrack = true } = {}) {
     for (const [id, point] of layerState._points) {
       point.show = false;
       hidden().add(id);
     }
     syncPaths();
-    untrackIfHidden();
+    // while sets are still loading we do not know yet who has none: the
+    // satellite being followed stays followed until the answer says otherwise
+    if (untrack) untrackIfHidden();
     fetchedAt = NaN;
   }
 
@@ -164,7 +166,7 @@ export function createHistory({ state: layerState, parts = null }) {
           return { status: 'ok', reused: true };
         // the sets for this time are not here yet: draw nothing until they are,
         // never the live (or an older recorded) position at this time
-        hideAll();
+        hideAll({ untrack: false });
         try {
           return await load(ms, mine);
         } catch {
