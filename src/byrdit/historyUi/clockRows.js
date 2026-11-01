@@ -73,7 +73,7 @@ export function waybackDriver(win) {
       const list = s.catalog().map((e) => parseDate(e.date));
       let idx = -1;
       for (let i = 0; i < list.length; i++) if (list[i] <= ms) idx = i;
-      if (idx < 0) return;
+      if (idx < 0) idx = 0; // before the first release: the oldest one (the menu says so)
       if (before === null) before = s.state?.().index ?? idx;
       s.setIndex(idx);
     },
@@ -102,7 +102,7 @@ export function naipDriver(win) {
       }
       let year = null;
       for (const y of st.ticks) if (midYear(y) <= ms) year = y;
-      if (year === null) return;
+      if (year === null) year = st.ticks[0]; // before the first: the oldest
       if (before === null) before = st.year ?? year;
       s.setYear(year);
     },
@@ -158,6 +158,7 @@ export function layerDriver(getDataManager, layerId) {
  * (a gap), never a wrong one. status(ms) names that gap for the menu.
  */
 export function weatherDriver(getClock) {
+  let wasPlaying = null; // the radar loop's state before the menu first moved it
   const clock = () => {
     try {
       return getClock() ?? null;
@@ -174,7 +175,15 @@ export function weatherDriver(getClock) {
     apply(ms) {
       const c = clock();
       if (!c) return;
-      if (!Number.isFinite(ms)) return c.latest?.();
+      if (!Number.isFinite(ms)) {
+        const resume = wasPlaying;
+        wasPlaying = null;
+        const out = c.latest?.();
+        // a radar loop the user had playing before history plays again
+        if (resume) Promise.resolve(out).then(() => c.play?.());
+        return out;
+      }
+      if (wasPlaying === null) wasPlaying = Boolean(c.getState?.().playing);
       c.pause?.(); // a playing radar loop would run past the history time
       return c.setTarget(new Date(ms).toISOString());
     },

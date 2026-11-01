@@ -45,3 +45,13 @@ test('wayback / naip drivers pick the release at or before the time', () => {
   assert.deepEqual(picked, [['wb', 1], ['wb', 2], ['naip', 2016], ['naip', 2022]]);
   assert.equal(waybackDriver({}).available(), false);
 });
+
+test('weather driver: a radar loop that was playing resumes on LIVE and is paused for history', async () => {
+  const calls = [];
+  const clock = { getState: () => ({ playing: true, products: [] }), getTimeline: () => [], pause: () => calls.push('pause'), setTarget: () => calls.push('target'), latest: () => { calls.push('latest'); return Promise.resolve(true); }, play: () => calls.push('play') };
+  const d = weatherDriver(() => clock);
+  d.apply(Date.parse('2026-10-01T00:00:00Z'));
+  d.apply(null);
+  await new Promise((r) => setTimeout(r, 1));
+  assert.deepEqual(calls, ['pause', 'target', 'latest', 'play']);
+});

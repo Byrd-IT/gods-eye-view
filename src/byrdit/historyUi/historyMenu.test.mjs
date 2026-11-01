@@ -155,12 +155,14 @@ test('a locked row asked for a time before its coverage shows a "No data before"
   assert.equal(part('flights', 'gev-hm-note').textContent, '');
 });
 
-test('a locked release row before its first release is a gap, not LIVE', () => {
-  const wb = { available: () => true, releases: () => [NOW - 300 * D, NOW - 10 * D], apply() { throw new Error('must not be applied in a gap'); } };
+test('a locked release row before its first release is a gap, not LIVE; the layer is told the time (it shows its oldest)', () => {
+  const gap = [];
+  const wb = { available: () => true, releases: () => [NOW - 300 * D, NOW - 10 * D], apply: (ms) => gap.push(ms) };
   const { menu, part } = setup({ drivers: new Map([['wayback', wb]]) });
   menu.onHistory({ active: true, timeMs: NOW - 400 * D, playing: false, rate: 1 });
   assert.match(part('wayback', 'gev-hm-note').textContent, /^No data before /);
   assert.equal(part('wayback', 'gev-hm-time').textContent, '—');
+  assert.deepEqual(gap, [NOW - 400 * D]);
 });
 
 test('GhostMaps row hears a rate change at the same shared time', () => {

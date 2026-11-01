@@ -113,7 +113,7 @@ test('satellites history: a satellite with no elset cannot be tracked and a trac
   const cleared = [];
   const mk = make(() => csv(row(25544, '2025-03-01T12:00:00.000000', 10)));
   const { state } = mk;
-  const h = createHistory({ state, parts: { tracking: { _clearTracking: (...a) => { cleared.push(a); } } } });
+  const h = createHistory({ state, parts: { tracking: { _clearTracking: (...a) => { cleared.push(a); state._trackedNorad = null; } } } });
   state._trackedNorad = 99999; // has no recorded set at that time
   await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
   assert.equal(cleared.length, 1, 'the hidden tracked satellite is untracked');
@@ -135,4 +135,17 @@ test('satellites history: the orbit path of a satellite that is not drawn is hid
   assert.equal(state._orbitPaths.get(25544).primitive.show, true);
   await h.methods.setHistoryTime(null);
   assert.equal(state._orbitPaths.get(99999).primitive.show, true);
+});
+
+test('satellites history: while the sets for a new time load, nothing is drawn from the old ones', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const { state, h } = make(() => csv(row(25544, '2025-03-01T12:00:00.000000', 10)));
+  const f = globalThis.fetch;
+  globalThis.fetch = async (u) => { await gate; return f(u); };
+  const p = h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  for (const pt of state._points.values()) assert.equal(pt.show, false, 'hidden while loading');
+  release();
+  await p;
+  assert.equal(state._points.get(25544).show, true);
 });

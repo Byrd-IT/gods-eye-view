@@ -266,7 +266,19 @@ export function mountHistoryMenu({
       const eff = clocks.effective(def.id);
       const locked = clocks.isLocked(def.id);
       // a locked row in a gap (before its first release) is not LIVE: leave it
-      if (locked && eff === null && sharedOn) continue;
+      // but the layer must not keep a newer release: show the oldest one
+      if (locked && eff === null && sharedOn) {
+        const gapKey = `G${lastDetail.timeMs}`;
+        if (applied.get(def.id) !== gapKey) {
+          applied.set(def.id, gapKey);
+          try {
+            driver.apply(lastDetail.timeMs);
+          } catch {
+            /* the layer keeps its view */
+          }
+        }
+        continue;
+      }
       // a locked row also follows the shared rate / error (GhostMaps)
       const key = `${locked ? 'L' : 'O'}${eff}${locked && driver.usesDetail ? `|${lastDetail.rate ?? ''}|${lastDetail.error ?? ''}` : ''}`;
       // the shared playing state must keep flowing to a locked GhostMaps row

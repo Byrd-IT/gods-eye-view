@@ -505,3 +505,14 @@ test('own time: moving one unlocked row while the group plays redraws only that 
   await driver.settle();
   assert.deepEqual(dm.calls, ['military'], 'only the moved row refreshes; flights keeps playing');
 });
+
+test('own time: one layer goes LIVE on its own while the others stay in history', async () => {
+  const { clock, dm, driver } = setup();
+  driver.onHistory({ active: true, timeMs: T, playing: false, layerTimes: { military: T - 3_600_000 } });
+  await clock.run(RELEASE_DEBOUNCE_MS + 1);
+  await driver.settle();
+  dm.calls.length = 0;
+  driver.onHistory({ active: true, timeMs: T, playing: false, layerTimes: { military: null } });
+  await driver.settle();
+  assert.deepEqual(dm.calls, ['military'], 'only the layer that went LIVE is reset and re-asked live');
+});

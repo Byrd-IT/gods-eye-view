@@ -162,6 +162,9 @@ export function createHistory({ state: layerState, parts = null }) {
         layerState._lastPropagation = 0;
         if (Number.isFinite(fetchedAt) && Math.abs(ms - fetchedAt) < ELSET_REUSE_MS)
           return { status: 'ok', reused: true };
+        // the sets for this time are not here yet: draw nothing until they are,
+        // never the live (or an older recorded) position at this time
+        hideAll();
         try {
           return await load(ms, mine);
         } catch {
