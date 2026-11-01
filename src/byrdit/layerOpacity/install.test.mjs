@@ -66,15 +66,34 @@ test('items added in a later update take the current opacity', async () => {
   assert.equal(col.items[0].color.alpha, 0.5);
   h.destroy();
 });
-test('layer with setOpacity hook uses it, not the generic writer', async () => {
+test('setOpacity hook is called with the slider value and the generic writer also scales owned collections', async () => {
   const w = world();
   const seen = [];
-  w.add('s', { setOpacity: (v) => seen.push(v), update: async () => {} });
+  const col = new BillboardCollection(); col.add();
+  w.add('s', { setOpacity: (v) => seen.push(v), enable: async (v) => { v.scene.primitives.add(col); } });
   const model = createOpacityModel();
   const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
+  await w.dataManager.layers.get('s').module.enable(w.viewer);
   model.set('s', 0.25);
+  assert.equal(col.items[0].color.alpha, 0.25);
   model.set('s', 1);
   assert.deepEqual(seen, [0.25, 1]);
+  assert.equal(col.items[0].color.alpha, 1);
+  h.destroy();
+});
+test('an owned collection removed from the scene without being destroyed is dropped', async () => {
+  const w = world();
+  const col = new BillboardCollection(); col.add();
+  w.add('r', { enable: async (v) => { v.scene.primitives.add(col); } });
+  const model = createOpacityModel();
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
+  await w.dataManager.layers.get('r').module.enable(w.viewer);
+  model.set('r', 0.5);
+  assert.equal(col.items[0].color.alpha, 0.5);
+  w.viewer.scene.primitives.items.length = 0; // removed, not destroyed
+  model.set('r', 0.3);
+  assert.equal(col.items[0].color.alpha, 0.5, 'no longer rewritten');
+  assert.equal(h.ownedCount('r'), 0);
   h.destroy();
 });
 test('overlapping calls: a layer left at 100% is never dimmed by another layer slider', async () => {

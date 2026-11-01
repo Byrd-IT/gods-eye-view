@@ -69,7 +69,16 @@ export function parseSourceKey(stack) {
   return sawSource ? NON_LAYER : null;
 }
 
-const sourceKey = () => parseSourceKey(new Error().stack);
+const sourceKey = () => {
+  // V8 keeps 10 frames by default; deep helpers could cut the layer's own frame.
+  const limit = Error.stackTraceLimit;
+  Error.stackTraceLimit = 50;
+  try {
+    return parseSourceKey(new Error().stack);
+  } finally {
+    Error.stackTraceLimit = limit;
+  }
+};
 
 function snapshot(viewer) {
   const scene = viewer.scene;
@@ -138,8 +147,16 @@ export function installLayerOpacity({
     // writer its collections, data sources and imagery.
     const o = owned.get(id);
     if (o) {
+      // Items removed from the scene without being destroyed are dropped too.
+      const live = snapshot(viewer);
+      const inScene = new Set([
+        ...live.prims,
+        ...live.sources,
+        ...live.imagery,
+      ]);
       for (const set of [o.prims, o.sources, o.imagery])
-        for (const item of set) if (item?.isDestroyed?.()) set.delete(item);
+        for (const item of set)
+          if (item?.isDestroyed?.() || !inScene.has(item)) set.delete(item);
       // An item with several candidate owners takes the highest of their values.
       const groups = new Map();
       const put = (kind, item) => {
