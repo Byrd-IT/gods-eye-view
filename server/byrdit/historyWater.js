@@ -62,9 +62,11 @@ export function createWaterHistoryReader({
   let running = 0;
   const waiting = [];
   const release = () => {
-    running -= 1;
+    // hand the slot straight to the next waiter, so a new question that
+    // arrives in between cannot take it (a 4th would then be out)
     const next = waiting.shift();
     if (next) next();
+    else running -= 1;
   };
   async function turn() {
     if (running < WATER_CONCURRENCY) {
@@ -79,7 +81,6 @@ export function createWaterHistoryReader({
       throw error;
     }
     await new Promise((resolve) => waiting.push(resolve));
-    running += 1;
   }
   return {
     /** Oldest instant USGS answers for, at the clock `nowMs`. */

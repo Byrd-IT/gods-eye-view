@@ -693,7 +693,10 @@ test('busy: a water slice waits on USGS, not on ES, so it takes no ES slot (t_7a
     return fake.fetchImpl(url, init);
   };
   const waterReader = {
-    read: async () => ({ type: 'FeatureCollection', features: [] }),
+    earliestMs: () => 0,
+    maxWindowMs: 6 * 3_600_000,
+    stepMs: 60_000,
+    read: async () => ({ observations: [], truncated: false }),
   };
   const api = createHistoryApi({
     env: ENV,
@@ -710,7 +713,7 @@ test('busy: a water slice waits on USGS, not on ES, so it takes no ES slot (t_7a
     api,
     `/api/history/slice?feed=water&t=${T}&bbox=-100,30,-96,34`,
   );
-  assert.notEqual(water.status, 429);
+  assert.equal(water.status, 200);
   const fifth = await call(api, path);
   assert.equal(fifth.status, 429);
   release();

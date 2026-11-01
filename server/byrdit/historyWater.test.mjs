@@ -225,3 +225,21 @@ test('reader: at most 3 questions are out at once; the rest wait their turn', as
   assert.equal(settled, 6);
   assert.equal(peak, 3);
 });
+
+test('reader: the 68th question is refused (3 running + 64 waiting)', async () => {
+  const fetch = () => new Promise(() => {});
+  const reader = createWaterHistoryReader({ env: {}, fetch, now: () => NOW });
+  const ask = (i) =>
+    reader.read({
+      t: NOW - (i + 1) * 3_600_000,
+      windowMs: HOUR,
+      limit: 5,
+      bbox: BOX,
+    });
+  for (let i = 0; i < 67; i += 1) ask(i).catch(() => {});
+  await new Promise((r) => setTimeout(r, 30));
+  await assert.rejects(
+    ask(67),
+    (e) => e.code === 'BACKEND' && !/https?:/.test(e.message),
+  );
+});
