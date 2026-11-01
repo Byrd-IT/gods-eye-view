@@ -1075,14 +1075,15 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // drawn/compare/waybackOff speaking rule adds 151 characters (36468 -> 36619).
   // waybackStillOn and starting speaking rule adds 115 characters (36619 -> 36734).
   // Drone Flight Plan voice adds control_droneplan (+3754: 36734 -> 40488).
-  // Orbit height bounds match the planner cap (+1: 40488 -> 40520).
+  // Orbit height bounds match the planner cap (+1: 40488 -> 40489); the
+  // air-quality and gnss-integrity history feed ids add 31 (t_7d3de14d).
   // Existing tool shapes are unchanged apart from that cap; the new tool is appended.
   assert.equal(block.length, 40520, 'serialized tool schema length drifted');
   // Description-only edits of tool text are allowed. Re-pin both the length
   // (with a changelog line above) and this hash when they land.
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '1611a846a362a9f87abb182ed2fd8d8691ebdd9fc97c1f41ba979eb1b62ef899',
+    '087a3f24ce9f08ef34179f75a9f31135e4be50eb08fba91bd69df99c79683b50',
     'the first-run missions must ride EXISTING tools: no schema-shape edits; description-only edits are allowed but must re-pin this hash and the length above',
   );
   const instructions = fs.readFileSync(
