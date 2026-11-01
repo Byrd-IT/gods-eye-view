@@ -684,6 +684,39 @@ test('busy: more than MAX_IN_FLIGHT concurrent store requests -> 429', async () 
   for (const r of await Promise.all(pending)) assert.equal(r.status, 200);
 });
 
+test('busy: a water slice waits on USGS, not on ES, so it takes no ES slot (t_7a4c6a57)', async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const fake = createFakeEs({});
+  const slow = async (url, init) => {
+    await gate;
+    return fake.fetchImpl(url, init);
+  };
+  const waterReader = {
+    read: async () => ({ type: 'FeatureCollection', features: [] }),
+  };
+  const api = createHistoryApi({
+    env: ENV,
+    fetchImpl: slow,
+    now: () => NOW,
+    log: () => {},
+    allow: () => true,
+    waterReader,
+  });
+  const path = `/api/history/snapshots?feed=military&around=${T}`;
+  const pending = Array.from({ length: 4 }, () => call(api, path));
+  await new Promise((r) => setImmediate(r));
+  const water = await call(
+    api,
+    `/api/history/slice?feed=water&t=${T}&bbox=-100,30,-96,34`,
+  );
+  assert.notEqual(water.status, 429);
+  const fifth = await call(api, path);
+  assert.equal(fifth.status, 429);
+  release();
+  await Promise.all(pending);
+});
+
 // ------------------------------------------------------- end to end
 const S = NOW - 3_600_000; // military poll snap
 const militaryData = {

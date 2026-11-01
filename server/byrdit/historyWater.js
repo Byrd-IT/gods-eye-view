@@ -22,6 +22,16 @@ import {
  * H8 matrix allows a single box.
  */
 export const DEFAULT_WATER_PER_HOUR = 600;
+/**
+ * USGS answers a 16 square degree tile in about 9 to 12 s (730 KB), and a
+ * view is 9 to 12 tiles. The default 20 s timeout of the live store cut off
+ * slow tiles, so the wait is longer, and at most WATER_CONCURRENCY questions
+ * are out at once; the others wait their turn here (never a "busy" answer,
+ * which would show the live gauges under a history clock).
+ */
+export const WATER_TIMEOUT_MS = 45_000;
+export const WATER_CONCURRENCY = 3;
+export const WATER_MAX_QUEUED = 64;
 
 /**
  * @param {object} [options]
@@ -45,9 +55,32 @@ export function createWaterHistoryReader({
   };
   const store = createLiveApiStore({
     adapters: { water: tuned },
+    timeoutMs: WATER_TIMEOUT_MS,
     ...(fetchImpl ? { fetch: fetchImpl } : {}),
     now,
   });
+  let running = 0;
+  const waiting = [];
+  const release = () => {
+    running -= 1;
+    const next = waiting.shift();
+    if (next) next();
+  };
+  async function turn() {
+    if (running < WATER_CONCURRENCY) {
+      running += 1;
+      return;
+    }
+    if (waiting.length >= WATER_MAX_QUEUED) {
+      const error = new Error(
+        'water history source: too many questions waiting',
+      );
+      error.code = 'BACKEND';
+      throw error;
+    }
+    await new Promise((resolve) => waiting.push(resolve));
+    running += 1;
+  }
   return {
     /** Oldest instant USGS answers for, at the clock `nowMs`. */
     earliestMs: (nowMs) => tuned.earliestMs(nowMs),
@@ -58,8 +91,13 @@ export function createWaterHistoryReader({
     /**
      * @returns {Promise<{observations: Array<{t:number,key:string,lat:number,lon:number,data:object}>, truncated:boolean}>}
      */
-    read({ t, bbox, windowMs, limit }) {
-      return store.slice('water', { t, bbox, windowMs, limit });
+    async read({ t, bbox, windowMs, limit }) {
+      await turn();
+      try {
+        return await store.slice('water', { t, bbox, windowMs, limit });
+      } finally {
+        release();
+      }
     },
     close: () => store.close(),
   };

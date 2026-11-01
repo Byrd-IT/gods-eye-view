@@ -189,3 +189,39 @@ test('reader: synthetic secrets in a failing fetch never reach the error', async
     );
   }
 });
+
+test('reader: at most 3 questions are out at once; the rest wait their turn', async () => {
+  let out = 0;
+  let peak = 0;
+  const release = [];
+  const fetch = async () => {
+    out += 1;
+    peak = Math.max(peak, out);
+    await new Promise((r) => release.push(r));
+    out -= 1;
+    return new Response(JSON.stringify({ value: { timeSeries: [] } }), {
+      status: 200,
+    });
+  };
+  const reader = createWaterHistoryReader({ env: {}, fetch, now: () => NOW });
+  let settled = 0;
+  const asks = [0, 1, 2, 3, 4, 5].map((i) =>
+    reader
+      .read({
+        t: NOW - (i + 1) * 3_600_000,
+        windowMs: HOUR,
+        limit: 5,
+        bbox: BOX,
+      })
+      .then(() => (settled += 1)),
+  );
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(out, 3);
+  for (let spins = 0; spins < 400 && settled < 6; spins += 1) {
+    release.splice(0).forEach((r) => r());
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  await Promise.all(asks);
+  assert.equal(settled, 6);
+  assert.equal(peak, 3);
+});

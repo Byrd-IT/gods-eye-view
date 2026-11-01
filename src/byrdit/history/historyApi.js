@@ -264,9 +264,13 @@ export function createHistoryApi({
     const key = cacheable ? cacheKey(route, params) : null;
     const hit = key ? cache.get(key) : null;
     if (hit) return sendCached(req, res, hit, 'HIT');
-    if (inFlight >= MAX_IN_FLIGHT)
+    // t_7a4c6a57: a water slice waits on USGS, not on Elasticsearch, and is
+    // queued by its own reader (server/byrdit/historyWater.js), so it does
+    // not take one of the ES-backed slots (a view asks for 9 to 12 tiles at once)
+    const external = route === 'slice' && params.feed === 'water';
+    if (!external && inFlight >= MAX_IN_FLIGHT)
       return send(res, 429, { error: 'busy' }, { 'Retry-After': '1' });
-    inFlight += 1;
+    if (!external) inFlight += 1;
     try {
       const out =
         route === 'slice' || route === 'track'
@@ -294,7 +298,7 @@ export function createHistoryApi({
       );
       return send(res, 503, { error: 'history_unavailable' });
     } finally {
-      inFlight -= 1;
+      if (!external) inFlight -= 1;
     }
   };
 }
