@@ -162,6 +162,7 @@ const closeSets = (a, b, tol) =>
 /** Differences between a native plan and its reference; [] when it matches. */
 export function compareToReference(native, reference, tol = TOLERANCE) {
   const problems = [];
+  if (!(reference.waypointCount > 0)) return ['reference has no waypoints'];
   const relCount =
     Math.abs(native.waypointCount - reference.waypointCount) /
     reference.waypointCount;
@@ -173,9 +174,13 @@ export function compareToReference(native, reference, tol = TOLERANCE) {
     problems.push(`heights ${native.heights} vs ${reference.heights}`);
   if (!closeSets(native.pitches, reference.pitches, tol.pitchDeg))
     problems.push(`pitches ${native.pitches} vs ${reference.pitches}`);
-  if (Math.abs(native.meanRadiusM - reference.meanRadiusM) > tol.radiusM)
+  // Grid plans have no orbit target, so no radius to compare.
+  if (
+    native.meanRadiusM != null &&
+    Math.abs(native.meanRadiusM - reference.meanRadiusM) > tol.radiusM
+  )
     problems.push(
-      `radius ${native.meanRadiusM?.toFixed(1)} vs ${reference.meanRadiusM.toFixed(1)}`,
+      `radius ${native.meanRadiusM.toFixed(1)} vs ${reference.meanRadiusM.toFixed(1)}`,
     );
   return problems;
 }
@@ -209,13 +214,18 @@ const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  * Write the items to a store. Idempotent: an existing plan of the same name
  * whose document is unchanged is left alone; a changed one gets a new version;
  * nothing else in the library is read for writing or touched.
- * @returns {{name: string, action: 'created'|'updated'|'unchanged', id?: string}[]}
+ * @returns {{name: string, action: 'created'|'updated'|'unchanged'|'skipped (in trash)', id?: string}[]}
  */
 export function seedLibrary(store, user, items, { dryRun = false } = {}) {
   const existing = store.list(user, { purgeOld: false });
+  const trashed = new Set(
+    store.list(user, { trash: true, purgeOld: false }).map((p) => p.name),
+  );
   return items.map(({ details, plan }) => {
     if (!isSeedName(details.name)) throw new Error('refusing a non-seed name');
     const found = existing.find((p) => p.name === details.name);
+    if (!found && trashed.has(details.name))
+      return { name: details.name, action: 'skipped (in trash)' };
     if (!found) {
       if (dryRun) return { name: details.name, action: 'created' };
       const made = store.create(user, details, plan);
@@ -227,7 +237,12 @@ export function seedLibrary(store, user, items, { dryRun = false } = {}) {
       found.site === details.site &&
       found.notes === details.notes;
     if (same) return { name: details.name, action: 'unchanged', id: found.id };
-    if (!dryRun) store.save(user, found.id, plan, details);
+    if (!dryRun)
+      store.save(user, found.id, plan, {
+        name: details.name,
+        site: details.site,
+        notes: details.notes,
+      });
     return { name: details.name, action: 'updated', id: found.id };
   });
 }

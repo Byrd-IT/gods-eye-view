@@ -51,6 +51,19 @@ try {
   console.error('the spec file could not be read as JSON');
   process.exit(2);
 }
+if (
+  !Array.isArray(spec?.plans) ||
+  !spec.plans.length ||
+  !Number.isFinite(spec.center?.lat) ||
+  !Number.isFinite(spec.center?.lon) ||
+  !Number.isFinite(spec.takeoff?.lat) ||
+  !Number.isFinite(spec.takeoff?.lon)
+) {
+  console.error(
+    'the spec needs center {lat, lon}, takeoff {lat, lon} and plans[]',
+  );
+  process.exit(2);
+}
 const root = opt.root ?? defaultRoot();
 
 const failures = [];

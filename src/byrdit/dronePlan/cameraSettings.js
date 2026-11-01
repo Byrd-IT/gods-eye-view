@@ -53,14 +53,12 @@ export function cameraPresetOrDefault(id) {
 }
 
 /**
- * The shutter denominator to show and use for a preset: the plan's own when it
- * is already fast enough, else the slowest the preset allows.
+ * The shutter denominator to show: the plan's own (what the blur limit used),
+ * else the preset's minimum when the plan has none.
  */
 export function shutterForPreset(preset, shutterDenominator) {
   const n = Number(shutterDenominator);
-  return Number.isFinite(n) && n >= preset.minShutterDenominator
-    ? n
-    : preset.minShutterDenominator;
+  return Number.isFinite(n) && n > 0 ? n : preset.minShutterDenominator;
 }
 
 /** The nearest allowed shutter value at or above `n` (for the select list). */

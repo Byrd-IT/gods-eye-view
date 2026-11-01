@@ -2852,7 +2852,7 @@ test('the camera settings checklist shows in the panel, follows its preset and f
     'Before launch: take a test photo and check it is 8192 x 6144',
   ]);
   pick(w, 'Shutter speed', '250');
-  assert.equal(list()[1], 'Shutter: 1/500 s or faster', 'never slower than the preset allows');
+  assert.equal(list()[1], 'Shutter: 1/250 s or faster', 'the checklist shows the shutter the plan assumes');
   pick(w, 'Camera settings preset', 'test-12mp');
   assert.equal(w.control('Shutter speed').value, '500', 'the preset feeds the blur shutter');
   assert.equal(list()[0], 'Photo size: 12 MP, 4:3 (4096 x 3072)');

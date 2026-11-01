@@ -1523,7 +1523,10 @@ export function initDronePlan({
       listCameraPresets().map((p) => [p.id, cameraPresetName(p.id)]),
       t('Camera settings preset'),
     );
+    const outerHost = host;
+    host = ui.cameraBlock;
     field(t('Camera settings preset'), ui.cameraPreset, { value: false });
+    host = outerHost;
     ui.cameraList = el(doc, 'ul', ui.cameraBlock, {
       cls: 'gev-dp-camera-list',
       attrs: { 'data-role': 'camera-checklist' },
@@ -1583,7 +1586,7 @@ export function initDronePlan({
       t('Height above ground'),
       ui.agl,
     ));
-    ui.front = slider(t('Front overlap'), 50, 98, 1);
+    ui.front = slider(t('Front overlap'), 50, 98, 0.5);
     ({ out: ui.frontOut } = field(t('Front overlap'), ui.front));
     ui.side = slider(t('Side overlap'), 40, 95, 1);
     ({ out: ui.sideOut } = field(t('Side overlap'), ui.side));
@@ -2174,6 +2177,7 @@ export function initDronePlan({
       schedule();
     });
     ui.shutter.addEventListener('change', () => {
+      // The checklist shows this value, so it and the blur limit agree.
       o.shutterDenominator = Number(ui.shutter.value);
       syncControls();
       schedule();
@@ -2183,7 +2187,7 @@ export function initDronePlan({
       o.cameraPresetId = cam.id;
       // The preset's shutter feeds the blur limit: never slower than it asks.
       o.shutterDenominator = allowedShutter(
-        shutterForPreset(cam, o.shutterDenominator),
+        Math.max(cam.minShutterDenominator, o.shutterDenominator),
       );
       syncControls();
       schedule();

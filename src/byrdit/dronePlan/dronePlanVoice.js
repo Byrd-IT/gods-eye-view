@@ -411,7 +411,7 @@ function readOptions(patch = {}) {
     next.aglM = patch.aglM;
   }
   if (patch.frontOverlap != null) {
-    if (!finite(patch.frontOverlap, 50, 95))
+    if (!finite(patch.frontOverlap, 50, 98))
       return { ok: false, error: OUT_OF_RANGE };
     next.frontOverlap = patch.frontOverlap;
   }
