@@ -10,14 +10,23 @@
  * ambiguous object may stay brighter than its real owner's slider says; it
  * never gets dimmer than any candidate owner asked.
  *
- * To keep the ambiguous case rare, every add() on the scene collections is
- * attributed at the moment it happens: the call stack names the source
- * directory (src/layers/flights/...), a directory is tied to a layer the first
- * time an add happens while exactly ONE layer call is in flight, and from then
- * on an add from that directory belongs to that layer alone, overlap or not.
+ * To keep the ambiguous case rare (dev server only: it needs unbundled
+ * /src/ stack frames; a production bundle falls back to the rule above),
+ * every add() on the scene collections is attributed at the moment it happens
+ * from the call stack:
+ *   - a stack with /src/ frames but none inside /src/layers/<name>/ was made
+ *     by non-layer code (annotations, file import, drone plan preview, basemap,
+ *     history outlines ...): it belongs to NO layer and is never touched;
+ *   - a layers/<name> directory is tied to a layer the first time an add from
+ *     it happens while exactly ONE layer call is in flight; later overlapped
+ *     adds from that directory go to that layer alone, but only while every
+ *     other layer in flight has also learned a directory of its own (else the
+ *     add stays a candidate set, because the other layer might share it).
  *
- * A layer that can do better supplies `setOpacity(fraction)` (used instead of
- * the generic writer for that layer).
+ * A layer's `setOpacity(fraction)` hook runs IN ADDITION to the generic
+ * writer (they cover different things: a hook its own shaders and uniforms,
+ * the writer colours, entities and imagery). A hook must therefore not scale
+ * anything the generic writer also scales, or the layer would be dimmed twice.
  *
  * Nothing runs for a layer at 100 %: no writes, no timer work.
  */
@@ -41,15 +50,26 @@ function listOf(collection) {
   return out;
 }
 
-/** `layers/flights` for a frame inside /src/layers/flights/..., else null. */
-function sourceKey() {
-  for (const line of String(new Error().stack ?? '').split('\n')) {
+/** Marks an add made by code that is not a data layer. */
+export const NON_LAYER = Symbol('non-layer');
+
+/**
+ * Where did this stack come from? `layers/flights` for the first frame inside
+ * /src/layers/flights/, NON_LAYER when the stack has /src/ frames but none in
+ * /src/layers/, null when it has no /src/ frames at all (production bundle).
+ */
+export function parseSourceKey(stack) {
+  let sawSource = false;
+  for (const line of String(stack ?? '').split('\n')) {
     if (line.includes('/layerOpacity/')) continue;
-    const m = /\/src\/([^/:?\s]+\/[^/:?\s]+)\//.exec(line);
-    if (m) return m[1];
+    const m = /\/src\/([^/:?\s]+)\/([^/:?\s]+)\//.exec(line);
+    if (m || line.includes('/src/')) sawSource = true;
+    if (m && m[1] === 'layers') return `layers/${m[2]}`;
   }
-  return null;
+  return sawSource ? NON_LAYER : null;
 }
+
+const sourceKey = () => parseSourceKey(new Error().stack);
 
 function snapshot(viewer) {
   const scene = viewer.scene;
@@ -69,6 +89,7 @@ export function installLayerOpacity({
   model,
   onApplied,
   sourceKeyOf = sourceKey,
+  tickMs = TICK_MS,
 }) {
   /** @type {Map<string, {prims:Set, sources:Set, imagery:Set}>} */
   const owned = new Map();
@@ -81,6 +102,8 @@ export function installLayerOpacity({
   const attributed = new WeakMap();
   /** source directory -> the one layer id that creates objects from it (null = shared) */
   const keyOwner = new Map();
+  /** layer ids that own a learned directory */
+  const learned = new Set();
   /** @type {Set<{ids:Set<string>}>} */
   const active = new Set();
   const dirty = new Set();
@@ -152,9 +175,9 @@ export function installLayerOpacity({
       for (const ds of g.sources)
         if (ds?.entities?.values && (force || stale.has(ds)))
           work.push([ds, v]);
+    if (!work.length) return; // a tick with nothing new must not cancel a running pass
     const prior = jobs.get(id);
     if (prior) prior.cancelled = true;
-    if (!work.length) return;
     const job = { cancelled: false };
     jobs.set(id, job);
     let at = 0;
@@ -195,18 +218,27 @@ export function installLayerOpacity({
   function attribute(item) {
     if (!item || typeof item !== 'object' || active.size === 0) return;
     const key = sourceKeyOf();
+    if (key === NON_LAYER) {
+      attributed.set(item, new Set()); // not made by a layer: owned by none
+      return;
+    }
     const live = [...active].map((c) => c.id);
     let ids;
     if (live.length === 1) {
       if (key) {
         const cur = keyOwner.get(key);
-        if (cur === undefined) keyOwner.set(key, live[0]);
-        else if (cur !== live[0]) keyOwner.set(key, null);
+        if (cur === undefined) {
+          keyOwner.set(key, live[0]);
+          learned.add(live[0]);
+        } else if (cur !== live[0]) keyOwner.set(key, null);
       }
       ids = new Set(live);
     } else {
       const known = key ? keyOwner.get(key) : undefined;
-      ids = known && live.includes(known) ? new Set([known]) : new Set(live);
+      if (known && live.includes(known)) {
+        const unsure = live.filter((id) => id !== known && !learned.has(id));
+        ids = new Set(unsure.length ? [known, ...unsure] : [known]);
+      } else ids = new Set(live);
     }
     attributed.set(item, ids);
   }
@@ -333,7 +365,7 @@ export function installLayerOpacity({
       if (model.get(id) < 1 && typeof entry.module?.setOpacity === 'function')
         dirty.add(id);
     flush();
-  }, TICK_MS);
+  }, tickMs);
   timer.unref?.();
 
   return {

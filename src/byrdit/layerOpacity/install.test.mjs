@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { installLayerOpacity } from './install.js';
+import { installLayerOpacity, NON_LAYER, parseSourceKey } from './install.js';
 import { createOpacityModel } from './opacityModel.js';
 
 class Color {
@@ -37,7 +37,7 @@ test('objects added during enable are owned and follow the slider', async () => 
   w.add('a', { enable: async (v) => { col = new BillboardCollection(); col.add(); v.scene.primitives.items.push(col); } });
   w.add('b', { enable: async () => {} });
   const model = createOpacityModel({ ids: ['a', 'b'] });
-  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
   await w.dataManager.layers.get('a').module.enable(w.viewer);
   assert.equal(h.ownedCount('a'), 1);
   assert.equal(h.ownedCount('b'), 0);
@@ -58,7 +58,7 @@ test('items added in a later update take the current opacity', async () => {
     update: async () => { col.add(); },
   });
   const model = createOpacityModel();
-  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
   const m = w.dataManager.layers.get('a').module;
   await m.enable(w.viewer);
   model.set('a', 0.5);
@@ -71,7 +71,7 @@ test('layer with setOpacity hook uses it, not the generic writer', async () => {
   const seen = [];
   w.add('s', { setOpacity: (v) => seen.push(v), update: async () => {} });
   const model = createOpacityModel();
-  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
   model.set('s', 0.25);
   model.set('s', 1);
   assert.deepEqual(seen, [0.25, 1]);
@@ -86,14 +86,14 @@ test('overlapping calls: a layer left at 100% is never dimmed by another layer s
   w.add('a', { enable: async () => { await gate; } });
   w.add('b', { enable: async (v) => { v.scene.primitives.items.push(colB); } });
   const model = createOpacityModel({ ids: ['a', 'b'] });
-  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
   const slowA = w.dataManager.layers.get('a').module.enable(w.viewer);
   await w.dataManager.layers.get('b').module.enable(w.viewer); // B's object appears while A is in flight
   release();
   await slowA;
   assert.equal(h.ownedCount('b'), 1);
   model.set('a', 0.5);
-  await new Promise((r) => setTimeout(r, 1100)); // 1 s tick re-applies A
+  await new Promise((r) => setTimeout(r, 120)); // tick re-applies A
   assert.equal(colB.items[0].color.alpha, 1, 'B stays at 100%');
   model.set('b', 0.3);
   assert.equal(colB.items[0].color.alpha, 0.5, 'ambiguous object: highest candidate (A=0.5, B=0.3)');
@@ -114,7 +114,7 @@ test('replacing entities while keeping the same count is re-scanned after the ca
     update: async () => { store.values = [mk(), mk()]; },
   });
   const model = createOpacityModel();
-  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
   await w.dataManager.layers.get('e').module.enable(w.viewer);
   model.set('e', 0.5);
   await new Promise((r) => setTimeout(r, 80));
@@ -134,13 +134,13 @@ test('a collectionChanged event marks a source for re-scan on the next tick', as
   };
   w.add('e', { enable: async (v) => { v.dataSources.items.push({ entities: store }); } });
   const model = createOpacityModel();
-  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
   await w.dataManager.layers.get('e').module.enable(w.viewer);
   model.set('e', 0.5);
   await new Promise((r) => setTimeout(r, 60));
   store.values = [mk(), mk()];
   fire();
-  await new Promise((r) => setTimeout(r, 1200));
+  await new Promise((r) => setTimeout(r, 150));
   assert.ok(store.values.every((e) => e.point.color.v.alpha === 0.5));
   h.destroy();
 });
@@ -160,7 +160,7 @@ test('add() attribution: after a directory is learned, an overlapped add goes to
   let bRuns = 0;
   w.add('b', { enable: async (v) => { if (bRuns++ > 0) await gate; key = 'layers/b'; v.scene.primitives.add(bRuns === 1 ? colB0 : colB); } });
   const model = createOpacityModel({ ids: ['a', 'b'] });
-  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, sourceKeyOf: () => key });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20, sourceKeyOf: () => key });
   const a = w.dataManager.layers.get('a').module;
   const b = w.dataManager.layers.get('b').module;
   await a.enable(w.viewer); // exclusive: learns layers/a -> a
@@ -209,7 +209,7 @@ test('a big data source is written in slices that never run long, and re-scans o
   Object.defineProperty(w.viewer.dataSources, 'length', { get() { return this.items.length; } });
   w.viewer.dataSources.get = function (i) { return this.items[i]; };
   const model = createOpacityModel();
-  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
   await w.dataManager.layers.get('big').module.enable(w.viewer);
   model.set('big', 0.5);
   assert.equal(entities[0].point.color.v.alpha, 1, 'nothing synchronous for entities');
@@ -240,7 +240,7 @@ test('synthetic-secret probe: a failing hook or frozen module never puts the err
     const frozen = Object.freeze({ update: async () => {} });
     w.add('f', frozen);
     const model = createOpacityModel();
-    const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+    const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20 });
     model.set('s', 0.5);
     h.destroy();
   } finally {
@@ -252,4 +252,59 @@ test('synthetic-secret probe: a failing hook or frozen module never puts the err
     for (const form of [secret, encodeURIComponent(secret), Buffer.from(secret).toString('base64'), secret.slice(-6), secret.slice(0, 8)])
       assert.ok(!text.includes(form), `leaked ${form.length} chars`);
   }
+});
+
+test('an add by non-layer code during a slow layer update belongs to no layer', async () => {
+  const w = world();
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const note = new BillboardCollection(); note.add();
+  let key = 'layers/slow';
+  w.add('slow', { update: async () => { await gate; } });
+  const model = createOpacityModel();
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20, sourceKeyOf: () => key });
+  const run = w.dataManager.layers.get('slow').module.update(w.viewer);
+  key = NON_LAYER; // the user draws an annotation while the fetch is pending
+  w.viewer.scene.primitives.add(note);
+  release();
+  await run;
+  assert.equal(h.ownedCount('slow'), 0);
+  model.set('slow', 0.2);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(note.items[0].color.alpha, 1, 'annotation untouched');
+  h.destroy();
+});
+test('learned directory is only trusted while the other running layers have learned theirs', async () => {
+  const w = world();
+  let key = null;
+  const mk = () => { const c = new BillboardCollection(); c.add(); return c; };
+  const cA = mk(), cA2 = mk(), cB = mk();
+  let release;
+  const gate = new Promise((r) => (release = r));
+  let aRuns = 0;
+  w.add('a', { enable: async (v) => { key = 'layers/a'; v.scene.primitives.add(aRuns++ === 0 ? cA : cA2); } });
+  w.add('b', { enable: async (v) => { await gate; key = 'layers/a'; v.scene.primitives.add(cB); } }); // B shares A's directory
+  const model = createOpacityModel({ ids: ['a', 'b'] });
+  const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model, tickMs: 20, sourceKeyOf: () => key });
+  await w.dataManager.layers.get('a').module.enable(w.viewer); // learns layers/a -> a
+  const bRun = w.dataManager.layers.get('b').module.enable(w.viewer); // B never alone
+  await Promise.resolve();
+  const aRun2 = w.dataManager.layers.get('a').module.enable(w.viewer);
+  release();
+  await Promise.all([aRun2, bRun]);
+  model.set('a', 0.4); // B is still at 100%: its object must not be dimmed by A
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(cB.items[0].color.alpha, 1);
+  h.destroy();
+});
+test('parseSourceKey reads Chrome, Firefox and bundled stacks', () => {
+  const chrome = 'Error\n    at Object.add (http://h/node_modules/.vite/deps/cesium.js:1:1)\n    at draw (http://h/src/layers/flights/rendering.js?t=17:12:3)\n    at x (http://h/src/data/lifecycle.js:5:5)';
+  const firefox = 'add@http://h/node_modules/.vite/deps/cesium.js:1:1\ndraw@http://h/src/layers/earthquakes/index.js?t=1:2:3';
+  const annotation = 'Error\n    at add (http://h/node_modules/.vite/deps/cesium.js:1:1)\n    at go (http://h/src/annotations/drawTool.js:9:9)';
+  const bundled = 'Error\n    at e (http://h/assets/index-abc123.js:1:2)\n    at t (http://h/assets/vendor-def.js:3:4)';
+  assert.equal(parseSourceKey(chrome), 'layers/flights');
+  assert.equal(parseSourceKey(firefox), 'layers/earthquakes');
+  assert.equal(parseSourceKey(annotation), NON_LAYER);
+  assert.equal(parseSourceKey(bundled), null);
+  assert.equal(parseSourceKey(''), null);
 });
