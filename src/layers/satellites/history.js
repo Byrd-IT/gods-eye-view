@@ -41,7 +41,28 @@ export function createHistory({ state: layerState, parts = null }) {
     if (id && hidden().has(id)) parts?.tracking?._clearTracking?.(false, { origin: 'programmatic' });
   }
 
+  // Orbit paths are built from the live element sets: a satellite that is not
+  // drawn at the history time must not keep its path on screen.
+  const pathsHidden = new Set();
+  function syncPaths() {
+    for (const [id, path] of layerState._orbitPaths ?? []) {
+      if (!path.primitive) continue;
+      if (hidden().has(id) && path.primitive.show !== false) {
+        path.primitive.show = false;
+        pathsHidden.add(id);
+      }
+    }
+  }
+  function showPaths() {
+    for (const id of pathsHidden) {
+      const path = layerState._orbitPaths?.get(id);
+      if (path?.primitive) path.primitive.show = true;
+    }
+    pathsHidden.clear();
+  }
+
   function restore() {
+    showPaths();
     hidden().clear();
     for (const [id, satrec] of liveSatrecs) {
       const sat = layerState._catalog.get(id);
@@ -58,6 +79,7 @@ export function createHistory({ state: layerState, parts = null }) {
       point.show = false;
       hidden().add(id);
     }
+    syncPaths();
     untrackIfHidden();
     fetchedAt = NaN;
   }
@@ -84,6 +106,8 @@ export function createHistory({ state: layerState, parts = null }) {
         if (point) point.show = false;
       }
     }
+    showPaths();
+    syncPaths();
     untrackIfHidden();
     return byId.size;
   }
@@ -104,7 +128,6 @@ export function createHistory({ state: layerState, parts = null }) {
     fetchedAt = tMs;
     return { status: truncated ? 'truncated' : 'ok', count: apply(rows, tMs) };
   }
-
 
   /**
    * The live catalog was rebuilt (ingestion.js): its satellites carry live
@@ -151,6 +174,5 @@ export function createHistory({ state: layerState, parts = null }) {
         elsetAtMs: Number.isFinite(fetchedAt) ? fetchedAt : null,
       }),
     },
-    /** The date the layer propagates at: the history time, else now. */
   };
 }

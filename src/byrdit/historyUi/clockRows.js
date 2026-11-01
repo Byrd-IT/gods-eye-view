@@ -116,6 +116,8 @@ export function naipDriver(win) {
  */
 export function ghostMapsDriver(ghostMaps) {
   return {
+    /** apply() reads the shared detail (rate, error, play state) */
+    usesDetail: true,
     available: () => Boolean(ghostMaps),
     apply(ms, { detail = null } = {}) {
       ghostMaps?.onHistory?.(
@@ -173,6 +175,7 @@ export function weatherDriver(getClock) {
       const c = clock();
       if (!c) return;
       if (!Number.isFinite(ms)) return c.latest?.();
+      c.pause?.(); // a playing radar loop would run past the history time
       return c.setTarget(new Date(ms).toISOString());
     },
     /** Text for the row, or '' when a frame exists for the time. */

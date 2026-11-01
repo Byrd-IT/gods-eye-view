@@ -23,6 +23,7 @@ import { ALL_ROW_DEFS } from './clockRows.js';
 export const HISTORY_MENU_ID = 'gev-history-menu';
 const STYLE_ID = 'gev-history-menu-style';
 const MINUTE = 60_000;
+const RECHECK_MS = 3000;
 
 export const HISTORY_MENU_CSS = `
 #${HISTORY_MENU_ID} { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin-top: 6px; }
@@ -239,8 +240,18 @@ export function mountHistoryMenu({
     }
   }
 
+  let inSync = false;
   function sync() {
-    if (destroyed) return;
+    if (destroyed || inSync) return;
+    inSync = true;
+    try {
+      syncNow();
+    } finally {
+      inSync = false;
+    }
+  }
+
+  function syncNow() {
     const sharedOn = Boolean(lastDetail.active) && Number.isFinite(lastDetail.timeMs);
     clocks.setShared(sharedOn ? lastDetail.timeMs : null);
     // router feeds: the main detail plus each unlocked row's own time
@@ -257,7 +268,7 @@ export function mountHistoryMenu({
       // a locked row in a gap (before its first release) is not LIVE: leave it
       if (locked && eff === null && sharedOn) continue;
       // a locked row also follows the shared rate / error (GhostMaps)
-      const key = `${locked ? 'L' : 'O'}${eff}${locked ? `|${lastDetail.rate ?? ''}|${lastDetail.error ?? ''}` : ''}`;
+      const key = `${locked ? 'L' : 'O'}${eff}${locked && driver.usesDetail ? `|${lastDetail.rate ?? ''}|${lastDetail.error ?? ''}` : ''}`;
       // the shared playing state must keep flowing to a locked GhostMaps row
       const follow = locked && sharedOn && lastDetail.playing;
       if ((applied.get(def.id) ?? 'Lnull') === key && !follow) continue;
@@ -274,7 +285,7 @@ export function mountHistoryMenu({
 
   function onClocks() {
     pushUrl();
-    sync();
+    sync(); // a no-op while sync() itself moved the shared time
   }
   const offClocks = clocks.subscribe(onClocks);
 
@@ -298,6 +309,7 @@ export function mountHistoryMenu({
   }
 
   toggle.addEventListener('click', () => {
+    if (list.hidden) api.recheck();
     list.hidden = !list.hidden;
     toggle.setAttribute('aria-expanded', String(!list.hidden));
     toggle.textContent = `${list.hidden ? '▸' : '▾'} ${t('Layer times')}`;
@@ -346,6 +358,7 @@ export function mountHistoryMenu({
     }
   }
 
+  let recheckTimer = null;
   const api = {
     root,
     clocks,
@@ -355,14 +368,34 @@ export function mountHistoryMenu({
       refreshRowInfo();
       sync();
     },
+    /**
+     * The layers a driver row needs arrive after the menu mounts, and the
+     * main control only repeats its state while in history. Look again.
+     */
+    recheck() {
+      if (destroyed) return;
+      refreshRowInfo();
+      sync();
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      if (recheckTimer != null) win?.clearInterval?.(recheckTimer);
       offClocks();
       root.remove?.();
     },
   };
   refreshRowInfo();
   render();
+  // until every driver row's layer exists, look again every few seconds
+  if (typeof win?.setInterval === 'function') {
+    recheckTimer = win.setInterval(() => {
+      api.recheck();
+      if ([...drivers.values()].every((d) => d.available?.())) {
+        win.clearInterval?.(recheckTimer);
+        recheckTimer = null;
+      }
+    }, RECHECK_MS);
+  }
   return api;
 }

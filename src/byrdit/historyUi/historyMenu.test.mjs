@@ -165,7 +165,7 @@ test('a locked release row before its first release is a gap, not LIVE', () => {
 
 test('GhostMaps row hears a rate change at the same shared time', () => {
   const seen = [];
-  const gm = { available: () => true, apply: (ms, o) => seen.push(o.detail?.rate) };
+  const gm = { usesDetail: true, available: () => true, apply: (ms, o) => seen.push(o.detail?.rate) };
   const { menu } = setup({ drivers: new Map([['ghostmaps', gm]]) });
   menu.onHistory({ active: true, timeMs: NOW - D, playing: false, rate: 1 });
   menu.onHistory({ active: true, timeMs: NOW - D, playing: false, rate: 4 });
@@ -177,4 +177,37 @@ test('hl write keeps every other query parameter byte for byte', async () => {
   const out = writeHlToUrl('https://g.example/?a=b%20c&ht=2026-10-13T14:05:30Z&q=%C3%A9+x', [['vessels', NOW - D]]);
   assert.match(out, /a=b%20c&ht=2026-10-13T14:05:30Z&q=%C3%A9\+x&hl=vessels/);
   assert.equal(writeHlToUrl(out, []), 'https://g.example/?a=b%20c&ht=2026-10-13T14:05:30Z&q=%C3%A9+x');
+});
+
+test('a driver row whose layer appears after mount (shared time LIVE) shows up on recheck and applies its hl= time', () => {
+  const applied = [];
+  let ready = false;
+  const sat = { available: () => ready, apply: (ms) => applied.push(ms) };
+  const { menu, row } = setup({
+    href: 'https://gev.example/?hl=satellites:2026-10-01T00:00:00Z',
+    drivers: new Map([['satellites', sat]]),
+  });
+  assert.equal(row('satellites').hidden, true);
+  assert.deepEqual(applied, []);
+  ready = true;
+  menu.recheck();
+  assert.equal(row('satellites').hidden, false);
+  assert.deepEqual(applied, [Date.parse('2026-10-01T00:00:00Z')]);
+});
+
+test('LIVE: a rate or error change does not re-apply a driver that ignores them (a radar loop keeps playing)', () => {
+  const applied = [];
+  const wx = { available: () => true, apply: (ms) => applied.push(ms) };
+  const { menu } = setup({ drivers: new Map([['weather', wx]]) });
+  menu.onHistory({ active: false, timeMs: null, rate: 1 });
+  menu.onHistory({ active: false, timeMs: null, rate: 4, error: 'x' });
+  menu.onHistory({ active: false, timeMs: null, rate: 4, error: null });
+  assert.deepEqual(applied, []);
+});
+
+test('one detail runs the router once (no nested sync)', () => {
+  const { menu, routed } = setup();
+  const before = routed.length;
+  menu.onHistory({ active: true, timeMs: NOW - D, playing: false, rate: 1 });
+  assert.equal(routed.length - before, 1);
 });

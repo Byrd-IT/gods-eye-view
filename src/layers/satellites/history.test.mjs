@@ -125,3 +125,14 @@ test('satellites history: a satellite with no elset cannot be tracked and a trac
   const out = await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
   assert.equal(out.status, 'truncated');
 });
+
+test('satellites history: the orbit path of a satellite that is not drawn is hidden, and comes back on LIVE', async () => {
+  const mk = make(() => csv(row(25544, '2025-03-01T12:00:00.000000', 10)));
+  const { state, h } = mk;
+  state._orbitPaths = new Map([[99999, { primitive: { show: true } }], [25544, { primitive: { show: true } }]]);
+  await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  assert.equal(state._orbitPaths.get(99999).primitive.show, false);
+  assert.equal(state._orbitPaths.get(25544).primitive.show, true);
+  await h.methods.setHistoryTime(null);
+  assert.equal(state._orbitPaths.get(99999).primitive.show, true);
+});

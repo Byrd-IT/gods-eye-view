@@ -35,10 +35,10 @@ import { DAY_MS } from './historyParams.js';
  *    cmr-latest docs (latest available day per layer). No pixels.
  */
 
-/** gev-history src/feeds/celestrak.js RECORDED_GROUP: the only group with docs. */
 /** Epochs further ahead of the wall clock than this are never used. */
 export const GP_FUTURE_EPOCH_SLACK_MS = 3_600_000;
 
+/** gev-history src/feeds/celestrak.js RECORDED_GROUP: the only group with docs. */
 export const GP_RECORDED_GROUPS = Object.freeze(['active']);
 /** CelesTrak GP CSV columns, in the order /api/celestrak/<group> serves them. */
 export const GP_CSV_COLUMNS = Object.freeze([
