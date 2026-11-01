@@ -900,9 +900,9 @@ test('footprints: off draws neither the bulk nor the photo in view', () => {
 
 test('footprints: the photo in view shows with Camera view one, thinned and off', () => {
   for (const frustum of ['one', 'thinned', 'off']) {
-    for (const footprints_ of ['selected', 'all']) {
-      const { source } = checkRig({ frustum, footprints: footprints_ });
-      assert.equal(polygonsOf(currentLayer(source)).length, 1, `${frustum}/${footprints_}`);
+    for (const mode of ['selected', 'all']) {
+      const { source } = checkRig({ frustum, footprints: mode });
+      assert.equal(polygonsOf(currentLayer(source)).length, 1, `${frustum}/${mode}`);
     }
     const { source } = checkRig({ frustum, footprints: 'off' });
     assert.equal(currentLayer(source).length, 0, `${frustum}/off`);
@@ -941,7 +941,12 @@ test('footprints: the old tick box values migrate - true to selected, false to o
   const old = checkRig({ footprints: true });
   assert.equal(footprints(old.source).length, 0);
   assert.equal(polygonsOf(currentLayer(old.source)).length, 1);
-  assert.equal(old.preview.checkInfo !== undefined, true);
+  assert.ok(old.preview.checkInfo().count > 0);
+  old.preview.setCheck({ footprints: false });
+  assert.equal(currentLayer(old.source).length, 0, 'a later boolean false is off');
+  old.preview.setCheck({ footprints: true });
+  assert.equal(polygonsOf(currentLayer(old.source)).length, 1, 'a later true is selected');
+  assert.equal(footprints(old.source).length, 0);
   const off = checkRig({ footprints: false });
   assert.equal(currentLayer(off.source).length, 0);
   assert.equal(DEFAULT_CHECK_OPTIONS.footprints, 'selected');
