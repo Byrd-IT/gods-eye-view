@@ -1015,7 +1015,7 @@ export function createHistoryService({
   const latestSlices = createLatestSlices({ es });
   const b12c = createB12cSlices({ es, now, windReader, weatherTimes });
   const airGnss = createAirGnssSlices({ es, now });
-  const waterSlices = createWaterSlices({ reader: waterReader, now });
+  const waterSlices = createWaterSlices({ reader: waterReader, es, now });
   const SLICES = {
     aircraft: sliceAircraft,
     military: sliceMilitary,

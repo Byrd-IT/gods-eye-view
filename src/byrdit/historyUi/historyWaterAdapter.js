@@ -16,6 +16,10 @@
  * an empty answer (D3: never live, never another time). The rivers layer is
  * the only USGS layer with a time slider: wells, lakes and springs use other
  * parameters and are not queried by area.
+ *
+ * Since owner decision 2A (t_7d3de14d) the server answers from our own
+ * recording (usgs-water-levels, since 2026-09-03) when it covers the time and
+ * from USGS NWIS before that; X-History-Source tells which, for the chip.
  */
 import { passHeaders } from './historyAdapters.js';
 import {
@@ -32,6 +36,8 @@ export const WATER_TILE_RE =
   /^\/byrdit\/usgs_water\/stream\/(\d{1,2})_(\d{1,2})\.geojsonl$/;
 export const WATER_NOTE_CHIP =
   'Rivers are read from USGS on request (about the last 120 days)';
+export const WATER_RECORDED_CHIP =
+  'Rivers are from our own USGS recording (older times are read from USGS on request)';
 export const WATER_TOO_OLD_CHIP =
   'HISTORY none at this time: USGS answers for about the last 120 days only';
 
@@ -72,10 +78,15 @@ function adaptWater(answers, { url }) {
       ? []
       : a.body.features.filter((f) => inTile(f, box));
   const reason = a.headers?.['x-history-empty-reason'] ?? null;
+  const recorded = a.headers?.['x-history-source'] === 'recorded';
   const chip =
     reason === 'before_recording_start'
       ? { state: HISTORY_EMPTY_STATE, text: WATER_TOO_OLD_CHIP, reason }
-      : { state: HISTORY_NOTE_STATE, text: WATER_NOTE_CHIP, reason: null };
+      : {
+          state: HISTORY_NOTE_STATE,
+          text: recorded ? WATER_RECORDED_CHIP : WATER_NOTE_CHIP,
+          reason: null,
+        };
   const headers = passHeaders(answers);
   // a tile with no gauge is normal (sea, desert): not a recording gap
   headers['X-History-Rows'] = String(source.length);

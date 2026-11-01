@@ -55,6 +55,8 @@ export const HISTORY_INDICES = Object.freeze({
   // integrity cells (one doc per cell per 5 min snapshot)
   aqhi: 'gev-history-aqhi',
   gnss: 'gev-history-gnss-integrity',
+  // t_7d3de14d: S3 exporter's USGS gauge readings (read-only key, owner 2A)
+  water: 'usgs-water-levels',
 });
 const ALLOWED = new Set(Object.values(HISTORY_INDICES));
 /**
