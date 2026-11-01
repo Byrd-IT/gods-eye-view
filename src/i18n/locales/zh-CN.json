@@ -3354,5 +3354,6 @@
   "Unlock all": "全部解锁",
   "Lock to the shared time": "绑定到共享时间",
   "History time": "历史时间",
-  "No data before": "此前无数据"
+  "No data before": "此前无数据",
+  "No imagery (provider serves {time} on)": "无影像（提供方自 {time} 起）"
 }

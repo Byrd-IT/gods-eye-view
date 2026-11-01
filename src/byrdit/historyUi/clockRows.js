@@ -11,7 +11,7 @@
  * Drivers are plain objects built from the live page (window hooks and the
  * data manager) so this file needs no layer import.
  */
-import { msg } from '../../i18n/index.js';
+import { msg, t } from '../../i18n/index.js';
 
 /**
  * Router feeds, in menu order. id = the adapter id in historyEventAdapters.
@@ -51,37 +51,60 @@ const parseDate = (d) => {
   return Number.isFinite(ms) ? ms : NaN;
 };
 
-/** Wayback: window.__gevWayback (catalog() oldest..newest, setIndex). */
+/**
+ * Wayback: window.__gevWayback (catalog() oldest..newest, setIndex, state()).
+ * The release in effect before the menu first moved it is put back on LIVE.
+ */
 export function waybackDriver(win) {
   const slot = () => win?.__gevWayback ?? null;
+  let before = null;
   return {
     available: () => Boolean(slot()?.catalog),
     releases: () =>
       (slot()?.catalog?.() ?? []).map((e) => parseDate(e.date)).filter(Number.isFinite),
     apply(ms) {
       const s = slot();
-      if (!s || !Number.isFinite(ms)) return; // LIVE = leave the layer as the user set it
+      if (!s) return;
+      if (!Number.isFinite(ms)) {
+        if (before !== null) s.setIndex(before);
+        before = null;
+        return;
+      }
       const list = s.catalog().map((e) => parseDate(e.date));
       let idx = -1;
       for (let i = 0; i < list.length; i++) if (list[i] <= ms) idx = i;
-      if (idx >= 0) s.setIndex(idx);
+      if (idx < 0) return;
+      if (before === null) before = s.state?.().index ?? idx;
+      s.setIndex(idx);
     },
   };
 }
 
-/** NAIP: window.__gevNaip (state().ticks = years, setYear). */
+/**
+ * NAIP: window.__gevNaip (state().ticks = years, setYear). The year in effect
+ * before the menu first moved it is put back on LIVE.
+ */
 export function naipDriver(win) {
   const slot = () => win?.__gevNaip ?? null;
   const midYear = (y) => Date.UTC(y, 6, 1);
+  let before = null;
   return {
     available: () => Boolean(slot()?.state?.().ticks?.length),
     releases: () => (slot()?.state?.().ticks ?? []).map(midYear),
     apply(ms) {
       const s = slot();
-      if (!s || !Number.isFinite(ms)) return;
+      if (!s) return;
+      const st = s.state();
+      if (!Number.isFinite(ms)) {
+        if (before !== null) s.setYear(before);
+        before = null;
+        return;
+      }
       let year = null;
-      for (const y of s.state().ticks) if (midYear(y) <= ms) year = y;
-      if (year !== null) s.setYear(year);
+      for (const y of st.ticks) if (midYear(y) <= ms) year = y;
+      if (year === null) return;
+      if (before === null) before = st.year ?? year;
+      s.setYear(year);
     },
   };
 }
@@ -159,7 +182,9 @@ export function weatherDriver(getClock) {
       if (!c || !Number.isFinite(ms) || !tl.length) return '';
       const shown = c.getState?.().products?.filter((p) => !p.suspended) ?? [];
       if (shown.length && shown.every((p) => p.selected === null))
-        return `No imagery (provider serves ${new Date(tl[0]).toISOString().slice(0, 16).replace('T', ' ')}Z on)`;
+        return t('No imagery (provider serves {time} on)', {
+          time: `${new Date(tl[0]).toISOString().slice(0, 16).replace('T', ' ')}Z`,
+        });
       return '';
     },
   };

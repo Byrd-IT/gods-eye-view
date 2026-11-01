@@ -215,11 +215,17 @@ export function createLayerClocks({ rows, now = () => Date.now() } = {}) {
     getState() {
       return {
         shared,
-        rows: list.map((r) => ({
-          id: r.id,
-          locked: st.get(r.id).locked,
-          timeMs: effective(r.id),
-        })),
+        rows: list.map((r) => {
+          const timeMs = effective(r.id);
+          return {
+            id: r.id,
+            locked: st.get(r.id).locked,
+            timeMs,
+            // in history by the group but nothing at or before the time
+            // (before the first release): not LIVE, a gap
+            gap: timeMs === null && st.get(r.id).locked && isTime(shared),
+          };
+        }),
         allLocked: list.every((r) => st.get(r.id).locked),
         noneLocked: list.every((r) => !st.get(r.id).locked),
       };
@@ -232,13 +238,19 @@ export function createLayerClocks({ rows, now = () => Date.now() } = {}) {
   return api;
 }
 
-/** The address with `hl` set from unlocked entries, or removed when none. */
+/**
+ * The address with `hl` set from unlocked entries, or removed when none.
+ * Only the hl pair is edited; every other parameter keeps its encoding.
+ */
 export function writeHlToUrl(href, entries) {
   const url = new URL(href);
   const value = encodeHl(entries);
-  if (value) url.searchParams.set(HL_PARAM, value);
-  else url.searchParams.delete(HL_PARAM);
-  url.search = url.searchParams.toString().replace(/%2C/gi, ',').replace(/%3A/gi, ':');
+  const kept = url.search
+    .replace(/^\?/, '')
+    .split('&')
+    .filter((pair) => pair && pair.split('=')[0] !== HL_PARAM);
+  if (value) kept.push(`${HL_PARAM}=${value}`);
+  url.search = kept.length ? `?${kept.join('&')}` : '';
   return url.href;
 }
 

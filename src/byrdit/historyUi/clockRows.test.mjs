@@ -30,15 +30,18 @@ test('wayback / naip drivers pick the release at or before the time', () => {
   const win = {
     __gevWayback: {
       catalog: () => [{ date: '2020-01-01' }, { date: '2023-06-01' }, { date: '2025-01-01' }],
+      state: () => ({ index: 2 }),
       setIndex: (i) => picked.push(['wb', i]),
     },
-    __gevNaip: { state: () => ({ ticks: [2012, 2016, 2022] }), setYear: (y) => picked.push(['naip', y]) },
+    __gevNaip: { state: () => ({ ticks: [2012, 2016, 2022], year: 2022 }), setYear: (y) => picked.push(['naip', y]) },
   };
   const wb = waybackDriver(win);
   wb.apply(Date.parse('2024-01-01T00:00:00Z'));
   wb.apply(null);
   const naip = naipDriver(win);
   naip.apply(Date.parse('2017-01-01T00:00:00Z'));
-  assert.deepEqual(picked, [['wb', 1], ['naip', 2016]]);
+  naip.apply(null);
+  // LIVE puts the release that was in effect before the menu moved it back
+  assert.deepEqual(picked, [['wb', 1], ['wb', 2], ['naip', 2016], ['naip', 2022]]);
   assert.equal(waybackDriver({}).available(), false);
 });

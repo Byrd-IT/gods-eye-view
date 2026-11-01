@@ -3433,5 +3433,6 @@
   "Unlock all": "Alle entsperren",
   "Lock to the shared time": "An die gemeinsame Zeit koppeln",
   "History time": "Verlaufszeit",
-  "No data before": "Keine Daten vor"
+  "No data before": "Keine Daten vor",
+  "No imagery (provider serves {time} on)": "Keine Bilder (Anbieter liefert ab {time})"
 }

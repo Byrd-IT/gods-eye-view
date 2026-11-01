@@ -29,13 +29,22 @@ export function createHistory({ state: layerState }) {
 
   const noradOf = (satrec) => noradIdFromSatnum(satrec.satnum);
 
+  /** The tracked satellite's dot is drawn by its entity (tracking.js). */
+  const drawnByPoint = (id) => id !== layerState._trackedNorad;
+
   function restore() {
     for (const [id, satrec] of liveSatrecs) {
       const sat = layerState._catalog.get(id);
       if (sat) sat.satrec = satrec;
     }
     liveSatrecs.clear();
-    for (const point of layerState._points.values()) point.show = true;
+    for (const [id, point] of layerState._points) point.show = drawnByPoint(id);
+    fetchedAt = NaN;
+  }
+
+  /** No element sets known for the time: draw nothing, never a wrong place. */
+  function hideAll() {
+    for (const point of layerState._points.values()) point.show = false;
     fetchedAt = NaN;
   }
 
@@ -54,7 +63,7 @@ export function createHistory({ state: layerState }) {
       if (!liveSatrecs.has(id)) liveSatrecs.set(id, sat.satrec);
       if (next) {
         sat.satrec = next;
-        if (point) point.show = true;
+        if (point) point.show = drawnByPoint(id);
       } else if (point) {
         point.show = false;
       }
@@ -70,12 +79,34 @@ export function createHistory({ state: layerState }) {
     const text = res.ok ? await res.text() : '';
     if (mine !== token) return { status: 'superseded' };
     const rows = parseGP(text);
-    if (!rows.length) return { status: 'empty' };
+    if (!rows.length) {
+      hideAll();
+      return { status: res.ok ? 'empty' : 'unavailable' };
+    }
     fetchedAt = tMs;
     return { status: 'ok', count: apply(rows, tMs) };
   }
 
+
+  /**
+   * The live catalog was rebuilt (ingestion.js): its satellites carry live
+   * element sets again, so the saved ones are void. While a history time is
+   * set, hide them and apply the recorded sets again.
+   */
+  function onCatalogReloaded() {
+    liveSatrecs.clear();
+    fetchedAt = NaN;
+    const ms = layerState._historyMs;
+    if (!Number.isFinite(ms)) return;
+    hideAll();
+    const mine = ++token;
+    load(ms, mine).catch(() => {
+      if (mine === token) hideAll();
+    });
+  }
+
   return {
+    onCatalogReloaded,
     methods: {
       /** ms = show the layer as of that time, null = back to live. */
       async setHistoryTime(ms) {
@@ -93,6 +124,7 @@ export function createHistory({ state: layerState }) {
         try {
           return await load(ms, mine);
         } catch {
+          if (mine === token) hideAll();
           return { status: 'unavailable' };
         }
       },

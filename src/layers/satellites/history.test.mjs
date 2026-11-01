@@ -57,7 +57,7 @@ test('satellites at a history time: recorded elset swapped in, untracked satelli
   assert.equal(state._points.get(99999).show, true);
 });
 
-test('satellites history: an elset dated far after the asked time is not used; empty answer changes nothing', async () => {
+test('satellites history: an elset dated far after the asked time is not used; an empty answer hides all', async () => {
   const { state, live, h } = make(() =>
     csv(row(25544, '2026-11-02T12:00:00.000000')),
   );
@@ -67,5 +67,44 @@ test('satellites history: an elset dated far after the asked time is not used; e
   const empty = make(() => csv());
   const out = await empty.h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
   assert.equal(out.status, 'empty');
-  assert.equal(empty.state._points.get(25544).show, true);
+  assert.equal(empty.state._points.get(25544).show, false, 'no recorded elset: not drawn from the live one');
+});
+
+test('satellites history: an empty or failed answer hides everything (never the live positions)', async () => {
+  let body = csv(row(25544, '2025-03-01T12:00:00.000000', 10));
+  const { state, h } = make(() => body);
+  await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  body = csv();
+  const out = await h.methods.setHistoryTime(Date.parse('2020-01-01T00:00:00Z'));
+  assert.equal(out.status, 'empty');
+  for (const p of state._points.values()) assert.equal(p.show, false);
+  globalThis.fetch = async () => ({ ok: false, text: async () => '' });
+  const bad = await h.methods.setHistoryTime(Date.parse('2019-01-01T00:00:00Z'));
+  assert.equal(bad.status, 'unavailable');
+  for (const p of state._points.values()) assert.equal(p.show, false);
+});
+
+test('satellites history: the tracked satellite stays hidden as a point on restore (its entity draws it)', async () => {
+  const { state, h } = make(() => csv(row(25544, '2025-03-01T12:00:00.000000', 10)));
+  state._trackedNorad = 25544;
+  await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  assert.equal(state._points.get(25544).show, false);
+  await h.methods.setHistoryTime(null);
+  assert.equal(state._points.get(25544).show, false);
+  assert.equal(state._points.get(99999).show, true);
+});
+
+test('satellites history: a live catalog reload while in history is replaced by the recorded sets again', async () => {
+  const { state, live, calls, h } = make(() => csv(row(25544, '2025-03-01T12:00:00.000000', 10)));
+  await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  // ingestion.js rebuilds the catalog with live elsets
+  state._catalog.get(25544).satrec = live.get(25544);
+  state._points.get(99999).show = true;
+  h.onCatalogReloaded();
+  assert.equal(state._points.get(99999).show, false, 'live set hidden at once');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(calls.length, 2, 'recorded sets fetched again');
+  assert.notEqual(state._catalog.get(25544).satrec, live.get(25544));
+  await h.methods.setHistoryTime(null);
+  assert.equal(state._catalog.get(25544).satrec, live.get(25544), 'LIVE restores the NEW live sets, not stale ones');
 });

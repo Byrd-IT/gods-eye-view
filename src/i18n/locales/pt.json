@@ -3512,5 +3512,6 @@
   "Unlock all": "Desbloquear tudo",
   "Lock to the shared time": "Vincular ao horário compartilhado",
   "History time": "Horário do histórico",
-  "No data before": "Sem dados antes de"
+  "No data before": "Sem dados antes de",
+  "No imagery (provider serves {time} on)": "Sem imagens (o provedor serve a partir de {time})"
 }

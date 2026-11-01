@@ -207,12 +207,19 @@ export function mountHistoryMenu({
       if (dragging !== r.id) {
         configureRange(r.id);
         e.range.value = String(msToValue(r.id, r.timeMs));
-        e.time.textContent = Number.isFinite(r.timeMs) ? formatUtc(r.timeMs, { seconds: false }) : t('LIVE');
+        e.time.textContent = Number.isFinite(r.timeMs)
+          ? formatUtc(r.timeMs, { seconds: false })
+          : r.gap
+            ? '—'
+            : t('LIVE');
       }
       e.lock.checked = r.locked;
-      e.row.setAttribute('data-live', String(!Number.isFinite(r.timeMs)));
-      e.live.disabled = !Number.isFinite(r.timeMs);
-      const note = statusOf(r.id, r.timeMs);
+      e.row.setAttribute('data-live', String(!Number.isFinite(r.timeMs) && !r.gap));
+      e.live.disabled = !Number.isFinite(r.timeMs) && !r.gap;
+      const first = releasesOf(r.id)?.[0];
+      const note = r.gap
+        ? `${t('No data before')} ${Number.isFinite(first) ? formatUtc(first, { seconds: false }) : ''}`.trim()
+        : statusOf(r.id, r.timeMs);
       e.note.textContent = note;
       e.note.hidden = !note;
     }
@@ -247,7 +254,10 @@ export function mountHistoryMenu({
       if (!driver?.available?.()) continue;
       const eff = clocks.effective(def.id);
       const locked = clocks.isLocked(def.id);
-      const key = `${locked ? 'L' : 'O'}${eff}`;
+      // a locked row in a gap (before its first release) is not LIVE: leave it
+      if (locked && eff === null && sharedOn) continue;
+      // a locked row also follows the shared rate / error (GhostMaps)
+      const key = `${locked ? 'L' : 'O'}${eff}${locked ? `|${lastDetail.rate ?? ''}|${lastDetail.error ?? ''}` : ''}`;
       // the shared playing state must keep flowing to a locked GhostMaps row
       const follow = locked && sharedOn && lastDetail.playing;
       if ((applied.get(def.id) ?? 'Lnull') === key && !follow) continue;
@@ -311,8 +321,13 @@ export function mountHistoryMenu({
       if (!driver.available?.()) continue;
       if (driver.releases) {
         const rel = driver.releases();
-        const have = clocks.row(id)?.releases;
-        if (rel.length && rel.length !== (have?.length ?? 0))
+        const have = clocks.row(id)?.releases ?? [];
+        if (
+          rel.length &&
+          (rel.length !== have.length ||
+            rel[0] !== have[0] ||
+            rel.at(-1) !== have.at(-1))
+        )
           clocks.setRowInfo(id, { releases: rel });
       }
       const first = driver.earliest?.();

@@ -3591,5 +3591,6 @@
   "Unlock all": "Розблокувати все",
   "Lock to the shared time": "Прив'язати до спільного часу",
   "History time": "Час історії",
-  "No data before": "Немає даних до"
+  "No data before": "Немає даних до",
+  "No imagery (provider serves {time} on)": "Немає знімків (провайдер віддає з {time})"
 }

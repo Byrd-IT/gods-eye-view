@@ -154,3 +154,27 @@ test('a locked row asked for a time before its coverage shows a "No data before"
   assert.equal(part('vessels', 'gev-hm-note').textContent, 'No data before 2024-10-11 00:00Z');
   assert.equal(part('flights', 'gev-hm-note').textContent, '');
 });
+
+test('a locked release row before its first release is a gap, not LIVE', () => {
+  const wb = { available: () => true, releases: () => [NOW - 300 * D, NOW - 10 * D], apply() { throw new Error('must not be applied in a gap'); } };
+  const { menu, part } = setup({ drivers: new Map([['wayback', wb]]) });
+  menu.onHistory({ active: true, timeMs: NOW - 400 * D, playing: false, rate: 1 });
+  assert.match(part('wayback', 'gev-hm-note').textContent, /^No data before /);
+  assert.equal(part('wayback', 'gev-hm-time').textContent, '—');
+});
+
+test('GhostMaps row hears a rate change at the same shared time', () => {
+  const seen = [];
+  const gm = { available: () => true, apply: (ms, o) => seen.push(o.detail?.rate) };
+  const { menu } = setup({ drivers: new Map([['ghostmaps', gm]]) });
+  menu.onHistory({ active: true, timeMs: NOW - D, playing: false, rate: 1 });
+  menu.onHistory({ active: true, timeMs: NOW - D, playing: false, rate: 4 });
+  assert.deepEqual(seen, [1, 4]);
+});
+
+test('hl write keeps every other query parameter byte for byte', async () => {
+  const { writeHlToUrl } = await import('./layerClocks.js');
+  const out = writeHlToUrl('https://g.example/?a=b%20c&ht=2026-10-13T14:05:30Z&q=%C3%A9+x', [['vessels', NOW - D]]);
+  assert.match(out, /a=b%20c&ht=2026-10-13T14:05:30Z&q=%C3%A9\+x&hl=vessels/);
+  assert.equal(writeHlToUrl(out, []), 'https://g.example/?a=b%20c&ht=2026-10-13T14:05:30Z&q=%C3%A9+x');
+});

@@ -3512,5 +3512,6 @@
   "Unlock all": "Sblocca tutto",
   "Lock to the shared time": "Collega al tempo condiviso",
   "History time": "Tempo della cronologia",
-  "No data before": "Nessun dato prima del"
+  "No data before": "Nessun dato prima del",
+  "No imagery (provider serves {time} on)": "Nessuna immagine (il fornitore serve da {time})"
 }
