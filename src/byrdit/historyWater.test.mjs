@@ -312,3 +312,8 @@ test('the live tile selection is unchanged (history reuses its requests)', () =>
   assert.equal(pick.status, 'ok');
   assert.ok(WATER_TILE_RE.test(`/byrdit/usgs_water/${pick.tiles[0].file}`));
 });
+
+test("adapter is never prefetched (each slice spends the shared USGS budget)", () => {
+  const url = new URL("http://x/byrdit/usgs_water/stream/13_32.geojsonl");
+  assert.deepEqual(WATER_ADAPTER.prefetchParams(url), []);
+});

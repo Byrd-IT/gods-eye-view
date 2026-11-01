@@ -1083,6 +1083,7 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // Orbit height bounds match the planner cap (+1: 40488 -> 40489); the
   // air-quality and gnss-integrity history feed ids add 31 (t_7d3de14d).
   // Existing tool shapes are unchanged apart from that cap; the new tool is appended.
+  // +19: local-usgs-water in the layer enum (t_7a4c6a57).
   assert.equal(block.length, 40539, 'serialized tool schema length drifted');
   // Description-only edits of tool text are allowed. Re-pin both the length
   // (with a changelog line above) and this hash when they land.

@@ -101,6 +101,9 @@ export const WATER_ADAPTER = Object.freeze({
   match: WATER_TILE_RE,
   // every tile asks another box; they belong to one frame
   paramsKey: () => 'tiles',
+  // no prefetch: the last live request is one tile, and every slice spends
+  // the shared USGS budget; a frame is asked for when the slider lands on it
+  prefetchParams: () => [],
   accept: Object.freeze({ notRecorded: true }),
   sliceParams(liveUrl) {
     const bbox = tileOf(liveUrl);
