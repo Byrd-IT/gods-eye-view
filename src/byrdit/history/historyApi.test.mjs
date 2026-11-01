@@ -376,8 +376,8 @@ const ABUSE = [
     400,
   ],
   [
-    't outside retention',
-    `/api/history/slice?feed=aircraft&t=2023-01-01T00:00:00Z`,
+    't before the API floor (1957-10-04)',
+    `/api/history/slice?feed=aircraft&t=1950-01-01T00:00:00Z`,
     400,
   ],
   [

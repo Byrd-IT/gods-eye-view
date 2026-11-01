@@ -20,7 +20,7 @@
  * It adds no state of its own and never throws: an unusable request answers
  * {ok:false, error} so the model can say why.
  */
-import { RATES, HISTORY_SPAN_MS } from './historyTimeline.js';
+import { RATES, HISTORY_FLOOR_MS } from './historyTimeline.js';
 
 export const HISTORY_VOICE_ACTIONS = Object.freeze([
   'jump',
@@ -32,7 +32,7 @@ export const HISTORY_VOICE_ACTIONS = Object.freeze([
   'feeds',
 ]);
 
-const MAX_MINUTES_AGO = Math.floor(HISTORY_SPAN_MS / 60_000);
+const MAX_MINUTES_AGO = Math.floor((Date.now() - HISTORY_FLOOR_MS) / 60_000);
 const ZONE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_HEAD = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?/;
@@ -123,7 +123,7 @@ export function createHistoryVoice({
           return fail('minutesAgo must be a number of minutes, zero or more');
         ms = t - Math.min(minutes, MAX_MINUTES_AGO) * 60_000;
       } else return fail('jump needs time (ISO 8601) or minutesAgo');
-      const earliest = t - HISTORY_SPAN_MS;
+      const earliest = HISTORY_FLOOR_MS;
       const clamped = ms > t ? 'future' : ms < earliest ? 'past' : null;
       h.seek(Math.min(t, Math.max(earliest, ms)), { snap: true });
       return done({

@@ -15,7 +15,7 @@ import {
 } from './coverageRibbon.js';
 import {
   DAY_MS,
-  HISTORY_SPAN_MS,
+  HISTORY_FLOOR_MS,
   MINUTE_MS,
   coverageRange,
   windowAround,
@@ -169,11 +169,11 @@ test('a just-ended adsb.lol day stays pending inside the publish grace', () => {
   assert.equal(ribbon.gaps.length, 0);
 });
 
-test('outside retention is blank whatever the answer says', () => {
+test('before the API floor is blank whatever the answer says', () => {
   const now = NOW;
   const win = {
-    from: now - HISTORY_SPAN_MS - 10 * DAY_MS,
-    to: now - HISTORY_SPAN_MS + 10 * DAY_MS,
+    from: HISTORY_FLOOR_MS - 10 * DAY_MS,
+    to: HISTORY_FLOOR_MS + 10 * DAY_MS,
   };
   const ribbon = buildRibbon({
     win,
@@ -195,7 +195,7 @@ test('outside retention is blank whatever the answer says', () => {
   const lane = ribbon.lanes[0];
   const first = lane.segments.find((s) => s.from === win.from);
   assert.equal(first.kind, 'none');
-  assert.equal(first.to, now - HISTORY_SPAN_MS);
+  assert.equal(first.to, HISTORY_FLOOR_MS);
   assert.equal(lane.segments.at(-1).kind, 'recorded');
 });
 

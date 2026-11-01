@@ -4,8 +4,9 @@
  * Everything here is UTC epoch milliseconds and has no DOM, no fetch and no
  * clock of its own (callers pass `now`), so it is unit tested directly.
  *
- *   - span of the slider: now - 2 years .. now (HISTORY_SPAN_MS; the API
- *     itself accepts 731 days, so the slider never asks for a refused time)
+ *   - span of the slider: HISTORY_FLOOR_MS .. now (no retention clamp: history
+ *     is kept forever; the earliest SELECTABLE time of a layer is the start
+ *     of its own coverage, see layerClocks.js)
  *   - presets 1 h / 24 h / 7 d / 30 d / 90 d / all = the visible window
  *   - coverage bucket per window (the API caps an answer at 2000 buckets)
  *   - snap-to-data and step selection over recorded snapshot times
@@ -19,7 +20,8 @@ export const MINUTE_MS = 60_000;
 export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
 /** Slider span: 2 years (owner R1). The API keeps 731 days. */
-export const HISTORY_SPAN_MS = 730 * DAY_MS;
+/** Earliest instant the API accepts (Sputnik 1; Space-Track GP starts 1962). */
+export const HISTORY_FLOOR_MS = Date.UTC(1957, 9, 4);
 
 /** Visible-window presets, in display order. */
 export const PRESETS = Object.freeze([
@@ -28,7 +30,7 @@ export const PRESETS = Object.freeze([
   Object.freeze({ id: '7d', label: '7 d', spanMs: 7 * DAY_MS }),
   Object.freeze({ id: '30d', label: '30 d', spanMs: 30 * DAY_MS }),
   Object.freeze({ id: '90d', label: '90 d', spanMs: 90 * DAY_MS }),
-  Object.freeze({ id: 'all', label: 'all', spanMs: HISTORY_SPAN_MS }),
+  Object.freeze({ id: 'all', label: 'all', spanMs: Infinity }),
 ]);
 export const DEFAULT_PRESET = '24h';
 
@@ -43,6 +45,7 @@ export const COVERAGE_BUCKETS = Object.freeze([
   Object.freeze({ id: '1h', ms: HOUR_MS }),
   Object.freeze({ id: '6h', ms: 6 * HOUR_MS }),
   Object.freeze({ id: '1d', ms: DAY_MS }),
+  Object.freeze({ id: '30d', ms: 30 * DAY_MS }),
 ]);
 /** Ribbon resolution: at most this many buckets per lane (API max 2000). */
 export const MAX_RIBBON_BUCKETS = 1000;
@@ -58,21 +61,21 @@ export function presetById(id) {
 
 /** Earliest time the slider offers at `now`. */
 export function historyStart(now) {
-  return now - HISTORY_SPAN_MS;
+  return HISTORY_FLOOR_MS;
 }
 
-/** `t` clamped into [now - 2 y, now]. */
+/** `t` clamped into [HISTORY_FLOOR_MS, now]. */
 export function clampTime(t, now) {
   if (!isTime(t)) return now;
   return Math.min(now, Math.max(historyStart(now), t));
 }
 
 /**
- * Visible window of `spanMs` that holds `t`, inside [now - 2 y, now].
+ * Visible window of `spanMs` that holds `t`, inside [HISTORY_FLOOR_MS, now].
  * `anchor` is where t sits in the window (0 = left edge, 1 = right edge).
  */
 export function windowAround(t, spanMs, now, anchor = 0.5) {
-  const span = Math.min(Math.max(spanMs, MINUTE_MS), HISTORY_SPAN_MS);
+  const span = Math.min(Math.max(spanMs, MINUTE_MS), now - HISTORY_FLOOR_MS);
   const start = historyStart(now);
   let from = clampTime(t, now) - span * Math.min(1, Math.max(0, anchor));
   from = Math.max(start, Math.min(from, now - span));
@@ -91,7 +94,7 @@ export function followWindow(
   now,
   { playing = false } = {},
 ) {
-  const span = Math.min(Math.max(spanMs, MINUTE_MS), HISTORY_SPAN_MS);
+  const span = Math.min(Math.max(spanMs, MINUTE_MS), now - HISTORY_FLOOR_MS);
   if (
     current &&
     current.to - current.from === span &&

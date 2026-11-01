@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DAY_MS,
-  HISTORY_SPAN_MS,
+  HISTORY_FLOOR_MS,
   HOUR_MS,
   HT_PARAM,
   MINUTE_MS,
@@ -31,7 +31,7 @@ import { readSkyUrl, writeSkyUrl } from '../skyView/skyUrl.js';
 import {
   COVERAGE_BUCKETS as API_BUCKETS,
   MAX_COVERAGE_BUCKETS,
-  RETENTION_MS,
+  HISTORY_FLOOR_MS as HISTORY_FLOOR_MS_API,
 } from '../history/historyParams.js';
 
 const NOW = Date.parse('2026-10-14T16:00:00Z');
@@ -42,21 +42,24 @@ test('presets, speeds and the 2-year span match DESIGN 4.5', () => {
     ['1h', '24h', '7d', '30d', '90d', 'all'],
   );
   assert.deepEqual([...RATES], [1, 10, 60, 600]);
-  assert.equal(HISTORY_SPAN_MS, 730 * DAY_MS);
-  // the API keeps 731 days: the slider never asks for a refused time
-  assert.ok(HISTORY_SPAN_MS < RETENTION_MS);
+  // no retention clamp (history is kept forever): the slider floor is the
+  // API floor, so the slider never asks for a refused time
+  assert.equal(HISTORY_FLOOR_MS, HISTORY_FLOOR_MS_API);
+  assert.ok(NOW - HISTORY_FLOOR_MS > 730 * DAY_MS);
 });
 
 test('every preset window maps to an API bucket under the 2000-bucket cap', () => {
   for (const p of PRESETS) {
-    const b = coverageBucketFor(p.spanMs);
+    const spanMs = Math.min(p.spanMs, NOW - HISTORY_FLOOR_MS);
+    const b = coverageBucketFor(spanMs);
     assert.ok(API_BUCKETS[b.id], `${p.id} -> ${b.id} is an API bucket`);
     assert.equal(API_BUCKETS[b.id], b.ms);
-    assert.ok(Math.ceil(p.spanMs / b.ms) + 1 <= MAX_COVERAGE_BUCKETS, p.id);
+    assert.ok(Math.ceil(spanMs / b.ms) + 1 <= MAX_COVERAGE_BUCKETS, p.id);
   }
   assert.equal(coverageBucketFor(HOUR_MS).id, '1m');
   assert.equal(coverageBucketFor(DAY_MS).id, '5m');
-  assert.equal(coverageBucketFor(HISTORY_SPAN_MS).id, '1d');
+  assert.equal(coverageBucketFor(730 * DAY_MS).id, '1d');
+  assert.equal(coverageBucketFor(NOW - HISTORY_FLOOR_MS).id, '30d');
 });
 
 test('coverageRange is bucket aligned, inside retention and never past now', () => {
@@ -65,18 +68,18 @@ test('coverageRange is bucket aligned, inside retention and never past now', () 
   assert.equal(r.bucket, '5m');
   assert.equal(r.from % r.bucketMs, 0);
   assert.ok(r.to <= NOW);
-  const all = coverageRange(windowAround(NOW, HISTORY_SPAN_MS, NOW), NOW);
-  assert.ok(all.from >= NOW - HISTORY_SPAN_MS);
+  const all = coverageRange(windowAround(NOW, Infinity, NOW), NOW);
+  assert.ok(all.from >= HISTORY_FLOOR_MS);
   assert.ok(
     Math.ceil((all.to - all.from) / all.bucketMs) <= MAX_COVERAGE_BUCKETS,
   );
 });
 
-test('windows stay inside [now - 2 y, now]', () => {
+test('windows stay inside [HISTORY_FLOOR_MS, now]', () => {
   const w1 = windowAround(NOW, DAY_MS, NOW);
   assert.deepEqual(w1, { from: NOW - DAY_MS, to: NOW });
-  const w2 = windowAround(NOW - HISTORY_SPAN_MS - DAY_MS, 7 * DAY_MS, NOW);
-  assert.equal(w2.from, NOW - HISTORY_SPAN_MS);
+  const w2 = windowAround(HISTORY_FLOOR_MS - DAY_MS, 7 * DAY_MS, NOW);
+  assert.equal(w2.from, HISTORY_FLOOR_MS);
   assert.equal(w2.to - w2.from, 7 * DAY_MS);
   const w3 = windowAround(NOW - 10 * DAY_MS, DAY_MS, NOW);
   assert.equal(w3.from, NOW - 10 * DAY_MS - DAY_MS / 2);
@@ -125,7 +128,7 @@ test('snap-to-data: nearest recorded snapshot within tolerance, never across a g
   assert.equal(snapTo(NOW + 9 * MINUTE_MS, snaps, 60_000), null);
   assert.equal(snapToleranceMs(HOUR_MS), MINUTE_MS);
   assert.equal(snapToleranceMs(DAY_MS), 172_800);
-  assert.equal(snapToleranceMs(HISTORY_SPAN_MS), 10 * MINUTE_MS);
+  assert.equal(snapToleranceMs(730 * DAY_MS), 10 * MINUTE_MS);
 });
 
 test('step picks the n-th recorded snapshot; Shift = 10 steps; farthest when fewer', () => {
@@ -170,7 +173,9 @@ test('playback advances rate x wall time and stops at now', () => {
     reachedNow: true,
   });
   assert.equal(clampTime(NOW + DAY_MS, NOW), NOW);
-  assert.equal(clampTime(0, NOW), NOW - HISTORY_SPAN_MS);
+  assert.equal(clampTime(Date.UTC(1900, 0, 1), NOW), HISTORY_FLOOR_MS);
+  // two years ago is selectable now (no 2-year clamp)
+  assert.equal(clampTime(NOW - 900 * DAY_MS, NOW), NOW - 900 * DAY_MS);
 });
 
 test('ht round trip: own query parameter, hash (l=) and sv untouched', () => {
@@ -215,7 +220,7 @@ test('ht: share-link hash rewrite keeps it; Sky reads the same time and keeps it
   assert.equal(readHtFromUrl(skyWritten, NOW), t);
 });
 
-test('ht: strict ISO UTC inside the 2-year window, else ignored', () => {
+test('ht: strict ISO UTC between the API floor and now, else ignored', () => {
   assert.equal(
     encodeHt(Date.parse('2026-10-13T14:05:30.250Z')),
     '2026-10-13T14:05:30Z',
@@ -229,7 +234,7 @@ test('ht: strict ISO UTC inside the 2-year window, else ignored', () => {
     'yesterday',
     '2026-10-13 14:05:30Z',
     '2026-10-13T14:05:30+02:00',
-    '2020-01-01T00:00:00Z',
+    '1950-01-01T00:00:00Z',
     '2027-01-01T00:00:00Z',
   ])
     assert.equal(decodeHt(bad, NOW), null, bad);

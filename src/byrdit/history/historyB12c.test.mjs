@@ -293,7 +293,7 @@ const ABUSE = [
   ],
   ['quakes bad t', 'feed=quakes&t=yesterday', 400],
   ['quakes date-only t', 'feed=quakes&t=2026-10-14', 400],
-  ['quakes t before retention', 'feed=quakes&t=2020-01-01T00:00:00Z', 400],
+  ['quakes t before the API floor', 'feed=quakes&t=1950-01-01T00:00:00Z', 400],
   ['quakes t in the future', 'feed=quakes&t=2026-10-15T00:00:00Z', 400],
   ['quakes window', 'feed=quakes&t=2026-10-14T12:00:00Z&window=30d', 400],
   ['quakes group', 'feed=quakes&t=2026-10-14T12:00:00Z&group=active', 400],

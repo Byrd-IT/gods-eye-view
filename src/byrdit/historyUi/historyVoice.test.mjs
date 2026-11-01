@@ -79,9 +79,11 @@ test('jump: refuses bad input, clamps the future and the far past', () => {
   const future = h.voice.jump({ time: '2027-01-01T00:00:00Z' });
   assert.equal(future.ok, true);
   assert.equal(future.clamped, 'future');
-  const past = h.voice.jump({ time: '2020-01-01T00:00:00Z' });
+  const past = h.voice.jump({ time: '1950-01-01T00:00:00Z' });
   assert.equal(past.clamped, 'past');
-  assert.ok(Date.parse(past.time) >= NOW - 730 * DAY_MS);
+  assert.ok(Date.parse(past.time) < NOW - 730 * DAY_MS, 'no 2-year clamp');
+  const old = h.voice.jump({ time: '2020-01-01T00:00:00Z' });
+  assert.equal(old.clamped, undefined);
   h.control.destroy();
 });
 

@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs';
 import { HISTORY_EVENT, mountHistoryControl } from './historyControl.js';
 import { HISTORY_UNAVAILABLE } from './historyClient.js';
 import { HISTORY_STYLE_ID } from './historyStyles.js';
-import { DAY_MS, MINUTE_MS, readHtFromUrl } from './historyTimeline.js';
+import {
+  DAY_MS,
+  HISTORY_FLOOR_MS,
+  MINUTE_MS,
+  readHtFromUrl,
+} from './historyTimeline.js';
 import { createHistoryProvider } from '../skyView/historyTime.js';
 import { fixtureFetch, fixtureWorld } from './fixtures/b11Coverage.mjs';
 import { fakeClock, fakeDocument, fakeWindow, flush } from './fakeDom.mjs';
@@ -106,10 +111,11 @@ test('expand shows presets and the coverage ribbon; presets change the window', 
   h.q('[data-preset="all"]').click();
   await h.clock.run(500);
   assert.equal(
-    h.control.getState().window.to - h.control.getState().window.from,
-    730 * DAY_MS,
+    h.control.getState().window.from,
+    HISTORY_FLOOR_MS,
   );
-  assert.ok(h.calls.slice(before).some((c) => c.includes('bucket=1d')));
+  assert.ok(h.control.getState().window.to - NOW <= 1000);
+  assert.ok(h.calls.slice(before).some((c) => c.includes('bucket=30d')));
   h.control.destroy();
 });
 

@@ -32,7 +32,7 @@ import { createFeedChips } from './feedChips.js';
 import { createTimeSlider } from '../timeTravel/timeSlider.js';
 import {
   DEFAULT_PRESET,
-  HISTORY_SPAN_MS,
+  HISTORY_FLOOR_MS,
   PRESETS,
   RATES,
   advance,
@@ -739,7 +739,7 @@ export function mountHistoryControl({
       while (found === null && rounds < STEP_SEARCH_ROUNDS) {
         rounds++;
         const around = cur + dir * (known + 1000);
-        if (around < now() - HISTORY_SPAN_MS || around > now()) break;
+        if (around < HISTORY_FLOOR_MS || around > now()) break;
         const more = await api.snapshots({ feed, around, n });
         snapIndex.add(around, more);
         // anything nearer to cur than the nearest found would be nearer to

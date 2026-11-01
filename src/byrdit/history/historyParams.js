@@ -15,8 +15,12 @@
  */
 
 export const DAY_MS = 86_400_000;
-/** Owner R1: 2-year retention (730 d) plus one day of slack for the edge. */
-export const RETENTION_MS = 731 * DAY_MS;
+/**
+ * Owner 2026-11-01: history is kept forever (ILM has no delete phase), so
+ * there is no retention window; the earliest instant a request may name is
+ * Sputnik 1 (Space-Track GP history starts 1962).
+ */
+export const HISTORY_FLOOR_MS = Date.UTC(1957, 9, 4);
 /** A request may look at most this far past the server clock (clock skew). */
 export const FUTURE_SLACK_MS = 5 * 60_000;
 /** DESIGN 4.3: maxRows <= 15,000 for any slice. */
@@ -35,6 +39,7 @@ export const COVERAGE_BUCKETS = Object.freeze({
   '1h': 3_600_000,
   '6h': 21_600_000,
   '1d': DAY_MS,
+  '30d': 30 * DAY_MS,
 });
 
 /**
@@ -202,10 +207,10 @@ export function parseInstant(value, param) {
   return ms;
 }
 
-/** An instant inside the retention window [now - 731 d, now + 5 min]. */
+/** An instant in [HISTORY_FLOOR_MS, now + 5 min]. */
 export function parseRetainedInstant(value, param, now) {
   const ms = parseInstant(value, param);
-  if (ms < now - RETENTION_MS || ms > now + FUTURE_SLACK_MS) throw bad(param);
+  if (ms < HISTORY_FLOOR_MS || ms > now + FUTURE_SLACK_MS) throw bad(param);
   return Math.min(ms, now);
 }
 
