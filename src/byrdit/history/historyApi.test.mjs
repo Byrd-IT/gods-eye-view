@@ -689,6 +689,15 @@ test('busy: a water slice waits on USGS, not on ES, so it takes no ES slot (t_7a
   const gate = new Promise((r) => (release = r));
   const fake = createFakeEs({});
   const slow = async (url, init) => {
+    // the water slice shares the key check and asks our own USGS copy for its
+    // first record (t_7d3de14d); only the military reads are held back
+    if (String(url).includes('_security/_authenticate'))
+      return fake.fetchImpl(url, init);
+    if (String(url).includes('usgs-water-levels'))
+      return new Response(
+        JSON.stringify({ hits: { hits: [] }, aggregations: { first: { value: null } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
     await gate;
     return fake.fetchImpl(url, init);
   };
