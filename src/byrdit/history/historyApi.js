@@ -159,6 +159,7 @@ export function createHistoryApi({
   healthService,
   windReader = null,
   weatherTimes = null,
+  waterReader = null,
 } = {}) {
   if (service === undefined) {
     const config = esConfigFromEnv(env);
@@ -171,6 +172,7 @@ export function createHistoryApi({
           now,
           windReader,
           weatherTimes,
+          waterReader,
         })
       : null;
   }

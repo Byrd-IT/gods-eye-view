@@ -3357,5 +3357,6 @@
   "No data before": "これより前のデータなし",
   "No imagery (provider serves {time} on)": "画像なし（提供元は {time} 以降のみ）",
   "Air quality (AQHI)": "大気質 (AQHI)",
-  "GNSS integrity": "GNSS 完全性"
+  "GNSS integrity": "GNSS 完全性",
+  "River gauges (USGS)": "河川観測所 (USGS)"
 }

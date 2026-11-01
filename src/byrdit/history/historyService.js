@@ -36,6 +36,7 @@ import {
 } from './historyCollapse.js';
 import { createB12cSlices } from './historySlicesB12c.js';
 import { createAirGnssSlices } from './historySlicesAirGnss.js';
+import { createWaterSlices } from './historySlicesWater.js';
 
 /**
  * /api/history query orchestration (gev-history DESIGN 4.3; card B9).
@@ -257,6 +258,7 @@ export function createHistoryService({
   now = () => Date.now(),
   windReader = null,
   weatherTimes = null,
+  waterReader = null,
 }) {
   /**
    * B10 performance gate (card t_7d16a765, DESIGN 4.3 benchmark): the
@@ -1013,6 +1015,7 @@ export function createHistoryService({
   const latestSlices = createLatestSlices({ es });
   const b12c = createB12cSlices({ es, now, windReader, weatherTimes });
   const airGnss = createAirGnssSlices({ es, now });
+  const waterSlices = createWaterSlices({ reader: waterReader, now });
   const SLICES = {
     aircraft: sliceAircraft,
     military: sliceMilitary,
@@ -1032,6 +1035,8 @@ export function createHistoryService({
     // t_7d3de14d
     aqhi: airGnss.sliceAqhi,
     gnss: airGnss.sliceGnss,
+    // t_7a4c6a57: USGS river gauges, asked of USGS on demand (nothing stored)
+    water: waterSlices.sliceWater,
   };
 
   async function slice(params) {

@@ -3436,5 +3436,6 @@
   "No data before": "Keine Daten vor",
   "No imagery (provider serves {time} on)": "Keine Bilder (Anbieter liefert ab {time})",
   "Air quality (AQHI)": "Luftqualität (AQHI)",
-  "GNSS integrity": "GNSS-Integrität"
+  "GNSS integrity": "GNSS-Integrität",
+  "River gauges (USGS)": "Flusspegel (USGS)"
 }

@@ -915,7 +915,7 @@ const schemas = [
         feeds: {
           type: 'array',
           minItems: 1,
-          maxItems: 13,
+          maxItems: 14,
           items: {
             type: 'string',
             enum: [
@@ -932,6 +932,7 @@ const schemas = [
               'wind',
               'air-quality',
               'gnss-integrity',
+              'local-usgs-water',
             ],
           },
         },

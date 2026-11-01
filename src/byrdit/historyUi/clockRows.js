@@ -22,19 +22,86 @@ import { msg, t } from '../../i18n/index.js';
  * HISTORY_FLOOR_MS and answers "not recorded" outside the data.
  */
 export const ROUTER_ROWS = Object.freeze([
-  { id: 'flights', label: msg('Flights'), adapterIds: ['flights'], snapFeed: 'aircraft' },
-  { id: 'military', label: msg('Military aircraft'), adapterIds: ['military'], snapFeed: 'military' },
-  { id: 'vessels', label: msg('Vessels (AIS)'), adapterIds: ['vessels'], since: '2024-10-11' },
-  { id: 'quakes', label: msg('Earthquakes'), adapterIds: ['quakes'], since: '2025-07-12' },
-  { id: 'firms', label: msg('Fires (FIRMS)'), adapterIds: ['firms'], since: '2026-07-14' },
-  { id: 'fire-perimeters', label: msg('Fire perimeters'), adapterIds: ['fire-perimeters'], since: '2026-09-01' },
-  { id: 'cyclones', label: msg('Cyclones'), adapterIds: ['cyclones'], since: '2026-09-01' },
-  { id: 'launches', label: msg('Rocket launches'), adapterIds: ['launches'], since: '2026-09-01' },
-  { id: 'transit', label: msg('Transit'), adapterIds: ['transit'], since: '2026-09-01' },
-  { id: 'bikeshare', label: msg('Bike share'), adapterIds: ['bikeshare'], since: '2026-09-01' },
+  {
+    id: 'flights',
+    label: msg('Flights'),
+    adapterIds: ['flights'],
+    snapFeed: 'aircraft',
+  },
+  {
+    id: 'military',
+    label: msg('Military aircraft'),
+    adapterIds: ['military'],
+    snapFeed: 'military',
+  },
+  {
+    id: 'vessels',
+    label: msg('Vessels (AIS)'),
+    adapterIds: ['vessels'],
+    since: '2024-10-11',
+  },
+  {
+    id: 'quakes',
+    label: msg('Earthquakes'),
+    adapterIds: ['quakes'],
+    since: '2025-07-12',
+  },
+  {
+    id: 'firms',
+    label: msg('Fires (FIRMS)'),
+    adapterIds: ['firms'],
+    since: '2026-07-14',
+  },
+  {
+    id: 'fire-perimeters',
+    label: msg('Fire perimeters'),
+    adapterIds: ['fire-perimeters'],
+    since: '2026-09-01',
+  },
+  {
+    id: 'cyclones',
+    label: msg('Cyclones'),
+    adapterIds: ['cyclones'],
+    since: '2026-09-01',
+  },
+  {
+    id: 'launches',
+    label: msg('Rocket launches'),
+    adapterIds: ['launches'],
+    since: '2026-09-01',
+  },
+  {
+    id: 'transit',
+    label: msg('Transit'),
+    adapterIds: ['transit'],
+    since: '2026-09-01',
+  },
+  {
+    id: 'bikeshare',
+    label: msg('Bike share'),
+    adapterIds: ['bikeshare'],
+    since: '2026-09-01',
+  },
   { id: 'wind', label: msg('Wind'), adapterIds: ['wind'], since: '2026-09-01' },
-  { id: 'aqhi', label: msg('Air quality (AQHI)'), adapterIds: ['aqhi'], since: '2026-10-30' },
-  { id: 'gnss', label: msg('GNSS integrity'), adapterIds: ['gnss'], since: '2026-11-01' },
+  {
+    id: 'aqhi',
+    label: msg('Air quality (AQHI)'),
+    adapterIds: ['aqhi'],
+    since: '2026-10-30',
+  },
+  {
+    id: 'gnss',
+    label: msg('GNSS integrity'),
+    adapterIds: ['gnss'],
+    since: '2026-11-01',
+  },
+  // t_7a4c6a57: USGS answers on demand for about the last 120 days
+  {
+    id: 'water',
+    label: msg('River gauges (USGS)'),
+    adapterIds: ['water'],
+    since: new Date(Date.now() - 118 * 86_400_000).toISOString().slice(0, 10),
+  },
 ]);
 
 /** Rows driven by a layer object or a window hook, in menu order. */
@@ -63,7 +130,9 @@ export function waybackDriver(win) {
   return {
     available: () => Boolean(slot()?.catalog),
     releases: () =>
-      (slot()?.catalog?.() ?? []).map((e) => parseDate(e.date)).filter(Number.isFinite),
+      (slot()?.catalog?.() ?? [])
+        .map((e) => parseDate(e.date))
+        .filter(Number.isFinite),
     apply(ms) {
       const s = slot();
       if (!s) return;
@@ -171,7 +240,9 @@ export function weatherDriver(getClock) {
     }
   };
   const timelineMs = () =>
-    (clock()?.getTimeline?.() ?? []).map((x) => Date.parse(x)).filter(Number.isFinite);
+    (clock()?.getTimeline?.() ?? [])
+      .map((x) => Date.parse(x))
+      .filter(Number.isFinite);
   return {
     available: () => typeof clock()?.setTarget === 'function',
     /** The provider only serves what its timeline still lists. */
@@ -184,7 +255,11 @@ export function weatherDriver(getClock) {
         wasPlaying = null;
         const out = c.latest?.();
         // a radar loop the user had playing before history plays again
-        if (resume) Promise.resolve(out).then(() => c.play?.(), () => {});
+        if (resume)
+          Promise.resolve(out).then(
+            () => c.play?.(),
+            () => {},
+          );
         return out;
       }
       if (wasPlaying === null) wasPlaying = Boolean(c.getState?.().playing);

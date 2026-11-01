@@ -3357,5 +3357,6 @@
   "No data before": "此前无数据",
   "No imagery (provider serves {time} on)": "无影像（提供方自 {time} 起）",
   "Air quality (AQHI)": "空气质量 (AQHI)",
-  "GNSS integrity": "GNSS 完整性"
+  "GNSS integrity": "GNSS 完整性",
+  "River gauges (USGS)": "河流水文站 (USGS)"
 }

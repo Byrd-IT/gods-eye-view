@@ -171,6 +171,7 @@ test('history: /api/flights is answered from the slice at t with the view bbox; 
     'wind',
     'aqhi',
     'gnss',
+    'water',
   ]);
   assert.equal(router.getState().served.flights.rows, states.length);
 });
@@ -673,7 +674,11 @@ test('own times: flights at T1, military at T2, vessels LIVE; none follow the sh
   assert.equal(router.getState().active, true);
   assert.equal(router.isSwapped('flights'), true);
   assert.equal(router.isSwapped('military'), true);
-  assert.equal(router.isSwapped('vessels'), false, 'no entry = follows the shared time (off)');
+  assert.equal(
+    router.isSwapped('vessels'),
+    false,
+    'no entry = follows the shared time (off)',
+  );
   await sources.flights.getSnapshot({
     latitude: 30,
     longitude: -97,
@@ -690,8 +695,13 @@ test('own times: flights at T1, military at T2, vessels LIVE; none follow the sh
   assert.equal(ts.aircraft, new Date(T).toISOString());
   assert.equal(ts.military, new Date(T2).toISOString());
   // a layer without an entry stays LIVE: its request is not a slice
-  await sources.vessels.getSnapshot?.({ latitude: 30, longitude: -97 }).catch(() => {});
-  assert.equal(sliceCalls(srv).some((c) => c.path.includes('feed=vessels')), false);
+  await sources.vessels
+    .getSnapshot?.({ latitude: 30, longitude: -97 })
+    .catch(() => {});
+  assert.equal(
+    sliceCalls(srv).some((c) => c.path.includes('feed=vessels')),
+    false,
+  );
 });
 
 test('own time null = LIVE for that layer while the shared time keeps the others in history', () => {
@@ -705,13 +715,20 @@ test('own time null = LIVE for that layer while the shared time keeps the others
   assert.equal(out.entered, true);
   assert.equal(router.isSwapped('flights'), true);
   assert.equal(router.isSwapped('military'), false);
-  assert.equal(router.timeOf(router.adapters.find((a) => a.id === 'military')), null);
+  assert.equal(
+    router.timeOf(router.adapters.find((a) => a.id === 'military')),
+    null,
+  );
   // military back to the shared time: reported as a changed layer
   const back = router.setHistory({ active: true, timeMs: T, layerTimes: {} });
   assert.deepEqual(back.layersChanged, ['military']);
   assert.equal(router.isSwapped('military'), true);
   // everything off: left, no layer in history
-  const off = router.setHistory({ active: false, timeMs: null, layerTimes: { flights: null } });
+  const off = router.setHistory({
+    active: false,
+    timeMs: null,
+    layerTimes: { flights: null },
+  });
   assert.equal(off.left, true);
   assert.equal(router.getState().active, false);
 });
@@ -720,12 +737,27 @@ test('moving only an unlocked row while the shared time plays does not clear the
   const { router } = setup();
   router.install();
   router.setHistory({ active: true, timeMs: T, playing: true, layerTimes: {} });
-  const a = router.setHistory({ active: true, timeMs: T, playing: true, layerTimes: { military: T - 3_600_000 } });
+  const a = router.setHistory({
+    active: true,
+    timeMs: T,
+    playing: true,
+    layerTimes: { military: T - 3_600_000 },
+  });
   assert.deepEqual(a.layersChanged, ['military']);
   assert.equal(a.moved, true);
   assert.equal(a.seeked, false, 'the shared group did not jump');
-  router.setHistory({ active: true, timeMs: T, playing: false, layerTimes: { military: T - 3_600_000 } });
-  const b = router.setHistory({ active: true, timeMs: T, playing: false, layerTimes: { military: T - 7_200_000 } });
+  router.setHistory({
+    active: true,
+    timeMs: T,
+    playing: false,
+    layerTimes: { military: T - 3_600_000 },
+  });
+  const b = router.setHistory({
+    active: true,
+    timeMs: T,
+    playing: false,
+    layerTimes: { military: T - 7_200_000 },
+  });
   assert.equal(b.seeked, false, 'paused: still only the one row');
   assert.deepEqual(b.layersChanged, ['military']);
 });

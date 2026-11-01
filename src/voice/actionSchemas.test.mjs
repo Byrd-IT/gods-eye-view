@@ -55,7 +55,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // waybackStillOn and starting speaking rule, description only.
     // Snow leaves the set_visual_style enum.
     // The Operator HUD layout leaves set_hud's layout enum.
-    '6259390d8a85eeaece32c8d596b2eb4d7d9babe2cad511cce5e31dc153e505da',
+    'de5117cb6463399d4b47f4ee6ddb59daf353b9830a7e87b94bff45b731147765',
   );
 });
 

@@ -145,6 +145,7 @@ export function createUsgsWaterLayers(
     let tileKeys = '';
     let moveRemover = null;
     let reloadTimer = null;
+    let lastViewer = null;
 
     async function loadManifest(signal) {
       manifest = JSON.parse(
@@ -200,6 +201,7 @@ export function createUsgsWaterLayers(
 
     // Re-fetch the small classes on every enable (no stale in-memory cache).
     layer.enable = async (viewer) => {
+      lastViewer = viewer ?? lastViewer;
       await baseEnable(viewer);
       if (!spec.viewport || moveRemover || !viewer?.camera?.moveEnd) return;
       moveRemover = viewer.camera.moveEnd.addEventListener(() => {
@@ -245,6 +247,16 @@ export function createUsgsWaterLayers(
       }
       return stats;
     };
+    /**
+     * GEV history seam (card t_7a4c6a57, touch point; re-check on upstream
+     * merges). The river layer's tile requests are answered for the history
+     * time while history is on (historyWaterAdapter.js), so the layer loads
+     * its tiles again for every frame time and once back on live. Only the
+     * stream layer has a history; the others are live.
+     */
+    if (spec.viewport)
+      layer.reloadForHistoryFrame = () =>
+        lastViewer ? layer.reload(lastViewer) : undefined;
     /** Diagnostics for QA/tests: which stream tiles are loaded. */
     layer.getViewportDiagnostics = () => ({
       status: viewStatus,

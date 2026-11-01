@@ -106,6 +106,7 @@ test('registry: B12a feeds + FIRMS/perimeters/cyclones/launches + transit/bike s
       ['wind', 'wind', 'wind', false],
       ['aqhi', 'air-quality', 'aqhi', true],
       ['gnss', 'gnss-integrity', 'gnss', true],
+      ['water', 'local-usgs-water', 'water', false],
     ],
   );
   const find = (p) => adapterForPath(p, ALL_HISTORY_ADAPTERS)?.id ?? null;
@@ -126,7 +127,7 @@ test('registry: B12a feeds + FIRMS/perimeters/cyclones/launches + transit/bike s
     ALL_HISTORY_ADAPTERS.filter((a) => a.reloadOnFrame)
       .map((a) => a.id)
       .join(),
-    'bikeshare',
+    'bikeshare,water',
   );
   assert.equal(TRANSIT_ADAPTER.match.test('/api/transit/vehicles/a%2Fb'), true);
   assert.equal(TRANSIT_ADAPTER.rebased, true);

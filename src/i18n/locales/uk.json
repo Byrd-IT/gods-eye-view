@@ -3594,5 +3594,6 @@
   "No data before": "Немає даних до",
   "No imagery (provider serves {time} on)": "Немає знімків (провайдер віддає з {time})",
   "Air quality (AQHI)": "Якість повітря (AQHI)",
-  "GNSS integrity": "Цілісність GNSS"
+  "GNSS integrity": "Цілісність GNSS",
+  "River gauges (USGS)": "Гідропости річок (USGS)"
 }

@@ -386,8 +386,13 @@ test('one ESC does one thing — a Cockpit utility disclosure stops later docume
   // they own the same contract: their capture handler is the only one that can
   // keep a later document listener (Cockpit exit, the launcher) off the key, and
   // only the immediate form does it.
-  const utilityEsc = ui.slice(ui.indexOf('if (!displayOpen && !radioOpen) return;'));
-  const claim = utilityEsc.slice(0, utilityEsc.indexOf('setCockpitDisclosure(kind, false'));
+  const utilityEsc = ui.slice(
+    ui.indexOf('if (!displayOpen && !radioOpen) return;'),
+  );
+  const claim = utilityEsc.slice(
+    0,
+    utilityEsc.indexOf('setCockpitDisclosure(kind, false'),
+  );
   assert.match(claim, /event\.preventDefault\(\);/);
   assert.match(claim, /event\.stopImmediatePropagation\(\);/);
   assert.doesNotMatch(
@@ -1078,12 +1083,12 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // Orbit height bounds match the planner cap (+1: 40488 -> 40489); the
   // air-quality and gnss-integrity history feed ids add 31 (t_7d3de14d).
   // Existing tool shapes are unchanged apart from that cap; the new tool is appended.
-  assert.equal(block.length, 40520, 'serialized tool schema length drifted');
+  assert.equal(block.length, 40539, 'serialized tool schema length drifted');
   // Description-only edits of tool text are allowed. Re-pin both the length
   // (with a changelog line above) and this hash when they land.
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '087a3f24ce9f08ef34179f75a9f31135e4be50eb08fba91bd69df99c79683b50',
+    '5880aaf44e1b3c72f81eb0522889b5ebfbc08c7e3eb8e0a23b53b31c45d14133',
     'the first-run missions must ride EXISTING tools: no schema-shape edits; description-only edits are allowed but must re-pin this hash and the length above',
   );
   const instructions = fs.readFileSync(

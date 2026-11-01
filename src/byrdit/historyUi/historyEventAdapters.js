@@ -48,6 +48,7 @@ import {
 } from './historyAdapters.js';
 import { FIELD_ADAPTERS } from './historyFieldAdapters.js';
 import { AIR_GNSS_ADAPTERS } from './historyAirGnssAdapters.js';
+import { WATER_ADAPTERS } from './historyWaterAdapter.js';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 const MIN = 60_000;
@@ -462,6 +463,7 @@ export const ALL_HISTORY_ADAPTERS = Object.freeze([
   ...EVENT_ADAPTERS,
   ...FIELD_ADAPTERS,
   ...AIR_GNSS_ADAPTERS,
+  ...WATER_ADAPTERS,
 ]);
 
 export { historySourceLabel };

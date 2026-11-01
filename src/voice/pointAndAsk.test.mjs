@@ -359,15 +359,18 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // + 230 characters: waybackStillOn and starting speaking rule (instructions + tool).
   // + 4313 characters: the control_droneplan tool and its routing sentence.
   // + 1 character: orbit height bounds match the planner cap.
+  // + 16 characters: the local-usgs-water id in the layer enum (t_7a4c6a57).
   assert.ok(
-    size <= 52000 + 297 + 89 + 2113 + 1812 + 159 + 2026 + 302 + 230 + 4313 + 1,
+    size <=
+      52000 + 297 + 89 + 2113 + 1812 + 159 + 2026 + 302 + 230 + 4313 + 1 + 16,
     `prompt size ${size}`,
   );
 });
 
-
 test('after-tool speech allows returned items to answer requested lists and rankings', () => {
-  const rule = realtimeInstructions().split('\n').find(line => line.startsWith('AFTER TOOLS:'));
+  const rule = realtimeInstructions()
+    .split('\n')
+    .find((line) => line.startsWith('AFTER TOOLS:'));
   assert.match(rule, /requested analyst list or ranking/);
   assert.match(rule, /returned items.*returned values/);
   assert.match(rule, /keep their order/);

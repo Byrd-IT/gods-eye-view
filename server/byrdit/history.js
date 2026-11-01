@@ -10,6 +10,7 @@ import {
 import { DEFAULT_HISTORY_PER_MIN } from '../../src/byrdit/history/historyApi.js';
 import { createWindHistoryReader } from './historyWind.js';
 import { createWeatherServingState } from './historyImageryTimes.js';
+import { createWaterHistoryReader } from './historyWater.js';
 
 /**
  * Server-side composition of the Byrd-IT history plugins (gev-history
@@ -61,6 +62,8 @@ export function historyPlugins(options = {}) {
       // B12c: wind at a past cycle through GEV's byte-range reader pieces
       windReader: createWindHistoryReader(),
       weatherTimes,
+      // t_7a4c6a57: USGS river gauges at a past time, on demand (nothing stored)
+      waterReader: createWaterHistoryReader({ env }),
       ...options.historyApi,
     },
   });

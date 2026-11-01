@@ -101,6 +101,13 @@ export const SLICE_FEEDS = Object.freeze({
   // t_7d3de14d: GNSS integrity cells of the newest recorded snapshot at or
   // before t (fixed lookback, GNSS_SNAPSHOT_LOOKBACK_MS).
   gnss: { defaultRows: 20_000 },
+  // t_7a4c6a57: USGS river gauges at t, read from USGS NWIS on demand (nothing
+  // recorded). The newest reading of each gauge in [t - window, t]; the
+  // source answers for a box of at most 25 square degrees, so a box is needed.
+  water: {
+    defaultRows: 5_000,
+    window: { def: 2 * 3_600_000, max: 6 * 3_600_000 },
+  },
 });
 
 /**

@@ -3515,5 +3515,6 @@
   "No data before": "Sin datos antes de",
   "No imagery (provider serves {time} on)": "Sin imágenes (el proveedor sirve desde {time})",
   "Air quality (AQHI)": "Calidad del aire (AQHI)",
-  "GNSS integrity": "Integridad GNSS"
+  "GNSS integrity": "Integridad GNSS",
+  "River gauges (USGS)": "Estaciones fluviales (USGS)"
 }
