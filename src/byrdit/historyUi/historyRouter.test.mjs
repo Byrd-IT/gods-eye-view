@@ -656,3 +656,60 @@ test('budget: a prefetch never spends the last reserved slice requests of the mi
   await clock.run(60_001);
   assert.equal(router.budgetLeft(), 10);
 });
+
+// History menu (t_73beacfb): a layer on its own time, another LIVE, another locked
+
+test('own times: flights at T1, military at T2, vessels LIVE; none follow the shared time', async () => {
+  const { router, srv, sources } = setup();
+  router.install();
+  const T2 = T - 6 * 3_600_000;
+  router.setHistory({
+    active: false,
+    timeMs: null,
+    layerTimes: { flights: T, military: T2 },
+  });
+  assert.equal(router.getState().active, true);
+  assert.equal(router.isSwapped('flights'), true);
+  assert.equal(router.isSwapped('military'), true);
+  assert.equal(router.isSwapped('vessels'), false, 'no entry = follows the shared time (off)');
+  await sources.flights.getSnapshot({
+    latitude: 30,
+    longitude: -97,
+    view: '-106.6,25.8,-93.5,36.5',
+    vsid: 'vABCDEFGHIJKLMNOP',
+  });
+  await sources.military.getSnapshot({ latitude: 30, longitude: -97 });
+  const ts = Object.fromEntries(
+    sliceCalls(srv).map((c) => {
+      const q = new URL(c.path, ORIGIN).searchParams;
+      return [q.get('feed'), q.get('t')];
+    }),
+  );
+  assert.equal(ts.aircraft, new Date(T).toISOString());
+  assert.equal(ts.military, new Date(T2).toISOString());
+  // a layer without an entry stays LIVE: its request is not a slice
+  await sources.vessels.getSnapshot?.({ latitude: 30, longitude: -97 }).catch(() => {});
+  assert.equal(sliceCalls(srv).some((c) => c.path.includes('feed=vessels')), false);
+});
+
+test('own time null = LIVE for that layer while the shared time keeps the others in history', () => {
+  const { router } = setup();
+  router.install();
+  const out = router.setHistory({
+    active: true,
+    timeMs: T,
+    layerTimes: { military: null },
+  });
+  assert.equal(out.entered, true);
+  assert.equal(router.isSwapped('flights'), true);
+  assert.equal(router.isSwapped('military'), false);
+  assert.equal(router.timeOf(router.adapters.find((a) => a.id === 'military')), null);
+  // military back to the shared time: reported as a changed layer
+  const back = router.setHistory({ active: true, timeMs: T, layerTimes: {} });
+  assert.deepEqual(back.layersChanged, ['military']);
+  assert.equal(router.isSwapped('military'), true);
+  // everything off: left, no layer in history
+  const off = router.setHistory({ active: false, timeMs: null, layerTimes: { flights: null } });
+  assert.equal(off.left, true);
+  assert.equal(router.getState().active, false);
+});

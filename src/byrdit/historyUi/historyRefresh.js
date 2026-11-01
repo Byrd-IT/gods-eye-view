@@ -112,7 +112,12 @@ export function createRefreshDriver({
   }
 
   /** The history time now: frozen while paused, rate x wall while playing. */
-  function historyNow() {
+  function historyNow(adapter = null) {
+    // a layer on its own time (History menu) is not played: frozen there
+    if (adapter && router.hasOwnTime?.(adapter.id)) {
+      const own = router.timeOf(adapter);
+      return Number.isFinite(own) ? own : NaN;
+    }
     if (!state.active || !Number.isFinite(state.timeMs)) return NaN;
     const run = state.playing ? state.rate * Math.max(0, now() - stateAt) : 0;
     return Math.min(state.timeMs + run, now());
@@ -123,7 +128,7 @@ export function createRefreshDriver({
     if (!clock) {
       clock = (appliedAtMs) => {
         const t = frameT.get(adapter.id);
-        const tau = historyNow();
+        const tau = historyNow(adapter);
         if (!(appliedAtMs > 0) || !Number.isFinite(t) || !Number.isFinite(tau))
           return NaN; // the layer falls back to the wall clock
         return appliedAtMs + (tau - t);
@@ -333,6 +338,8 @@ export function createRefreshDriver({
     const list = targets();
     const interval = frameInterval(list.length);
     for (const a of list) {
+      // own-time layers (History menu) are not part of playback
+      if (router.hasOwnTime?.(a.id)) continue;
       wasSwapped.add(a.id);
       askSnaps(a, t);
       // show the newest PREFETCHED frame that is due (at or before t) so
@@ -383,9 +390,12 @@ export function createRefreshDriver({
     const change = router.setHistory(detail);
     stateAt = now();
     state = {
-      active: Boolean(detail.active) && Number.isFinite(detail.timeMs),
-      timeMs: detail.timeMs ?? null,
-      playing: Boolean(detail.active && detail.playing),
+      // any adapter in history: the shared time and / or a layer's own
+      active: router.getState().active,
+      timeMs: Number.isFinite(detail.timeMs) ? detail.timeMs : null,
+      playing: Boolean(
+        detail.active && Number.isFinite(detail.timeMs) && detail.playing,
+      ),
       rate: Number(detail.rate) > 0 ? Number(detail.rate) : 1,
     };
     if (change.left) {
@@ -411,6 +421,20 @@ export function createRefreshDriver({
       return;
     }
     if (!state.active) return;
+    // a layer that went LIVE on its own while others stay in history:
+    // no history frame survives for it, ask live once
+    if (change.layersChanged?.length) {
+      const enabled = enabledIds();
+      for (const a of adapters) {
+        if (!change.layersChanged.includes(a.id) || router.timeOf(a) !== null)
+          continue;
+        if (lastMode.has(a.id) || wasSwapped.has(a.id)) resetLayer(a, null);
+        lastMode.delete(a.id);
+        frameT.delete(a.id);
+        wasSwapped.delete(a.id);
+        if (enabled.has(a.layerId)) refresh(a, 1);
+      }
+    }
     if (state.playing) startPlay();
     else stopPlay();
     if (change.seeked || change.entered || !state.playing) {

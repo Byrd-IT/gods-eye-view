@@ -228,6 +228,11 @@ export function createHistoryRouter({
   let inner = null; // the fetch below the router (feedChips -> browser)
   let restore = null;
   const s = { active: false, timeMs: null, playing: false, error: false };
+  // History menu (t_73beacfb): adapter id -> its OWN time (ms), or null =
+  // LIVE for that adapter while others are in history. An adapter without
+  // an entry follows the shared time s.timeMs (null = not in history).
+  // s.active = ANY adapter is answered from history.
+  const layerTimes = new Map();
   let gen = 0;
   const cache = new Map(); // slice url -> {promise, value}
   const snaps = new Map(); // snap feed -> sorted epoch ms
@@ -306,6 +311,7 @@ export function createHistoryRouter({
     return {
       active: s.active,
       timeMs: s.timeMs,
+      layerTimes: Object.fromEntries(layerTimes),
       playing: s.playing,
       swapped: adapters.filter((a) => isSwapped(a.id)).map((a) => a.id),
       failed: adapters.filter((a) => isFailed(a.id)).map((a) => a.id),
@@ -339,7 +345,22 @@ export function createHistoryRouter({
 
   /** History is active and this feed is answered from history. */
   function isSwapped(id) {
-    return s.active && adapters.some((a) => a.id === id) && !isFailed(id);
+    const adapter = adapters.find((a) => a.id === id);
+    return Boolean(adapter) && activeFor(adapter) && !isFailed(id);
+  }
+
+  /** The time an adapter is shown at (own time, else the shared one), or null. */
+  function timeOf(adapter) {
+    if (layerTimes.has(adapter.id)) {
+      const own = layerTimes.get(adapter.id);
+      return Number.isFinite(own) ? own : null;
+    }
+    return Number.isFinite(s.timeMs) ? s.timeMs : null;
+  }
+
+  /** History is on and THIS adapter is in it (not LIVE on its own). */
+  function activeFor(adapter) {
+    return s.active && timeOf(adapter) !== null;
   }
 
   // ── cache ───────────────────────────────────────────────
@@ -520,9 +541,10 @@ export function createHistoryRouter({
   }
 
   /** The slice time of an adapter at t (see the module note). */
-  function frameTime(adapter, t = s.timeMs) {
+  function frameTime(adapter, t = timeOf(adapter)) {
     if (!Number.isFinite(t)) return t;
-    if (!s.playing) return t;
+    // playback is the shared clock: a layer on its own time is not played
+    if (!s.playing || layerTimes.has(adapter.id)) return t;
     const list = adapter.snapFeed ? snaps.get(adapter.snapFeed) : null;
     if (list?.length) {
       const floor = floorOf(list, t);
@@ -544,10 +566,11 @@ export function createHistoryRouter({
 
   /** The slice time a layer request asks now (pinned frame or frameTime). */
   function requestTime(adapter) {
-    const t = s.timeMs;
+    const t = timeOf(adapter);
     const pin = pinned.get(adapter.id);
     if (
       s.playing &&
+      !layerTimes.has(adapter.id) &&
       Number.isFinite(pin) &&
       pin <= t &&
       t - pin <= MAX_FRAME_LAG_MS
@@ -586,11 +609,25 @@ export function createHistoryRouter({
    * @returns {{entered, left, seeked, moved}}
    */
   function setHistory(detail = {}) {
-    const active = Boolean(detail.active) && Number.isFinite(detail.timeMs);
-    const timeMs = active ? detail.timeMs : null;
-    const playing = active && Boolean(detail.playing);
+    const sharedOn = Boolean(detail.active) && Number.isFinite(detail.timeMs);
+    const timeMs = sharedOn ? detail.timeMs : null;
+    const playing = sharedOn && Boolean(detail.playing);
     const error = Boolean(detail.error);
-    const out = { entered: false, left: false, seeked: false, moved: false };
+    // own times (History menu): id -> ms | null (that adapter is LIVE)
+    const own = new Map();
+    for (const [id, v] of Object.entries(detail.layerTimes ?? {}))
+      if (adapters.some((a) => a.id === id))
+        own.set(id, Number.isFinite(v) ? v : null);
+    const active =
+      sharedOn || [...own.values()].some((v) => Number.isFinite(v));
+    const out = {
+      entered: false,
+      left: false,
+      seeked: false,
+      moved: false,
+      /** adapter ids whose own time changed (incl. to / from LIVE) */
+      layersChanged: [],
+    };
     // history is back (D3): failed feeds may retry at once; they stay
     // failed (LIVE chip) until a history answer is actually served
     if (s.error && !error) for (const f of failed.values()) f.retryAt = 0;
@@ -602,6 +639,7 @@ export function createHistoryRouter({
         s.active = false;
         s.timeMs = null;
         s.playing = false;
+        layerTimes.clear();
         clearCache();
         failed.clear();
         served.clear();
@@ -615,17 +653,33 @@ export function createHistoryRouter({
     }
     const prev = s.timeMs;
     const wasPlaying = s.playing;
-    if (!s.active) {
+    const wasActive = s.active;
+    // adapters whose effective time changes with this call
+    const before = new Map(
+      adapters.map((a) => [a.id, wasActive ? timeOf(a) : null]),
+    );
+    layerTimes.clear();
+    for (const [id, v] of own) layerTimes.set(id, v);
+    s.timeMs = timeMs;
+    s.active = true;
+    s.playing = playing;
+    for (const a of adapters) {
+      const was = before.get(a.id);
+      const is = timeOf(a);
+      if (was !== is) out.layersChanged.push(a.id);
+    }
+    if (!wasActive) {
       out.entered = true;
       gen++;
       clearCache();
       clearTrack();
-    } else if (timeMs !== prev) {
+    } else if (out.layersChanged.length) {
       out.moved = true;
       const jump =
-        timeMs < prev ||
-        timeMs - prev > PLAY_JUMP_MS ||
-        !(wasPlaying && playing);
+        !(wasPlaying && playing) ||
+        (Number.isFinite(prev) && Number.isFinite(timeMs)
+          ? timeMs < prev || timeMs - prev > PLAY_JUMP_MS
+          : true);
       if (jump) {
         out.seeked = true;
         gen++;
@@ -633,9 +687,6 @@ export function createHistoryRouter({
         if (clearTrack()) notify();
       }
     }
-    s.active = true;
-    s.timeMs = timeMs;
-    s.playing = playing;
     if (!playing || out.seeked || out.entered) pinned.clear();
     if (out.entered) notify();
     return out;
@@ -714,7 +765,7 @@ export function createHistoryRouter({
     }
     if (!adapted || adapted.refresh || adapted.inconsistent) {
       // cannot happen for a verified frame; never live, ask the layer again
-      if (s.active) {
+      if (activeFor(adapter)) {
         clearCache();
         announce({ adapterId: adapter.id, mode: 'refresh', t: due.t });
       }
@@ -772,7 +823,7 @@ export function createHistoryRouter({
             )),
           ];
         }
-        if (s.active && gen === myGen) {
+        if (activeFor(adapter) && gen === myGen) {
           adapted = adapter.adapt(answers, { t, nowMs: now(), url });
           if (adapted?.inconsistent) {
             // the halves do not belong together (the server re-read
@@ -788,7 +839,7 @@ export function createHistoryRouter({
         }
       } catch (error) {
         if (signal?.aborted) throw abortError();
-        if (!s.active) return inner.call(target, input, init);
+        if (!activeFor(adapter)) return inner.call(target, input, init);
         if (isAbort(error) || gen !== myGen) continue; // a seek: ask again
         if (
           error instanceof SliceError &&
@@ -797,7 +848,7 @@ export function createHistoryRouter({
         ) {
           busyRetried = true;
           await withSignal(sleep(busyRetryMs), signal);
-          if (!s.active) return inner.call(target, input, init);
+          if (!activeFor(adapter)) return inner.call(target, input, init);
           continue;
         }
         // D3: any failure, a repeated 429 included -> live + unavailable
@@ -805,7 +856,7 @@ export function createHistoryRouter({
         announce({ adapterId: adapter.id, mode: 'live' });
         return inner.call(target, input, init);
       }
-      if (!s.active) return inner.call(target, input, init); // LIVE meanwhile
+      if (!activeFor(adapter)) return inner.call(target, input, init); // LIVE meanwhile
       if (gen !== myGen) continue; // a seek meanwhile: answer the new t
       const wasFailed = failed.delete(adapter.id);
       const nowMs = now();
@@ -956,7 +1007,7 @@ export function createHistoryRouter({
     const mySeq = ++trackSeq;
     trackWant = { seq: mySeq, layerId: adapter.layerId, id };
     const current = () =>
-      s.active &&
+      activeFor(adapter) &&
       gen === myGen &&
       trackSeq === mySeq &&
       shownFrameT(adapter) === to;
@@ -980,7 +1031,7 @@ export function createHistoryRouter({
     }
     // a seek / LIVE meanwhile: never a track of another time (the new
     // frame asks again)
-    if (!s.active || gen !== myGen) return refuseTrack(TRACK_UNAVAILABLE);
+    if (!activeFor(adapter) || gen !== myGen) return refuseTrack(TRACK_UNAVAILABLE);
     const ms = Math.round(monotonic() - started);
     // a superseded answer still goes to its caller (the layer's own
     // backfill token drops it); it never becomes the chip
@@ -1078,6 +1129,11 @@ export function createHistoryRouter({
         return Promise.resolve(refuseTrack(TRACK_IN_HISTORY));
       }
       if (!adapter) return inner.call(target, input, init);
+      // LIVE for this adapter on its own (History menu)
+      if (!activeFor(adapter)) {
+        announce({ adapterId: adapter.id, mode: 'live' });
+        return inner.call(target, input, init);
+      }
       // a failed feed passes through until its retry is due (D3)
       if (!retryDue(adapter.id)) {
         announce({ adapterId: adapter.id, mode: 'live' });
@@ -1126,6 +1182,8 @@ export function createHistoryRouter({
     cancelPrefetch,
     clearCache,
     isSwapped,
+    timeOf,
+    hasOwnTime: (id) => layerTimes.has(id),
     isFailed,
     getState,
     adapters,
