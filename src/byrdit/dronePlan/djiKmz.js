@@ -336,16 +336,12 @@ export function checkMission(
   // over the whole mission.
   const groups = wps.flatMap((w) => w.groups);
   if (groups.some((g) => g.mode !== 'parallel')) add('warn', 'group-mode');
-  // DJI Fly itself repeats a group id when one gimbalEvenlyRotate group runs on
-  // from one waypoint to the next, so ids only have to start at 1 and never go
-  // back down.
-  const gids = groups.map((g) => g.id);
-  if (
-    gids.length &&
-    (gids.some((g) => g === null) ||
-      Math.min(...gids) !== 1 ||
-      gids.some((g, i) => i > 0 && g < gids[i - 1]))
-  ) {
+  // DJI Fly restarts the group ids at 1 on every waypoint (a waypoint's tilt
+  // group is 2), so ids only have to be whole numbers from 1 up.
+  const badIds = (list) =>
+    list.some((g) => g === null || !Number.isInteger(g) || g < 1) ||
+    new Set(list).size !== list.length;
+  if (wps.some((w) => badIds(w.groups.map((g) => g.id)))) {
     add('warn', 'group-ids');
   }
   const aids = groups.flatMap((g) => g.actions.map((a) => a.id));

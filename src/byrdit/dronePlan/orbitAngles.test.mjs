@@ -262,7 +262,7 @@ test('outward: time and photo totals include the turn; WPML orders photo, turn, 
   assert.equal(seq.length, stops);
   const funcs = [...seq[0].matchAll(/<wpml:actionActuatorFunc>(\w+)</g)].map((m) => m[1]);
   assert.deepEqual(funcs, ['takePhoto', 'rotateYaw', 'gimbalRotate', 'takePhoto', 'rotateYaw', 'gimbalRotate']);
-  assert.ok(waylinesWpml.includes('toPointAndStopWithDiscontinuityCurvature'));
+  assert.ok(waylinesWpml.includes('toPointAndStopWithContinuityCurvature'));
   assert.ok(waylinesWpml.includes('<wpml:aircraftPathMode>'));
 });
 
@@ -451,7 +451,7 @@ test('saved plans keep the new options and paths', () => {
   assert.equal(back.lookAtPaths[0].points.length, 2);
 });
 
-test('heading: every orbit and look-at photo halts at its point, so the heading has settled', () => {
+test('heading: orbit and look-at photos are written the way DJI Fly keeps them (pass-through, stored angle, flag 0)', () => {
   const t = buildingTarget({ id: 'T', radiusM: 20 });
   const p = plan({
     orbitTargets: [t],
@@ -464,8 +464,11 @@ test('heading: every orbit and look-at photo halts at its point, so the heading 
   const marks = waylinesWpml.split('<Placemark>').slice(1);
   const photoMarks = marks.filter((m) => m.includes('takePhoto'));
   assert.ok(photoMarks.length > 36);
-  for (const m of photoMarks) {
-    assert.ok(m.includes('toPointAndStopWithDiscontinuityCurvature'), 'stops at the photo point');
+  const inner = photoMarks.filter((m) => !m.includes('<wpml:index>0<'));
+  for (const m of inner.slice(0, -1)) {
+    assert.ok(m.includes('toPointAndPassWithContinuityCurvature'), 'DJI Fly turns the stop into a pass-through');
+    assert.ok(m.includes('<wpml:waypointHeadingMode>smoothTransition<'), 'the heading mode and angle are kept');
+    assert.ok(m.includes('<wpml:waypointHeadingAngleEnable>0<'), 'the flag DJI Fly writes');
   }
 });
 

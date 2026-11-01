@@ -135,66 +135,74 @@ test('waylines.wpml lists every waypoint with height, speed and turn mode', () =
       Number(textOf(mark, 'wpml:waypointSpeed')),
       result.plan.speedMs,
     );
+    // DJI Fly writes the first and the last waypoint as stops.
     assert.equal(
       textOf(mark, 'wpml:waypointTurnMode'),
-      'toPointAndPassWithContinuityCurvature',
+      i === 0 || i === marks.length - 1
+        ? 'toPointAndStopWithContinuityCurvature'
+        : 'toPointAndPassWithContinuityCurvature',
+    );
+    assert.equal(
+      textOf(mark, 'wpml:waypointHeadingAngleEnable'),
+      i === 0 || i === marks.length - 1 ? '1' : '0',
     );
     assert.equal(textOf(mark, 'wpml:waypointGimbalPitchAngle'), '-90');
   });
-  assert.equal(
-    Number(textOf(doc, 'wpml:distance')),
-    Math.round(mission.routeM),
-  );
-  assert.equal(
-    Number(textOf(doc, 'wpml:duration')),
-    Math.round(mission.durationS),
-  );
+  // The folder is written as DJI Fly re-saves it; each waypoint's own speed flies.
+  assert.equal(textOf(doc, 'wpml:distance'), '0');
+  assert.equal(textOf(doc, 'wpml:duration'), '0');
+  assert.equal(textOf(doc, 'wpml:autoFlightSpeed'), '2.5');
 });
 
-test('photo at every waypoint: takePhoto per waypoint, gimbal rotate per leg', () => {
+test('photo at every waypoint: one group per waypoint, tilt on the first, gradual tilt per leg', () => {
   const result = build();
   const mission = result.missions[0];
   const { waylinesWpml } = buildMissionFiles(mission, result.plan);
   const doc = parseXml(waylinesWpml);
   const funcs = all(doc, 'wpml:actionActuatorFunc').map((n) => n.text.trim());
-  assert.equal(
-    funcs.filter((f) => f === 'takePhoto').length,
-    mission.photoCount,
-  );
-  assert.equal(
-    funcs.filter((f) => f === 'gimbalRotate').length,
-    mission.legs.length,
-  );
-  const pitch = all(doc, 'wpml:gimbalPitchRotateAngle')[0];
-  assert.equal(pitch.text.trim(), '-90');
-  const groups = all(doc, 'wpml:actionGroup');
-  const ids = groups.map((g) => Number(textOf(g, 'wpml:actionGroupId')));
-  assert.deepEqual(
-    ids,
-    ids.map((_, i) => i + 1),
-    'group ids are 1..n',
-  );
+  const count = (f) => funcs.filter((x) => x === f).length;
+  assert.equal(count('takePhoto'), mission.photoCount);
+  assert.equal(count('gimbalRotate'), 1, 'a plain rotate on the first waypoint only');
+  assert.equal(count('gimbalEvenlyRotate'), mission.legs.length - 1);
+  assert.ok(mission.legs.length > 2, 'the test needs several legs');
   const actionIds = all(doc, 'wpml:actionId').map((n) => Number(n.text));
   assert.deepEqual(
-    actionIds,
+    [...actionIds].sort((a, b) => a - b),
     actionIds.map((_, i) => i + 1),
     'action ids are unique across the mission: 1..n',
   );
-  for (const g of groups) {
-    assert.equal(textOf(g, 'wpml:actionTriggerType'), 'reachPoint');
-    assert.equal(textOf(g, 'wpml:actionGroupMode'), 'parallel');
-    assert.equal(
-      textOf(g, 'wpml:actionGroupStartIndex'),
-      textOf(g, 'wpml:actionGroupEndIndex'),
-    );
-  }
-  // Parallel groups: the gimbal turn is its own group, BEFORE the photo group,
-  // so a photo never fires while the gimbal is still turning.
-  const perGroup = groups.map((g) =>
-    all(g, 'wpml:actionActuatorFunc').map((n) => n.text.trim()),
-  );
-  assert.ok(perGroup.every((f) => f.length === 1), 'one action per group');
-  assert.deepEqual(perGroup.slice(0, 2), [['gimbalRotate'], ['takePhoto']]);
+  const marks = all(doc, 'Placemark');
+  marks.forEach((mark, i) => {
+    const groups = all(mark, 'wpml:actionGroup');
+    groups.forEach((g, n) => {
+      assert.equal(textOf(g, 'wpml:actionTriggerType'), 'reachPoint');
+      assert.equal(textOf(g, 'wpml:actionGroupMode'), 'parallel');
+      assert.equal(textOf(g, 'wpml:actionGroupId'), String(n + 1), 'group ids restart at 1');
+    });
+    const first = groups[0];
+    assert.equal(textOf(first, 'wpml:actionGroupStartIndex'), String(i));
+    assert.equal(textOf(first, 'wpml:actionGroupEndIndex'), String(i));
+    const fns = all(first, 'wpml:actionActuatorFunc').map((n) => n.text.trim());
+    // First waypoint: photo and tilt in ONE group, photo first, as DJI Fly.
+    assert.deepEqual(fns, i === 0 ? ['takePhoto', 'gimbalRotate'] : ['takePhoto']);
+    if (groups[1]) {
+      assert.equal(groups.length, 2);
+      assert.equal(textOf(groups[1], 'wpml:actionGroupStartIndex'), String(i));
+      assert.equal(textOf(groups[1], 'wpml:actionGroupEndIndex'), String(i + 1));
+      assert.deepEqual(
+        all(groups[1], 'wpml:actionActuatorFunc').map((n) => n.text.trim()),
+        ['gimbalEvenlyRotate'],
+      );
+    }
+  });
+  // The tilt of a leg sits on the waypoint BEFORE the leg's first waypoint.
+  const starts = mission.legs.slice(1).map((l) => l.waypoints[0].index - 1);
+  const withTilt = marks
+    .map((m, i) => (all(m, 'wpml:actionActuatorFunc').some((n) => n.text.trim() === 'gimbalEvenlyRotate') ? i : -1))
+    .filter((i) => i >= 0);
+  assert.deepEqual(withTilt, starts);
+  assert.equal(all(doc, 'wpml:gimbalPitchRotateAngle')[0].text.trim(), '-90');
+  assert.equal((waylinesWpml.match(/<wpml:useGlobalPayloadLensIndex>0</g) ?? []).length, mission.photoCount);
 });
 
 test('interval mode: one distance-triggered photo group per leg', () => {
@@ -213,6 +221,27 @@ test('interval mode: one distance-triggered photo group per leg', () => {
     String(mission.legs[0].waypoints.length - 1),
   );
   assert.equal(textOf(g, 'wpml:actionActuatorFunc'), 'takePhoto');
+  // The first tilt shares waypoint 0 with the interval group (own group, id 1,
+  // ahead of it); later legs get the gradual tilt on the waypoint before.
+  const marks = all(doc, 'Placemark');
+  const first = all(marks[0], 'wpml:actionGroup');
+  assert.equal(first.length, 2);
+  assert.equal(textOf(first[0], 'wpml:actionActuatorFunc'), 'gimbalRotate');
+  assert.equal(textOf(first[0], 'wpml:actionGroupId'), '1');
+  assert.equal(textOf(first[1], 'wpml:actionTriggerType'), 'multipleDistance');
+  const evenly = marks.flatMap((m, i) =>
+    all(m, 'wpml:actionGroup')
+      .filter((x) => textOf(x, 'wpml:actionActuatorFunc') === 'gimbalEvenlyRotate')
+      .map((x) => [i, textOf(x, 'wpml:actionGroupStartIndex'), textOf(x, 'wpml:actionGroupEndIndex')]),
+  );
+  assert.deepEqual(
+    evenly,
+    mission.legs.slice(1).map((l) => [
+      l.waypoints[0].index - 1,
+      String(l.waypoints[0].index - 1),
+      String(l.waypoints[0].index),
+    ]),
+  );
 });
 
 test('double grid writes the tilted gimbal pitch', () => {
@@ -359,4 +388,15 @@ test('zip: an independent unzip tool accepts the KMZ', (t) => {
   }
   const test = spawnSync('unzip', ['-tq', file], { encoding: 'utf8' });
   assert.equal(test.status, 0, test.stdout + test.stderr);
+});
+
+test('reading a mission back refuses interval photos (one leg or several)', async () => {
+  const { missionFromWaylines } = await import('./wpmlCompare.mjs');
+  const result = build({ photoMode: 'interval' });
+  const xml = buildMissionFiles(result.missions[0], result.plan).waylinesWpml;
+  assert.throws(() => missionFromWaylines(xml), /interval-photo/);
+  // One leg: the interval group sits behind the tilt group on waypoint 0.
+  const one = { ...result.missions[0], legs: result.missions[0].legs.slice(0, 1) };
+  const oneXml = buildMissionFiles(one, result.plan).waylinesWpml;
+  assert.throws(() => missionFromWaylines(oneXml), /interval-photo/);
 });

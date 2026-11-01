@@ -10,13 +10,24 @@
  * Layout of a real DJI Fly file: `wpmz/template.kml` holds ONLY author,
  * createTime, updateTime and missionConfig (no waypoints, no Folder); every
  * waypoint lives in `wpmz/waylines.wpml`. So the waypoints are written to
- * waylines.wpml only. Action groups are `parallel`, actionGroupId starts at 1
- * and actionId is unique across the whole mission (1, 2, 3 ...).
+ * waylines.wpml only.
  *
- * Still NOT verified by a real file: takePhoto, multipleDistance interval
- * photos, and smoothTransition orbit headings (DJI Fly's own files only hold
- * gimbalRotate and gimbalEvenlyRotate). The namespace and drone enum are
- * constants so a mismatch is a one-line change.
+ * The output is written in the form DJI Fly itself produces when it re-saves a
+ * mission, so a file loads and flies without opening and saving it first.
+ * That form was measured on five real Mini 5 Pro missions (GEV originals of
+ * 2026-10-30 against the files DJI Fly wrote back; see wpmlDjiResave.test.mjs):
+ *  - one parallel reachPoint group per waypoint with takePhoto and, on the
+ *    first waypoint, the gimbalRotate; useGlobalPayloadLensIndex 0 on takePhoto;
+ *  - a later tilt is a gimbalEvenlyRotate on the waypoint before it;
+ *  - first and last waypoint are stops with waypointHeadingAngleEnable 1, every
+ *    other waypoint has the flag 0 (also on orbits: DJI Fly keeps the
+ *    smoothTransition mode and the stored angle, and sets only this flag);
+ *  - folder autoFlightSpeed 2.5, distance 0, duration 0; numbers without ".0".
+ *
+ * Still NOT verified by a real DJI Fly file: multipleDistance interval photos,
+ * the rotateYaw/sequence outward orbit photo, and whether the aircraft honours
+ * the smoothTransition angle when the flag is 0 (needs a flight). The
+ * namespace and drone enum are constants so a mismatch is a one-line change.
  */
 import { jobFolder, jobSlug } from './areas.js';
 import { TRANSIT_SPEED_MS } from './planner.js';
@@ -33,8 +44,19 @@ export const esc = (value) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-const one = (n) => Number(n).toFixed(1);
-const pitchText = (n) => (Number.isInteger(n) ? String(n) : one(n));
+/**
+ * Numbers the way DJI Fly writes them: no trailing zeros and no ".0"
+ * (79 not 79.0, 2.8, -82.9). `dp` is the most decimals kept.
+ */
+const num = (n, dp = 1) => {
+  const text = Number(n).toFixed(dp);
+  const trimmed = text.includes('.') ? text.replace(/\.?0+$/, '') : text;
+  return trimmed === '-0' || trimmed === '' ? '0' : trimmed;
+};
+const one = (n) => num(n, 1);
+const pitchText = (n) => one(n);
+/** A coordinate with 8 decimals (about 1 mm), trailing zeros dropped. */
+const coord = (n) => num(n, 8);
 
 function missionConfig(preset, plan, wpml) {
   if (preset.kmz?.supported === false) {
@@ -86,6 +108,24 @@ function photoAction(id) {
             <wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>
             <wpml:actionActuatorFuncParam>
               <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
+              <wpml:useGlobalPayloadLensIndex>0</wpml:useGlobalPayloadLensIndex>
+            </wpml:actionActuatorFuncParam>
+          </wpml:action>`;
+}
+
+/**
+ * The gradual tilt DJI Fly writes in place of a plain gimbalRotate at every
+ * waypoint after the first: it sits on the waypoint BEFORE the change, in a
+ * group spanning that waypoint and the next, so the camera tilts over the leg.
+ */
+function gimbalEvenlyAction(id, pitchDeg) {
+  return `          <wpml:action>
+            <wpml:actionId>${id}</wpml:actionId>
+            <wpml:actionActuatorFunc>gimbalEvenlyRotate</wpml:actionActuatorFunc>
+            <wpml:actionActuatorFuncParam>
+              <wpml:gimbalPitchRotateAngle>${pitchText(pitchDeg)}</wpml:gimbalPitchRotateAngle>
+              <wpml:gimbalRollRotateAngle>0</wpml:gimbalRollRotateAngle>
+              <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
             </wpml:actionActuatorFuncParam>
           </wpml:action>`;
 }
@@ -125,7 +165,7 @@ function actionGroup({
     triggerParam == null
       ? ''
       : `
-            <wpml:actionTriggerParam>${one(triggerParam)}</wpml:actionTriggerParam>`;
+            <wpml:actionTriggerParam>${Number(triggerParam).toFixed(1)}</wpml:actionTriggerParam>`;
   return `        <wpml:actionGroup>
           <wpml:actionGroupId>${id}</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>${start}</wpml:actionGroupStartIndex>
@@ -139,16 +179,40 @@ ${actions.join('\n')}
 `;
 }
 
-function placemark(wp, speedMs, groups) {
+/**
+ * Folder autoFlightSpeed, distance and duration exactly as DJI Fly re-saves
+ * them: 2.5 (its default speed), 0 and 0. The speed that flies is each
+ * waypoint's own waypointSpeed: the five Oct 30 missions were flown after
+ * DJI Fly rewrote them this way and the photos show 2.2-2.8 m/s, the planned
+ * speeds. Writing the default here means DJI Fly has nothing left to reset.
+ */
+const DJI_AUTO_FLIGHT_SPEED = '2.5';
+/**
+ * Turn mode of a stop. DJI Fly's own stop (first and last waypoint of every
+ * file it wrote) is ...StopWithContinuityCurvature; GEV used to write the
+ * Discontinuity variant, which no real DJI Fly file contains.
+ */
+const STOP_TURN = 'toPointAndStopWithContinuityCurvature';
+const PASS_TURN = 'toPointAndPassWithContinuityCurvature';
+
+/**
+ * One Placemark.
+ * `ends` is true for the first and the last waypoint of the mission: DJI Fly
+ * writes both as stops with waypointHeadingAngleEnable 1 and every other
+ * waypoint with 0, whatever the heading mode (followWayline or
+ * smoothTransition with a stored angle). The heading angle and mode are kept.
+ */
+function placemark(wp, speedMs, groups, ends) {
   const orbit = wp.headingDeg != null;
-  // Every orbit or look-at photo halts at its point, so the heading has
-  // settled on the planned value (smoothTransition blends it mid-curve) and
-  // the outward turn happens standing still.
-  const stops = wp.photo && (wp.outwardHeadingDeg != null || orbit);
+  // DJI Fly rewrites every orbit photo stop into a pass-through when it
+  // re-saves (172 of 174 waypoints of the Oct 30 orbit), so GEV writes the
+  // pass-through. Only the outward orbit photo, whose turn and tilt need the
+  // aircraft standing still, keeps the stop (no DJI Fly file has one).
+  const stop = ends || (wp.photo && wp.outwardHeadingDeg != null);
   return `      <Placemark>
         <Point>
           <coordinates>
-            ${wp.lon.toFixed(8)},${wp.lat.toFixed(8)}
+            ${coord(wp.lon)},${coord(wp.lat)}
           </coordinates>
         </Point>
         <wpml:index>${wp.index}</wpml:index>
@@ -158,12 +222,12 @@ function placemark(wp, speedMs, groups) {
           <wpml:waypointHeadingMode>${orbit ? 'smoothTransition' : 'followWayline'}</wpml:waypointHeadingMode>
           <wpml:waypointHeadingAngle>${orbit ? one(wp.headingDeg) : '0'}</wpml:waypointHeadingAngle>
           <wpml:waypointPoiPoint>0.000000,0.000000,0.000000</wpml:waypointPoiPoint>
-          <wpml:waypointHeadingAngleEnable>${orbit ? 1 : 0}</wpml:waypointHeadingAngleEnable>
+          <wpml:waypointHeadingAngleEnable>${ends ? 1 : 0}</wpml:waypointHeadingAngleEnable>
           <wpml:waypointHeadingPathMode>followBadArc</wpml:waypointHeadingPathMode>
           <wpml:waypointHeadingPoiIndex>0</wpml:waypointHeadingPoiIndex>
         </wpml:waypointHeadingParam>
         <wpml:waypointTurnParam>
-          <wpml:waypointTurnMode>${stops ? 'toPointAndStopWithDiscontinuityCurvature' : 'toPointAndPassWithContinuityCurvature'}</wpml:waypointTurnMode>
+          <wpml:waypointTurnMode>${stop ? STOP_TURN : PASS_TURN}</wpml:waypointTurnMode>
           <wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>
         </wpml:waypointTurnParam>
         <wpml:useStraightLine>0</wpml:useStraightLine>
@@ -175,81 +239,132 @@ ${groups}        <wpml:waypointGimbalHeadingParam>
 }
 
 /**
- * Placemark XML for every waypoint of a mission, with its photo actions.
- * Group ids start at 1 and action ids are unique across the mission, as DJI
- * Fly writes them. The gimbal turn sits in its OWN group at the first
- * waypoint and the photo in a separate group: groups run in parallel, so a
- * photo in the same group could fire while the gimbal is still turning.
+ * Placemark XML for every waypoint of a mission, in the form DJI Fly writes
+ * when it re-saves a file (measured on 5 real Mini 5 Pro missions):
+ *  - one parallel reachPoint group per waypoint holding takePhoto AND, on the
+ *    first waypoint, the gimbalRotate (takePhoto first);
+ *  - group ids restart at 1 on every waypoint (the tilt group is 2 even when
+ *    the waypoint has no photo group), action ids run 1..n over the
+ *    whole mission, handed out waypoint by waypoint (photo, then tilt);
+ *  - every later tilt (the first waypoint of a leg) is a gimbalEvenlyRotate
+ *    in a second group on the waypoint BEFORE it, start = that waypoint,
+ *    end = the next one, keeping the id the tilt would have had.
+ * Interval-photo legs, the outward orbit photo sequence and the look-at
+ * rotateYaw are not in any DJI Fly file: they keep GEV's own groups and are
+ * only renumbered the same way.
  */
 function placemarks(mission, speedMs) {
-  const blocks = [];
-  let groupId = 1;
-  let actionId = 1;
+  const flat = [];
   for (const leg of mission.legs) {
-    const wps = leg.waypoints;
-    const last = wps[wps.length - 1].index;
-    wps.forEach((wp, i) => {
-      let groups = '';
-      if (leg.photoMode === 'interval') {
-        if (i === 0) {
-          groups += actionGroup({
-            id: groupId++,
-            start: wp.index,
-            end: wp.index,
-            trigger: 'reachPoint',
-            actions: [gimbalAction(actionId++, wp.pitchDeg)],
-          });
-          groups += actionGroup({
-            id: groupId++,
-            start: wp.index,
-            end: last,
-            trigger: 'multipleDistance',
-            triggerParam: Math.max(1, leg.photoSpacingM),
-            actions: [photoAction(actionId++)],
-          });
-        }
-      } else {
-        if (i === 0) {
-          groups += actionGroup({
-            id: groupId++,
-            start: wp.index,
-            end: wp.index,
-            trigger: 'reachPoint',
-            actions: [gimbalAction(actionId++, wp.pitchDeg)],
-          });
-        }
-        if (wp.photo && wp.outwardHeadingDeg != null) {
-          // One ordered group: photo at the building, turn the aircraft and
-          // tilt the camera away, photo, then turn and tilt back.
-          groups += actionGroup({
-            id: groupId++,
-            start: wp.index,
-            end: wp.index,
-            trigger: 'reachPoint',
-            mode: 'sequence',
-            actions: [
-              photoAction(actionId++),
-              yawAction(actionId++, wp.outwardHeadingDeg, wp.headingDeg),
-              gimbalAction(actionId++, wp.outwardPitchDeg),
-              photoAction(actionId++),
-              yawAction(actionId++, wp.headingDeg, wp.outwardHeadingDeg),
-              gimbalAction(actionId++, wp.pitchDeg),
-            ],
-          });
-        } else if (wp.photo) {
-          groups += actionGroup({
-            id: groupId++,
-            start: wp.index,
-            end: wp.index,
-            trigger: 'reachPoint',
-            actions: [photoAction(actionId++)],
-          });
-        }
-      }
-      blocks.push(placemark(wp, speedMs, groups));
-    });
+    leg.waypoints.forEach((wp, i) => flat.push({ wp, leg, first: i === 0 }));
   }
-  return blocks.join('\n');
+  const total = flat.length;
+  let actionId = 1;
+
+  // Pass 1: ids and the groups each waypoint owns.
+  const own = flat.map(({ wp, leg, first }, k) => {
+    const lastIndex = leg.waypoints[leg.waypoints.length - 1].index;
+    const item = { groups: [], tilt: null };
+    const missionStart = k === 0;
+    if (first) item.tilt = { id: 0, pitch: wp.pitchDeg };
+    const interval = leg.photoMode === 'interval';
+    const outward = !interval && wp.photo && wp.outwardHeadingDeg != null;
+    // Where the first-waypoint rotate goes: in front of GEV's own groups when
+    // they are not the plain photo group, so the tilt is set before they run.
+    const tiltFirst = missionStart && (interval || outward);
+    if (tiltFirst) item.tilt.id = actionId++;
+    if (interval) {
+      if (first) {
+        item.groups.push({
+          start: wp.index,
+          end: lastIndex,
+          trigger: 'multipleDistance',
+          triggerParam: Math.max(1, leg.photoSpacingM),
+          actions: [photoAction(actionId++)],
+        });
+      }
+    } else if (outward) {
+      // One ordered group: photo at the building, turn the aircraft and tilt
+      // the camera away, photo, then turn and tilt back.
+      item.groups.push({
+        start: wp.index,
+        end: wp.index,
+        trigger: 'reachPoint',
+        mode: 'sequence',
+        actions: [
+          photoAction(actionId++),
+          yawAction(actionId++, wp.outwardHeadingDeg, wp.headingDeg),
+          gimbalAction(actionId++, wp.outwardPitchDeg),
+          photoAction(actionId++),
+          yawAction(actionId++, wp.headingDeg, wp.outwardHeadingDeg),
+          gimbalAction(actionId++, wp.pitchDeg),
+        ],
+      });
+    } else if (wp.photo) {
+      item.groups.push({
+        start: wp.index,
+        end: wp.index,
+        trigger: 'reachPoint',
+        actions: [photoAction(actionId++)],
+      });
+    }
+    if (item.tilt && !tiltFirst) item.tilt.id = actionId++;
+    return item;
+  });
+
+  // Pass 2: place the tilts. The first waypoint's is a gimbalRotate; every
+  // other is the gimbalEvenlyRotate on the waypoint before it.
+  const placed = own.map((item) => ({ groups: [...item.groups] }));
+  own.forEach((item, k) => {
+    if (!item.tilt) return;
+    const { id, pitch } = item.tilt;
+    if (k === 0) {
+      const rotate = gimbalAction(id, pitch);
+      const photoGroup = placed[0].groups.find(
+        (g) => g.trigger === 'reachPoint' && g.mode == null,
+      );
+      if (photoGroup) {
+        photoGroup.actions.push(rotate);
+      } else if (placed[0].groups.length === 0) {
+        placed[0].groups.push({
+          start: flat[0].wp.index,
+          end: flat[0].wp.index,
+          trigger: 'reachPoint',
+          actions: [rotate],
+        });
+      } else {
+        placed[0].groups.unshift({
+          start: flat[0].wp.index,
+          end: flat[0].wp.index,
+          trigger: 'reachPoint',
+          actions: [rotate],
+        });
+      }
+    } else {
+      placed[k - 1].groups.push({
+        start: flat[k - 1].wp.index,
+        end: flat[k].wp.index,
+        trigger: 'reachPoint',
+        evenly: true,
+        actions: [gimbalEvenlyAction(id, pitch)],
+      });
+    }
+  });
+
+  return flat
+    .map(({ wp }, k) => {
+      const groups = placed[k].groups;
+      const owned = groups.filter((group) => !group.evenly).length;
+      // DJI Fly numbers a waypoint's groups from 1, but the tilt group is
+      // always at least 2, even on a waypoint that has no photo group.
+      const text = groups
+        .map((group, g) =>
+          actionGroup({ ...group, id: group.evenly ? Math.max(2, owned + 1) : g + 1 }),
+        )
+        .join('');
+      return placemark(wp, speedMs, text, k === 0 || k === total - 1);
+    })
+    .join('\n');
 }
 
 /**
@@ -262,12 +377,11 @@ export function buildMissionFiles(mission, plan, opts = {}) {
   const preset = plan.preset;
   const speedMs = plan.speedMs;
   const created = opts.createdMs ?? Date.now();
-  const author = esc(opts.name ?? 'GEV Drone Flight Plan');
+  const author = esc(opts.name ?? 'fly');
   const config = missionConfig(preset, plan, opts.wpml);
   const body = placemarks(mission, speedMs);
   const templateKml = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2"
-     xmlns:wpml="${WPML_NAMESPACE}">
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="${WPML_NAMESPACE}">
   <Document>
     <wpml:author>${author}</wpml:author>
     <wpml:createTime>${created}</wpml:createTime>
@@ -277,17 +391,16 @@ ${config}
 </kml>
 `;
   const waylinesWpml = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2"
-     xmlns:wpml="${WPML_NAMESPACE}">
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="${WPML_NAMESPACE}">
   <Document>
 ${config}
     <Folder>
       <wpml:templateId>0</wpml:templateId>
       <wpml:executeHeightMode>relativeToStartPoint</wpml:executeHeightMode>
       <wpml:waylineId>0</wpml:waylineId>
-      <wpml:distance>${Math.round(mission.routeM)}</wpml:distance>
-      <wpml:duration>${Math.round(mission.durationS)}</wpml:duration>
-      <wpml:autoFlightSpeed>${one(speedMs)}</wpml:autoFlightSpeed>
+      <wpml:distance>0</wpml:distance>
+      <wpml:duration>0</wpml:duration>
+      <wpml:autoFlightSpeed>${DJI_AUTO_FLIGHT_SPEED}</wpml:autoFlightSpeed>
 ${body}
     </Folder>
   </Document>
@@ -350,10 +463,11 @@ export function readmeText(result, when = new Date(), opts = {}) {
           'in the DJI Fly data folder of the controller.',
         ]
       : []),
-    'Verified against real DJI Fly files: the file layout, namespace, aircraft code,',
-    'gimbal rotation actions. NOT verified by a real file: takePhoto actions,',
-    'distance-interval photos, smooth-transition orbit headings, and the stop,',
-    'rotateYaw and sequence-mode actions of the outward orbit photo.',
+    'Written in the form DJI Fly itself saves (checked against five real DJI Fly',
+    'files): file layout, namespace, aircraft code, photo and gimbal actions,',
+    'gradual tilt, stops at the first and last waypoint.',
+    'NOT verified by a real file: distance-interval photos, orbit headings in',
+    'flight, and the rotateYaw and sequence-mode actions of the outward orbit photo.',
     'Check airspace and local rules, keep the aircraft in sight, and fly the',
     'first mission short and supervised.',
     'The 3D check on the globe is a VISUAL aid only: it does not detect a',
