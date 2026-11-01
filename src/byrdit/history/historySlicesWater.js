@@ -1,4 +1,4 @@
-import { HISTORY_INDICES as IDX } from './historyEs.js';
+import { HISTORY_INDICES as IDX, HistoryUnavailableError } from './historyEs.js';
 import { FIRST_RECORD_TTL_MS, notRecorded } from './historySlicesB12c.js';
 
 /**
@@ -7,7 +7,7 @@ import { FIRST_RECORD_TTL_MS, notRecorded } from './historySlicesB12c.js';
  *
  * Two sources, one answer shape (owner decision 2A, 2026-11-01):
  *  - RECORDED (t at or after the first doc of usgs-water-levels, written by
- *    the S3 exporter every 15 min): the newest reading of each stream gauge
+ *    every 15 min): the newest reading of each stream gauge
  *    (parameters 00065 gage height, 00060 discharge) in [t - window, t],
  *    from our own copy. X-History-Source: recorded.
  *  - BEFORE our recording starts: a reader injected by the server
@@ -84,8 +84,23 @@ export function gaugeFeature(row) {
 /** Questions to Elasticsearch that one water slice server may have out. */
 export const WATER_ES_CONCURRENCY = 4;
 export const WATER_ES_MAX_QUEUED = 64;
+const FIRST_FAIL_BACKOFF_MS = 60_000;
+/** The exporter fills the copy about every 15 min: a newer answer may be incomplete. */
+export const RECORDED_SETTLE_MS = 20 * 60_000;
 const RECORDED_CODES = WATER_READINGS.map((r) => r.parameter_code);
 const SPEC_BY_CODE = new Map(WATER_READINGS.map((r) => [r.parameter_code, r]));
+
+/** Every geo_point form Elasticsearch keeps in _source: object, "lat,lon", [lon, lat]. */
+export function geoPoint(v) {
+  let lat;
+  let lon;
+  if (Array.isArray(v)) [lon, lat] = v;
+  else if (typeof v === 'string') [lat, lon] = v.split(',').map((x) => Number(x));
+  else if (v && typeof v === 'object') ({ lat, lon } = v);
+  lat = fin(lat);
+  lon = fin(lon);
+  return lat === null || lon === null ? null : { lat, lon };
+}
 
 /** Recorded docs of one gauge -> a gauge Feature (schema 2), or null. */
 export function recordedGaugeFeature(siteId, perCode) {
@@ -106,9 +121,9 @@ export function recordedGaugeFeature(siteId, perCode) {
     });
     first ??= d;
   }
-  const lat = fin(first?.location?.lat);
-  const lon = fin(first?.location?.lon);
-  if (!readings.length || lat === null || lon === null) return null;
+  const at = geoPoint(first?.location);
+  if (!readings.length || !at) return null;
+  const { lat, lon } = at;
   return {
     type: 'Feature',
     geometry: { type: 'Point', coordinates: [lon, lat] },
@@ -137,7 +152,7 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
       return;
     }
     if (waiting.length >= WATER_ES_MAX_QUEUED)
-      throw new Error('water history: too many questions waiting');
+      throw new HistoryUnavailableError('water history: too many questions');
     await new Promise((resolve) => waiting.push(resolve));
   }
   function esRelease() {
@@ -145,18 +160,37 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
     if (next) next();
     else running -= 1;
   }
+  // one shared lookup of the first recorded reading: concurrent tiles of a
+  // view wait for the same promise, it runs behind the limiter, and a failure
+  // is remembered for FIRST_FAIL_BACKOFF_MS so an outage or a missing
+  // privilege costs one query a minute, not one per tile
   let firstAt = null;
   let firstValue = null;
-  async function firstRecorded() {
-    if (firstAt !== null && now() - firstAt < FIRST_RECORD_TTL_MS)
-      return firstValue;
-    const json = await es.search(IDX.water, {
-      size: 0,
-      aggs: { first: { min: { field: 'observed_time' } } },
-    });
-    firstValue = fin(json?.aggregations?.first?.value);
-    firstAt = now();
+  let firstPending = null;
+  async function lookupFirst() {
+    await esTurn();
+    try {
+      const json = await es.search(IDX.water, {
+        size: 0,
+        aggs: { first: { min: { field: 'observed_time' } } },
+      });
+      firstValue = fin(json?.aggregations?.first?.value);
+      firstAt = now();
+    } catch {
+      firstValue = null;
+      firstAt = now() - FIRST_RECORD_TTL_MS + FIRST_FAIL_BACKOFF_MS;
+    } finally {
+      esRelease();
+    }
     return firstValue;
+  }
+  function firstRecorded() {
+    if (firstAt !== null && now() - firstAt < FIRST_RECORD_TTL_MS)
+      return Promise.resolve(firstValue);
+    firstPending ??= lookupFirst().finally(() => {
+      firstPending = null;
+    });
+    return firstPending;
   }
 
   async function sliceRecorded({ t, bbox, maxRows, windowMs }, first) {
@@ -229,9 +263,11 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
       const f = recordedGaugeFeature(site.key, perCode);
       if (f) features.push(f);
     }
-    const truncated = features.length > maxRows;
+    const truncated = buckets.length > maxRows;
     const kept = features.slice(0, maxRows);
     return {
+      // a time inside the copy's fill interval is not cached: a later reading may complete it
+      ...(t > now() - RECORDED_SETTLE_MS ? { noStore: true } : {}),
       body: { type: 'FeatureCollection', features: kept },
       headers: {
         'X-History-Rows': String(kept.length),
@@ -247,9 +283,17 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
   async function sliceWater(q) {
     const { t, bbox, maxRows, windowMs } = q;
     if (!bbox) return notRecorded('area_required');
-    // an unreadable copy of ours degrades to the NWIS reader (still true data)
-    const first = es ? await firstRecorded().catch(() => null) : null;
-    if (first !== null && t >= first) return sliceRecorded(q, first);
+    // an unreadable copy of ours degrades to the NWIS reader (still true data; the lookup remembers a failure for a minute)
+    const first = es ? await firstRecorded() : null;
+    if (first !== null && t >= first) {
+      try {
+        return await sliceRecorded(q, first);
+      } catch (error) {
+        // our copy failed after answering before: NWIS can still answer for
+        // about the last 120 days; further back the error stands
+        if (!reader || t < reader.earliestMs(now())) throw error;
+      }
+    }
     if (!reader) {
       if (first !== null)
         return notRecorded('before_recording_start', {

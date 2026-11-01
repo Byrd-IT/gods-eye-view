@@ -684,7 +684,7 @@ test('busy: more than MAX_IN_FLIGHT concurrent store requests -> 429', async () 
   for (const r of await Promise.all(pending)) assert.equal(r.status, 200);
 });
 
-test('busy: a water slice waits on USGS, not on ES, so it takes no ES slot (t_7a4c6a57)', async () => {
+test('busy: a water slice (NWIS path) has its own queue and takes no shared ES slot (t_7a4c6a57)', async () => {
   let release;
   const gate = new Promise((r) => (release = r));
   const fake = createFakeEs({});
@@ -725,6 +725,98 @@ test('busy: a water slice waits on USGS, not on ES, so it takes no ES slot (t_7a
   assert.equal(water.status, 200);
   const fifth = await call(api, path);
   assert.equal(fifth.status, 429);
+  release();
+  await Promise.all(pending);
+});
+
+const DAY_MS = 86_400_000;
+test('busy: a recorded water slice answers from our copy while the shared slots are full (t_7d3de14d)', async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const fake = createFakeEs({});
+  const reply = (body) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  const fetchImpl = async (url, init) => {
+    if (String(url).includes('_security/_authenticate'))
+      return fake.fetchImpl(url, init);
+    if (String(url).includes('usgs-water-levels')) {
+      const body = JSON.parse(init.body);
+      if (body.aggs?.first)
+        return reply({
+          took: 1,
+          timed_out: false,
+          _shards: { failed: 0 },
+          hits: { hits: [] },
+          aggregations: { first: { value: Date.parse(T) - DAY_MS } },
+        });
+      return reply({
+        took: 1,
+        timed_out: false,
+        _shards: { failed: 0 },
+        hits: { hits: [] },
+        aggregations: {
+          sites: {
+            buckets: [
+              {
+                key: 'USGS-01',
+                p: {
+                  buckets: [
+                    {
+                      key: '00065',
+                      n: {
+                        hits: {
+                          hits: [
+                            {
+                              _source: {
+                                parameter_code: '00065',
+                                value: 2.5,
+                                unit: 'ft',
+                                observed_time: new Date(Date.parse(T) - 600_000).toISOString(),
+                                location: { lat: 31, lon: -98 },
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      });
+    }
+    await gate;
+    return fake.fetchImpl(url, init);
+  };
+  const api = createHistoryApi({
+    env: ENV,
+    fetchImpl,
+    now: () => NOW,
+    log: () => {},
+    allow: () => true,
+    waterReader: {
+      earliestMs: () => 0,
+      read: async () => {
+        throw new Error('NWIS must not be asked for a recorded time');
+      },
+    },
+  });
+  const path = `/api/history/snapshots?feed=military&around=${T}`;
+  const pending = Array.from({ length: 4 }, () => call(api, path));
+  await new Promise((r) => setImmediate(r));
+  const water = await call(
+    api,
+    `/api/history/slice?feed=water&t=${T}&bbox=-100,30,-96,34`,
+  );
+  assert.equal(water.status, 200);
+  assert.equal(water.headers['x-history-source'], 'recorded');
+  assert.equal(JSON.parse(water.body).features.length, 1);
+  assert.equal((await call(api, path)).status, 429);
   release();
   await Promise.all(pending);
 });
