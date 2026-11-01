@@ -74,9 +74,12 @@ test('greyColor: desaturated, faded to the flights stale alpha', () => {
 });
 
 test('targets cover every swappable layer, plus satellites (tagged)', () => {
-  // B12d quakes / wind are swapped but not bridged (no feed state to grey)
+  // B12d quakes / wind and t_7d3de14d aqhi / gnss are swapped but not
+  // bridged (no feed state to grey)
   const layers = new Set(
-    ALL_HISTORY_ADAPTERS.filter((a) => !['quakes', 'wind'].includes(a.id)).map(
+    ALL_HISTORY_ADAPTERS.filter(
+      (a) => !['quakes', 'wind', 'aqhi', 'gnss'].includes(a.id),
+    ).map(
       (a) => a.layerId,
     ),
   );

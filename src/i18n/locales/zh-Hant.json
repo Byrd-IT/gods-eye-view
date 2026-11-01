@@ -3355,5 +3355,7 @@
   "Lock to the shared time": "綁定到共用時間",
   "History time": "歷史時間",
   "No data before": "此前無資料",
-  "No imagery (provider serves {time} on)": "無影像（提供方自 {time} 起）"
+  "No imagery (provider serves {time} on)": "無影像（提供方自 {time} 起）",
+  "Air quality (AQHI)": "空氣品質 (AQHI)",
+  "GNSS integrity": "GNSS 完整性"
 }

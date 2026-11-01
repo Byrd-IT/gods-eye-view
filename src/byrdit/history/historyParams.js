@@ -46,6 +46,9 @@ export const COVERAGE_BUCKETS = Object.freeze({
  * Slice feeds served by B9. `window` is the as-of lookback for event feeds
  * (default / max, ms); fires use the fixed trailing 24 h of the live feed.
  */
+/** The live air-quality layer drops readings older than this (6 h). */
+export const AQHI_LOOKBACK_MS = 6 * 3_600_000;
+
 export const SLICE_FEEDS = Object.freeze({
   aircraft: { defaultRows: MAX_ROWS },
   military: { defaultRows: MAX_ROWS },
@@ -88,6 +91,16 @@ export const SLICE_FEEDS = Object.freeze({
     noBbox: true,
   },
   imagery: { defaultRows: 1, extras: ['product'], noBbox: true },
+  // t_7d3de14d: ECCC AQHI per station, newest observation inside a lookback
+  // window (the recorder keeps changes only; the live layer drops readings
+  // older than 6 h, so 6 h is the default and the max is a day).
+  aqhi: {
+    defaultRows: 2_000,
+    window: { def: AQHI_LOOKBACK_MS, max: DAY_MS },
+  },
+  // t_7d3de14d: GNSS integrity cells of the newest recorded snapshot at or
+  // before t (fixed lookback, GNSS_SNAPSHOT_LOOKBACK_MS).
+  gnss: { defaultRows: 20_000 },
 });
 
 /**
@@ -128,6 +141,7 @@ function parseSliceExtras(spec, q) {
 /** Fixed lookbacks of the latest-per-entity slices (B10, DESIGN 4.3). */
 export const VESSELS_LOOKBACK_MS = 35 * 60_000;
 export const TRANSIT_LOOKBACK_MS = 3 * 60_000;
+export const GNSS_SNAPSHOT_LOOKBACK_MS = 15 * 60_000;
 
 /**
  * GET /api/history/track feeds and their id syntax (B10, DESIGN 4.3):

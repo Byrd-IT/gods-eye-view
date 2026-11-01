@@ -169,6 +169,8 @@ test('history: /api/flights is answered from the slice at t with the view bbox; 
     'bikeshare',
     'quakes',
     'wind',
+    'aqhi',
+    'gnss',
   ]);
   assert.equal(router.getState().served.flights.rows, states.length);
 });

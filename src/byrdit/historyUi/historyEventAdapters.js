@@ -47,6 +47,7 @@ import {
   viewToBboxes,
 } from './historyAdapters.js';
 import { FIELD_ADAPTERS } from './historyFieldAdapters.js';
+import { AIR_GNSS_ADAPTERS } from './historyAirGnssAdapters.js';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 const MIN = 60_000;
@@ -460,6 +461,7 @@ export const ALL_HISTORY_ADAPTERS = Object.freeze([
   ...HISTORY_ADAPTERS,
   ...EVENT_ADAPTERS,
   ...FIELD_ADAPTERS,
+  ...AIR_GNSS_ADAPTERS,
 ]);
 
 export { historySourceLabel };

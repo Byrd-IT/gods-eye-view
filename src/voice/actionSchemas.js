@@ -915,7 +915,7 @@ const schemas = [
         feeds: {
           type: 'array',
           minItems: 1,
-          maxItems: 11,
+          maxItems: 13,
           items: {
             type: 'string',
             enum: [
@@ -930,6 +930,8 @@ const schemas = [
               'bikeshare',
               'earthquakes',
               'wind',
+              'air-quality',
+              'gnss-integrity',
             ],
           },
         },

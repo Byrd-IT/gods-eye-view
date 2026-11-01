@@ -3592,5 +3592,7 @@
   "Lock to the shared time": "Привязать к общему времени",
   "History time": "Время истории",
   "No data before": "Нет данных до",
-  "No imagery (provider serves {time} on)": "Нет снимков (провайдер отдаёт с {time})"
+  "No imagery (provider serves {time} on)": "Нет снимков (провайдер отдаёт с {time})",
+  "Air quality (AQHI)": "Качество воздуха (AQHI)",
+  "GNSS integrity": "Целостность GNSS"
 }

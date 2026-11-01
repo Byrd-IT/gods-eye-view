@@ -33,6 +33,8 @@ export const ROUTER_ROWS = Object.freeze([
   { id: 'transit', label: msg('Transit'), adapterIds: ['transit'], since: '2026-09-01' },
   { id: 'bikeshare', label: msg('Bike share'), adapterIds: ['bikeshare'], since: '2026-09-01' },
   { id: 'wind', label: msg('Wind'), adapterIds: ['wind'], since: '2026-09-01' },
+  { id: 'aqhi', label: msg('Air quality (AQHI)'), adapterIds: ['aqhi'], since: '2026-10-30' },
+  { id: 'gnss', label: msg('GNSS integrity'), adapterIds: ['gnss'], since: '2026-11-01' },
 ]);
 
 /** Rows driven by a layer object or a window hook, in menu order. */

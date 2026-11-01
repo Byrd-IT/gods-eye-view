@@ -3355,5 +3355,7 @@
   "Lock to the shared time": "共有時刻に連動",
   "History time": "履歴の時刻",
   "No data before": "これより前のデータなし",
-  "No imagery (provider serves {time} on)": "画像なし（提供元は {time} 以降のみ）"
+  "No imagery (provider serves {time} on)": "画像なし（提供元は {time} 以降のみ）",
+  "Air quality (AQHI)": "大気質 (AQHI)",
+  "GNSS integrity": "GNSS 完全性"
 }

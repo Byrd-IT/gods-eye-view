@@ -3513,5 +3513,7 @@
   "Lock to the shared time": "Vincular ao horário compartilhado",
   "History time": "Horário do histórico",
   "No data before": "Sem dados antes de",
-  "No imagery (provider serves {time} on)": "Sem imagens (o provedor serve a partir de {time})"
+  "No imagery (provider serves {time} on)": "Sem imagens (o provedor serve a partir de {time})",
+  "Air quality (AQHI)": "Qualidade do ar (AQHI)",
+  "GNSS integrity": "Integridade GNSS"
 }

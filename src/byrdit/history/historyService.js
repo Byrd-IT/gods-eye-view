@@ -35,6 +35,7 @@ import {
   latestPerKey,
 } from './historyCollapse.js';
 import { createB12cSlices } from './historySlicesB12c.js';
+import { createAirGnssSlices } from './historySlicesAirGnss.js';
 
 /**
  * /api/history query orchestration (gev-history DESIGN 4.3; card B9).
@@ -1011,6 +1012,7 @@ export function createHistoryService({
 
   const latestSlices = createLatestSlices({ es });
   const b12c = createB12cSlices({ es, now, windReader, weatherTimes });
+  const airGnss = createAirGnssSlices({ es, now });
   const SLICES = {
     aircraft: sliceAircraft,
     military: sliceMilitary,
@@ -1027,6 +1029,9 @@ export function createHistoryService({
     quakes: b12c.sliceQuakes,
     wind: b12c.sliceWind,
     imagery: b12c.sliceImagery,
+    // t_7d3de14d
+    aqhi: airGnss.sliceAqhi,
+    gnss: airGnss.sliceGnss,
   };
 
   async function slice(params) {

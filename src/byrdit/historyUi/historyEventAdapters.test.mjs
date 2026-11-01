@@ -104,6 +104,8 @@ test('registry: B12a feeds + FIRMS/perimeters/cyclones/launches + transit/bike s
       ['bikeshare', 'bikeshare', 'bikeshare', false],
       ['quakes', 'earthquakes', 'quakes', false],
       ['wind', 'wind', 'wind', false],
+      ['aqhi', 'air-quality', 'aqhi', true],
+      ['gnss', 'gnss-integrity', 'gnss', true],
     ],
   );
   const find = (p) => adapterForPath(p, ALL_HISTORY_ADAPTERS)?.id ?? null;

@@ -49,6 +49,10 @@ export const HISTORY_INDICES = Object.freeze({
   quakesArchive: 'gev-history-quakes-hist-*',
   cycles: 'gev-history-cycles',
   imagery: 'gev-history-imagery',
+  // t_7d3de14d: ECCC AQHI hourly observations (change-only) and the GNSS
+  // integrity cells (one doc per cell per 5 min snapshot)
+  aqhi: 'gev-history-aqhi',
+  gnss: 'gev-history-gnss-integrity',
 });
 const ALLOWED = new Set(Object.values(HISTORY_INDICES));
 /**

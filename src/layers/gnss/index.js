@@ -260,6 +260,19 @@ export function createGnssIntegrityLayer({
       if (_primitives) _primitives.show = false;
     },
 
+    /**
+     * GEV history seam (card t_7d3de14d, touch point; re-check on upstream
+     * merges). The rolling store holds aircraft of another time: a history
+     * frame (or the return to live) starts from an empty store, so cells of
+     * the previous time never mix into the shown one.
+     */
+    resetForHistoryFrame() {
+      _observations.clear();
+      _cells = [];
+      _lastQueryKey = null;
+      _retryAt = 0;
+    },
+
     async update(_viewerArg, { signal } = {}) {
       if (!_enabled || !_primitives || signal?.aborted) return false;
       if (now() < _retryAt) {
