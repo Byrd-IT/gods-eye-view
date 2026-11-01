@@ -51,6 +51,7 @@ export function createWindGpuRendering({ cesium: C, getViewer }) {
   let diagnostics = emptyDiagnostics();
   // Byrd-IT fork: layer opacity (1 = unchanged); scales the streamline fade.
   let opacity = 1;
+  let lastHeightFade = 0; // kept apart from diagnostics, which emptyDiagnostics() resets
 
   function supported() {
     const scene = getViewer?.()?.scene;
@@ -226,6 +227,7 @@ export function createWindGpuRendering({ cesium: C, getViewer }) {
       ),
     );
     diagnostics.heightFade = heightFade;
+    lastHeightFade = heightFade;
     if (material) material.uniforms.heightFade = heightFade * opacity;
     diagnostics.visibleCells = 0;
     diagnostics.visibleVertexCount = 0;
@@ -262,8 +264,7 @@ export function createWindGpuRendering({ cesium: C, getViewer }) {
     },
     setOpacity(value) {
       opacity = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
-      if (material)
-        material.uniforms.heightFade = diagnostics.heightFade * opacity;
+      if (material) material.uniforms.heightFade = lastHeightFade * opacity;
     },
     setOptions(options = {}) {
       if (typeof options.paused === 'boolean') paused = options.paused;
