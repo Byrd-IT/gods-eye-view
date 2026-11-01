@@ -151,3 +151,41 @@ test('service: feed=water goes through the injected reader (no ES needed)', asyn
   assert.equal(out.body.features[0].properties.readings[0].value, 123);
   assert.equal(out.headers['X-History-Rows'], '1');
 });
+
+test('reader: synthetic secrets in a failing fetch never reach the error', async () => {
+  const secret = 'SYNTHtoken9f3kQ2ABC123';
+  const msg = `Authorization: Bearer ${secret} https://u:${secret}@h.example/x?api_key=${secret}`;
+  const fetches = [
+    async () => {
+      const e = new Error(msg);
+      e.cause = new Error(msg);
+      throw e;
+    },
+    async () =>
+      new Response(msg, { status: 500, headers: { 'x-api-key': secret } }),
+    async () => new Response(msg, { status: 200 }),
+  ];
+  for (const fetch of fetches) {
+    const reader = createWaterHistoryReader({ env: {}, fetch, now: () => NOW });
+    await assert.rejects(
+      reader.read({ t: NOW - 24 * HOUR, windowMs: HOUR, limit: 5, bbox: BOX }),
+      (e) => {
+        const text = [
+          e.message,
+          e.stack,
+          JSON.stringify(e),
+          String(e.cause ?? ''),
+        ].join('\n');
+        for (const v of [
+          secret,
+          secret.slice(0, 8),
+          secret.slice(-6),
+          encodeURIComponent(secret),
+          Buffer.from(secret).toString('base64'),
+        ])
+          assert.ok(!text.includes(v), 'leak');
+        return e.code === 'BACKEND';
+      },
+    );
+  }
+});
