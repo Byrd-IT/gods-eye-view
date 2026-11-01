@@ -3920,6 +3920,8 @@ export function initDronePlan({
     state.box = plan.areas.at(-1)?.box ?? null;
     state.jobGrouping = plan.jobGrouping;
     state.takeoff = plan.takeoff;
+    // A plan saved before the camera preset existed gets the default one.
+    state.options.cameraPresetId = DEFAULT_CAMERA_PRESET_ID;
     Object.assign(state.options, plan.options);
     state.options.orbitTargets = plan.orbitTargets;
     state.options.lookAtPaths = plan.lookAtPaths ?? [];

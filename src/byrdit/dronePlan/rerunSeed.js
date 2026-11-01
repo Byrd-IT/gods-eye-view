@@ -186,7 +186,7 @@ export function compareToReference(native, reference, tol = TOLERANCE) {
 }
 
 /** One library item: details plus the storable plan document. */
-export function buildItem(spec, entry) {
+export function buildItem(spec, entry, clean = (details) => details) {
   if (!isSeedName(entry.name))
     throw new Error(
       `seed plans must be named "${SEED_PREFIXES.join('" or "')}"`,
@@ -197,13 +197,16 @@ export function buildItem(spec, entry) {
     `Planned by GEV: ${stats.waypointCount} waypoints, ${stats.photoCount} photos, ` +
     `${stats.missionCount} mission${stats.missionCount === 1 ? '' : 's'}, ` +
     `speed ${stats.speedMs.toFixed(2)} m/s.`;
+  // `clean` is the store's own cleaning (trim, length limits), so the stored
+  // name and text equal what is compared on the next run.
+  const details = clean({
+    name: entry.name,
+    site: spec.site ?? '',
+    notes: `${entry.notes ?? ''}\n${planned}`.trim(),
+    status: 'planned',
+  });
   return {
-    details: {
-      name: entry.name,
-      site: spec.site ?? '',
-      notes: `${entry.notes ?? ''}\n${planned}`.trim(),
-      status: 'planned',
-    },
+    details,
     plan: serializePlan(buildState(spec, entry)),
   };
 }

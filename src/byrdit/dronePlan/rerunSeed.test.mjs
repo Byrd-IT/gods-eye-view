@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createStore } from '../../../server/byrdit/planLibrary/store.js';
+import {
+  cleanDetails,
+  createStore,
+} from '../../../server/byrdit/planLibrary/store.js';
 import { readPlan } from './planDoc.js';
 import { planFlight } from './planner.js';
 import { parseDjiKmz } from './djiKmz.js';
@@ -36,7 +39,7 @@ const spec = {
       orbitTargets: [{ radiusM: 30, heightM: 9 }],
     },
     {
-      name: 'Suggested test - 12MP stop',
+      name: 'Suggested test - 12MP ring',
       areaHalfM: 55,
       options: {
         pattern: 'orbit',
@@ -125,7 +128,7 @@ test('seeding keeps the geometry, camera preset and a readable plan; re-running 
     assert.equal(store.list('byrdit').length, 4);
     const test12 = store
       .list('byrdit')
-      .find((p) => p.name === 'Suggested test - 12MP stop');
+      .find((p) => p.name === 'Suggested test - 12MP ring');
     const stored = readPlan(store.get('byrdit', test12.id).plan);
     assert.equal(stored.options.cameraPresetId, 'test-12mp');
     assert.equal(
@@ -206,6 +209,22 @@ test('grid plans (no radius) and empty references compare cleanly', () => {
   ]);
 });
 
+test('a name with stray spaces is cleaned like the store does, so re-runs do not duplicate', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'seed-'));
+  try {
+    const store = createStore({ root });
+    const clean = (d) => cleanDetails(d, { requireName: true });
+    const messy = { ...spec.plans[0], name: 'Suggested rerun - ring  ' };
+    const items = [buildItem({ ...spec, site: ' Test field ' }, messy, clean)];
+    seedLibrary(store, 'byrdit', items);
+    const again = seedLibrary(store, 'byrdit', items);
+    assert.equal(again[0].action, 'unchanged');
+    assert.equal(store.list('byrdit').length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('only "Suggested ..." names are seeded', () => {
   assert.equal(isSeedName('Suggested rerun - x'), true);
   assert.equal(isSeedName('My plan'), false);
@@ -217,7 +236,7 @@ test('only "Suggested ..." names are seeded', () => {
   );
 });
 
-// Real check against the Byrd Ranch spec and KMZs; only where they exist.
+// Real check against the private spec and KMZs; only where they exist.
 const SPEC = process.env.GEV_RERUN_SPEC;
 const KMZ_DIR = process.env.GEV_RERUN_KMZ_DIR;
 test(

@@ -17,7 +17,7 @@ test('default preset is the 50 MP 4:3 mapping preset', () => {
     [8192, 6144, 500, -0.7],
   );
 });
-test('shutter is never slower than the preset; EV text', () => {
+test('the checklist shows the shutter of the plan, the preset minimum when none is set; EV text', () => {
   const p = cameraPresetOrDefault('mapping-50mp');
   assert.equal(shutterForPreset(p, 250), 250);
   assert.equal(shutterForPreset(p, undefined), 500);

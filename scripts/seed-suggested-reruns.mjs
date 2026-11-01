@@ -23,6 +23,7 @@ import {
 import {
   createStore,
   defaultRoot,
+  cleanDetails,
 } from '../server/byrdit/planLibrary/store.js';
 
 function args(argv) {
@@ -108,7 +109,9 @@ if (failures.length) {
   process.exit(1);
 }
 
-const items = spec.plans.map((e) => buildItem(spec, e));
+const items = spec.plans.map((e) =>
+  buildItem(spec, e, (d) => cleanDetails(d, { requireName: true })),
+);
 if (!opt.dryRun && existsSync(root)) {
   const backup =
     opt.backupDir ??
