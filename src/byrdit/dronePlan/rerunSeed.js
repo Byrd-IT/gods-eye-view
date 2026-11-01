@@ -135,8 +135,11 @@ export function planStats(spec, entry) {
 }
 
 const distinct = (list) =>
-  [...new Set(list.filter(Number.isFinite).map((v) => Math.round(v * 10) / 10))]
-    .sort((a, b) => a - b);
+  [
+    ...new Set(
+      list.filter(Number.isFinite).map((v) => Math.round(v * 10) / 10),
+    ),
+  ].sort((a, b) => a - b);
 
 /** Stats of a parsed reference mission (parseDjiKmz) around the centre. */
 export function referenceStats(mission, center) {
@@ -167,9 +170,7 @@ export function compareToReference(native, reference, tol = TOLERANCE) {
       `waypoints ${native.waypointCount} vs ${reference.waypointCount}`,
     );
   if (!closeSets(native.heights, reference.heights, tol.heightM))
-    problems.push(
-      `heights ${native.heights} vs ${reference.heights}`,
-    );
+    problems.push(`heights ${native.heights} vs ${reference.heights}`);
   if (!closeSets(native.pitches, reference.pitches, tol.pitchDeg))
     problems.push(`pitches ${native.pitches} vs ${reference.pitches}`);
   if (Math.abs(native.meanRadiusM - reference.meanRadiusM) > tol.radiusM)
@@ -182,7 +183,9 @@ export function compareToReference(native, reference, tol = TOLERANCE) {
 /** One library item: details plus the storable plan document. */
 export function buildItem(spec, entry) {
   if (!isSeedName(entry.name))
-    throw new Error(`seed plans must be named "${SEED_PREFIXES.join('" or "')}"`);
+    throw new Error(
+      `seed plans must be named "${SEED_PREFIXES.join('" or "')}"`,
+    );
   const stats = planStats(spec, entry);
   if (stats.error) throw new Error(`${entry.name}: ${stats.error}`);
   const planned =

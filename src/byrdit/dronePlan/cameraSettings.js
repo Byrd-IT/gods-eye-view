@@ -65,7 +65,9 @@ export function shutterForPreset(preset, shutterDenominator) {
 
 /** The nearest allowed shutter value at or above `n` (for the select list). */
 export function allowedShutter(n) {
-  return SHUTTER_DENOMINATORS.find((d) => d >= n) ?? SHUTTER_DENOMINATORS.at(-1);
+  return (
+    SHUTTER_DENOMINATORS.find((d) => d >= n) ?? SHUTTER_DENOMINATORS.at(-1)
+  );
 }
 
 /** EV as DJI Fly shows it: -0.7, +0.3, 0. */
