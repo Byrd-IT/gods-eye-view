@@ -3575,5 +3575,21 @@
     "other": "{count} фотографії без висоти чи даних камери, тож деталь на землі не визначається"
   },
   "Reading photos: {done} of {total}": "Читання фото: {done} з {total}",
-  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "У жодному файлі немає положення. Використовуйте оригінальні файли JPEG, а не копії, надіслані через чат."
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "У жодному файлі немає положення. Використовуйте оригінальні файли JPEG, а не копії, надіслані через чат.",
+  "Vessels (AIS)": "Судна (AIS)",
+  "Earthquakes": "Землетруси",
+  "Fires (FIRMS)": "Пожежі (FIRMS)",
+  "Fire perimeters": "Межі пожеж",
+  "Cyclones": "Циклони",
+  "Rocket launches": "Запуски ракет",
+  "Bike share": "Прокат велосипедів",
+  "Weather radar, lightning, clouds": "Метеорадар, блискавки, хмари",
+  "GhostMaps": "GhostMaps",
+  "Imagery (Wayback)": "Знімки (Wayback)",
+  "Layer times": "Час шарів",
+  "Lock all": "Заблокувати все",
+  "Unlock all": "Розблокувати все",
+  "Lock to the shared time": "Прив'язати до спільного часу",
+  "History time": "Час історії",
+  "No data before": "Немає даних до"
 }

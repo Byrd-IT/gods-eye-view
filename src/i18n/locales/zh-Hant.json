@@ -3338,5 +3338,21 @@
     "other": "{count} 張照片沒有高度或相機數據，因此沒有地面細節"
   },
   "Reading photos: {done} of {total}": "正在讀取照片：{done}/{total}",
-  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "所有文件都沒有位置。請使用原始 JPEG 文件，不要使用經聊天應用傳送的副本。"
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "所有文件都沒有位置。請使用原始 JPEG 文件，不要使用經聊天應用傳送的副本。",
+  "Vessels (AIS)": "船舶 (AIS)",
+  "Earthquakes": "地震",
+  "Fires (FIRMS)": "火災 (FIRMS)",
+  "Fire perimeters": "火災邊界",
+  "Cyclones": "氣旋",
+  "Rocket launches": "火箭發射",
+  "Bike share": "共享單車",
+  "Weather radar, lightning, clouds": "天氣雷達、閃電、雲層",
+  "GhostMaps": "GhostMaps",
+  "Imagery (Wayback)": "影像 (Wayback)",
+  "Layer times": "圖層時間",
+  "Lock all": "全部鎖定",
+  "Unlock all": "全部解鎖",
+  "Lock to the shared time": "綁定到共用時間",
+  "History time": "歷史時間",
+  "No data before": "此前無資料"
 }

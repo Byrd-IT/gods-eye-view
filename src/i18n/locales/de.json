@@ -3417,5 +3417,21 @@
     "other": "{count} Fotos haben keine Höhen- oder Kameradaten, daher kein Bodendetail"
   },
   "Reading photos: {done} of {total}": "Fotos werden gelesen: {done} von {total}",
-  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "Keine der Dateien enthält eine Position. Original-JPEG-Dateien verwenden, keine Kopien aus einer Chat-App."
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "Keine der Dateien enthält eine Position. Original-JPEG-Dateien verwenden, keine Kopien aus einer Chat-App.",
+  "Vessels (AIS)": "Schiffe (AIS)",
+  "Earthquakes": "Erdbeben",
+  "Fires (FIRMS)": "Brände (FIRMS)",
+  "Fire perimeters": "Brandperimeter",
+  "Cyclones": "Zyklone",
+  "Rocket launches": "Raketenstarts",
+  "Bike share": "Bike-Sharing",
+  "Weather radar, lightning, clouds": "Wetterradar, Blitze, Wolken",
+  "GhostMaps": "GhostMaps",
+  "Imagery (Wayback)": "Luftbilder (Wayback)",
+  "Layer times": "Ebenenzeiten",
+  "Lock all": "Alle sperren",
+  "Unlock all": "Alle entsperren",
+  "Lock to the shared time": "An die gemeinsame Zeit koppeln",
+  "History time": "Verlaufszeit",
+  "No data before": "Keine Daten vor"
 }

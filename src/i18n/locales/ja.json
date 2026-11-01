@@ -3338,5 +3338,21 @@
     "other": "高度またはカメラのデータがない写真が{count}枚あるため、地面の詳細はありません"
   },
   "Reading photos: {done} of {total}": "写真を読み取り中：{done}/{total}",
-  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "どのファイルにも位置がありません。チャットアプリ経由のコピーではなく、元のJPEGファイルを使ってください。"
+  "None of the files has a position in it. Use the original JPEG files, not copies sent through a chat app.": "どのファイルにも位置がありません。チャットアプリ経由のコピーではなく、元のJPEGファイルを使ってください。",
+  "Vessels (AIS)": "船舶 (AIS)",
+  "Earthquakes": "地震",
+  "Fires (FIRMS)": "火災 (FIRMS)",
+  "Fire perimeters": "火災境界",
+  "Cyclones": "サイクロン",
+  "Rocket launches": "ロケット打ち上げ",
+  "Bike share": "シェアサイクル",
+  "Weather radar, lightning, clouds": "気象レーダー・雷・雲",
+  "GhostMaps": "GhostMaps",
+  "Imagery (Wayback)": "衛星画像 (Wayback)",
+  "Layer times": "レイヤーの時刻",
+  "Lock all": "すべてロック",
+  "Unlock all": "すべてロック解除",
+  "Lock to the shared time": "共有時刻に連動",
+  "History time": "履歴の時刻",
+  "No data before": "これより前のデータなし"
 }
