@@ -27,6 +27,7 @@ import {
   t,
   translateKnown,
 } from '../i18n/index.js';
+import { createOpacityRow } from '../byrdit/layerOpacity/opacityRow.js';
 
 // Feed-state values are machine ids (QA hooks, CSS feed-* classes); only the
 // label translates.
@@ -453,9 +454,35 @@ export class LayerPanel {
         }
       }
 
+      this._appendOpacityRows(row, [{ id: layer.id }]);
       this._toggleContainer.appendChild(row);
     }
     this._refreshWeatherPanel();
+  }
+
+  /**
+   * Byrd-IT fork: attach the layer-opacity model; every layer row then shows
+   * an Opacity slider (default 100 %). Re-renders the rows.
+   */
+  attachOpacity(model) {
+    this._opacityModel = model || null;
+    this._renderToggles();
+  }
+  _appendOpacityRows(row, members) {
+    const model = this._opacityModel;
+    if (!model) return;
+    for (const member of members) {
+      if (!model.has(member.id)) continue;
+      const control = createOpacityRow({
+        documentRef: row.ownerDocument,
+        model,
+        layerId: member.id,
+        label: members.length > 1 ? member.label || member.id : '',
+        translate: (text) => t(text),
+      });
+      this._removers.push(control.dispose);
+      row.appendChild(control.element);
+    }
   }
 
   _scheduleRowControlsRefresh() {
@@ -745,6 +772,7 @@ export class LayerPanel {
       if (!this._destroyed && this._generation === generation)
         this._syncCombinedRow(row);
     });
+    this._appendOpacityRows(row, def.members);
     this._toggleContainer.appendChild(row);
     this._combinedRows.push(row);
     this._syncCombinedRow(row);

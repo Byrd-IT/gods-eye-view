@@ -67,6 +67,7 @@ export function createWindLayer({
   let request = null;
   let enabled = false;
   let rendering = null;
+  let opacity = 1; // Byrd-IT fork: layer opacity slider
   let imageryHost = null;
   let manifest = null;
   let error = null;
@@ -127,6 +128,7 @@ export function createWindLayer({
         onStatusChange: notify,
       });
       rendering.attach();
+      rendering.setOpacity?.(opacity);
       rendering.setOptions?.({ overlay, paused });
       const target = container ?? nextViewer.container;
       inspectionMarker = createWindInspectionMarker({
@@ -141,6 +143,10 @@ export function createWindLayer({
           ? services.imageryHost
           : null;
       rendering?.rehome?.();
+    },
+    setOpacity(value) {
+      opacity = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
+      rendering?.setOpacity?.(opacity);
     },
     enable() {
       enabled = true;

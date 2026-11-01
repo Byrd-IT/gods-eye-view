@@ -734,6 +734,9 @@ export function createWindRendering({
         motionChanged();
       }
     },
+    setOpacity(value) {
+      gpu.setOpacity?.(value);
+    },
     setOptions(options = {}) {
       const nextOverlay = ['none', 'speed', 'temperature', 'pressure'].includes(
         options.overlay,

@@ -1203,3 +1203,26 @@ html:not([lang='en']) .data-row-list-text {
 .data-toggle-row--combined .data-toggle-chip.active::before {
   opacity: 1;
 }
+
+/* Byrd-IT fork: per-layer opacity slider row (default 100%). */
+.layer-opacity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.78em;
+  opacity: 0.9;
+}
+.layer-opacity-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.layer-opacity-slider {
+  flex: 1 1 auto;
+  min-width: 60px;
+}
+.layer-opacity-value {
+  flex: 0 0 3.2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

@@ -2,6 +2,7 @@ import { LayerLifecycle } from '../data/lifecycle.js';
 import { LayerPresentation } from './layerPresentation.js';
 import { createCyberSonarScene } from '../cyberSonarScene.js';
 import { panelAwareVisibility } from './embed.js';
+import { createLayerOpacity } from '../byrdit/layerOpacity/index.js';
 /** Register the application layer catalog before allowing state restoration. */
 export function createApplicationData({
   scene: { viewer, mapStackController },
@@ -61,9 +62,13 @@ export function createApplicationData({
         delete window.__gevQaUnregisterLayer;
     });
   }
+  // Byrd-IT fork: per-layer opacity sliders (default 100 %, additive).
+  const layerOpacity = createLayerOpacity({ viewer, dataManager });
+  defer(() => layerOpacity.destroy());
+  presentation.panel.attachOpacity(layerOpacity.model);
   presentation.mount(document.getElementById('data-toggles'));
   styleManager.attachDataManager(dataManager);
   defer(createCyberSonarScene(viewer, dataManager));
 
-  return { dataManager, catalog, presentation };
+  return { dataManager, catalog, presentation, layerOpacity };
 }
