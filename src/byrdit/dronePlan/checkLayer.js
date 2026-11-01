@@ -71,12 +71,25 @@ export function clampAlpha(layer, value) {
   return Math.min(range.max, Math.max(range.min, n));
 }
 
+/** The Photo footprints setting: only the photo in view, every photo, none. */
+export const FOOTPRINT_MODES = Object.freeze(['selected', 'all', 'off']);
+
+/**
+ * A footprints value as a mode. The old tick box (true / false) reads as
+ * selected / off; anything unknown is the default, selected.
+ */
+export function footprintMode(value) {
+  if (FOOTPRINT_MODES.includes(value)) return value;
+  if (value === false) return 'off';
+  return 'selected';
+}
+
 export const DEFAULT_CHECK_OPTIONS = Object.freeze({
   enabled: true,
   zone: true,
   halfWidthM: DEFAULT_ZONE_HALF_WIDTH_M,
   curtain: true,
-  footprints: true,
+  footprints: 'selected',
   frustum: 'one',
   index: 0,
   frame: null,
@@ -426,11 +439,13 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
           : '',
       curtain: on && options.curtain ? `${version}|${level('curtain')}` : '',
       footprints:
-        wantFrame && options.footprints
+        wantFrame && options.footprints === 'all'
           ? `${version}|${frameKey()}|${level('footprint')}`
           : '',
+      // The photo in view shows for 'selected' and 'all', whatever the camera
+      // view is; only 'off' hides it.
       current:
-        wantFrame && (options.footprints || options.frustum === 'thinned')
+        wantFrame && options.footprints !== 'off'
           ? `${version}|${frameKey()}|${level('footprint')}|${clampIndex()}`
           : '',
       frustums:
@@ -472,6 +487,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     },
     setOptions(patch = {}) {
       options = { ...options, ...patch };
+      options.footprints = footprintMode(options.footprints);
       if (patch.alpha) options.alpha = { ...DEFAULT_ALPHA, ...patch.alpha };
       sync();
     },

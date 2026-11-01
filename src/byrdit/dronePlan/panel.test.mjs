@@ -1306,14 +1306,19 @@ test('3D check section: defaults are zone 10 m, curtain on, one pyramid, and it 
   assert.equal(checkBox(w, 'enabled').checked, true);
   assert.equal(checkBox(w, 'zone').checked, true);
   assert.equal(checkBox(w, 'curtain').checked, true, 'curtain on by default');
-  assert.equal(checkBox(w, 'footprints').checked, true);
+  assert.equal(checkBox(w, 'footprints').value, 'selected');
+  assert.deepEqual(
+    checkBox(w, 'footprints').children.map((o) => o.textContent),
+    ['Selected photo only', 'All photos', 'Off'],
+  );
   assert.equal(checkSlider(w, 'width').value, '10');
   assert.equal(checkBox(w, 'frustum').value, 'one');
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   assert.ok(checkOf(w, 'zone').length >= 1);
   assert.ok(checkOf(w, 'curtain').length >= 1);
-  assert.ok(checkOf(w, 'footprint').length >= 1);
+  assert.equal(checkOf(w, 'footprint').length, 0, 'no bulk footprints by default');
+  assert.equal(checkOf(w, 'current').length, 2, 'the photo in view: fill and outline');
   assert.equal(checkOf(w, 'view').length, 5, 'one pyramid');
   assert.equal(checkOf(w, 'zone')[0].polylineVolume.shape[1].x, 10);
   w.handle.destroy();
@@ -1349,13 +1354,27 @@ test('3D check: toggles remove only their own layer; master switch removes all',
     box.checked = on;
     box.dispatch('change');
   };
+  const setFootprints = (value) => {
+    const select = checkBox(w, 'footprints');
+    select.value = value;
+    select.dispatch('change');
+  };
+  assert.equal(checkOf(w, 'footprint').length, 0, 'default: no bulk footprints');
+  assert.equal(checkOf(w, 'current').length, 2, 'default: the photo in view');
+  setFootprints('all');
+  assert.ok(checkOf(w, 'footprint').length > 1);
   flipTo('curtain', false);
   assert.equal(checkOf(w, 'curtain').length, 0);
   assert.ok(checkOf(w, 'zone').length && checkOf(w, 'footprint').length);
   flipTo('zone', false);
   assert.equal(checkOf(w, 'zone').length, 0);
-  flipTo('footprints', false);
+  setFootprints('off');
   assert.equal(checkOf(w, 'footprint').length, 0);
+  assert.equal(checkOf(w, 'current').length, 0, 'off hides the photo in view');
+  setFootprints('selected');
+  assert.equal(checkOf(w, 'footprint').length, 0);
+  assert.equal(checkOf(w, 'current').length, 2);
+  setFootprints('off');
   assert.equal(checkOf(w, 'view').length, 5);
   const view = checkBox(w, 'frustum');
   view.value = 'off';
@@ -2359,6 +2378,9 @@ test('transparency: four sliders, defaults are today\'s values, remembered per b
   );
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
+  const mode = checkBox(w, 'footprints');
+  mode.value = 'all';
+  mode.dispatch('change');
   const slider = checkSlider(w, 'alpha-footprint');
   slider.value = '25';
   slider.dispatch('input');
@@ -2818,6 +2840,9 @@ test('an imported file feeds the 3D check: one footprint and pyramid per photo; 
   const checkView = checkBox(w, 'frustum');
   checkView.value = 'thinned';
   checkView.dispatch('change');
+  const mode = checkBox(w, 'footprints');
+  mode.value = 'all';
+  mode.dispatch('change');
   // Three point photos + stations at 0, 20, 40 m on the 40 m leg.
   assert.equal(checkOf(w, 'footprint').length, 3 + 3);
   assert.equal(checkOf(w, 'view').length, 6 * 5);

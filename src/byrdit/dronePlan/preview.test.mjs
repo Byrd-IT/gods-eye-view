@@ -21,7 +21,12 @@ import {
   thinIndexes,
 } from './checkGeometry.js';
 import { getPreset } from './presets.js';
-import { ALPHA_RANGE, DEFAULT_ALPHA } from './checkLayer.js';
+import {
+  ALPHA_RANGE,
+  DEFAULT_ALPHA,
+  DEFAULT_CHECK_OPTIONS,
+  footprintMode,
+} from './checkLayer.js';
 
 function fakeCesium() {
   const paint = (css, a = 1) => ({ css, a, withAlpha: (x) => paint(css, x) });
@@ -456,7 +461,7 @@ test('3D check: zone corridor half-width follows the slider and flies at the rea
 });
 
 test('3D check: each toggle adds and removes only its own entities', () => {
-  const { preview, source } = checkRig({ frustum: 'one' });
+  const { preview, source } = checkRig({ frustum: 'one', footprints: 'all' });
   assert.ok(zones(source).length && curtains(source).length);
   assert.ok(footprints(source).length && views(source).length);
   const keep = (list) => list.slice();
@@ -477,7 +482,7 @@ test('3D check: each toggle adds and removes only its own entities', () => {
   assert.equal(zones(source).length, 0);
   assert.ok(curtains(source).length);
   assert.ok(same(footprints(source), before.foot));
-  preview.setCheck({ zone: true, footprints: false });
+  preview.setCheck({ zone: true, footprints: 'off' });
   assert.equal(footprints(source).length, 0);
   assert.ok(views(source).length, 'pyramid stays when footprints go');
   preview.setCheck({ frustum: 'off' });
@@ -523,7 +528,7 @@ test('3D check: one pyramid by default; the index steps it; thinned shows many w
 
 test('3D check: entity caps hold on a plan of about 600 photos or more', () => {
   const big = result(1500, 1200, { aglM: 60, batteryMin: 60 });
-  const { preview, source } = checkRig({ frustum: 'thinned' }, big);
+  const { preview, source } = checkRig({ frustum: 'thinned', footprints: 'all' }, big);
   assert.ok(preview.checkInfo().count > MAX_FOOTPRINTS);
   assert.ok(footprints(source).length <= MAX_FOOTPRINTS);
   assert.ok(views(source).length <= MAX_FRUSTUMS * 5);
@@ -531,7 +536,7 @@ test('3D check: entity caps hold on a plan of about 600 photos or more', () => {
 });
 
 test('3D check: a footprint is shaded on the ground, classified onto 3D tiles', () => {
-  const { source } = checkRig({ frustum: 'off' });
+  const { source } = checkRig({ frustum: 'off', footprints: 'all' });
   const poly = footprints(source)[0].polygon;
   assert.equal(poly.classificationType, 'both');
   assert.equal(poly.hierarchy.length, 8, 'four lon/lat corners');
@@ -546,7 +551,7 @@ test('3D check: it follows each pass checkbox and is coloured per pass', () => {
     enabled: true,
     frame: FRAME,
     frustum: 'off',
-    footprints: false,
+    footprints: 'off',
   });
   preview.showSuite(suitePasses());
   const ids = (list) =>
@@ -607,7 +612,7 @@ test('3D check: no footprints or pyramids without a camera', () => {
 
 test('3D check: an interval-photo plan still shows footprints and pyramids at the photo spots', () => {
   const planned = result(300, 200, { aglM: 80, photoMode: 'interval' });
-  const { preview, source } = checkRig({ frustum: 'one' }, planned);
+  const { preview, source } = checkRig({ frustum: 'one', footprints: 'all' }, planned);
   const info = preview.checkInfo();
   const expected = planned.totals.photoCount;
   assert.ok(info.count > 0, 'photos found');
@@ -755,7 +760,7 @@ const alphaOf = (e) =>
   (e.polygon ?? e.polylineVolume ?? e.polyline ?? e.wall)?.material?.a;
 
 test('transparency: the defaults are today\'s values on every layer', () => {
-  const { source } = checkRig({ frustum: 'one' });
+  const { source } = checkRig({ frustum: 'one', footprints: 'all' });
   assert.equal(zones(source).length > 0, true);
   assert.equal(alphaOf(zones(source)[0]), 0.16);
   assert.equal(alphaOf(curtains(source)[0]), 0.1);
@@ -769,7 +774,7 @@ test('transparency: the defaults are today\'s values on every layer', () => {
 });
 
 test('transparency: each layer follows its own level and the others stay put', () => {
-  const { preview, source } = checkRig({ frustum: 'one' });
+  const { preview, source } = checkRig({ frustum: 'one', footprints: 'all' });
   preview.setCheck({ alpha: { ...DEFAULT_ALPHA, footprint: 0.3 } });
   assert.equal(alphaOf(footprints(source)[0]), 0.3);
   assert.equal(alphaOf(zones(source)[0]), 0.16);
@@ -786,7 +791,7 @@ test('transparency: each layer follows its own level and the others stay put', (
 });
 
 test('transparency: levels are clamped to the slider range', () => {
-  const { preview, source } = checkRig({ frustum: 'off' });
+  const { preview, source } = checkRig({ frustum: 'off', footprints: 'all' });
   preview.setCheck({ alpha: { ...DEFAULT_ALPHA, footprint: 7, zone: -1 } });
   assert.equal(alphaOf(footprints(source)[0]), ALPHA_RANGE.footprint.max);
   assert.equal(alphaOf(zones(source)[0]), 0);
@@ -796,7 +801,7 @@ test('transparency: levels are clamped to the slider range', () => {
 const currents = (source) => layerOf(source, '3D check current photo');
 
 test('current photo: its footprint is drawn stronger with an outline, and follows the stepper', () => {
-  const { preview, source } = checkRig({ frustum: 'one', index: 0 });
+  const { preview, source } = checkRig({ frustum: 'one', index: 0, footprints: 'all' });
   const fillOf = () => currents(source).find((e) => e.polygon);
   const lineOf = () => currents(source).find((e) => e.polyline);
   assert.ok(fillOf(), 'a highlighted footprint');
@@ -812,9 +817,9 @@ test('current photo: its footprint is drawn stronger with an outline, and follow
 });
 
 test('current photo: it is not drawn when the 3D check or footprints are off', () => {
-  const { preview, source } = checkRig({ frustum: 'off', footprints: false });
+  const { preview, source } = checkRig({ frustum: 'off', footprints: 'off' });
   assert.equal(currents(source).length, 0);
-  preview.setCheck({ footprints: true });
+  preview.setCheck({ footprints: 'selected' });
   assert.equal(currents(source).length, 2);
   preview.setCheck({ enabled: false });
   assert.equal(checkEntities(source).length, 0);
@@ -839,7 +844,7 @@ test('imported files: setImportCheck feeds the 3D check with one footprint and p
   const viewer = fakeViewer();
   const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
   const source = viewer.dataSources.sources[0];
-  preview.setCheck({ enabled: true, frame: FRAME, frustum: 'thinned' });
+  preview.setCheck({ enabled: true, frame: FRAME, frustum: 'thinned', footprints: 'all' });
   assert.equal(checkEntities(source).length, 0);
   preview.setImportCheck(importPasses(12));
   assert.equal(preview.checkInfo().count, 12);
@@ -865,4 +870,79 @@ test('imported files: a plan built in the panel wins, and the import returns whe
   assert.equal(preview.checkInfo().count, 6, 'import back once there is no plan');
   preview.clear();
   assert.equal(preview.checkInfo().count, 0, 'clear removes it');
+});
+
+// ------------------------------------------- photo footprints: 3 settings --
+const currentLayer = (source) => layerOf(source, '3D check current photo');
+const polygonsOf = (list) => list.filter((e) => e.polygon);
+const outlinesOf = (list) => list.filter((e) => e.polyline);
+
+test('footprints: the default is the selected photo only - one fill, one outline, no bulk footprints', () => {
+  const { source } = checkRig({});
+  assert.equal(footprints(source).length, 0, 'no bulk footprints');
+  const cur = currentLayer(source);
+  assert.equal(polygonsOf(cur).length, 1, 'one filled footprint');
+  assert.equal(outlinesOf(cur).length, 1, 'one outline');
+});
+
+test('footprints: all draws the bulk footprints and the photo in view', () => {
+  const { source } = checkRig({ footprints: 'all' });
+  assert.ok(footprints(source).length > 1);
+  assert.equal(polygonsOf(currentLayer(source)).length, 1);
+  assert.equal(outlinesOf(currentLayer(source)).length, 1);
+});
+
+test('footprints: off draws neither the bulk nor the photo in view', () => {
+  const { source } = checkRig({ footprints: 'off' });
+  assert.equal(footprints(source).length, 0);
+  assert.equal(currentLayer(source).length, 0);
+});
+
+test('footprints: the photo in view shows with Camera view one, thinned and off', () => {
+  for (const frustum of ['one', 'thinned', 'off']) {
+    for (const footprints_ of ['selected', 'all']) {
+      const { source } = checkRig({ frustum, footprints: footprints_ });
+      assert.equal(polygonsOf(currentLayer(source)).length, 1, `${frustum}/${footprints_}`);
+    }
+    const { source } = checkRig({ frustum, footprints: 'off' });
+    assert.equal(currentLayer(source).length, 0, `${frustum}/off`);
+  }
+});
+
+test('footprints: stepping the photo moves the one shaded footprint', () => {
+  const { preview, source } = checkRig({ index: 0 });
+  const at = () => currentLayer(source)[0].polygon.hierarchy.join(',');
+  const first = at();
+  preview.setCheck({ index: 7 });
+  assert.equal(polygonsOf(currentLayer(source)).length, 1);
+  assert.notEqual(at(), first);
+});
+
+test('footprints: switching between the settings adds and removes only the footprint layers', () => {
+  const { preview, source } = checkRig({});
+  const zone = zones(source).slice();
+  preview.setCheck({ footprints: 'all' });
+  assert.ok(footprints(source).length > 1);
+  preview.setCheck({ footprints: 'selected' });
+  assert.equal(footprints(source).length, 0);
+  assert.equal(polygonsOf(currentLayer(source)).length, 1);
+  preview.setCheck({ footprints: 'off' });
+  assert.equal(currentLayer(source).length, 0);
+  assert.ok(zones(source).every((e, i) => e === zone[i]), 'zone untouched');
+});
+
+test('footprints: the old tick box values migrate - true to selected, false to off, unknown to selected', () => {
+  assert.equal(footprintMode(true), 'selected');
+  assert.equal(footprintMode(false), 'off');
+  for (const v of ['selected', 'all', 'off']) assert.equal(footprintMode(v), v);
+  for (const v of [undefined, null, 'bogus', 1, 0, {}]) {
+    assert.equal(footprintMode(v), 'selected', String(v));
+  }
+  const old = checkRig({ footprints: true });
+  assert.equal(footprints(old.source).length, 0);
+  assert.equal(polygonsOf(currentLayer(old.source)).length, 1);
+  assert.equal(old.preview.checkInfo !== undefined, true);
+  const off = checkRig({ footprints: false });
+  assert.equal(currentLayer(off.source).length, 0);
+  assert.equal(DEFAULT_CHECK_OPTIONS.footprints, 'selected');
 });

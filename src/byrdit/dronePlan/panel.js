@@ -109,7 +109,12 @@ import {
   speedUnit,
   writeUnitSystem,
 } from './units.js';
-import { ALPHA_RANGE, DEFAULT_ALPHA, clampAlpha } from './checkLayer.js';
+import {
+  ALPHA_RANGE,
+  DEFAULT_ALPHA,
+  clampAlpha,
+  footprintMode,
+} from './checkLayer.js';
 import {
   STEP_KEYS,
   readAlpha,
@@ -263,7 +268,7 @@ export function initDronePlan({
       zone: true,
       halfWidthM: DEFAULT_ZONE_HALF_WIDTH_M,
       curtain: true,
-      footprints: true,
+      footprints: 'selected',
       frustum: 'one',
       index: 0,
       // How see-through each layer is (0 = invisible): the sliders.
@@ -1965,7 +1970,23 @@ export function initDronePlan({
     ui.checkEnabled = checkBox(t('Show 3D check'), 'enabled');
     ui.checkZone = checkBox(t('Safety zone'), 'zone');
     ui.checkCurtain = checkBox(t('Height curtain'), 'curtain');
-    ui.checkFootprints = checkBox(t('Photo footprints'), 'footprints');
+    ui.checkFootprints = select(
+      [
+        ['selected', t('Selected photo only')],
+        ['all', t('All photos')],
+        ['off', t('Off')],
+      ],
+      t('Photo footprints'),
+    );
+    ui.checkFootprints.setAttribute('data-check', 'footprints');
+    const footprintsRow = el(doc, 'label', host, { cls: 'gev-dp-row' });
+    el(doc, 'span', footprintsRow, {
+      cls: 'gev-dp-label',
+      text: t('Photo footprints'),
+    });
+    el(doc, 'span', footprintsRow, { cls: 'gev-dp-control' }).append(
+      ui.checkFootprints,
+    );
     ui.checkView = select(
       [
         ['one', t('One at a time')],
@@ -2105,7 +2126,6 @@ export function initDronePlan({
       [ui.checkEnabled, 'enabled'],
       [ui.checkZone, 'zone'],
       [ui.checkCurtain, 'curtain'],
-      [ui.checkFootprints, 'footprints'],
     ]) {
       box.addEventListener('change', () => {
         c[key] = Boolean(box.checked);
@@ -2113,6 +2133,11 @@ export function initDronePlan({
         syncCheckUi();
       });
     }
+    ui.checkFootprints.addEventListener('change', () => {
+      c.footprints = footprintMode(ui.checkFootprints.value);
+      pushCheck();
+      syncCheckUi();
+    });
     ui.checkView.addEventListener('change', () => {
       c.frustum = ui.checkView.value;
       pushCheck();
@@ -2376,7 +2401,7 @@ export function initDronePlan({
             ...[
               [state.check.zone, t('zone')],
               [state.check.curtain, t('curtain')],
-              [state.check.footprints, t('footprints')],
+              [state.check.footprints !== 'off', t('footprints')],
             ]
               .filter(([on]) => on)
               .map(([, name]) => name),
@@ -2486,7 +2511,7 @@ export function initDronePlan({
       zone: c.zone,
       halfWidthM: c.halfWidthM,
       curtain: c.curtain,
-      footprints: c.footprints,
+      footprints: footprintMode(c.footprints),
       frustum: c.frustum,
       index: c.index,
       frame: importFramePreset() ?? getPreset(state.options.presetId),
@@ -2585,7 +2610,7 @@ export function initDronePlan({
     ui.checkEnabled.checked = c.enabled;
     ui.checkZone.checked = c.zone;
     ui.checkCurtain.checked = c.curtain;
-    ui.checkFootprints.checked = c.footprints;
+    ui.checkFootprints.value = footprintMode(c.footprints);
     ui.checkView.value = c.frustum;
     ui.checkWidth.value = lengthField(c.halfWidthM);
     ui.checkWidthOut.textContent = heightText(c.halfWidthM);
