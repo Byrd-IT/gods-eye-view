@@ -16,6 +16,12 @@
 import { applyToDataSourceSlice, applyToOwned } from './applyOpacity.js';
 
 const TICK_MS = 1000;
+
+/** Error class name only (never the message, URL or stack of a layer's error). */
+const errorKind = (error) =>
+  typeof error?.name === 'string' && /^\w{1,40}$/.test(error.name)
+    ? error.name
+    : 'Error';
 /** Entity writes are slow: do at most this much per slice, then yield. */
 const SLICE_MS = 12;
 
@@ -69,7 +75,8 @@ export function installLayerOpacity({ viewer, dataManager, model, onApplied }) {
       try {
         module.setOpacity(value);
       } catch (error) {
-        console.warn(`[Opacity] ${id} setOpacity failed:`, error?.message);
+        // The error text may carry anything a layer put in it: log its class only.
+        console.warn(`[Opacity] ${id} setOpacity failed (${errorKind(error)})`);
       }
     }
     // The generic writer runs too: a hook covers a layer's own shaders, the
@@ -169,7 +176,9 @@ export function installLayerOpacity({ viewer, dataManager, model, onApplied }) {
         if (module[method] === wrapped) module[method] = original;
       });
     } catch (error) {
-      console.warn(`[Opacity] cannot wrap ${id}.${method}:`, error?.message);
+      console.warn(
+        `[Opacity] cannot wrap ${id}.${method} (${errorKind(error)})`,
+      );
     }
   }
 

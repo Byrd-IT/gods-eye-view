@@ -139,3 +139,34 @@ test('a big data source is written in slices that never run long, and re-scans o
   assert.ok(suspended > before);
   h.destroy();
 });
+
+test('synthetic-secret probe: a failing hook or frozen module never puts the error text in the log', () => {
+  const nonce = Math.random().toString(36).slice(2, 10);
+  const secrets = [
+    `Bearer tok_${nonce}_ABC123`,
+    `https://user:pw${nonce}@host.example/x`,
+    `key_${nonce}_SUFFIX99`,
+    `?api_key=k${nonce}`,
+  ];
+  const lines = [];
+  const warn = console.warn;
+  console.warn = (...args) => lines.push(args.map(String).join(' '));
+  try {
+    const w = world();
+    w.add('s', { setOpacity() { throw new Error(secrets.join(' ')); }, update: async () => {} });
+    const frozen = Object.freeze({ update: async () => {} });
+    w.add('f', frozen);
+    const model = createOpacityModel();
+    const h = installLayerOpacity({ viewer: w.viewer, dataManager: w.dataManager, model });
+    model.set('s', 0.5);
+    h.destroy();
+  } finally {
+    console.warn = warn;
+  }
+  assert.ok(lines.length >= 2, 'both failure paths ran');
+  const text = lines.join('\n');
+  for (const secret of secrets) {
+    for (const form of [secret, encodeURIComponent(secret), Buffer.from(secret).toString('base64'), secret.slice(-6), secret.slice(0, 8)])
+      assert.ok(!text.includes(form), `leaked ${form.length} chars`);
+  }
+});
