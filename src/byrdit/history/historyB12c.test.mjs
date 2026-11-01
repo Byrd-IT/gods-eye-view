@@ -467,6 +467,25 @@ test('gp slice: nearest epoch per object, membership as recorded by t, header sa
   assert.equal(r.headers['x-history-truncated'], undefined);
 });
 
+test('gp slice: an element set dated after now is never used, even as the only candidate', async () => {
+  const P1 = NOW - 10 * DAY;
+  const t = NOW - 5 * DAY;
+  const docs = [
+    elset(1, t - 2 * HOUR, P1),
+    // 2 has only a future-dated epoch (gp max epoch was 2026-11-02 on 2026-11-01)
+    elset(2, NOW + 30 * HOUR, P1),
+    // 3: a near-future epoch inside the slack is kept
+    elset(3, NOW + 10 * 60_000, P1),
+  ];
+  const { api } = makeApi({ 'gev-history-gp': docs });
+  const r = await call(api, slice(`feed=gp&t=${iso(t)}&group=active`));
+  assert.equal(r.status, 200);
+  const ids = parseGP(r.body).map((e) => e.gp.NORAD_CAT_ID);
+  assert.ok(ids.includes('1'));
+  assert.ok(!ids.includes('2'), 'future-dated epoch is clamped out');
+  assert.ok(ids.includes('3'));
+});
+
 test('gp slice: before the first recorded poll -> the CSV header only + before_recording_start (D3)', async () => {
   const P1 = Date.UTC(2026, 9, 12, 17, 25);
   const { api } = makeApi({ 'gev-history-gp': [elset(1, P1 - DAY, P1)] });

@@ -32,7 +32,7 @@ export function createCatalog({ state: layerState, services, parts, source }) {
       1,
       Math.ceil(layerState._denseIds.length / DENSE_REFRESH_FRAMES),
     );
-    const now = new Date();
+    const now = new Date(layerState._historyMs ?? Date.now());
     for (let i = 0; i < perFrame; i++) {
       if (layerState._denseCursor >= layerState._denseIds.length)
         layerState._denseCursor = 0;

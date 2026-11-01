@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { json2satrec } from 'satellite.js';
+import { createHistory } from './history.js';
+import { parseGP } from '../../byrdit/gpCsv.js';
+
+const HEADER =
+  'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT';
+const row = (id, epoch, anomaly = 88.1156) =>
+  `SAT ${id},1998-067A,${epoch},15.48899044,.0006748,51.6326,58.3278,271.9059,${anomaly},0,U,${id},999,59060,.15012E-3,.7803E-4,0`;
+const csv = (...rows) => [HEADER, ...rows].join('\r\n') + '\r\n';
+const satrecOf = (id, epoch, anomaly) => json2satrec(parseGP(csv(row(id, epoch, anomaly)))[0].gp);
+
+function make(fetchText) {
+  const state = {
+    _historyMs: null,
+    _lastPropagation: 99,
+    _catalog: new Map(),
+    _points: new Map(),
+  };
+  const live = new Map();
+  for (const id of [25544, 99999]) {
+    const satrec = satrecOf(id, '2026-10-16T18:57:11.428512');
+    live.set(id, satrec);
+    state._catalog.set(id, { name: `SAT ${id}`, satrec, group: 'stations' });
+    state._points.set(id, { show: true });
+  }
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return { ok: true, text: async () => fetchText() };
+  };
+  return { state, live, calls, h: createHistory({ state, parts: {} }) };
+}
+
+test('satellites at a history time: recorded elset swapped in, untracked satellite hidden, live restored', async () => {
+  const { state, live, calls, h } = make(() =>
+    csv(row(25544, '2025-03-01T12:00:00.000000', 10)),
+  );
+  const t = Date.parse('2025-03-01T13:00:00Z');
+  const out = await h.methods.setHistoryTime(t);
+  assert.equal(out.status, 'ok');
+  assert.match(calls[0], /feed=gp&group=active.*&t=2025-03-01T13%3A00%3A00.000Z/);
+  assert.equal(state._historyMs, t);
+  assert.notEqual(state._catalog.get(25544).satrec, live.get(25544), 'recorded elset');
+  assert.equal(state._points.get(25544).show, true);
+  assert.equal(state._points.get(99999).show, false, 'no elset at that time: not drawn');
+  assert.equal(state._lastPropagation, 0, 'repropagates at once');
+  // a nearby time reuses the elsets (no second request)
+  await h.methods.setHistoryTime(t + 3_600_000);
+  assert.equal(calls.length, 1);
+  // LIVE restores
+  const back = await h.methods.setHistoryTime(null);
+  assert.equal(back.status, 'live');
+  assert.equal(state._historyMs, null);
+  assert.equal(state._catalog.get(25544).satrec, live.get(25544));
+  assert.equal(state._points.get(99999).show, true);
+});
+
+test('satellites history: an elset dated far after the asked time is not used; empty answer changes nothing', async () => {
+  const { state, live, h } = make(() =>
+    csv(row(25544, '2026-11-02T12:00:00.000000')),
+  );
+  await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  assert.equal(state._catalog.get(25544).satrec, live.get(25544), 'future-dated epoch ignored');
+  assert.equal(state._points.get(25544).show, false);
+  const empty = make(() => csv());
+  const out = await empty.h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  assert.equal(out.status, 'empty');
+  assert.equal(empty.state._points.get(25544).show, true);
+});

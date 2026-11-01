@@ -10,6 +10,7 @@ import { createLifecycle } from './lifecycle.js';
 import { createIngestion } from './ingestion.js';
 import { createRecords } from './records.js';
 import { createState } from './state.js';
+import { createHistory } from './history.js';
 
 /** Construct one layer with its own scene state and supplied application services. */
 export function createSatellitesLayer({ services, source }) {
@@ -29,11 +30,13 @@ export function createSatellitesLayer({ services, source }) {
   parts.interaction = createInteraction(context);
   parts.lifecycle = createLifecycle(context);
   parts.ingestion = createIngestion(context);
+  parts.history = createHistory(context);
   return Object.assign(
     {},
     parts.controls.methods,
     parts.lifecycle.methods,
     parts.ingestion.methods,
+    parts.history.methods,
     {
       satelliteVisualsVisible: parts.controls.satelliteVisualsVisible,
       satelliteCatalogModeChanged: parts.controls.satelliteCatalogModeChanged,

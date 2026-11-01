@@ -143,7 +143,7 @@ export function createRendering({
    */
 
   function _propagateAll() {
-    const now = new Date();
+    const now = new Date(layerState._historyMs ?? Date.now());
     let updated = 0;
 
     for (const [noradId, sat] of layerState._catalog) {
@@ -211,7 +211,11 @@ export function createRendering({
       layerState._params.showOrbits &&
       now - layerState._lastRingRotation >= RING_ROTATION_MS
     ) {
-      _updateOrbitPathRotations(new Date(now));
+      _updateOrbitPathRotations(
+        layerState._historyMs === null
+          ? new Date(now)
+          : new Date(layerState._historyMs),
+      );
       layerState._lastRingRotation = now;
     }
   }

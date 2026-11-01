@@ -154,7 +154,7 @@ export function createTracking({ state: layerState, services, parts, source }) {
         sat.satrec,
         layerState._trackedFrameNowForTest
           ? new Date(layerState._trackedFrameNowForTest())
-          : new Date(),
+          : new Date(layerState._historyMs ?? Date.now()),
       );
       if (!pos) return layerState._trackedFrameGeo; // propagation hiccup — keep last good sample
       layerState._trackedFrameGeo = pos;

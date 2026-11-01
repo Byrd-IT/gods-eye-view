@@ -54,6 +54,10 @@ export function createState({ services }) {
 
   state._lastPropagation = 0;
 
+  /** History menu time (ms) the layer is shown at, or null = live. */
+
+  state._historyMs = null;
+
   state._lastRingRotation = 0;
 
   state._lastFocusUpdate = 0;

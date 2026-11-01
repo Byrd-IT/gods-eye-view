@@ -36,6 +36,9 @@ import { DAY_MS } from './historyParams.js';
  */
 
 /** gev-history src/feeds/celestrak.js RECORDED_GROUP: the only group with docs. */
+/** Epochs further ahead of the wall clock than this are never used. */
+export const GP_FUTURE_EPOCH_SLACK_MS = 3_600_000;
+
 export const GP_RECORDED_GROUPS = Object.freeze(['active']);
 /** CelesTrak GP CSV columns, in the order /api/celestrak/<group> serves them. */
 export const GP_CSV_COLUMNS = Object.freeze([
@@ -392,7 +395,17 @@ export function createB12cSlices({
       collapseNumeric(es, IDX.gp, {
         filter: [
           groupFilter,
-          { range: { epoch: { gt: t, format: 'epoch_millis' } } },
+          // an element set dated after now is a bad / future-dated epoch
+          // (gp max epoch was 2026-11-02 on 2026-11-01): never a candidate
+          {
+            range: {
+              epoch: {
+                gt: t,
+                lte: now() + GP_FUTURE_EPOCH_SLACK_MS,
+                format: 'epoch_millis',
+              },
+            },
+          },
         ],
         field,
         sort: [{ epoch: 'asc' }],
