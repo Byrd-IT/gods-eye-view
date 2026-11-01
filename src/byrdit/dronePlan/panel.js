@@ -1583,7 +1583,7 @@ export function initDronePlan({
       t('Height above ground'),
       ui.agl,
     ));
-    ui.front = slider(t('Front overlap'), 50, 95, 1);
+    ui.front = slider(t('Front overlap'), 50, 98, 1);
     ({ out: ui.frontOut } = field(t('Front overlap'), ui.front));
     ui.side = slider(t('Side overlap'), 40, 95, 1);
     ({ out: ui.sideOut } = field(t('Side overlap'), ui.side));

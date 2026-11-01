@@ -353,7 +353,7 @@ export function normalizeOptions(raw = {}, box = null) {
       params: { requested: requestedAgl, cap: AGL_CAP_M },
     });
   }
-  o.frontOverlap = clamp(num(o.frontOverlap, 80), 30, 95);
+  o.frontOverlap = clamp(num(o.frontOverlap, 80), 30, 98);
   o.sideOverlap = clamp(num(o.sideOverlap, 70), 30, 95);
   o.pattern = PATTERNS.includes(o.pattern) ? o.pattern : 'grid';
   o.photoMode = PHOTO_MODES.includes(o.photoMode) ? o.photoMode : 'waypoint';
