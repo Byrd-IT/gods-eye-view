@@ -13,27 +13,32 @@
  */
 import { msg } from '../../i18n/index.js';
 
-/** Router feeds, in menu order. id = the adapter id in historyEventAdapters. */
+/**
+ * Router feeds, in menu order. id = the adapter id in historyEventAdapters.
+ * `since` is a conservative first day of recorded data (2026-11-01 coverage
+ * audit): the slider starts there until a probe finds the real start
+ * (`snapFeed`: the snapshots endpoint) or a backfill moves it earlier.
+ * It is a slider bound only; the server accepts any time back to
+ * HISTORY_FLOOR_MS and answers "not recorded" outside the data.
+ */
 export const ROUTER_ROWS = Object.freeze([
   { id: 'flights', label: msg('Flights'), adapterIds: ['flights'], snapFeed: 'aircraft' },
   { id: 'military', label: msg('Military aircraft'), adapterIds: ['military'], snapFeed: 'military' },
-  { id: 'vessels', label: msg('Vessels (AIS)'), adapterIds: ['vessels'] },
-  { id: 'quakes', label: msg('Earthquakes'), adapterIds: ['quakes'] },
-  { id: 'firms', label: msg('Fires (FIRMS)'), adapterIds: ['firms'] },
-  { id: 'fire-perimeters', label: msg('Fire perimeters'), adapterIds: ['fire-perimeters'] },
-  { id: 'cyclones', label: msg('Cyclones'), adapterIds: ['cyclones'] },
-  { id: 'launches', label: msg('Rocket launches'), adapterIds: ['launches'] },
-  { id: 'transit', label: msg('Transit'), adapterIds: ['transit'] },
-  { id: 'bikeshare', label: msg('Bike share'), adapterIds: ['bikeshare'] },
-  { id: 'wind', label: msg('Wind'), adapterIds: ['wind'] },
+  { id: 'vessels', label: msg('Vessels (AIS)'), adapterIds: ['vessels'], since: '2024-10-11' },
+  { id: 'quakes', label: msg('Earthquakes'), adapterIds: ['quakes'], since: '2025-07-12' },
+  { id: 'firms', label: msg('Fires (FIRMS)'), adapterIds: ['firms'], since: '2026-07-14' },
+  { id: 'fire-perimeters', label: msg('Fire perimeters'), adapterIds: ['fire-perimeters'], since: '2026-09-01' },
+  { id: 'cyclones', label: msg('Cyclones'), adapterIds: ['cyclones'], since: '2026-09-01' },
+  { id: 'launches', label: msg('Rocket launches'), adapterIds: ['launches'], since: '2026-09-01' },
+  { id: 'transit', label: msg('Transit'), adapterIds: ['transit'], since: '2026-09-01' },
+  { id: 'bikeshare', label: msg('Bike share'), adapterIds: ['bikeshare'], since: '2026-09-01' },
+  { id: 'wind', label: msg('Wind'), adapterIds: ['wind'], since: '2026-09-01' },
 ]);
 
 /** Rows driven by a layer object or a window hook, in menu order. */
 export const DRIVER_ROWS = Object.freeze([
-  { id: 'satellites', label: msg('Satellites') },
-  { id: 'weather-radar', label: msg('Weather radar') },
-  { id: 'weather-lightning', label: msg('Lightning') },
-  { id: 'weather-clouds', label: msg('Satellite clouds') },
+  { id: 'satellites', label: msg('Satellites'), since: '2024-11-01' },
+  { id: 'weather', label: msg('Weather radar, lightning, clouds') },
   { id: 'ghostmaps', label: msg('GhostMaps') },
   { id: 'wayback', label: msg('Imagery (Wayback)') },
   { id: 'naip', label: msg('Aerial (NAIP)') },
@@ -81,16 +86,81 @@ export function naipDriver(win) {
   };
 }
 
-/** GhostMaps: the existing ghostMapsHistory driver takes a history detail. */
+/**
+ * GhostMaps: the existing ghostMapsHistory driver takes a history detail.
+ * A row that follows the shared time passes the main control's own detail
+ * through (playing / rate included), so GhostMaps behaves as before.
+ */
 export function ghostMapsDriver(ghostMaps) {
   return {
     available: () => Boolean(ghostMaps),
-    apply(ms) {
+    apply(ms, { detail = null } = {}) {
       ghostMaps?.onHistory?.(
-        Number.isFinite(ms)
-          ? { active: true, timeMs: ms, playing: false, rate: 1 }
-          : { active: false, timeMs: null, playing: false, rate: 1 },
+        detail ??
+          (Number.isFinite(ms)
+            ? { active: true, timeMs: ms, playing: false, rate: 1 }
+            : { active: false, timeMs: null, playing: false, rate: 1 }),
       );
+    },
+  };
+}
+
+/**
+ * The satellites layer: setHistoryTime(ms|null) propagates the recorded
+ * element sets at that time (src/layers/satellites/history.js).
+ */
+export function layerDriver(getDataManager, layerId) {
+  const mod = () => {
+    try {
+      return getDataManager()?.layers?.get?.(layerId)?.module ?? null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    available: () => typeof mod()?.setHistoryTime === 'function',
+    apply(ms) {
+      return mod()?.setHistoryTime?.(Number.isFinite(ms) ? ms : null);
+    },
+  };
+}
+
+/**
+ * Weather radar, lightning and satellite clouds share ONE clock
+ * (src/layers/weather/clock.js) that only knows what the provider still
+ * serves. setTarget() picks, per product, the newest frame at or before the
+ * time within that product's max gap; outside that the product shows no frame
+ * (a gap), never a wrong one. status(ms) names that gap for the menu.
+ */
+export function weatherDriver(getClock) {
+  const clock = () => {
+    try {
+      return getClock() ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const timelineMs = () =>
+    (clock()?.getTimeline?.() ?? []).map((x) => Date.parse(x)).filter(Number.isFinite);
+  return {
+    available: () => typeof clock()?.setTarget === 'function',
+    /** The provider only serves what its timeline still lists. */
+    earliest: () => timelineMs()[0] ?? null,
+    apply(ms) {
+      const c = clock();
+      if (!c) return;
+      if (!Number.isFinite(ms)) return c.latest?.();
+      return c.setTarget(new Date(ms).toISOString());
+    },
+    /** Text for the row, or '' when a frame exists for the time. */
+    status(ms) {
+      const c = clock();
+      const tl = timelineMs();
+      if (!c || !Number.isFinite(ms) || !tl.length) return '';
+      const shown = c.getState?.().products?.filter((p) => !p.suspended) ?? [];
+      if (shown.length && shown.every((p) => p.selected === null))
+        return `No imagery (provider serves ${new Date(tl[0]).toISOString().slice(0, 16).replace('T', ' ')}Z on)`;
+      return '';
     },
   };
 }

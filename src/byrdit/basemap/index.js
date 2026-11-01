@@ -201,6 +201,8 @@ export async function openBasemap({
         flyTo: (bounds) => flyToImageryBounds(viewer, Cesium, bounds),
       });
       if (hookWindow) hookWindow.__gevImagery = { voice: imageryVoice };
+      // the History menu's NAIP row reads the year ticks and sets the year
+      if (hookWindow && naip) hookWindow.__gevNaip = naip;
       // Read/drive handle for the overlay layers (QA and the console).
       if (hookWindow && overlays) hookWindow.__gevOverlays = overlays;
       const detach = () => {
@@ -215,6 +217,7 @@ export async function openBasemap({
           }
         }
         if (health) health.onChange = null;
+        if (hookWindow?.__gevNaip === naip) delete hookWindow.__gevNaip;
         if (hookWindow?.__gevOverlays === overlays)
           delete hookWindow.__gevOverlays;
         overlays?.();

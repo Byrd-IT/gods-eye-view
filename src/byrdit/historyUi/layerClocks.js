@@ -90,9 +90,12 @@ export function createLayerClocks({ rows, now = () => Date.now() } = {}) {
     }
   };
   const floorOf = (row) => (isTime(row.earliest) ? Math.max(row.earliest, HISTORY_FLOOR_MS) : HISTORY_FLOOR_MS);
-  const place = (row, ms) => {
+  // own = a row's own slider stops at the row's coverage start; a locked row
+  // follows the shared time exactly (it has no data before its start: a gap,
+  // which the menu says, not a different time)
+  const place = (row, ms, own = true) => {
     if (!isTime(ms)) return null;
-    const t = Math.min(now(), Math.max(floorOf(row), ms));
+    const t = Math.min(now(), Math.max(own ? floorOf(row) : HISTORY_FLOOR_MS, ms));
     if (row.releases?.length) return snapToRelease(row.releases, t);
     return t;
   };
@@ -102,7 +105,7 @@ export function createLayerClocks({ rows, now = () => Date.now() } = {}) {
     const row = byId.get(id);
     const s = st.get(id);
     if (!row || !s) return null;
-    return s.locked ? place(row, shared) : s.own;
+    return s.locked ? place(row, shared, false) : s.own;
   }
 
   const api = {

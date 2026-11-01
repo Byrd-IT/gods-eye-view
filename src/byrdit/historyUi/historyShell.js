@@ -34,6 +34,15 @@ import { createGreyPainter } from './greyPainter.js';
 import { createHistoryVoice } from './historyVoice.js';
 import { createGhostMapsHistory } from './ghostMapsHistory.js';
 import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
+import { mountHistoryMenu } from './historyMenu.js';
+import { HISTORY_FLOOR_MS } from './historyTimeline.js';
+import {
+  ghostMapsDriver,
+  layerDriver,
+  naipDriver,
+  waybackDriver,
+  weatherDriver,
+} from './clockRows.js';
 
 const SCRUB_SELECTOR = '.gev-hist-scrub';
 
@@ -85,21 +94,57 @@ export function mountHistoryForShell(
   // entering / leaving history changes which layers the painter may touch
   const offRouterPaint = router.subscribe(() => painter?.changed());
   chips.connect();
+  const historyClient = createHistoryClient({ fetchImpl: router.innerFetch });
   const driver = createRefreshDriver({
     router,
     getDataManager,
-    client: createHistoryClient({ fetchImpl: router.innerFetch }),
+    client: historyClient,
   });
   const offGhostChip = ghostMaps.subscribe(() =>
     chips.refresh({ base: false }),
   );
+  // The History menu (card t_73beacfb): a time slider per layer and the lock
+  // group. It sits between the main control and the layers: the router and
+  // GhostMaps get the shared time plus each unlocked layer's own time.
+  const clockDrivers = new Map([
+    ['satellites', layerDriver(getDataManager, 'satellites')],
+    ['weather', weatherDriver(() => getDataManager()?.weatherClock)],
+    ['ghostmaps', ghostMapsDriver(ghostMaps)],
+    ['wayback', waybackDriver(win)],
+    ['naip', naipDriver(win)],
+  ]);
+  const clockMenu = historyHost
+    ? mountHistoryMenu({
+        document: doc ?? win?.document,
+        parent: historyHost,
+        window: win,
+        control: handle,
+        drivers: clockDrivers,
+        onRouter: (detail) => driver.onHistory(detail),
+        // the nearest stored snapshot to the API floor is the first one
+        probeEarliest: async (feed) =>
+          (
+            await historyClient.snapshots({
+              feed,
+              around: HISTORY_FLOOR_MS,
+              n: 1,
+            })
+          )[0] ?? null,
+      })
+    : null;
   const offHistory = handle.subscribe((detail) => {
-    driver.onHistory(detail);
-    ghostMaps.onHistory(detail);
+    if (clockMenu) clockMenu.onHistory(detail);
+    else {
+      driver.onHistory(detail);
+      ghostMaps.onHistory(detail);
+    }
   });
   // the control may already be in history (ht in the address)
-  driver.onHistory(handle.getState());
-  ghostMaps.onHistory(handle.getState());
+  if (clockMenu) clockMenu.onHistory(handle.getState());
+  else {
+    driver.onHistory(handle.getState());
+    ghostMaps.onHistory(handle.getState());
+  }
 
   // no refresh while the scrub is dragged; capture runs before the
   // control's own pointerdown (which already moves the time)
@@ -127,6 +172,7 @@ export function mountHistoryForShell(
     if (destroyed) return;
     destroyed = true;
     offHistory?.();
+    clockMenu?.destroy();
     offGhostChip?.();
     ghostMaps.destroy();
     root?.removeEventListener?.('pointerdown', onDown, true);
@@ -163,6 +209,7 @@ export function mountHistoryForShell(
       painter,
       voice,
       ghostMaps,
+      clockMenu,
     };
   return Object.assign(handle, {
     router,

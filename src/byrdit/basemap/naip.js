@@ -409,6 +409,8 @@ export function attachNaip({
   }
 
   const api = {
+    /** The slider state (ticks = years, oldest first): History menu reads it. */
+    state: () => uiState(),
     setYear(year) {
       if (!ticks.includes(year) || year === state.year) return false;
       state.year = year;

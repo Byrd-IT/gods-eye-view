@@ -30,6 +30,8 @@ export function createApplicationData({
     weatherClock: catalog?.weatherClock,
   });
   defer(() => presentation.destroy());
+  // the History menu drives the shared weather clock through this handle
+  dataManager.weatherClock = catalog?.weatherClock ?? null;
   onData?.(dataManager);
   if (!catalog?.layers || !catalog?.metadata)
     throw new TypeError('An application layer catalog is required');
