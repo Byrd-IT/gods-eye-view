@@ -3358,5 +3358,15 @@
   "No imagery (provider serves {time} on)": "无影像（提供方自 {time} 起）",
   "Air quality (AQHI)": "空气质量 (AQHI)",
   "GNSS integrity": "GNSS 完整性",
-  "River gauges (USGS)": "河流水文站 (USGS)"
+  "River gauges (USGS)": "河流水文站 (USGS)",
+  "Camera settings (set in DJI Fly)": "相机设置（在 DJI Fly 中设置）",
+  "Camera settings preset": "相机设置预设",
+  "GEV cannot send these to the aircraft: set them in DJI Fly before launch.": "GEV 无法把这些设置发送给飞行器：请在起飞前于 DJI Fly 中设置。",
+  "Photo size: {mp} MP, {ratio} ({w} x {h})": "照片尺寸：{mp} MP，{ratio}（{w} x {h}）",
+  "Shutter: 1/{n} s or faster": "快门：1/{n} 秒或更快",
+  "White balance: fixed (not auto)": "白平衡：固定（不要自动）",
+  "Exposure compensation (EV): {ev}": "曝光补偿（EV）：{ev}",
+  "Before launch: take a test photo and check it is {w} x {h}": "起飞前：拍一张测试照片，确认为 {w} x {h}",
+  "50 MP, 4:3 (mapping)": "50 MP，4:3（测绘）",
+  "12 MP, 4:3 (test)": "12 MP，4:3（测试）"
 }

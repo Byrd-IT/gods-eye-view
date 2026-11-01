@@ -15,6 +15,10 @@ import {
 } from './obstacles.js';
 import { DEFAULT_PRESET_ID, getPreset } from './presets.js';
 import {
+  DEFAULT_CAMERA_PRESET_ID,
+  cameraPresetOrDefault,
+} from './cameraSettings.js';
+import {
   DEFAULT_SHUTTER_DENOMINATOR,
   MIN_PLAN_SPEED_MS,
   floorTo,
@@ -158,6 +162,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
   speedMs: 5,
   photoMode: 'waypoint',
   shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
+  cameraPresetId: DEFAULT_CAMERA_PRESET_ID,
   batteryMin: 25,
   maxWaypoints: MAX_WAYPOINTS_PER_MISSION,
   orbitRadiusM: null,
@@ -359,6 +364,7 @@ export function normalizeOptions(raw = {}, box = null) {
     preset.maxSpeedMs,
   );
   o.shutterDenominator = shutterDenominatorOrDefault(o.shutterDenominator);
+  o.cameraPresetId = cameraPresetOrDefault(o.cameraPresetId).id;
   o.batteryMin = clamp(num(o.batteryMin, 25), 5, 60);
   o.maxWaypoints = Math.floor(
     clamp(

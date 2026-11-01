@@ -3595,5 +3595,15 @@
   "No imagery (provider serves {time} on)": "Немає знімків (провайдер віддає з {time})",
   "Air quality (AQHI)": "Якість повітря (AQHI)",
   "GNSS integrity": "Цілісність GNSS",
-  "River gauges (USGS)": "Гідропости річок (USGS)"
+  "River gauges (USGS)": "Гідропости річок (USGS)",
+  "Camera settings (set in DJI Fly)": "Налаштування камери (задати в DJI Fly)",
+  "Camera settings preset": "Набір налаштувань камери",
+  "GEV cannot send these to the aircraft: set them in DJI Fly before launch.": "GEV не може передати їх апарату: задайте їх у DJI Fly перед зльотом.",
+  "Photo size: {mp} MP, {ratio} ({w} x {h})": "Розмір фото: {mp} Мп, {ratio} ({w} x {h})",
+  "Shutter: 1/{n} s or faster": "Витримка: 1/{n} с або коротша",
+  "White balance: fixed (not auto)": "Баланс білого: фіксований (не авто)",
+  "Exposure compensation (EV): {ev}": "Компенсація експозиції (EV): {ev}",
+  "Before launch: take a test photo and check it is {w} x {h}": "Перед зльотом: зробіть тестове фото й перевірте, що воно {w} x {h}",
+  "50 MP, 4:3 (mapping)": "50 Мп, 4:3 (картографування)",
+  "12 MP, 4:3 (test)": "12 Мп, 4:3 (тест)"
 }

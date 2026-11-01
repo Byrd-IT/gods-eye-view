@@ -3358,5 +3358,15 @@
   "No imagery (provider serves {time} on)": "画像なし（提供元は {time} 以降のみ）",
   "Air quality (AQHI)": "大気質 (AQHI)",
   "GNSS integrity": "GNSS 完全性",
-  "River gauges (USGS)": "河川観測所 (USGS)"
+  "River gauges (USGS)": "河川観測所 (USGS)",
+  "Camera settings (set in DJI Fly)": "カメラ設定（DJI Fly で設定）",
+  "Camera settings preset": "カメラ設定プリセット",
+  "GEV cannot send these to the aircraft: set them in DJI Fly before launch.": "GEV からは機体に送信できません。離陸前に DJI Fly で設定してください。",
+  "Photo size: {mp} MP, {ratio} ({w} x {h})": "写真サイズ：{mp} MP、{ratio}（{w} x {h}）",
+  "Shutter: 1/{n} s or faster": "シャッター：1/{n} 秒以上の高速",
+  "White balance: fixed (not auto)": "ホワイトバランス：固定（オートにしない）",
+  "Exposure compensation (EV): {ev}": "露出補正（EV）：{ev}",
+  "Before launch: take a test photo and check it is {w} x {h}": "離陸前：テスト写真を撮り、{w} x {h} であることを確認",
+  "50 MP, 4:3 (mapping)": "50 MP、4:3（マッピング）",
+  "12 MP, 4:3 (test)": "12 MP、4:3（テスト）"
 }

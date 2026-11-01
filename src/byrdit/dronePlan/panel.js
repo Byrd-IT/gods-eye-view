@@ -10,6 +10,14 @@
  * actions, and give everything back; Escape cancels; destroy() returns it all.
  */
 import * as Cesium from 'cesium';
+import {
+  DEFAULT_CAMERA_PRESET_ID,
+  allowedShutter,
+  cameraPresetOrDefault,
+  evText,
+  listCameraPresets,
+  shutterForPreset,
+} from './cameraSettings.js';
 import { formatNumber, t } from '../../i18n/index.js';
 import { initImageryBoxTool } from '../../ui/imageryBoxTool.js';
 import { createSlider } from '../../ui/slider.js';
@@ -222,6 +230,7 @@ export function initDronePlan({
       speedMs: getPreset(DEFAULT_PRESET_ID).defaultSpeedMs,
       photoMode: 'waypoint',
       shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
+      cameraPresetId: DEFAULT_CAMERA_PRESET_ID,
       batteryMin: 25,
       orbitRadiusM: null,
       orbitHeightsM: null,
@@ -1502,6 +1511,29 @@ export function initDronePlan({
       t('Shutter speed'),
     );
     field(t('Shutter speed'), ui.shutter, { value: false });
+    ui.cameraBlock = el(doc, 'div', host, {
+      cls: 'gev-dp-camera',
+      attrs: { 'data-role': 'camera-settings' },
+    });
+    el(doc, 'p', ui.cameraBlock, {
+      cls: 'gev-dp-note gev-dp-camera-title',
+      text: t('Camera settings (set in DJI Fly)'),
+    });
+    ui.cameraPreset = select(
+      listCameraPresets().map((p) => [p.id, cameraPresetName(p.id)]),
+      t('Camera settings preset'),
+    );
+    field(t('Camera settings preset'), ui.cameraPreset, { value: false });
+    ui.cameraList = el(doc, 'ul', ui.cameraBlock, {
+      cls: 'gev-dp-camera-list',
+      attrs: { 'data-role': 'camera-checklist' },
+    });
+    el(doc, 'p', ui.cameraBlock, {
+      cls: 'gev-dp-note',
+      text: t(
+        'GEV cannot send these to the aircraft: set them in DJI Fly before launch.',
+      ),
+    });
     into('shots');
     ui.mode = select(
       MODES.map((m) => [m, modeLabel(m)]),
@@ -2146,6 +2178,16 @@ export function initDronePlan({
       syncControls();
       schedule();
     });
+    ui.cameraPreset.addEventListener('change', () => {
+      const cam = cameraPresetOrDefault(ui.cameraPreset.value);
+      o.cameraPresetId = cam.id;
+      // The preset's shutter feeds the blur limit: never slower than it asks.
+      o.shutterDenominator = allowedShutter(
+        shutterForPreset(cam, o.shutterDenominator),
+      );
+      syncControls();
+      schedule();
+    });
     ui.suiteButton.addEventListener('click', () => planSuite());
     ui.useRecommended.addEventListener('click', () => {
       useRecommended();
@@ -2594,12 +2636,43 @@ export function initDronePlan({
     }
   }
 
+  function cameraPresetName(id) {
+    return id === 'test-12mp'
+      ? t('12 MP, 4:3 (test)')
+      : t('50 MP, 4:3 (mapping)');
+  }
+
+  function renderCameraChecklist(o) {
+    const cam = cameraPresetOrDefault(o.cameraPresetId);
+    const rows = [
+      t('Photo size: {mp} MP, {ratio} ({w} x {h})', {
+        mp: num(cam.megapixels),
+        ratio: cam.ratio,
+        w: String(cam.width),
+        h: String(cam.height),
+      }),
+      t('Shutter: 1/{n} s or faster', {
+        n: String(shutterForPreset(cam, o.shutterDenominator)),
+      }),
+      t('White balance: fixed (not auto)'),
+      t('Exposure compensation (EV): {ev}', { ev: evText(cam.ev) }),
+      t('Before launch: take a test photo and check it is {w} x {h}', {
+        w: String(cam.width),
+        h: String(cam.height),
+      }),
+    ];
+    ui.cameraList.replaceChildren();
+    for (const text of rows) el(doc, 'li', ui.cameraList, { text });
+  }
+
   function syncControls() {
     const o = state.options;
     const preset = getPreset(o.presetId);
     ui.preset.value = o.presetId;
     ui.mode.value = modeFor(o);
     ui.shutter.value = String(o.shutterDenominator);
+    ui.cameraPreset.value = cameraPresetOrDefault(o.cameraPresetId).id;
+    renderCameraChecklist(o);
     ui.presetInfo.textContent = presetSummary(preset);
     renderRecommended(preset, modeFor(o));
     for (const system of ['ft', 'm']) {

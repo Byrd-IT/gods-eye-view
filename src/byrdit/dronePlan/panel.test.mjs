@@ -2835,3 +2835,38 @@ test('an imported file feeds the 3D check: one footprint and pyramid per photo; 
   assert.match(readout(), /No photo actions in nophoto/);
   w.handle.destroy();
 });
+
+test('the camera settings checklist shows in the panel, follows its preset and feeds the shutter', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const list = () =>
+    w
+      .find((n) => n.attributes.get('data-role') === 'camera-checklist')[0]
+      .children.map((li) => li.textContent);
+  assert.deepEqual(list(), [
+    'Photo size: 50 MP, 4:3 (8192 x 6144)',
+    'Shutter: 1/1000 s or faster',
+    'White balance: fixed (not auto)',
+    'Exposure compensation (EV): -0.7',
+    'Before launch: take a test photo and check it is 8192 x 6144',
+  ]);
+  pick(w, 'Shutter speed', '250');
+  assert.equal(list()[1], 'Shutter: 1/500 s or faster', 'never slower than the preset allows');
+  pick(w, 'Camera settings preset', 'test-12mp');
+  assert.equal(w.control('Shutter speed').value, '500', 'the preset feeds the blur shutter');
+  assert.equal(list()[0], 'Photo size: 12 MP, 4:3 (4096 x 3072)');
+  assert.match(list()[4], /4096 x 3072/);
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.options.cameraPresetId, 'test-12mp');
+  w.buttons('data-download')[0].click();
+  const readme = new TextDecoder().decode(
+    readZip(w.downloads.at(-1).bytes).get('README.txt'),
+  );
+  assert.match(readme, /Camera settings \(set in DJI Fly/);
+  assert.match(readme, /Photo size: 12 MP, 4:3 \(4096 x 3072\)/);
+  assert.match(readme, /Shutter: 1\/500 s or faster/);
+  assert.match(readme, /White balance: fixed \(not auto\)/);
+  assert.match(readme, /\(EV\): -0\.7/);
+  w.handle.destroy();
+});

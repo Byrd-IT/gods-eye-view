@@ -122,3 +122,13 @@ test('libraryClient sends the CSRF header, scopes owner, and maps errors', async
   const off = createLibraryClient({ fetchImpl: async () => { throw new Error('net'); } });
   await assert.rejects(() => off.me(), (e) => e.code === 'offline');
 });
+
+test('the camera preset round-trips and an unknown one is dropped', () => {
+  const s = state();
+  s.options.cameraPresetId = 'test-12mp';
+  const back = readPlan(JSON.parse(JSON.stringify(serializePlan(s))));
+  assert.equal(back.options.cameraPresetId, 'test-12mp');
+  const bad = state();
+  bad.options.cameraPresetId = 'nope';
+  assert.equal(readPlan(JSON.parse(JSON.stringify(serializePlan(bad)))).options.cameraPresetId, undefined);
+});

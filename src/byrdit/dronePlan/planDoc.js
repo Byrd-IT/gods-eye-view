@@ -15,6 +15,7 @@
 import { normalizeLookAtPaths, normalizeOrbitTargets } from './planner.js';
 import { normalizeObstacles } from './obstacles.js';
 import { getPreset } from './presets.js';
+import { isCameraPresetId } from './cameraSettings.js';
 
 export const GEVPLAN_SCHEMA = 'gevplan';
 export const GEVPLAN_VERSION = 1;
@@ -37,6 +38,7 @@ const OPTION_TYPES = Object.freeze({
   speedMs: finite,
   photoMode: (v) => ['waypoint', 'interval'].includes(v),
   shutterDenominator: finite,
+  cameraPresetId: (v) => typeof v === 'string' && isCameraPresetId(v),
   batteryMin: finite,
   orbitRadiusM: (v) => v === null || finite(v),
   orbitHeightsM: (v) =>

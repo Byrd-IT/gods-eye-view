@@ -21,6 +21,7 @@
 import { jobFolder, jobSlug } from './areas.js';
 import { TRANSIT_SPEED_MS } from './planner.js';
 import { makeZip } from './zip.js';
+import { cameraChecklistLines } from './cameraSettings.js';
 
 /** Namespace used by DJI Fly's own consumer-drone missions. */
 export const WPML_NAMESPACE = 'http://www.uav.com/wpmz/1.0.2';
@@ -333,6 +334,11 @@ export function readmeText(result, when = new Date(), opts = {}) {
         `  ${i + 1}. ${m.waypointCount} waypoints, ${m.photoCount} photos, ${Math.round(m.distanceM)} m, about ${Math.round(m.durationS / 60)} min`,
     ),
     `Photos: ${totals.photoCount}, ground sample distance ${totals.gsdCm.toFixed(2)} cm/px.`,
+    '',
+    ...cameraChecklistLines(
+      plan.options?.cameraPresetId,
+      plan.options?.shutterDenominator,
+    ),
     '',
     'NOT FLIGHT-TESTED. These files have not been validated on a real aircraft.',
     'Load one at a time: in DJI Fly make a dummy waypoint mission, save it, then',

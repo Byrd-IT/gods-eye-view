@@ -3437,5 +3437,15 @@
   "No imagery (provider serves {time} on)": "Keine Bilder (Anbieter liefert ab {time})",
   "Air quality (AQHI)": "Luftqualität (AQHI)",
   "GNSS integrity": "GNSS-Integrität",
-  "River gauges (USGS)": "Flusspegel (USGS)"
+  "River gauges (USGS)": "Flusspegel (USGS)",
+  "Camera settings (set in DJI Fly)": "Kameraeinstellungen (in DJI Fly setzen)",
+  "Camera settings preset": "Voreinstellung der Kamera",
+  "GEV cannot send these to the aircraft: set them in DJI Fly before launch.": "GEV kann diese nicht an das Fluggerät senden: in DJI Fly vor dem Start einstellen.",
+  "Photo size: {mp} MP, {ratio} ({w} x {h})": "Fotogröße: {mp} MP, {ratio} ({w} x {h})",
+  "Shutter: 1/{n} s or faster": "Verschluss: 1/{n} s oder schneller",
+  "White balance: fixed (not auto)": "Weißabgleich: fest (nicht automatisch)",
+  "Exposure compensation (EV): {ev}": "Belichtungskorrektur (EV): {ev}",
+  "Before launch: take a test photo and check it is {w} x {h}": "Vor dem Start: Testfoto machen und prüfen, ob es {w} x {h} groß ist",
+  "50 MP, 4:3 (mapping)": "50 MP, 4:3 (Kartierung)",
+  "12 MP, 4:3 (test)": "12 MP, 4:3 (Test)"
 }
