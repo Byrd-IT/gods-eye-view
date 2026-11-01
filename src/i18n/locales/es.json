@@ -3185,6 +3185,8 @@
   "Step photos": "Recorrer fotos",
   "Step through the photos": "Recorrer las fotos",
   "No photos to show yet": "Aún no hay fotos que mostrar",
+  "No photo actions in {names}: there are no camera views to show.": "Sin acciones de foto en {names}: no hay vistas de cámara que mostrar.",
+  "A saved plan does not keep where the camera fires: open the original KMZ again to see its camera views ({names}).": "Un plan guardado no conserva dónde dispara la cámara: abre de nuevo el KMZ original para ver sus vistas de cámara ({names}).",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "Foto {n} de {total}: {pass}, inclinación {pitch} grados, altura {h}, cubre {w} por {d}",
   "Mission {n}": "Misión {n}",
   "Part of the view is above the horizon, so the far edge is cut short.": "Parte de la vista queda sobre el horizonte, así que el borde lejano se corta.",

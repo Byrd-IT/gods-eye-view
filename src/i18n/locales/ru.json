@@ -3255,6 +3255,8 @@
   "Step photos": "Листать снимки",
   "Step through the photos": "Листать снимки по порядку",
   "No photos to show yet": "Снимков для показа пока нет",
+  "No photo actions in {names}: there are no camera views to show.": "В {names} нет действий съёмки: показывать виды камеры нечего.",
+  "A saved plan does not keep where the camera fires: open the original KMZ again to see its camera views ({names}).": "Сохранённый план не хранит, где срабатывает камера: откройте исходный KMZ снова, чтобы увидеть виды камеры ({names}).",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "Снимок {n} из {total}: {pass}, наклон {pitch} град., высота {h}, охват {w} на {d}",
   "Mission {n}": "Миссия {n}",
   "Part of the view is above the horizon, so the far edge is cut short.": "Часть кадра выше горизонта, поэтому дальний край обрезан.",

@@ -2139,6 +2139,7 @@
       "src/byrdit/dronePlan/terrain.js",
       "src/byrdit/dronePlan/djiKmz.js",
       "src/byrdit/dronePlan/importFile.js",
+      "src/byrdit/dronePlan/importShots.js",
       "src/byrdit/dronePlan/libraryClient.js",
       "src/byrdit/dronePlan/libraryPanel.js",
       "src/byrdit/dronePlan/planDoc.js",

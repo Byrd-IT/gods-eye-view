@@ -3351,6 +3351,8 @@
   "Camera": "Камера",
   "1/{n} s or faster, ISO {lo}-{hi}, locked white balance and focus, {format}": "1/{n} s або швидше, ISO {lo}-{hi}, зафіксовані баланс білого і фокус, {format}",
   "No photos to show yet": "Ще немає фото для показу",
+  "No photo actions in {names}: there are no camera views to show.": "У {names} немає дій зйомки: немає видів камери для показу.",
+  "A saved plan does not keep where the camera fires: open the original KMZ again to see its camera views ({names}).": "Збережений план не зберігає, де спрацьовує камера: відкрийте вихідний KMZ знову, щоб побачити види камери ({names}).",
   "Mission {n}": "Місія {n}",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "Фото {n} з {total}: {pass}, нахил {pitch} град, висота {h}, покриває {w} на {d}",
   "Part of the view is above the horizon, so the far edge is cut short.": "Частина виду вище горизонту, тож дальній край обрізано.",

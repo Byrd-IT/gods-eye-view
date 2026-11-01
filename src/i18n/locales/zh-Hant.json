@@ -3141,6 +3141,8 @@
   "Camera": "相機",
   "1/{n} s or faster, ISO {lo}-{hi}, locked white balance and focus, {format}": "1/{n} s 或更快，ISO {lo}-{hi}，鎖定白平衡和對焦，{format}",
   "No photos to show yet": "還沒有可顯示的照片",
+  "No photo actions in {names}: there are no camera views to show.": "{names} 中沒有拍照動作，因此沒有可顯示的相機視圖。",
+  "A saved plan does not keep where the camera fires: open the original KMZ again to see its camera views ({names}).": "已儲存的計畫不保留相機拍照位置：請重新開啟原始 KMZ 以查看相機視圖（{names}）。",
   "Mission {n}": "任務 {n}",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "照片 {n} / {total}：{pass}，傾角 {pitch} 度，高度 {h}，覆蓋 {w} × {d}",
   "Part of the view is above the horizon, so the far edge is cut short.": "視圖有一部分在地平線以上，因此遠邊被截短。",

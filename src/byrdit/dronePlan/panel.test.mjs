@@ -2801,3 +2801,37 @@ test('photo check: a drop of only non-JPEG files says not-a-JPEG; JPEGs without 
   assert.match(progress(), /position/);
   w.handle.destroy();
 });
+
+test('an imported file feeds the 3D check: one footprint and pyramid per photo; a file with no photos says so', async () => {
+  const { east, group, kmz, mark, LAT } = await import('./importKmzFixture.mjs');
+  const w = setup();
+  const readout = () =>
+    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0].textContent;
+  const withPhotos = kmz([
+    mark(0, east(0), LAT, { groups: group(1, 0, 0, 'reachPoint') }),
+    mark(1, east(10), LAT, { groups: group(2, 1, 1, 'reachPoint') }),
+    mark(2, east(20), LAT, { groups: group(3, 2, 2, 'reachPoint') }),
+    mark(3, east(60), LAT, { groups: group(4, 2, 3, 'multipleDistance', 20) }),
+  ]);
+  await w.handle.library().importBytes(withPhotos, 'photos.kmz');
+  await wait(20);
+  const checkView = checkBox(w, 'frustum');
+  checkView.value = 'thinned';
+  checkView.dispatch('change');
+  // Three point photos + stations at 0, 20, 40 m on the 40 m leg.
+  assert.equal(checkOf(w, 'footprint').length, 3 + 3);
+  assert.equal(checkOf(w, 'view').length, 6 * 5);
+  assert.match(readout(), /Photo 1 of 6: Import|Photo 1 of 6: photos/);
+  // Hiding the import takes the check away again.
+  const shown = w.find((n) => n.getAttribute?.('aria-label') === 'Show on map')[0];
+  shown.checked = false;
+  shown.dispatch('change');
+  await wait(20);
+  assert.equal(checkOf(w, 'footprint').length, 0);
+  // A file with no photo action: no cones, and the readout says why.
+  await w.handle.library().importBytes(kmz([mark(0, east(0), LAT), mark(1, east(30), LAT)]), 'nophoto.kmz');
+  await wait(20);
+  assert.equal(checkOf(w, 'footprint').length, 0);
+  assert.match(readout(), /No photo actions in nophoto/);
+  w.handle.destroy();
+});

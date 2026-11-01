@@ -111,11 +111,14 @@ export function createDronePlanPreview({
   let suiteCheck = null;
   let suiteSource = null;
   let checkSource = null;
+  // Imported files (setImportCheck): shown only when no panel plan is.
+  let importCheck = null;
+  let importSource = null;
   const refreshCheck = () => {
-    const next = suiteCheck ? suiteSource : planSource;
+    const next = suiteCheck ? suiteSource : (planSource ?? importSource);
     if (next === checkSource) return;
     checkSource = next;
-    check.setData(suiteCheck ?? planCheck);
+    check.setData(suiteCheck ?? planCheck ?? importCheck);
   };
 
   return {
@@ -625,6 +628,16 @@ export function createDronePlanPreview({
     },
     /** 3D check options: enabled, zone, halfWidthM, curtain, footprints,
      * frustum ('off' | 'one' | 'thinned'), index, frame (the camera preset). */
+    /**
+     * Feed imported drone files to the 3D check: passes [{ id, color,
+     * missions: [{ waypoints }] }] as importCheckMission() builds them; null
+     * clears. A plan built in the panel (or the all-passes plan) wins over it.
+     */
+    setImportCheck(passes) {
+      importCheck = passes?.length && !destroyed ? passes : null;
+      importSource = importCheck ? { passes: importCheck } : null;
+      refreshCheck();
+    },
     setCheck(patch) {
       check.setOptions(patch);
     },
@@ -702,6 +715,8 @@ export function createDronePlanPreview({
       planSource = null;
       suiteCheck = null;
       suiteSource = null;
+      importCheck = null;
+      importSource = null;
       refreshCheck();
       boxEntities = drop(boxEntities);
       areaEntities = drop(areaEntities);

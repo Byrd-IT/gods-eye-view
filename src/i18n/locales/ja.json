@@ -3141,6 +3141,8 @@
   "Camera": "カメラ",
   "1/{n} s or faster, ISO {lo}-{hi}, locked white balance and focus, {format}": "1/{n} s以上、ISO {lo}-{hi}、ホワイトバランスとフォーカスを固定、{format}",
   "No photos to show yet": "表示する写真はまだありません",
+  "No photo actions in {names}: there are no camera views to show.": "{names} には撮影アクションがないため、表示するカメラビューはありません。",
+  "A saved plan does not keep where the camera fires: open the original KMZ again to see its camera views ({names}).": "保存したプランにはカメラの撮影位置が保存されません。元の KMZ を開き直すとカメラビューを確認できます（{names}）。",
   "Mission {n}": "ミッション {n}",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "写真 {n} / {total}: {pass}、傾き {pitch} 度、高度 {h}、範囲 {w} × {d}",
   "Part of the view is above the horizon, so the far edge is cut short.": "視野の一部が地平線より上にあるため、遠い端は短く切れています。",

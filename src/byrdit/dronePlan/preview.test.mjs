@@ -819,3 +819,50 @@ test('current photo: it is not drawn when the 3D check or footprints are off', (
   preview.setCheck({ enabled: false });
   assert.equal(checkEntities(source).length, 0);
 });
+
+// ----------------------------------------------------- imported files --
+function importPasses(count = 12) {
+  const m = metersPerDegree(30.27);
+  const waypoints = Array.from({ length: count }, (_, i) => ({
+    lon: -97.77 + (i * 10) / m.lon,
+    lat: 30.27,
+    groundM: 0,
+    aglM: 60,
+    pitchDeg: -55,
+    headingDeg: 90,
+    photo: true,
+  }));
+  return [{ id: 'import-1', color: '#ff8800', missions: [{ waypoints }] }];
+}
+
+test('imported files: setImportCheck feeds the 3D check with one footprint and pyramid per station', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  preview.setCheck({ enabled: true, frame: FRAME, frustum: 'thinned' });
+  assert.equal(checkEntities(source).length, 0);
+  preview.setImportCheck(importPasses(12));
+  assert.equal(preview.checkInfo().count, 12);
+  assert.equal(footprints(source).length, 12);
+  assert.equal(views(source).length, 12 * 5);
+  assert.ok(zones(source).length && curtains(source).length);
+  preview.setImportCheck(null);
+  assert.equal(checkEntities(source).length, 0);
+  assert.equal(preview.checkInfo().count, 0);
+});
+
+test('imported files: a plan built in the panel wins, and the import returns when it goes', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  preview.setCheck({ enabled: true, frame: FRAME, frustum: 'off' });
+  preview.setImportCheck(importPasses(6));
+  assert.equal(preview.checkInfo().count, 6);
+  const planned = result(300, 200, { aglM: 80 });
+  preview.showPlan(planned);
+  const total = planned.missions.reduce((n, mi) => n + mi.waypoints.length, 0);
+  assert.equal(preview.checkInfo().count, total, 'the panel plan is checked, not the import');
+  preview.showPlan(null);
+  assert.equal(preview.checkInfo().count, 6, 'import back once there is no plan');
+  preview.clear();
+  assert.equal(preview.checkInfo().count, 0, 'clear removes it');
+});

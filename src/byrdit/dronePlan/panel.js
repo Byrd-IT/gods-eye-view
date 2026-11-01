@@ -76,6 +76,7 @@ import {
 import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
 import { buildSuiteZip, suiteOptions } from './suite.js';
 import { readPlan, serializePlan } from './planDoc.js';
+import { importCheckMission } from './importShots.js';
 import { mountLibrary } from './libraryPanel.js';
 import { mountPhotoCheck } from './photoCheckPanel.js';
 import {
@@ -282,6 +283,9 @@ export function initDronePlan({
   let cachedProvider = null;
   let planToken = 0;
   let suiteToken = 0;
+  // The 3D check of imported files (see refreshImportCheck).
+  let importCheckToken = 0;
+  let importCheckInfo = { aircraft: null, noPhoto: [], unavailable: [] };
   // Bumps only when a new plan is committed, not when the panel is merely
   // ready. A fast replan can be ready again before the first poll, so the
   // QA script waits for this number instead of waiting for "ready" to leave.
@@ -2439,9 +2443,93 @@ export function initDronePlan({
       footprints: c.footprints,
       frustum: c.frustum,
       index: c.index,
-      frame: getPreset(state.options.presetId),
+      frame: importFramePreset() ?? getPreset(state.options.presetId),
       alpha: c.alpha,
     });
+  }
+
+  /**
+   * Imported files are checked with the aircraft the file names, when that is
+   * not the selected one and the panel has no plan of its own on the globe.
+   */
+  function importFramePreset() {
+    const code = importCheckInfo.aircraft;
+    if (code === null || state.result || state.suite) return null;
+    const selected = getPreset(state.options.presetId);
+    if (selected?.wpml?.droneEnumValue === code) return null;
+    return listPresets().find((p) => p.wpml?.droneEnumValue === code) ?? null;
+  }
+
+  /**
+   * Feed the imported files on the globe to the 3D check: every photo station
+   * the file's actions give (importShots.js), on terrain heights. A file with
+   * no photo action gets none and the readout says so.
+   */
+  async function refreshImportCheck(items) {
+    importCheckToken += 1;
+    const token = importCheckToken;
+    const imports = (items ?? []).filter((i) => i.isImport);
+    const withPhotos = imports.filter((i) => i.shots?.stations?.length);
+    importCheckInfo = {
+      aircraft:
+        withPhotos.find((i) => Number.isInteger(i.droneEnumValue))
+          ?.droneEnumValue ?? null,
+      noPhoto: imports
+        .filter((i) => i.shots && !i.shots.stations.length)
+        .map((i) => i.name ?? i.id),
+      unavailable: imports.filter((i) => !i.shots).map((i) => i.name ?? i.id),
+    };
+    if (!withPhotos.length) {
+      preview.setImportCheck?.(null);
+      pushCheck();
+      syncCheckUi();
+      return;
+    }
+    const provider =
+      viewer.terrainProvider ?? viewer.scene?.globe?.terrainProvider;
+    if (terrainCache.size > MAX_TERRAIN_CACHE || provider !== cachedProvider) {
+      terrainCache.clear();
+    }
+    cachedProvider = provider;
+    const passes = [];
+    for (const item of withPhotos) {
+      const points = item.shots.path;
+      const ground = await sampleGround({
+        viewer,
+        cesium,
+        points,
+        takeoff: points[0],
+        cache: terrainCache,
+      });
+      if (destroyed || token !== importCheckToken) return;
+      passes.push({
+        id: item.id,
+        color: item.color,
+        missions: [importCheckMission(item.shots, ground)],
+      });
+    }
+    preview.setImportCheck?.(passes);
+    pushCheck();
+    syncCheckUi();
+  }
+
+  /** Why the 3D check has no imported photos to show, if it is that. */
+  function importCheckNote() {
+    if (state.result || state.suite) return null;
+    const { noPhoto, unavailable } = importCheckInfo;
+    if (noPhoto.length) {
+      return t(
+        'No photo actions in {names}: there are no camera views to show.',
+        { names: noPhoto.join(', ') },
+      );
+    }
+    if (unavailable.length) {
+      return t(
+        'A saved plan does not keep where the camera fires: open the original KMZ again to see its camera views ({names}).',
+        { names: unavailable.join(', ') },
+      );
+    }
+    return null;
   }
 
   /** Keep the 3D check controls and the photo readout true to the globe. */
@@ -2478,13 +2566,15 @@ export function initDronePlan({
       !c.enabled || c.frustum !== 'one' || info.count < 1;
     const cur = info.current;
     if (!c.enabled || !cur) {
-      ui.checkReadout.textContent = t('No photos to show yet');
+      ui.checkReadout.textContent =
+        importCheckNote() ?? t('No photos to show yet');
       return;
     }
     const mission = /^mission-(\d+)$/.exec(cur.passId);
     const pass = mission
       ? t('Mission {n}', { n: mission[1] })
       : (state.suite?.passes.find((p) => p.id === cur.passId)?.label ??
+        state.imports.find((i) => i.id === cur.passId)?.name ??
         cur.passId);
     const fp = cur.footprint;
     ui.checkReadout.textContent = t(
@@ -3685,6 +3775,7 @@ export function initDronePlan({
     state.ack = false;
     terrainCache.clear();
     preview.clear();
+    refreshImportCheck([]).catch(() => {});
     library?.renderImports();
     // The card stays on the rail as a collapsed launcher.
     if (!panel.classList.contains('collapsed')) {
@@ -3803,7 +3894,10 @@ export function initDronePlan({
       setControllerIds: (ids) => {
         state.controllerIds = ids;
       },
-      showOnMap: (items) => preview.showImports(items),
+      showOnMap: (items) => {
+        preview.showImports(items);
+        refreshImportCheck(items).catch(() => {});
+      },
       download: (name, bytes, type) => downloadFile(name, bytes, type),
     },
   });

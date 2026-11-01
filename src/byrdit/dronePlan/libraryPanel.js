@@ -361,6 +361,12 @@ export function mountLibrary({
         lines: [imp.waypoints],
         rings: [],
         poi: imp.waypoints.filter((w) => w.poi).map((w) => w.poi),
+        // For the 3D check: null for an import opened from a saved plan, which
+        // does not keep where the camera fires.
+        name: imp.name,
+        droneEnumValue: imp.droneEnumValue ?? null,
+        shots: imp.shots ?? null,
+        isImport: true,
       });
     }
     host.showOnMap(items);

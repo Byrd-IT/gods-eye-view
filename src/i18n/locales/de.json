@@ -3211,6 +3211,8 @@
   "Camera": "Kamera",
   "1/{n} s or faster, ISO {lo}-{hi}, locked white balance and focus, {format}": "1/{n} s oder schneller, ISO {lo}-{hi}, fester Weißabgleich und Fokus, {format}",
   "No photos to show yet": "Noch keine Fotos zum Anzeigen",
+  "No photo actions in {names}: there are no camera views to show.": "Keine Fotoaktionen in {names}: Es gibt keine Kameraansichten zum Anzeigen.",
+  "A saved plan does not keep where the camera fires: open the original KMZ again to see its camera views ({names}).": "Ein gespeicherter Plan behält nicht, wo die Kamera auslöst: Öffne die ursprüngliche KMZ erneut, um die Kameraansichten zu sehen ({names}).",
   "Mission {n}": "Mission Nr. {n}",
   "Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}": "Foto {n} von {total}: {pass}, Neigung {pitch} Grad, Höhe {h}, deckt {w} mal {d} ab",
   "Part of the view is above the horizon, so the far edge is cut short.": "Ein Teil der Sicht liegt über dem Horizont, daher ist der ferne Rand abgeschnitten.",

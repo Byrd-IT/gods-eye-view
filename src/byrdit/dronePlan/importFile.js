@@ -5,6 +5,7 @@
  * and untouched.
  */
 import { checkMission, missionIdFromFileName, parseDjiKmz } from './djiKmz.js';
+import { deriveImportShots } from './importShots.js';
 import {
   MAX_GEVPLAN_BYTES,
   importFromMission,
@@ -63,6 +64,9 @@ export async function openDroneFile(bytes, fileName, ctx = {}) {
     source: gev ? 'gev' : 'dji',
   });
   if (!item) return { kind: 'error', code: 'no-waypoints', warnings };
+  // Where the camera fires, for the 3D check. Kept on the open import only:
+  // the stored plan (cleanImport) is unchanged and does not carry it.
+  item.shots = deriveImportShots(mission);
   return { kind: 'mission', item, warnings, mission };
 }
 
