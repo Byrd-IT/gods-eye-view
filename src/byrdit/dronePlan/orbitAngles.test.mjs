@@ -259,11 +259,15 @@ test('outward: time and photo totals include the turn; WPML orders photo, turn, 
   const { waylinesWpml } = buildMissionFiles(a.missions[0], a.plan);
   const groups = waylinesWpml.split('<wpml:actionGroup>').slice(1);
   const seq = groups.filter((g) => g.includes('<wpml:actionGroupMode>sequence<'));
-  assert.equal(seq.length, stops);
-  const funcs = [...seq[0].matchAll(/<wpml:actionActuatorFunc>(\w+)</g)].map((m) => m[1]);
-  assert.deepEqual(funcs, ['takePhoto', 'rotateYaw', 'gimbalRotate', 'takePhoto', 'rotateYaw', 'gimbalRotate']);
+  // One ordered tilt-then-photo group per outward shot, plus the mission's
+  // first waypoint; never two photos in one group, never a yaw action.
+  assert.equal(seq.length, stops + 1);
+  for (const g of seq) {
+    const funcs = [...g.matchAll(/<wpml:actionActuatorFunc>(\w+)</g)].map((m) => m[1]);
+    assert.deepEqual(funcs, ['gimbalRotate', 'takePhoto']);
+  }
+  assert.ok(!waylinesWpml.includes('rotateYaw'));
   assert.ok(waylinesWpml.includes('toPointAndStopWithContinuityCurvature'));
-  assert.ok(waylinesWpml.includes('<wpml:aircraftPathMode>'));
 });
 
 test('outward: the 200-waypoint mission limit still holds', () => {
@@ -472,14 +476,23 @@ test('heading: orbit and look-at photos are written the way DJI Fly keeps them (
   }
 });
 
-test('outward: the turn goes the short way round in both directions', () => {
+test('outward: the second shot is its own waypoint, at the same place, facing directly away', () => {
   const p = plan({ orbitTargets: [buildingTarget()] });
   const ids = p.legs.flatMap((l) => l.waypoints.map((w) => w.id));
   const result = assembleMissions(p, { known: true, takeoffM: 100, wpM: ids.map(() => 100) });
   const { waylinesWpml } = buildMissionFiles(result.missions[0], result.plan);
-  const modes = [...waylinesWpml.matchAll(/<wpml:aircraftPathMode>(\w+)</g)].map((m) => m[1]);
-  assert.ok(modes.length >= 24);
-  assert.ok(modes.every((m) => m === 'clockwise' || m === 'counterClockwise'));
+  const marks = waylinesWpml.split('<Placemark>').slice(1);
+  const heading = (m) => Number(m.match(/<wpml:waypointHeadingAngle>([^<]+)</)[1]);
+  const where = (m) => m.match(/<coordinates>\s*([^<\s]+)/)[1];
+  const outs = marks.filter((m) => m.includes('<wpml:gimbalPitchRotateAngle>-5<'));
+  assert.ok(outs.length >= 12);
+  for (const m of outs) {
+    const k = marks.indexOf(m);
+    assert.equal(where(marks[k - 1]), where(m), 'same place as the inward shot');
+    assert.ok(angDiff(heading(m) + 360, heading(marks[k - 1]) + 180) < 0.2);
+    assert.ok(m.includes('<wpml:waypointHeadingAngleEnable>1<'));
+    assert.ok(m.includes('toPointAndStopWithContinuityCurvature'));
+  }
 });
 
 test('look-at: paths alone with no target to resolve say so, not "box too small"', () => {

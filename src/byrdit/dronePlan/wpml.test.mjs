@@ -176,15 +176,18 @@ test('photo at every waypoint: one group per waypoint, tilt on the first, gradua
     const groups = all(mark, 'wpml:actionGroup');
     groups.forEach((g, n) => {
       assert.equal(textOf(g, 'wpml:actionTriggerType'), 'reachPoint');
-      assert.equal(textOf(g, 'wpml:actionGroupMode'), 'parallel');
+      // The first waypoint's tilt and photo are one ORDERED group (tilt first).
+      assert.equal(textOf(g, 'wpml:actionGroupMode'), i === 0 && n === 0 ? 'sequence' : 'parallel');
       assert.equal(textOf(g, 'wpml:actionGroupId'), String(n + 1), 'group ids restart at 1');
     });
     const first = groups[0];
     assert.equal(textOf(first, 'wpml:actionGroupStartIndex'), String(i));
     assert.equal(textOf(first, 'wpml:actionGroupEndIndex'), String(i));
     const fns = all(first, 'wpml:actionActuatorFunc').map((n) => n.text.trim());
-    // First waypoint: photo and tilt in ONE group, photo first, as DJI Fly.
-    assert.deepEqual(fns, i === 0 ? ['takePhoto', 'gimbalRotate'] : ['takePhoto']);
+    // First waypoint: tilt and photo in ONE sequence group, TILT first, so the
+    // first photo is taken at the planned pitch (DJI Fly's parallel form took it
+    // at the leftover pitch on the 2026-11-01 flight).
+    assert.deepEqual(fns, i === 0 ? ['gimbalRotate', 'takePhoto'] : ['takePhoto']);
     if (groups[1]) {
       assert.equal(groups.length, 2);
       assert.equal(textOf(groups[1], 'wpml:actionGroupStartIndex'), String(i));

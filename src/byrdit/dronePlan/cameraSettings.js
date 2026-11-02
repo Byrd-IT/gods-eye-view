@@ -83,6 +83,10 @@ export function cameraChecklistLines(presetId, shutterDenominator) {
     '  - White balance: fixed (not auto)',
     `  - Exposure compensation (EV): ${evText(p.ev)}`,
     `  - Before launch: take a test photo and check it is ${p.width} x ${p.height}.`,
+    '  - DJI Fly in waypoint mode: on the first flight (Mini 5 Pro, 2026-11-01) all 302',
+    '    mission photos were 4096 x 3072 (12 MP), not 8192 x 6144. DJI\'s waypoint guide',
+    '    lists no photo-size setting, so expect 4096 x 3072: ground sample distance is',
+    '    twice the planned value (about 2.9 cm/px at 80 m). Check the first photo.',
     `  Preset: ${p.name}`,
   ];
 }

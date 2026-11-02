@@ -51,6 +51,27 @@ const swapTurn = (s, mode) =>
 const swapEnable = (s, v) =>
   s.replace(/waypointHeadingAngleEnable=\d/, `waypointHeadingAngleEnable=${v}`);
 
+/**
+ * The one difference on every file: GEV's first waypoint is a SEQUENCE group,
+ * gimbalRotate (id 1) then takePhoto (id 2); DJI Fly's re-save is a parallel
+ * group, takePhoto (1) then gimbalRotate (2). Turn ours into DJI's form.
+ */
+const PHOTO_2 =
+  'action(actionId=2 actionActuatorFunc=takePhoto actionActuatorFuncParam(payloadPositionIndex=0 useGlobalPayloadLensIndex=0))';
+function firstAsDjiFly(s) {
+  const g = s.indexOf('action(actionId=1 actionActuatorFunc=gimbalRotate');
+  const p = s.indexOf(PHOTO_2);
+  assert.ok(g >= 0 && p > g, 'first waypoint: gimbalRotate then takePhoto');
+  assert.match(s, /actionGroupMode=sequence/);
+  const gimbal = s.slice(g, p).trimEnd().replace('actionId=1', 'actionId=2');
+  const photo = PHOTO_2.replace('actionId=2', 'actionId=1');
+  return (
+    s.slice(0, g).replace('actionGroupMode=sequence', 'actionGroupMode=parallel') +
+    `${photo} ${gimbal}` +
+    s.slice(p + PHOTO_2.length)
+  );
+}
+
 const CASES = [
   { name: 'nadir', photos: 65, theirCount: 65, lastIsDjiPass: true },
   { name: 'oblique60', photos: 93 },
@@ -66,10 +87,15 @@ for (const c of CASES) {
     const { waylinesWpml } = write(input);
     const ours = summarizeWaylines(waylinesWpml);
     let relaxed = 0;
+    let relaxedFirst = 0;
     const last = ours.waypoints.length - 1;
     const diffs = compareSummaries(ours, expected, {
       theirCount: c.theirCount,
       relax(i, x, y) {
+        if (i === 0) {
+          relaxedFirst += 1;
+          x = firstAsDjiFly(x);
+        }
         if (c.lastIsDjiPass && i === last) {
           // DJI left it a pass-through because it was not the last one there.
           relaxed += 1;
@@ -81,6 +107,7 @@ for (const c of CASES) {
       },
     });
     assert.deepEqual(diffs, []);
+    assert.equal(relaxedFirst, 1, 'only the first waypoint differs');
     if (c.lastIsDjiPass) assert.equal(relaxed, 1);
     const photos = (waylinesWpml.match(/<wpml:actionActuatorFunc>takePhoto/g) ?? [])
       .length;
@@ -122,25 +149,20 @@ test('golden text: the first two placemarks of the nadir file match DJI Fly byte
   const names = (m) => [...m.matchAll(/<(\/?)(wpml:[A-Za-z]+|Point|coordinates)>/g)]
     .filter((x) => !x[1]).map((x) => x[2]);
   assert.deepEqual(names(marks[0]).slice(0, 6), ['Point', 'coordinates', 'wpml:index', 'wpml:executeHeight', 'wpml:waypointSpeed', 'wpml:waypointHeadingParam']);
+  // The first waypoint is the one deliberate difference from DJI Fly's file:
+  // a sequence group, tilt (id 1) then photo (id 2), so the first photo is
+  // taken at the planned pitch (first flight: it was taken at the old one).
   const takePhoto = marks[0].slice(marks[0].indexOf('<wpml:actionGroup>'), marks[0].indexOf('</wpml:actionGroup>'));
   assert.equal(takePhoto, `<wpml:actionGroup>
           <wpml:actionGroupId>1</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>0</wpml:actionGroupStartIndex>
           <wpml:actionGroupEndIndex>0</wpml:actionGroupEndIndex>
-          <wpml:actionGroupMode>parallel</wpml:actionGroupMode>
+          <wpml:actionGroupMode>sequence</wpml:actionGroupMode>
           <wpml:actionTrigger>
             <wpml:actionTriggerType>reachPoint</wpml:actionTriggerType>
           </wpml:actionTrigger>
           <wpml:action>
             <wpml:actionId>1</wpml:actionId>
-            <wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>
-            <wpml:actionActuatorFuncParam>
-              <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
-              <wpml:useGlobalPayloadLensIndex>0</wpml:useGlobalPayloadLensIndex>
-            </wpml:actionActuatorFuncParam>
-          </wpml:action>
-          <wpml:action>
-            <wpml:actionId>2</wpml:actionId>
             <wpml:actionActuatorFunc>gimbalRotate</wpml:actionActuatorFunc>
             <wpml:actionActuatorFuncParam>
               <wpml:gimbalHeadingYawBase>aircraft</wpml:gimbalHeadingYawBase>
@@ -154,6 +176,14 @@ test('golden text: the first two placemarks of the nadir file match DJI Fly byte
               <wpml:gimbalRotateTimeEnable>0</wpml:gimbalRotateTimeEnable>
               <wpml:gimbalRotateTime>0</wpml:gimbalRotateTime>
               <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
+            </wpml:actionActuatorFuncParam>
+          </wpml:action>
+          <wpml:action>
+            <wpml:actionId>2</wpml:actionId>
+            <wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>
+            <wpml:actionActuatorFuncParam>
+              <wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>
+              <wpml:useGlobalPayloadLensIndex>0</wpml:useGlobalPayloadLensIndex>
             </wpml:actionActuatorFuncParam>
           </wpml:action>
         `);

@@ -25,6 +25,7 @@ import {
   shutterDenominatorOrDefault,
   speedLimits,
 } from './speed.js';
+import { splitOutwardShots } from './shotWaypoints.js';
 import {
   DEFAULT_OUTWARD_PITCH_DEG,
   MAX_OUTWARD_PITCH_DEG,
@@ -1394,7 +1395,9 @@ export function assembleMissions(plan, ground) {
   let missing = 0;
   const legs = planLegs.map((leg) => ({
     ...leg,
-    waypoints: leg.waypoints.map((w) => {
+    // An outward photo is a waypoint of its own (see shotWaypoints.js), so
+    // the counts, the 200-waypoint split and the time estimate all see it.
+    waypoints: splitOutwardShots(leg.waypoints.map((w) => {
       const g = known ? ground.wpM[w.id] : 0;
       const read = typeof g === 'number' && Number.isFinite(g);
       if (read) lastGroundM = g;
@@ -1406,7 +1409,7 @@ export function assembleMissions(plan, ground) {
         groundEstimated: !read && known,
         relHeightM: round(groundM + w.aglM - takeoffM, 1),
       };
-    }),
+    })),
   }));
   if (missing) {
     warnings.push({ code: 'terrain-partial', params: { count: missing } });
@@ -1504,6 +1507,8 @@ export function assembleMissions(plan, ground) {
       take += 1;
     }
     take = Math.min(take, leg.waypoints.length);
+    // Never cut between the inward and the outward shot of one stop.
+    if (take > 2 && leg.waypoints[take - 1].shot === 'in') take -= 1;
     const head = leg.waypoints.slice(0, take);
     // The waypoint where the leg is cut ends one mission and starts the next;
     // it is photographed once, in the first.
@@ -1562,6 +1567,16 @@ export function assembleMissions(plan, ground) {
     want(wps[0], need.first);
     want(wps[wps.length - 1], need.last);
     if (!lifts.size) return missionLegs;
+    // The two shots of a stop share one place: lift both or neither.
+    wps.forEach((w, i) => {
+      const next = wps[i + 1];
+      if (w.shot !== 'in' || next?.shot !== 'out') return;
+      const n = Math.max(lifts.get(w) ?? 0, lifts.get(next) ?? 0);
+      if (n) {
+        lifts.set(w, n);
+        lifts.set(next, n);
+      }
+    });
     return missionLegs.map((leg) => {
       let blocked = false;
       const waypoints = leg.waypoints.map((w) => {

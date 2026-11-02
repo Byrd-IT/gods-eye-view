@@ -24,8 +24,18 @@
  *    smoothTransition mode and the stored angle, and sets only this flag);
  *  - folder autoFlightSpeed 2.5, distance 0, duration 0; numbers without ".0".
  *
+ * Deliberate differences from DJI Fly's own re-save, from the first flight
+ * (2026-11-01, Mini 5 Pro): DJI Fly took only the first takePhoto of a
+ * waypoint's action group, so
+ *  - every waypoint holds exactly ONE takePhoto; a ring stop with an outward
+ *    photo is two waypoints at one place (shotWaypoints.js), the second a
+ *    stop that faces away, tilted by a gimbalRotate that runs BEFORE its photo;
+ *  - on the first waypoint of a mission the gimbalRotate and the takePhoto
+ *    are one SEQUENCE group (tilt first), not two parallel actions, because
+ *    the first photo was taken at the leftover pitch.
+ *
  * Still NOT verified by a real DJI Fly file: multipleDistance interval photos,
- * the rotateYaw/sequence outward orbit photo, and whether the aircraft honours
+ * the heading of the outward waypoint, and whether the aircraft honours
  * the smoothTransition angle when the flag is 0 (needs a flight). The
  * namespace and drone enum are constants so a mismatch is a one-line change.
  */
@@ -33,6 +43,7 @@ import { jobFolder, jobSlug } from './areas.js';
 import { TRANSIT_SPEED_MS } from './planner.js';
 import { makeZip } from './zip.js';
 import { cameraChecklistLines } from './cameraSettings.js';
+import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
 
 /** Namespace used by DJI Fly's own consumer-drone missions. */
 export const WPML_NAMESPACE = 'http://www.uav.com/wpmz/1.0.2';
@@ -130,28 +141,6 @@ function gimbalEvenlyAction(id, pitchDeg) {
           </wpml:action>`;
 }
 
-/** Turn the aircraft to an absolute heading (-180..180, 0 = north) by the short way. */
-function yawAction(id, headingDeg, fromDeg) {
-  const h = wrap180(headingDeg);
-  // The shorter way round: clockwise when the heading is up to 180 degrees
-  // clockwise of where the aircraft points now.
-  const diff = (((h - wrap180(fromDeg ?? 0)) % 360) + 360) % 360;
-  const mode = diff <= 180 ? 'clockwise' : 'counterClockwise';
-  return `          <wpml:action>
-            <wpml:actionId>${id}</wpml:actionId>
-            <wpml:actionActuatorFunc>rotateYaw</wpml:actionActuatorFunc>
-            <wpml:actionActuatorFuncParam>
-              <wpml:aircraftHeading>${one(h)}</wpml:aircraftHeading>
-              <wpml:aircraftPathMode>${mode}</wpml:aircraftPathMode>
-            </wpml:actionActuatorFuncParam>
-          </wpml:action>`;
-}
-
-const wrap180 = (deg) => {
-  const w = ((Number(deg) % 360) + 360) % 360;
-  return w > 180 ? w - 360 : w;
-};
-
 function actionGroup({
   id,
   start,
@@ -206,9 +195,10 @@ function placemark(wp, speedMs, groups, ends) {
   const orbit = wp.headingDeg != null;
   // DJI Fly rewrites every orbit photo stop into a pass-through when it
   // re-saves (172 of 174 waypoints of the Oct 30 orbit), so GEV writes the
-  // pass-through. Only the outward orbit photo, whose turn and tilt need the
-  // aircraft standing still, keeps the stop (no DJI Fly file has one).
-  const stop = ends || (wp.photo && wp.outwardHeadingDeg != null);
+  // pass-through. The two shots of one stop keep the stop, since the turn and
+  // the tilt between them need the aircraft standing still (no DJI Fly file
+  // has one), and they carry the heading flag so the stored angle is used.
+  const stop = ends || Boolean(wp.shot);
   return `      <Placemark>
         <Point>
           <coordinates>
@@ -222,7 +212,7 @@ function placemark(wp, speedMs, groups, ends) {
           <wpml:waypointHeadingMode>${orbit ? 'smoothTransition' : 'followWayline'}</wpml:waypointHeadingMode>
           <wpml:waypointHeadingAngle>${orbit ? one(wp.headingDeg) : '0'}</wpml:waypointHeadingAngle>
           <wpml:waypointPoiPoint>0.000000,0.000000,0.000000</wpml:waypointPoiPoint>
-          <wpml:waypointHeadingAngleEnable>${ends ? 1 : 0}</wpml:waypointHeadingAngleEnable>
+          <wpml:waypointHeadingAngleEnable>${ends || wp.shot ? 1 : 0}</wpml:waypointHeadingAngleEnable>
           <wpml:waypointHeadingPathMode>followBadArc</wpml:waypointHeadingPathMode>
           <wpml:waypointHeadingPoiIndex>0</wpml:waypointHeadingPoiIndex>
         </wpml:waypointHeadingParam>
@@ -249,9 +239,11 @@ ${groups}        <wpml:waypointGimbalHeadingParam>
  *  - every later tilt (the first waypoint of a leg) is a gimbalEvenlyRotate
  *    in a second group on the waypoint BEFORE it, start = that waypoint,
  *    end = the next one, keeping the id the tilt would have had.
- * Interval-photo legs, the outward orbit photo sequence and the look-at
- * rotateYaw are not in any DJI Fly file: they keep GEV's own groups and are
- * only renumbered the same way.
+ * Differences (first flight): the first waypoint of a mission and the outward
+ * shot of a ring stop use a sequence group, gimbalRotate then takePhoto, so
+ * the photo is taken at the pitch it was planned for. Interval-photo legs are
+ * not in any DJI Fly file: they keep GEV's own groups and are only renumbered
+ * the same way.
  */
 function placemarks(mission, speedMs) {
   const flat = [];
@@ -266,12 +258,15 @@ function placemarks(mission, speedMs) {
     const lastIndex = leg.waypoints[leg.waypoints.length - 1].index;
     const item = { groups: [], tilt: null };
     const missionStart = k === 0;
-    if (first) item.tilt = { id: 0, pitch: wp.pitchDeg };
+    const outShot = wp.shot === 'out';
+    const afterOut = flat[k - 1]?.wp.shot === 'out';
+    // A tilt where the leg starts, at the outward shot of a stop, and back
+    // again on the waypoint after it.
+    if (first || outShot || afterOut) item.tilt = { id: 0, pitch: wp.pitchDeg };
     const interval = leg.photoMode === 'interval';
-    const outward = !interval && wp.photo && wp.outwardHeadingDeg != null;
     // Where the first-waypoint rotate goes: in front of GEV's own groups when
     // they are not the plain photo group, so the tilt is set before they run.
-    const tiltFirst = missionStart && (interval || outward);
+    const tiltFirst = missionStart && interval;
     if (tiltFirst) item.tilt.id = actionId++;
     if (interval) {
       if (first) {
@@ -283,23 +278,19 @@ function placemarks(mission, speedMs) {
           actions: [photoAction(actionId++)],
         });
       }
-    } else if (outward) {
-      // One ordered group: photo at the building, turn the aircraft and tilt
-      // the camera away, photo, then turn and tilt back.
+    } else if (wp.photo && item.tilt && (missionStart || outShot)) {
+      // The camera must be at its pitch BEFORE the photo: one ordered group,
+      // tilt then photo. In a parallel group both fire at once and the first
+      // photo of the mission was taken at the leftover pitch.
+      const tiltId = actionId++;
       item.groups.push({
         start: wp.index,
         end: wp.index,
         trigger: 'reachPoint',
         mode: 'sequence',
-        actions: [
-          photoAction(actionId++),
-          yawAction(actionId++, wp.outwardHeadingDeg, wp.headingDeg),
-          gimbalAction(actionId++, wp.outwardPitchDeg),
-          photoAction(actionId++),
-          yawAction(actionId++, wp.headingDeg, wp.outwardHeadingDeg),
-          gimbalAction(actionId++, wp.pitchDeg),
-        ],
+        actions: [gimbalAction(tiltId, wp.pitchDeg), photoAction(actionId++)],
       });
+      item.tilt = null;
     } else if (wp.photo) {
       item.groups.push({
         start: wp.index,
@@ -368,6 +359,28 @@ function placemarks(mission, speedMs) {
 }
 
 /**
+ * A mission whose ring stops still hold an outward photo in the same waypoint
+ * (hand-built, or made before the planner split them) is split here, so the
+ * file never holds two takePhoto actions at one waypoint. Missions the planner
+ * made pass through untouched.
+ */
+function oneShotPerWaypoint(mission) {
+  if (!mission.legs.some((leg) => leg.waypoints.some(hasOutwardShot))) {
+    return mission;
+  }
+  let next = 0;
+  const legs = mission.legs.map((leg) => ({
+    ...leg,
+    waypoints: splitOutwardShots(leg.waypoints).map((w) => ({
+      ...w,
+      index: next++,
+    })),
+  }));
+  const waypoints = legs.flatMap((leg) => leg.waypoints);
+  return { ...mission, legs, waypoints, waypointCount: waypoints.length };
+}
+
+/**
  * The two XML documents of one mission.
  * @param {object} mission One entry of assembleMissions().missions.
  * @param {object} plan The plan it came from.
@@ -379,7 +392,7 @@ export function buildMissionFiles(mission, plan, opts = {}) {
   const created = opts.createdMs ?? Date.now();
   const author = esc(opts.name ?? 'fly');
   const config = missionConfig(preset, plan, opts.wpml);
-  const body = placemarks(mission, speedMs);
+  const body = placemarks(oneShotPerWaypoint(mission), speedMs);
   const templateKml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="${WPML_NAMESPACE}">
   <Document>

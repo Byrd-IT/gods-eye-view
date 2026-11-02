@@ -335,7 +335,17 @@ export function checkMission(
   // Action groups: parallel, ids from 1 (never going down), action ids unique
   // over the whole mission.
   const groups = wps.flatMap((w) => w.groups);
-  if (groups.some((g) => g.mode !== 'parallel')) add('warn', 'group-mode');
+  // The one ordered group GEV writes: tilt, then photo (the first waypoint of
+  // a mission and the outward shot of a ring stop). Anything else sequenced
+  // is not a form DJI Fly writes.
+  const tiltThenPhoto = (g) =>
+    g.mode === 'sequence' &&
+    g.actions.length === 2 &&
+    g.actions[0].func === 'gimbalRotate' &&
+    g.actions[1].func === 'takePhoto';
+  if (groups.some((g) => g.mode !== 'parallel' && !tiltThenPhoto(g))) {
+    add('warn', 'group-mode');
+  }
   // DJI Fly restarts the group ids at 1 on every waypoint (a waypoint's tilt
   // group is 2), so ids only have to be whole numbers from 1 up.
   const badIds = (list) =>
