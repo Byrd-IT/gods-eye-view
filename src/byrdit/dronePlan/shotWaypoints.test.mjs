@@ -187,6 +187,6 @@ test('the README says DJI Fly waypoint mode gave 4096 x 3072, for the 50 MP sett
   const { result } = ringMission();
   const m = result.missions[0];
   assert.ok(readmeText(result, new Date('2026-11-01T00:00:00Z')).includes(`${m.waypointCount} waypoints, ${m.photoCount} photos`));
-  assert.match(cameraChecklistLines('mapping-50mp', 500).join('\n'), /4096 x 3072 \(12 MP\)/);
-  assert.doesNotMatch(cameraChecklistLines('test-12mp', 500).join('\n'), /4096 x 3072/);
+  assert.match(cameraChecklistLines('mapping-50mp', 500).join('\n'), /Waypoint mode[\s\S]*4096 x 3072 \(12 MP\)/);
+  assert.doesNotMatch(cameraChecklistLines("test-12mp", 500).join("\n"), /Waypoint mode/);
 });
