@@ -9,6 +9,7 @@ import test from 'node:test';
 import { assembleMissions, planFlight } from './planner.js';
 import { metersPerDegree } from './geo.js';
 import { buildKmz, buildMissionFiles, readmeText } from './wpml.js';
+import { cameraChecklistLines } from './cameraSettings.js';
 import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
 import { plannedPhotoPoints } from './photoCheck.js';
 import { checkMission, parseDjiKmz } from './djiKmz.js';
@@ -182,10 +183,10 @@ test('a hand-built two-photo waypoint is split by the writer, never written as t
   assert.deepEqual(splitOutwardShots(splitOutwardShots(one)), splitOutwardShots(one));
 });
 
-test('the README lists the doubled waypoint count and says what the camera gives in waypoint mode', () => {
+test('the README says DJI Fly waypoint mode gave 4096 x 3072, for the 50 MP setting only', () => {
   const { result } = ringMission();
-  const text = readmeText(result, new Date('2026-11-01T00:00:00Z'));
   const m = result.missions[0];
-  assert.ok(text.includes(`${m.waypointCount} waypoints, ${m.photoCount} photos`));
-  assert.match(text, /4096 x 3072 \(12 MP\)/);
+  assert.ok(readmeText(result, new Date('2026-11-01T00:00:00Z')).includes(`${m.waypointCount} waypoints, ${m.photoCount} photos`));
+  assert.match(cameraChecklistLines('mapping-50mp', 500).join('\n'), /4096 x 3072 \(12 MP\)/);
+  assert.doesNotMatch(cameraChecklistLines('test-12mp', 500).join('\n'), /4096 x 3072/);
 });

@@ -1507,7 +1507,8 @@ export function assembleMissions(plan, ground) {
       take += 1;
     }
     take = Math.min(take, leg.waypoints.length);
-    // Never cut between the inward and the outward shot of one stop.
+    // Keep the inward and the outward shot of one stop in one mission (when
+    // only two waypoints fit, a cut between them is unavoidable).
     if (take > 2 && leg.waypoints[take - 1].shot === 'in') take -= 1;
     const head = leg.waypoints.slice(0, take);
     // The waypoint where the leg is cut ends one mission and starts the next;
