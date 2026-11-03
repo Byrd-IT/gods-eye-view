@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { openSkyProxy } from './aircraft/opensky.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
 import { tomtomProxy } from './traffic.js';
@@ -12,7 +13,7 @@ import { adsbdbProxy } from './aircraft/enrichment.js';
 import { overpassProxy } from './overpass.js';
 import { militaryInstallationsProxy } from './military-installations.js';
 import { regionalBriefProxy } from './regional/briefing.js';
-import { geocodeProxy } from './regional/place.js';
+import { geocodeProxy, NOMINATIM_CACHE_DIR } from './regional/place.js';
 import { weatherEffectsProxy } from './regional/weather-effects.js';
 import { cctvProxy } from './cctv.js';
 import { defaultSourceRoot } from './common/source-root.js';
@@ -40,8 +41,20 @@ import { keyIsolationProxy } from '../byrdit/keyIsolation/plugin.js';
 /**
  * Construct the local provider plugins in their established order.
  * `realtime` configures OpenAI; `gemini` explicitly opts into Gemini Live.
+ * `nominatimStorageDir` binds an owned absolute directory before construction;
+ * omission retains the durable per-source cache and policy state.
  */
-function localProviderPlugins({ realtime, gemini } = {}) {
+function localProviderPlugins({
+  realtime,
+  gemini,
+  nominatimStorageDir = NOMINATIM_CACHE_DIR,
+} = {}) {
+  if (
+    typeof nominatimStorageDir !== 'string' ||
+    !nominatimStorageDir.trim() ||
+    !path.isAbsolute(nominatimStorageDir)
+  )
+    throw new TypeError('nominatimStorageDir must be an absolute directory');
   return [
     // First, so it sees every answer the providers below send.
     historyResponseTee(),
@@ -56,7 +69,7 @@ function localProviderPlugins({ realtime, gemini } = {}) {
     overpassProxy(),
     militaryInstallationsProxy(),
     regionalBriefProxy(),
-    geocodeProxy(),
+    geocodeProxy({ storageDir: nominatimStorageDir }),
     weatherEffectsProxy(),
     cctvProxy({ sourceRoot: defaultSourceRoot }),
     radioBrowserProxy(),

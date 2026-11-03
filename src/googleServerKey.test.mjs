@@ -169,7 +169,7 @@ test('browser defines carry neither the browser key nor the server key', () => {
   withKeys({ server: 'server-secret', browser: 'browser-public' }, () => {
     // Fork: no provider key is baked into the bundle (see keyExposure.test.mjs).
     const defines = config({ mode: 'test' }).define;
-    assert.equal(defines, undefined);
+    assert.deepEqual(Object.keys(defines ?? {}).filter((k) => !k.startsWith("__")), []);
     assert.ok(
       !JSON.stringify(config({ mode: 'test' }).define ?? {}).includes(
         'server-secret',

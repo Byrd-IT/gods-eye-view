@@ -9,11 +9,18 @@ import { t } from './i18n/index.js';
 // at runtime from a same-origin endpoint in obfuscated form and decoded in
 // memory (Google 3D Tiles are requested by the browser itself). No top-level
 // await: the production build targets es2020, which rejects it.
+// The Vite boundary exposes only undefined, null, or a validated URL.
+const photonSetting = import.meta.env.PHOTON_URL;
+
 const application = Promise.all([fetchIonCredential(), fetchGoogleKey()]).then(
   ([cesiumToken, googleApiKey]) => {
     const app = createStandaloneApplication({
       googleApiKey,
       cesiumToken,
+      geospatial:
+        photonSetting === undefined
+          ? {}
+          : { endpoints: { photon: photonSetting } },
       allowQaRegistration: import.meta.env.DEV,
     });
     app.start().catch((error) => {

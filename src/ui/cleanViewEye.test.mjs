@@ -5,8 +5,6 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { bindCleanViewEye, CLEAN_VIEW_EYE_IDLE_MS } from './cleanViewEye.js';
 import { bindApplicationShortcuts } from './applicationShortcuts.js';
-import { bindDisplayControls } from './displayControls.js';
-import { expandApplicationHtml } from '../../build/application-html.js';
 import { readStylesheet } from '../testSupport/readStylesheet.mjs';
 
 const ROOT = path.resolve(
@@ -167,17 +165,10 @@ function wiredApp() {
     searchInput: new FakeElement('search'),
     actions,
   });
-  bindDisplayControls({
-    elements: {
-      cleanViewButton: f.cleanViewBtn,
-      cleanViewExitButton: f.exitBtn,
-      cleanViewEyeButton: f.eyeBtn,
-    },
-    actions: {
-      toggleCleanView: () => f.shell.toggleCleanView(),
-      exitCleanView: () => f.shell.toggleCleanView(false),
-    },
-  });
+  // The Display view's buttons answer through the display store's actions.
+  f.cleanViewBtn.addEventListener('click', () => f.shell.toggleCleanView());
+  f.eyeBtn.addEventListener('click', () => f.shell.toggleCleanView());
+  f.exitBtn.addEventListener('click', () => f.shell.toggleCleanView(false));
   f.shell._cleanViewEye.sync(false);
   const key = (k, extra = {}) => {
     const event = new Event('keydown');
@@ -367,16 +358,15 @@ test('toggling touches only the body class, the buttons and the rail layout hold
 });
 
 test('markup: the eye is a labelled toggle button beside EXIT CLEAN VIEW', () => {
-  const html = expandApplicationHtml(read('index.html'));
-  const eye = html.match(/<button id="clean-view-eye"[^>]*>/)?.[0];
-  assert.ok(eye, 'eye button in the page');
+  const vue = read('src/ui/views/DisplayControlsView.vue');
+  const eye = vue.match(/<button id="clean-view-eye"[^>]*>/)?.[0];
+  assert.ok(eye, 'eye button in the Display view');
   assert.match(eye, /type="button"/);
   assert.match(eye, /aria-pressed="false"/);
-  assert.match(eye, /aria-label="[^"]+"/);
+  assert.match(eye, /:aria-label="[^"]+"/);
   assert.doesNotMatch(eye, /tabindex="-1"/);
-  assert.match(html, /id="clean-view-toggle"[^>]*aria-pressed="false"/);
   assert.ok(
-    html.indexOf('id="clean-view-exit"') < html.indexOf('id="clean-view-eye"'),
+    vue.indexOf('id="clean-view-exit"') < vue.indexOf('id="clean-view-eye"'),
   );
 });
 

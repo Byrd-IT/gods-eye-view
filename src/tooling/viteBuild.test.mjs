@@ -16,7 +16,10 @@ import * as providers from '../../server/providers/local.js';
 import { apiNotFoundPlugin } from '../../server/standalone/api-not-found.js';
 import { makeFixtureRoot } from './fixtureRoot.mjs';
 
-test('explicit build inputs preserve plugin order and loopback protections', () => {
+const nominatimStorageDir = await makeFixtureRoot('gev-build-composition-');
+test.after(() => rm(nominatimStorageDir, { recursive: true, force: true }));
+
+test('explicit build inputs preserve browser-only defines, plugin order and loopback protections', () => {
   const plugin = { name: 'fixture-provider' };
   const config = createBrowserViteConfig({
     plugins: [plugin],
@@ -29,6 +32,7 @@ test('explicit build inputs preserve plugin order and loopback protections', () 
   assert.equal(config.plugins[0].enforce, 'pre');
   assert.equal(config.plugins[1].name, 'host-check');
   assert.equal(config.plugins[1].enforce, 'pre');
+  assert.equal(config.plugins[3].name, 'vite:vue');
   assert.equal(config.plugins[4], plugin);
   assert.equal(config.server.host, 'localhost');
   assert.equal(config.server.port, 4173);
@@ -64,10 +68,41 @@ test('explicit build inputs preserve plugin order and loopback protections', () 
   assert.ok(!csp.includes("script-src 'self' 'unsafe-inline'"));
   assert.deepEqual(config.preview.headers, config.server.headers);
   // Provider keys are never baked into the bundle, whatever a caller passes.
-  assert.equal(config.define, undefined);
+  assert.deepEqual(config.define, {
+    __VUE_I18N_FULL_INSTALL__: 'false',
+    __VUE_I18N_LEGACY_API__: 'false',
+    __INTLIFY_PROD_DEVTOOLS__: 'false',
+    __INTLIFY_DROP_MESSAGE_COMPILER__: 'true',
+  });
+  assert.deepEqual(
+    Object.keys(
+      createBrowserViteConfig({
+        googleApiKey: 'browser-fixture',
+        cesiumToken: 'ion-fixture',
+        mapillaryToken: 'MLY|1|abc',
+      }).define,
+    ).filter((key) => /GOOGLE|CESIUM|MAPILLARY/.test(key)),
+    [],
+  );
   assert.equal(
-    createBrowserViteConfig({ mapillaryToken: 'MLY|1|abc' }).define,
-    undefined,
+    createBrowserViteConfig({ photonUrl: '' }).define[
+      'import.meta.env.PHOTON_URL'
+    ],
+    'null',
+    'an empty PHOTON_URL reaches the browser only as the disabled sentinel',
+  );
+  assert.equal(
+    createBrowserViteConfig({ photonUrl: 'https://u:p@example.test/api/' })
+      .define['import.meta.env.PHOTON_URL'],
+    'null',
+    'credentials are never serialized into browser assets',
+  );
+  assert.equal(
+    createBrowserViteConfig({ photonUrl: 'http://localhost:2322/api/' }).define[
+      'import.meta.env.PHOTON_URL'
+    ],
+    'null',
+    'plain http would be blocked by connect-src, so it is refused here',
   );
   // A wildcard bind keeps the Host-header check; LAN names are explicit.
   for (const host of ['0.0.0.0', '::'])
@@ -93,7 +128,11 @@ test('build helper does not discover environment values or construct local provi
   process.env.GOOGLE_MAPS_API_KEY = 'environment-fixture';
   try {
     const config = createBrowserViteConfig();
-    assert.equal(config.define, undefined);
+    assert.equal(
+      config.define['import.meta.env.GOOGLE_MAPS_API_KEY'],
+      undefined,
+      'provider keys are never baked into the bundle',
+    );
     assert.deepEqual(
       config.plugins.slice(4).map((plugin) => plugin.name),
       ['embed-framing', 'panel-build'],
@@ -107,7 +146,7 @@ test('build helper does not discover environment values or construct local provi
 test('root config retains existing named exports and standalone provider order', () => {
   for (const [name, value] of Object.entries(providers))
     assert.equal(compatibility[name], value, name);
-  const config = standaloneConfig({ mode: 'test' });
+  const config = standaloneConfig({ mode: 'test' }, { nominatimStorageDir });
   const names = config.plugins.map((plugin) => plugin.name);
   // The plan library API comes first (before any provider) and is not one.
   assert.equal(names[4], 'byrdit-plan-library');
@@ -126,7 +165,9 @@ test('root config retains existing named exports and standalone provider order',
   );
   assert.deepEqual(
     standaloneProviders.filter((name) => name !== 'gemini-live-proxy'),
-    providers.localProviderPlugins().map((plugin) => plugin.name),
+    providers
+      .localProviderPlugins({ nominatimStorageDir })
+      .map((plugin) => plugin.name),
   );
   assert.equal(config.plugins.at(-7).name, 'gev-key-setup');
   // Token fallback follows real providers and local MCP before the API 404.
@@ -139,10 +180,26 @@ test('root config retains existing named exports and standalone provider order',
   assert.equal(config.plugins.at(-1).name, 'panel-build');
 });
 
+test('standalone config passes a validated Photon setting into the browser define', () => {
+  const previous = process.env.PHOTON_URL;
+  process.env.PHOTON_URL = 'https://photon.example.test/api/';
+  try {
+    assert.equal(
+      standaloneConfig({ mode: 'test' }, { nominatimStorageDir }).define[
+        'import.meta.env.PHOTON_URL'
+      ],
+      '"https://photon.example.test/api/"',
+    );
+  } finally {
+    if (previous === undefined) delete process.env.PHOTON_URL;
+    else process.env.PHOTON_URL = previous;
+  }
+});
+
 test('directories the server writes while it runs are kept out of the dev watcher', () => {
   // Providers write cache files and logs here while the app runs; none of it is
   // source, so the dev watcher has no reason to stat it.
-  const config = standaloneConfig({ mode: 'test' });
+  const config = standaloneConfig({ mode: 'test' }, { nominatimStorageDir });
   const plugin = config.plugins.find(
     ({ name }) => name === 'gev-unwatched-runtime-dirs',
   );

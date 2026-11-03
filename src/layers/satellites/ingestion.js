@@ -129,6 +129,8 @@ export function createIngestion({
             name: entry.name,
             satrec,
             group: entry.group,
+            // satellite.js does not keep the designator the year match reads.
+            launchYear: parts.orbits.gpLaunchYear(entry.gp),
           });
 
           coreStale ||= entry.stale;

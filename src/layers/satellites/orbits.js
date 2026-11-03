@@ -356,7 +356,7 @@ export function createOrbits({ state: layerState, services, parts, source }) {
         : null;
       let bestScore = 0;
       for (const [id, sat] of layerState._catalog) {
-        const designatorYear = internationalDesignatorYear(sat.satrec);
+        const designatorYear = sat.launchYear ?? null;
         if (
           launchYear !== null &&
           designatorYear !== null &&

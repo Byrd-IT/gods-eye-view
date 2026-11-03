@@ -41,10 +41,14 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Street Level and GNSS extend the manifest; tracked and analyst aircraft describe broadcasts.
     // Air quality (ECCC AQHI) extends the manifest.
     // Byrd-IT fork: + the four USGS water layers in src/voice/layerManifest.js
-    // (upstream 1c234ce0 pin without them: 967b5a04...99cf6).
+    // (upstream 1c234ce0 pin without them: 967b5a04...99cf6). Re-pinned at the
+    // 0e27d69f merge: the only drift from upstream is fork-only (control_sky,
+    // control_history, control_imagery, control_droneplan, byrdit-open and
+    // basemap-auto in set_map_stack, the four USGS water layers).
     // Globe rotation adds one motion; visual keyhole fit and explicit
     // reset guidance/defaults update only move_camera and mode descriptions.
     // S2 GhostMaps extends the generated layer enums.
+    // The Utilities panel (Directions, Draw, Import) adds one panel target.
     // Panel adds named voice targets and timeout; shared Panel/Cockpit guidance
     // is consolidated without changing either feature's arguments.
     // History playback voice adds the control_history tool (last).
@@ -55,7 +59,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // waybackStillOn and starting speaking rule, description only.
     // Snow leaves the set_visual_style enum.
     // The Operator HUD layout leaves set_hud's layout enum.
-    'de5117cb6463399d4b47f4ee6ddb59daf353b9830a7e87b94bff45b731147765',
+    'a57d71a6f8b1363f41f0df7198c62c8cd61975076c3b6fc3015eda3769a94a48',
   );
 });
 
@@ -157,6 +161,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'voice-settings',
         'voice-preview',
         'provider-settings',
+        'utilities-panel',
       ].includes(id),
   );
   for (const tool of legacy) {

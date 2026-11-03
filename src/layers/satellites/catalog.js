@@ -123,6 +123,7 @@ export function createCatalog({ state: layerState, services, parts, source }) {
             name: entry.name,
             satrec,
             group: 'dense',
+            launchYear: parts.orbits.gpLaunchYear(entry.gp),
           });
           const point = layerState._pointCollection.add({
             position: Cesium.Cartesian3.fromDegrees(

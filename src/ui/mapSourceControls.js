@@ -1,58 +1,52 @@
-import {
-  renderMapStackChips,
-  syncMapStackChipStatus,
-  syncMapStackChips,
-} from '../mapStackChips.js';
-import { t } from '../i18n/index.js';
+import { mapStackChipModels } from '../mapStackChips.js';
+import { onLocaleChange, t } from '../i18n/index.js';
 
 /**
  * Own Map Source presentation and selection without constructing map providers.
  * The supplied controller remains authoritative for availability and active state.
+ * The chip row and the status badge are presented as a plain view and handed to
+ * `publish`; Core's dock renders them and calls `select()` for a chip.
  */
 export function createMapSourceControls({
-  container,
-  statusElement,
   controller,
   subscribe,
+  publish = () => {},
   claimSelection = () => {},
   onStateChanged = () => {},
   onError = () => {},
 }) {
   let destroyed = false;
   let generation = 0;
-  let statusTitled = false;
-  const removers = [];
-  const bind = (element, type, listener) => {
-    element.addEventListener(type, listener);
-    removers.push(() => element.removeEventListener(type, listener));
-  };
+  // Availability tracks the ion token, so the stacks are read on refresh only.
+  let stacks = [];
+  function present(state) {
+    const stack = state.activeStack;
+    // Byrd-IT Open health: working but reported degraded by its service.
+    const degraded =
+      typeof stack?.degradedReason === 'string' &&
+      stack.degradedReason.trim() !== '';
+    const name = stack?.shortLabel || stack?.label || t('MAP');
+    return {
+      chips: mapStackChipModels(stacks, state.activeId),
+      status: {
+        text:
+          state.status === 'switching'
+            ? '...'
+            : degraded
+              ? t('{name} (degraded)', { name })
+              : name,
+        warn: !!state.lastError || degraded,
+        // The degraded reason is the status tooltip; absent when healthy.
+        ...(degraded ? { title: stack.degradedReason } : {}),
+      },
+    };
+  }
   function render(state) {
     if (destroyed || !state) return;
-    syncMapStackChips(container, state.activeId);
-    if (Array.isArray(state.stacks))
-      syncMapStackChipStatus(container, state.stacks);
-    if (statusElement) {
-      const stack = state.activeStack;
-      const degraded =
-        typeof stack?.degradedReason === 'string' &&
-        stack.degradedReason.trim() !== '';
-      const name = stack?.shortLabel || stack?.label || t('MAP');
-      statusElement.textContent =
-        state.status === 'switching'
-          ? '...'
-          : degraded
-            ? t('{name} (degraded)', { name })
-            : name;
-      // Only clear a tooltip this control set itself.
-      if (degraded) {
-        statusElement.title = stack.degradedReason;
-        statusTitled = true;
-      } else if (statusTitled) {
-        statusElement.title = '';
-        statusTitled = false;
-      }
-      statusElement.classList.toggle('warn', !!state.lastError || degraded);
-    }
+    // Health arrives after the first paint, so read the stacks again whenever
+    // the state carries them (Byrd-IT Open degraded flag).
+    if (Array.isArray(state.stacks)) stacks = state.stacks;
+    publish(present(state));
   }
   /**
    * `intent` tells the controller who chose the stack: 'user' (a chip, the
@@ -87,14 +81,7 @@ export function createMapSourceControls({
   }
   function refresh() {
     if (destroyed) return;
-    for (const remove of removers.splice(0)) remove();
-    renderMapStackChips(container, controller.getStacks(), {
-      activeId: controller.getActiveId(),
-      onSelect: (id) => {
-        void select(id).catch(() => {});
-      },
-      bind,
-    });
+    stacks = controller.getStacks();
     render(controller.getState());
   }
   const unsubscribe = subscribe(() => {
@@ -102,6 +89,9 @@ export function createMapSourceControls({
     render(controller.getState());
     onStateChanged();
   });
+  // The chips' names and hints are translated; read them again in a new
+  // locale.
+  const offLocale = onLocaleChange(refresh);
   refresh();
   return {
     render,
@@ -112,7 +102,7 @@ export function createMapSourceControls({
       destroyed = true;
       generation++;
       unsubscribe?.();
-      for (const remove of removers.splice(0)) remove();
+      offLocale();
     },
   };
 }

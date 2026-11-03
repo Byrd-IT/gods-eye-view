@@ -1,5 +1,7 @@
+import '../testSupport/registerDom.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { nextTick } from 'vue';
 import {
   COMBINED_ROWS,
   CombinedSelection,
@@ -125,18 +127,8 @@ test('chip toggles one category; last chip off leaves the row off and remembered
 
 test('layer panel renders one USGS Water row; switch and chips drive the member layers', async () => {
   const { LayerPanel } = await import('./layerPanel.js');
-  const { railFixture } = await import('./railTestFixture.mjs');
-  const f = railFixture();
-  const previousDocument = globalThis.document;
-  // The fixture's style object has no setProperty (chip colours use it).
-  const createElement = f.document.createElement.bind(f.document);
-  f.document.createElement = (tag) => {
-    const node = createElement(tag);
-    node.style.setProperty = (key, value) => (node.style[key] = value);
-    node.style.removeProperty = (key) => delete node.style[key];
-    return node;
-  };
-  globalThis.document = f.document;
+  document.body.replaceChildren();
+  const container = document.body.appendChild(document.createElement('div'));
   const on = new Set();
   const layers = IDS.map((id) => ({
     id,
@@ -149,12 +141,10 @@ test('layer panel renders one USGS Water row; switch and chips drive the member 
       return on.has(id);
     },
   }));
-  const calls = [];
   const panel = new LayerPanel({
     getLayers: () => layers,
     isEnabled: (id) => on.has(id),
     setEnabled: async (id, enabled) => {
-      calls.push([id, enabled]);
       if (enabled) on.add(id);
       else on.delete(id);
     },
@@ -163,35 +153,36 @@ test('layer panel renders one USGS Water row; switch and chips drive the member 
     subscribeRowControls: () => null,
     getRowControls: () => null,
   });
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const settle = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTick();
+  };
   try {
-    panel.mount(f.container);
-    const rows = f.container.children.filter((n) =>
-      n.className?.includes('data-toggle-row'),
-    );
+    panel.mount(container);
+    await settle();
+    const rows = [...container.querySelectorAll('.data-toggle-row')];
     assert.equal(rows.length, 1);
     const el = rows[0];
     assert.equal(el.dataset.combinedRow, 'usgs-water');
-    const controls = el.querySelector('.data-toggle-controls');
-    assert.equal(controls.hidden, true);
+    const controls = () => el.querySelector('.data-toggle-controls');
+    const chips = () => [...controls().querySelectorAll('.data-toggle-chip')];
+    assert.equal(controls().hidden, true);
     el.querySelector('.data-toggle-btn').click();
     await settle();
     assert.equal(on.size, 4);
-    assert.equal(controls.hidden, false);
-    assert.equal(controls.children.length, 4);
-    assert.ok(
-      controls.children.every((c) => c.className.includes('chip-active')),
-    );
+    assert.equal(controls().hidden, false);
+    assert.equal(chips().length, 4);
+    assert.ok(chips().every((c) => c.className.includes('chip-active')));
     // Chip: turn Wells off.
-    controls.children[1].click();
+    chips()[1].click();
     await settle();
     assert.equal(on.has('local-usgs-wells'), false);
-    assert.equal(controls.children[1].className.includes('chip-idle'), true);
+    assert.equal(chips()[1].className.includes('chip-idle'), true);
     // Switch off, then on: restores the three, not four.
     el.querySelector('.data-toggle-btn').click();
     await settle();
     assert.equal(on.size, 0);
-    assert.equal(controls.hidden, true);
+    assert.equal(controls().hidden, true);
     el.querySelector('.data-toggle-btn').click();
     await settle();
     assert.deepEqual([...on].sort(), [
@@ -203,11 +194,12 @@ test('layer panel renders one USGS Water row; switch and chips drive the member 
     on.clear();
     on.add('local-usgs-springs');
     panel._refreshTogglePanel();
-    assert.equal(controls.hidden, false);
-    assert.equal(controls.children[3].className.includes('chip-active'), true);
-    assert.equal(controls.children[0].className.includes('chip-active'), false);
+    await settle();
+    assert.equal(controls().hidden, false);
+    assert.equal(chips()[3].className.includes('chip-active'), true);
+    assert.equal(chips()[0].className.includes('chip-active'), false);
   } finally {
     panel.destroy();
-    globalThis.document = previousDocument;
+    document.body.replaceChildren();
   }
 });

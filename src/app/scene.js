@@ -16,7 +16,7 @@ import {
 import { describeError } from './errors.js';
 import { openBasemap } from '../byrdit/basemap/index.js';
 import { attachWayback } from '../byrdit/wayback/index.js';
-import { t } from '../i18n/index.js';
+import { onLocaleChange, t } from '../i18n/index.js';
 
 /** Construct the application globe using the caller's local configuration. */
 export async function createApplicationScene({
@@ -53,6 +53,7 @@ export async function createApplicationScene({
   defer(installTrackpadPinchZoom(viewer));
   registerDataCredits(viewer, credits);
   configureCreditKeyboardAccess(document);
+  defer(onLocaleChange(() => configureCreditKeyboardAccess(document)));
   // Byrd-IT Open base map (BASEMAP.md 4.3): null unless GEV_BASEMAP=1, and
   // then everything below runs exactly as before.
   const basemap = await openBasemap({
