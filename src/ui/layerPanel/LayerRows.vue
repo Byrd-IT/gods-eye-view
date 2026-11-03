@@ -4,6 +4,7 @@ import RailRowList from '../rail/RailRowList.vue';
 import RowText from './RowText.vue';
 import { vClassToggle } from '../rail/classToggle.js';
 import OpacityHost from './OpacityHost.vue';
+import { getLocale } from '../../i18n/index.js';
 
 // The data layer rows under their group headings. LayerPanel presents every
 // value; clicks reach it with the layer id, and it re-reads the live
@@ -83,7 +84,7 @@ defineProps({
           :on-select="(entry) => onListItem(item.id, entry.id)" /></template
       ><OpacityHost
         v-for="entry in item.opacity || []"
-        :key="`opacity:${entry.layerId}`"
+        :key="`opacity:${getLocale()}:${entry.layerId}`"
         :model="opacityModel"
         :layer-id="entry.layerId"
         :label="entry.label" /></div
