@@ -198,12 +198,8 @@
   border: 0;
   cursor: pointer;
 }
-.gev-ov-group-head::before {
-  content: '\25B8';
+.gev-ov-group-caret {
   flex: 0 0 auto;
-}
-.gev-ov-group-head[aria-expanded='true']::before {
-  content: '\25BE';
 }
 .gev-ov-group-title {
   flex: 1 1 auto;

@@ -103,6 +103,10 @@ export function createOverlaysPanel({
         cls: 'gev-ov-group-head',
         attrs: { type: 'button', 'aria-expanded': 'false' },
       });
+      const caret = el(doc, 'span', head, {
+        cls: 'gev-ov-group-caret',
+        attrs: { 'aria-hidden': 'true' },
+      });
       el(doc, 'span', head, { cls: 'gev-ov-group-title', text: title });
       const count = el(doc, 'span', head, { cls: 'gev-ov-group-count' });
       const body = el(doc, 'div', section, { cls: 'gev-ov-group-body' });
@@ -110,6 +114,7 @@ export function createOverlaysPanel({
         section,
         head,
         count,
+        caret,
         body,
         title,
         open: DEFAULT_OPEN_GROUPS.includes(group.id),
@@ -213,6 +218,7 @@ export function createOverlaysPanel({
       const expanded = searching ? matches > 0 : entry.open;
       entry.body.hidden = !expanded;
       entry.head.setAttribute('aria-expanded', String(expanded));
+      entry.caret.textContent = expanded ? '\u25BE' : '\u25B8';
       entry.count.textContent = on
         ? `${on}/${entry.rows}`
         : searching
