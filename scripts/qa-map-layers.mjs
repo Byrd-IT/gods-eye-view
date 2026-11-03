@@ -170,6 +170,21 @@ async function run(label, viewport, { touch = false } = {}) {
   const back = await shownRows();
   check(`${label}: clearing the search restores the default view (Lakes open)`, back.length === 7, String(back.length));
 
+  // The NAIP / historic aerial year slider stays in Time Travel; the card links to it.
+  const aerialBtn = mobile ? null : await page.$('#gev-overlays-panel .gev-ov-aerial');
+  if (!mobile) check(`${label}: shortcut to the aerial / historic imagery slider is present`, Boolean(aerialBtn));
+  if (aerialBtn) {
+    await aerialBtn.evaluate((b) => b.scrollIntoView({ block: 'center' }));
+    await aerialBtn.click();
+    await sleep(1500);
+    const tt = await page.evaluate(() => ({
+      open: !document.getElementById('time-travel-panel').classList.contains('collapsed'),
+      aerial: Boolean(document.querySelector('#time-travel-panel [data-section="aerial"]:not([hidden])')),
+    }));
+    check(`${label}: the shortcut opens Time Travel with the Aerial (NAIP) slider`, tt.open && tt.aerial, JSON.stringify(tt));
+    await page.screenshot({ path: path.join(outDir, `${label}-aerial.png`) });
+  }
+
   if (mobile) {
     const sizes = await page.evaluate(() => {
       const h = (sel) => { const n = document.querySelector(sel); const r = n?.getBoundingClientRect(); return r ? Math.round(r.height) : 0; };
