@@ -252,7 +252,7 @@ test('export with a label: M07 file names, picture, README; still DJI Fly\'s for
   assert.deepEqual([...files.get(names.find((n) => n.endsWith('_preview.jpg')))], [...pic]);
   const readme = decode(files.get('README.txt'));
   assert.match(readme, /MISSION LABELS/);
-  assert.match(readme, new RegExp(`M07${total > 1 ? '-1' : ''} +M07`));
+  assert.match(readme, new RegExp(`M7${total > 1 ? '-1' : ''} +M07`));
   assert.match(readme, /NAME from the placeholder/);
   // The KMZ is the same structure DJI Fly writes: the structural check is clean.
   const kmzName = names.find((n) => n.endsWith('.kmz'));
