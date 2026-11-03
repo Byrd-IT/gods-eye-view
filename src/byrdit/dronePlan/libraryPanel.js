@@ -20,6 +20,8 @@ import { buildGevPlanFile } from './planDoc.js';
 import { checkMission, missionIdFromFileName, parseDjiKmz } from './djiKmz.js';
 import { drawableFor, openDroneFile } from './importFile.js';
 import { createLibraryClient } from './libraryClient.js';
+import { cheatSheetHtml, cheatSheetText } from './cheatSheet.js';
+import { flightCode } from './missionLabel.js';
 
 const COLORS = [
   '#ff9f1c',
@@ -244,6 +246,18 @@ export function mountLibrary({
     'library-export-gevplan',
     t('Download the full editable plan as a file'),
   );
+  const sheetBtn = button(
+    t('COPY CHEAT SHEET'),
+    'library-cheat-copy',
+    t(
+      'Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown',
+    ),
+  );
+  const printBtn = button(
+    t('PRINT CHEAT SHEET'),
+    'library-cheat-print',
+    t('Download a printable page of the same list'),
+  );
   const fileInput = el(doc, 'input', root, {
     cls: 'gev-dp-file',
     attrs: {
@@ -442,7 +456,7 @@ export function mountLibrary({
       const owner = !mine ? ` [${plan.owner}]` : '';
       el(doc, 'span', row, {
         cls: 'gev-dp-mission-label',
-        text: `${plan.name}${owner} · ${statusLabel(plan.status)} · v${plan.version}${plan.site ? ` · ${plan.site}` : ''}`,
+        text: `${Number.isInteger(plan.missionNo) ? `${flightCode(plan.missionNo)} · ` : ''}${plan.name}${owner} · ${statusLabel(plan.status)}${flownDate(plan)} · v${plan.version}${plan.site ? ` · ${plan.site}` : ''}`,
         attrs: { title: new Date(plan.updatedAt).toLocaleString() },
       });
       const act = (label, action, fn, show = true) => {
@@ -458,6 +472,12 @@ export function mountLibrary({
         act(t('RESTORE'), 'plan-restore', restorePlan, mine);
       } else {
         act(t('OPEN'), 'plan-open', openPlan);
+        act(
+          plan.status === 'planned' ? t('MARK FLOWN') : t('NOT FLOWN'),
+          'plan-flown',
+          toggleFlown,
+          mine,
+        );
         act(t('RENAME'), 'plan-rename', renamePlan, mine);
         act(t('DUPLICATE'), 'plan-duplicate', duplicatePlan, mine);
         act(t('VERSIONS'), 'plan-versions', showVersions);
@@ -465,6 +485,14 @@ export function mountLibrary({
       }
     }
   }
+
+  /** " (2026-11-03)" for a plan that has a flown date. */
+  const flownDate = (plan) => {
+    if (plan.status === 'planned' || !Number.isFinite(plan.flownAt)) return '';
+    const d = new Date(plan.flownAt);
+    const pad = (n) => String(n).padStart(2, '0');
+    return ` ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
 
   const statusLabel = (v) =>
     ({ planned: t('Planned'), flown: t('Flown'), processed: t('Processed') })[
@@ -547,6 +575,7 @@ export function mountLibrary({
         out = await client.create(d, body);
       }
       s.current = { ...out.plan, readOnly: false };
+      host.labelChanged?.();
       status(
         t('Saved {name} (version {version})', {
           name: out.plan.name,
@@ -592,6 +621,7 @@ export function mountLibrary({
         id: plan.id,
         owner: plan.owner,
         name: out.meta.name,
+        missionNo: out.meta.missionNo ?? null,
         version: out.version,
         readOnly: !mine,
       };
@@ -599,6 +629,7 @@ export function mountLibrary({
       f.controllers.value = idsText(host.controllerIds());
       renderImports();
       drawMap();
+      host.labelChanged?.();
       status(t('Opened {name}', { name: out.meta.name }), 'info');
     });
   }
@@ -637,9 +668,53 @@ export function mountLibrary({
       if (s.current?.id === plan.id) {
         s.current.name = name;
         f.name.value = name;
+        host.labelChanged?.();
       }
       await refresh();
     });
+
+  /** One click: flown <-> planned, so a repeat flight is easy to spot. */
+  const toggleFlown = (plan) =>
+    guarded(async () => {
+      const next = plan.status === 'planned' ? 'flown' : 'planned';
+      await client.update(plan.id, { status: next });
+      if (s.current?.id === plan.id) f.status.value = next;
+      await refresh();
+    });
+
+  const cheatSheet = async (kind) => {
+    let plans;
+    try {
+      ({ plans } = await client.list({ scope: 'mine' }));
+    } catch (e) {
+      fail(e);
+      return;
+    }
+    const opts = { when: new Date(), user: s.me.user ?? '' };
+    if (kind === 'print') {
+      host.download(
+        'GEV-mission-cheat-sheet.html',
+        new TextEncoder().encode(cheatSheetHtml(plans, opts)),
+        'text/html',
+      );
+      return;
+    }
+    const text = cheatSheetText(plans, opts);
+    try {
+      await doc.defaultView.navigator.clipboard.writeText(text);
+      status(t('Cheat sheet copied'), 'info');
+    } catch {
+      // No clipboard permission: give it as a file instead.
+      host.download(
+        'GEV-mission-cheat-sheet.txt',
+        new TextEncoder().encode(text),
+        'text/plain',
+      );
+      status(t('Cheat sheet downloaded'), 'info');
+    }
+  };
+  sheetBtn.addEventListener('click', () => cheatSheet('copy'));
+  printBtn.addEventListener('click', () => cheatSheet('print'));
 
   const duplicatePlan = (plan) =>
     guarded(async () => {
@@ -704,6 +779,7 @@ export function mountLibrary({
               id: plan.id,
               owner: plan.owner,
               name: got.meta.name,
+              missionNo: got.meta.missionNo ?? null,
               version: got.version,
               readOnly: !mine,
             };
@@ -861,6 +937,11 @@ export function mountLibrary({
     importBytes,
     checkExport,
     renderImports,
+    /** The plan open in the library, as { no, name } (null when none/unnumbered). */
+    currentLabel: () =>
+      Number.isInteger(s.current?.missionNo)
+        ? { no: s.current.missionNo, name: s.current.name ?? '' }
+        : null,
     state: s,
     destroy() {
       root.remove?.();

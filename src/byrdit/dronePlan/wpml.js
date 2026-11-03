@@ -44,6 +44,13 @@ import { TRANSIT_SPEED_MS } from './planner.js';
 import { makeZip } from './zip.js';
 import { cameraChecklistLines } from './cameraSettings.js';
 import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
+import {
+  flightCodePadded,
+  flightFileName,
+  flightTitle,
+  hasLabel,
+} from './missionLabel.js';
+import { labelReadmeLines } from './cheatSheet.js';
 
 /** Namespace used by DJI Fly's own consumer-drone missions. */
 export const WPML_NAMESPACE = 'http://www.uav.com/wpmz/1.0.2';
@@ -472,6 +479,9 @@ export function readmeText(result, when = new Date(), opts = {}) {
     'NOT FLIGHT-TESTED. These files have not been validated on a real aircraft.',
     'Load one at a time: in DJI Fly make a dummy waypoint mission, save it, then',
     'replace its KMZ with one of these (keep the file name DJI Fly gave it).',
+    ...(opts.labelFlights?.length
+      ? ['', ...labelReadmeLines(opts.labelFlights)]
+      : []),
     ...(opts.controllerIds?.some(Boolean)
       ? [
           'Files named <UUID>.kmz carry the mission id of a mission already on the',
@@ -539,6 +549,12 @@ export function bundleEntries(result, opts = {}) {
   const multi = jobs.length > 1;
   // Flights are counted across the passes of a suite, so one counter is shared.
   const counter = opts.flightCounter ?? { n: 0 };
+  // A saved plan has a number: its flights are named M7, M7-2, ... in the file
+  // names, the preview pictures and the README.
+  const label = hasLabel(opts.label) ? opts.label : null;
+  const flightTotal = opts.flightTotal ?? result.missions.length;
+  const labelFlights = [];
+  const extra = [];
   const entries = result.missions.map((mission) => {
     const same = multi
       ? result.missions.filter((item) => item.jobId === mission.jobId)
@@ -547,21 +563,59 @@ export function bundleEntries(result, opts = {}) {
     const job = jobs.find((item) => item.id === mission.jobId);
     // A flight with a controller mission id is named <UUID>.kmz, the name DJI
     // Fly gave it (waypoint/<UUID>/<UUID>.kmz on the controller).
-    const uuid = opts.controllerIds?.[counter.n++] ?? null;
+    // Optional chaining would skip the increment when there are no ids.
+    const flight = counter.n++;
+    const uuid = opts.controllerIds?.[flight] ?? null;
+    const labelFile = label ? flightFileName(label, flight, flightTotal) : null;
     const file = uuid
       ? `${uuid}.kmz`
-      : kmzFileName(index, same.length, when, multi ? mission.jobName : '');
+      : (labelFile ??
+        kmzFileName(index, same.length, when, multi ? mission.jobName : ''));
     const folder = multi
       ? `${jobFolder(job ?? { id: mission.jobId, name: mission.jobName })}/`
       : '';
+    if (label) {
+      const stem = flightFileName(label, flight, flightTotal, 'jpg');
+      const picture = opts.previews?.[flight] ?? null;
+      const pictureName = picture
+        ? `${folder}${stem.replace(/\.jpg$/, '')}_preview.jpg`
+        : null;
+      if (picture) {
+        extra.push({ name: pictureName, data: picture });
+        // The controller keeps its list picture at map_preview/<UUID>/<UUID>.jpg.
+        if (uuid) {
+          extra.push({
+            name: `${folder}map_preview/${uuid}/${uuid}.jpg`,
+            data: picture,
+          });
+        }
+      }
+      labelFlights.push({
+        code: flightCodePadded(label.no, flight, flightTotal),
+        title: flightTitle(label, flight, flightTotal),
+        file: `${folder}${file}`,
+        uuid,
+        preview: pictureName,
+      });
+    }
     return {
       name: `${folder}${file}`,
-      data: buildKmz(mission, result.plan, { ...opts, when }),
+      data: buildKmz(mission, result.plan, {
+        ...opts,
+        when,
+        ...(label
+          ? { name: flightTitle(label, flight, flightTotal) }
+          : {}),
+      }),
     };
   });
+  entries.push(...extra);
   entries.push({
     name: 'README.txt',
-    data: readmeText(result, when, { controllerIds: opts.controllerIds }),
+    data: readmeText(result, when, {
+      controllerIds: opts.controllerIds,
+      labelFlights,
+    }),
   });
   return entries;
 }

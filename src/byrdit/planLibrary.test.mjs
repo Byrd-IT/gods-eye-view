@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtempSync, readdirSync, existsSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, readdirSync, existsSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -354,4 +354,82 @@ test('?owner= naming yourself (any case) is your own plans, not a foreign owner'
   } finally {
     await s.close();
   }
+});
+
+test('mission numbers: sequential per user, never reused, stable, per user', () => {
+  const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevlib-'));
+  const store = createStore({ root });
+  const a1 = store.create('amy', { name: 'ring A' }, PLAN);
+  const a2 = store.create('amy', { name: 'ring B' }, PLAN);
+  const b1 = store.create('bob', { name: 'other' }, PLAN);
+  assert.deepEqual([a1.missionNo, a2.missionNo, b1.missionNo], [1, 2, 1]);
+  // Trash keeps the number reserved; a new plan never takes it.
+  store.trash('amy', a2.id);
+  const a3 = store.create('amy', { name: 'ring C' }, PLAN);
+  assert.equal(a3.missionNo, 3);
+  store.restore('amy', a2.id);
+  assert.equal(store.get('amy', a2.id).meta.missionNo, 2);
+  // Saving, renaming and restoring a version never renumber.
+  store.save('amy', a1.id, PLAN, { name: 'renamed' });
+  store.update('amy', a1.id, { name: 'again' });
+  assert.equal(store.get('amy', a1.id).meta.missionNo, 1);
+  // A duplicate is a new plan with its own number.
+  assert.equal(store.duplicate('amy', a1.id).missionNo, 4);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('mission numbers: plans saved before numbers existed are numbered once, oldest first', () => {
+  const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevlib-'));
+  let t = 1000;
+  const store = createStore({ root, now: () => (t += 10) });
+  const x = store.create('amy', { name: 'x' }, PLAN);
+  const y = store.create('amy', { name: 'y' }, PLAN);
+  const z = store.create('amy', { name: 'z' }, PLAN);
+  // Make them look like legacy plans: strip the number from meta.json.
+  for (const p of [x, y, z]) {
+    const f = path.join(root, 'amy', p.id, 'meta.json');
+    const m = JSON.parse(readFileSync(f, 'utf8'));
+    delete m.missionNo;
+    delete m.flownAt;
+    writeFileSync(f, JSON.stringify(m));
+  }
+  const list = store.list('amy');
+  const byName = Object.fromEntries(list.map((p) => [p.name, p.missionNo]));
+  assert.deepEqual(byName, { x: 1, y: 2, z: 3 });
+  // And it was written to disk, so a fresh store reads the same numbers.
+  const again = createStore({ root }).list('amy');
+  assert.deepEqual(
+    Object.fromEntries(again.map((p) => [p.name, p.missionNo])),
+    byName,
+  );
+  assert.equal(store.create('amy', { name: 'w' }, PLAN).missionNo, 4);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('flown tracking: the date follows the status', () => {
+  const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevlib-'));
+  let t = 5000;
+  const store = createStore({ root, now: () => (t += 1) });
+  const p = store.create('amy', { name: 'f' }, PLAN);
+  assert.equal(p.flownAt, null);
+  const flown = store.update('amy', p.id, { status: 'flown' });
+  assert.equal(typeof flown.flownAt, 'number');
+  // A rename keeps the date; flown -> flown does not restamp.
+  const keep = store.update('amy', p.id, { name: 'f2', status: 'flown' });
+  assert.equal(keep.flownAt, flown.flownAt);
+  // processed keeps it (it was flown), planned clears it (taken back).
+  assert.equal(
+    store.update('amy', p.id, { status: 'processed' }).flownAt,
+    flown.flownAt,
+  );
+  assert.equal(store.update('amy', p.id, { status: 'planned' }).flownAt, null);
+  // Saving a new version with status flown stamps too.
+  const saved = store.save('amy', p.id, PLAN, { status: 'flown' });
+  assert.equal(typeof saved.flownAt, 'number');
+  // Created as flown.
+  assert.equal(
+    typeof store.create('amy', { name: 'g', status: 'flown' }, PLAN).flownAt,
+    'number',
+  );
+  rmSync(root, { recursive: true, force: true });
 });

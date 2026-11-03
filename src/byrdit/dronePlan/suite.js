@@ -123,6 +123,10 @@ export function buildSuiteZip(passes, opts = {}) {
   const entries = [];
   // Controller mission ids are handed out to the flights in order, across passes.
   const flightCounter = { n: 0 };
+  const flightTotal = passes.reduce(
+    (sum, pass) => sum + (pass.result?.missions.length ?? 0),
+    0,
+  );
   passes.forEach((pass, i) => {
     if (!pass.result) return;
     const folder = passFolder(i, pass);
@@ -130,6 +134,7 @@ export function buildSuiteZip(passes, opts = {}) {
       ...opts,
       when,
       flightCounter,
+      flightTotal,
     })) {
       entries.push({ name: `${folder}/${e.name}`, data: e.data });
     }

@@ -218,6 +218,49 @@ export function createStore({
     }
   }
 
+  /**
+   * Every plan gets a mission number (M1, M2, ...): sequential per user, never
+   * reused (trashed plans keep theirs), stable for the life of the plan. Plans
+   * saved before numbers existed are numbered once, oldest first, and the
+   * number is written to meta.json so it never moves again.
+   * @returns {number} the highest number in use
+   */
+  function ensureNumbers(user) {
+    const metas = [];
+    for (const id of ids(user)) {
+      try {
+        metas.push(loadMeta(user, id));
+      } catch {
+        // unreadable plan: it keeps no number
+      }
+    }
+    let top = metas.reduce(
+      (m, x) => (Number.isInteger(x.missionNo) ? Math.max(m, x.missionNo) : m),
+      0,
+    );
+    const missing = metas
+      .filter((x) => !Number.isInteger(x.missionNo))
+      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+    for (const meta of missing) {
+      top += 1;
+      saveMeta(user, meta.id, { ...meta, missionNo: top });
+    }
+    return top;
+  }
+
+  /**
+   * The date a plan was flown follows its status: set when the status becomes
+   * "flown", kept when it moves on to "processed", cleared when it goes back.
+   */
+  function flownStamp(meta, clean) {
+    if (clean.status === undefined) return {};
+    if (clean.status === 'flown' && meta.status !== 'flown') {
+      return { flownAt: now() };
+    }
+    if (clean.status === 'planned') return { flownAt: null };
+    return {};
+  }
+
   /** Public fields of a plan; the id is the only handle. */
   function view(user, meta) {
     return { ...meta, owner: user };
@@ -272,6 +315,7 @@ export function createStore({
 
     list(user, { trash = false, purgeOld = true } = {}) {
       if (purgeOld) purge(user);
+      ensureNumbers(user);
       const out = [];
       for (const id of ids(user)) {
         let meta;
@@ -297,6 +341,7 @@ export function createStore({
           409,
         );
       }
+      const missionNo = ensureNumbers(user) + 1;
       const id = `p_${randomBytes(8).toString('hex')}`;
       const t = now();
       const meta = {
@@ -306,6 +351,8 @@ export function createStore({
         customer: clean.customer ?? '',
         notes: clean.notes ?? '',
         status: clean.status ?? 'planned',
+        missionNo,
+        flownAt: clean.status === 'flown' ? t : null,
         createdAt: t,
         updatedAt: t,
         version: 1,
@@ -318,6 +365,7 @@ export function createStore({
     },
 
     get(user, id, version = null) {
+      ensureNumbers(user);
       const meta = loadMeta(user, id);
       const n = version ?? meta.version;
       if (!Number.isInteger(n) || n < 1) {
@@ -343,15 +391,28 @@ export function createStore({
       checkQuota(user, body);
       const next = Math.max(meta.version, ...versionNumbers(user, id)) + 1;
       writeVersion(user, id, next, body);
-      const updated = { ...meta, ...clean, version: next, updatedAt: now() };
+      const updated = {
+        ...meta,
+        ...clean,
+        ...flownStamp(meta, clean),
+        version: next,
+        updatedAt: now(),
+      };
       saveMeta(user, id, updated);
       return view(user, updated);
     },
 
     /** Rename / details only: no new version. */
     update(user, id, details) {
+      ensureNumbers(user);
       const meta = loadMeta(user, id);
-      const updated = { ...meta, ...cleanDetails(details), updatedAt: now() };
+      const clean = cleanDetails(details);
+      const updated = {
+        ...meta,
+        ...clean,
+        ...flownStamp(meta, clean),
+        updatedAt: now(),
+      };
       saveMeta(user, id, updated);
       return view(user, updated);
     },

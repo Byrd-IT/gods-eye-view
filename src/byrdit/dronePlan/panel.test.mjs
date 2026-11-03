@@ -21,6 +21,7 @@ import { createDronePlanVoice } from './dronePlanVoice.js';
 import { metersPerDegree } from './geo.js';
 import { MAX_OBSTACLES } from './obstacles.js';
 import { readZip } from './zip.js';
+import { checkMission, parseDjiKmz } from './djiKmz.js';
 import { makeGrid } from './surfaceFixtures.mjs';
 
 // ---------------------------------------------------------------- DOM stub --
@@ -235,6 +236,7 @@ function setup({
   sample = async (cartos) => flat(cartos),
   libraryClient,
   surfaceClient,
+  renderPreview,
   storage = memoryStorage({ 'gev.dronePlan.units': 'm' }),
 } = {}) {
   resetPointerOwnership();
@@ -247,6 +249,7 @@ function setup({
     document: dom.doc,
     downloadFile: (name, bytes, type) => downloads.push({ name, bytes, type }),
     libraryClient,
+    ...(renderPreview ? { renderPreview } : {}),
     ...(surfaceClient ? { surfaceClient } : {}),
     unitStorage: storage,
   });
@@ -2895,3 +2898,106 @@ test('the camera settings checklist shows in the panel, follows its preset and f
   assert.match(readme, /\(EV\): -0\.7/);
   w.handle.destroy();
 });
+
+// ------------------------------------------------ mission labels (M1, M2) --
+test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, README and cheat sheet; flown is one click', async () => {
+  const srv = await server();
+  try {
+    const copied = [];
+    const rendered = [];
+    const pic = new Uint8Array([0xff, 0xd8, 9, 9, 0xff, 0xd9]);
+    const w = setup({
+      libraryClient: srv.clientFor('alice'),
+      renderPreview: async (spec) => {
+        rendered.push(spec);
+        return { bytes: pic, tile: false };
+      },
+    });
+    w.doc.defaultView = {
+      prompt: () => '',
+      confirm: () => true,
+      navigator: { clipboard: { writeText: async (t) => copied.push(t) } },
+    };
+    await settleUi();
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    // Not saved yet: no number, the old file name, and the note says how to get one.
+    const note = () => w.find((n) => n.getAttribute?.('data-role') === 'mission-label-note')[0].textContent;
+    assert.match(note(), /Save this plan in the Plan library/);
+    w.handle.downloadMission(0);
+    assert.match(w.downloads.at(-1).name, /^gev-drone-plan-/);
+    assert.equal(btnPreview(w).every((b) => b.disabled), true, 'no picture without a number');
+
+    field(w, 'name').value = 'Byrd Ranch ring A';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    assert.match(rows(w)[0].textContent, /^M1 · Byrd Ranch ring A/);
+    assert.match(note(), /labelled M1/);
+    await w.handle.replan();
+    await settleUi();
+
+    // One mission: M01_<slug>.kmz, the author is the visible title, and the check is clean.
+    const total = w.handle.getResult().missions.length;
+    w.handle.downloadMission(0);
+    const one = w.downloads.at(-1);
+    assert.equal(one.name, total > 1 ? 'M01-1_Byrd-Ranch-ring-A.kmz' : 'M01_Byrd-Ranch-ring-A.kmz');
+    const parsed = await parseDjiKmz(one.bytes, { fileName: one.name });
+    assert.match(parsed.meta.author, /^M01(-1)? Byrd Ranch ring A/);
+    assert.deepEqual(
+      checkMission(parsed, { droneEnumValue: 68 }).filter((f) => f.code === 'template-shape'),
+      [],
+    );
+
+    // The picture button gives a JPG named like the file.
+    assert.equal(await w.handle.downloadPreview(0), true);
+    assert.equal(w.downloads.at(-1).name, one.name.replace(/\.kmz$/, '_preview.jpg'));
+    assert.equal(w.downloads.at(-1).type, 'image/jpeg');
+    assert.equal(rendered.at(-1).code, total > 1 ? 'M1-1' : 'M1');
+    assert.ok(rendered.at(-1).points.length > 2, 'the route is what is drawn');
+
+    // The ZIP carries the picture and the label block.
+    w.handle.ensurePreviews();
+    await settleUi();
+    w.buttons('data-download')[0].click();
+    const zip = w.downloads.at(-1);
+    assert.match(zip.name, /^M01_Byrd-Ranch-ring-A-all\.zip$/);
+    const files = readZip(zip.bytes);
+    assert.ok([...files.keys()].some((n) => n.endsWith('_preview.jpg')));
+    assert.match(new TextDecoder().decode(files.get('README.txt')), /MISSION LABELS/);
+
+    // A second plan is M2; the first keeps M1 after a rename.
+    w.handle.applyOptions({ aglM: 55 }, { planNow: true });
+    await w.handle.replan();
+    field(w, 'name').value = 'Shop';
+    btn(w, 'library-save-new')[0].click();
+    await settleUi();
+    const lines = rows(w).map((r) => r.textContent);
+    assert.ok(lines.some((l) => /^M1 · Byrd Ranch ring A/.test(l)), lines.join('|'));
+    assert.ok(lines.some((l) => /^M2 · Shop/.test(l)), lines.join('|'));
+
+    // Flown: one click, the row shows it, the cheat sheet copies with it.
+    const shopRow = () => rows(w).find((r) => /^M2 /.test(r.textContent));
+    assert.match(shopRow().textContent, /Planned/);
+    const flown = shopRow().children.find((c) => c.getAttribute?.('data-action') === 'plan-flown');
+    assert.equal(flown.textContent, 'MARK FLOWN');
+    flown.click();
+    await settleUi();
+    assert.match(shopRow().textContent, /Flown \d{4}-\d{2}-\d{2}/);
+    btn(w, 'library-cheat-copy')[0].click();
+    await settleUi();
+    assert.match(copied[0], /\[x\] M2 +Shop +- FLOWN \d{4}-\d{2}-\d{2}/);
+    assert.match(copied[0], /\[ \] M1 +Byrd Ranch ring A +- not flown/);
+    btn(w, 'library-cheat-print')[0].click();
+    await settleUi();
+    assert.equal(w.downloads.at(-1).name, 'GEV-mission-cheat-sheet.html');
+    // Taking it back.
+    shopRow().children.find((c) => c.getAttribute?.('data-action') === 'plan-flown').click();
+    await settleUi();
+    assert.match(shopRow().textContent, /Planned/);
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
+const btnPreview = (w) => w.find((n) => n.tagName === 'BUTTON' && n.attributes.has('data-preview'));

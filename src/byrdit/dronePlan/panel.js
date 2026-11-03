@@ -82,6 +82,14 @@ import {
   SHUTTER_DENOMINATORS,
 } from './speed.js';
 import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
+import {
+  flightCode,
+  flightFileName,
+  flightTitle,
+  hasLabel,
+  labelStem,
+} from './missionLabel.js';
+import { renderThumb } from './missionThumb.js';
 import { buildSuiteZip, suiteOptions } from './suite.js';
 import { readPlan, serializePlan } from './planDoc.js';
 import { importCheckMission } from './importShots.js';
@@ -199,6 +207,7 @@ export function initDronePlan({
   cesium = Cesium,
   document: doc = globalThis.document,
   downloadFile = browserDownload,
+  renderPreview = renderThumb,
   libraryClient,
   getBuildingFootprints = null,
   fetchObstacles = null,
@@ -3352,11 +3361,28 @@ export function initDronePlan({
     }
     const list = ui.missions;
     const when = new Date();
+    const label = planLabel();
+    el(doc, 'p', list, {
+      cls: 'gev-dp-note',
+      text: label
+        ? t(
+            'Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)',
+            { code: flightCode(label.no) },
+          )
+        : t(
+            'Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture',
+          ),
+      attrs: { 'data-role': 'mission-label-note' },
+    });
     missions.forEach((m, i) => {
       const row = el(doc, 'div', list, { cls: 'gev-dp-mission' });
       el(doc, 'span', row, {
         cls: 'gev-dp-mission-label',
+        attrs: label
+          ? { 'data-code': flightCode(label.no, i, missions.length) }
+          : {},
         text:
+          (label ? `${flightCode(label.no, i, missions.length)} · ` : '') +
           t('Mission {n}: {wp} waypoints, {photos} photos, {time}', {
             n: num(i + 1),
             wp: num(m.waypointCount),
@@ -3375,6 +3401,19 @@ export function initDronePlan({
       });
       button.disabled = !downloadsAllowed();
       button.addEventListener('click', () => downloadMission(i, when));
+      const pic = el(doc, 'button', row, {
+        cls: 'data-toggle-chip',
+        text: t('PICTURE'),
+        attrs: {
+          type: 'button',
+          'data-preview': String(i),
+          title: t(
+            'Download the labelled preview picture of this mission (JPG)',
+          ),
+        },
+      });
+      pic.disabled = !downloadsAllowed() || !label;
+      pic.addEventListener('click', () => downloadPreview(i));
     });
     const all = el(doc, 'button', list, {
       cls: 'data-toggle-chip gev-dp-all',
@@ -3693,14 +3732,21 @@ export function initDronePlan({
 
   function downloadSuite(when = new Date()) {
     if (!suiteAllowed()) return false;
+    const label = planLabel();
     const bytes = buildSuiteZip(state.suite.passes, {
       when,
       wpml: wpmlOverride(),
       controllerIds: state.controllerIds,
+      label,
+      previews: state.suite.passes.flatMap((pass) =>
+        (pass.result?.missions ?? []).map((m) => previewOf(m)),
+      ),
     });
     for (const pass of state.suite.passes)
       if (pass.result) checkBuilt(pass.result);
-    const stamp = kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
+    const stamp = label
+      ? labelStem(label)
+      : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
     downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
     return true;
   }
@@ -3751,13 +3797,93 @@ export function initDronePlan({
     return result.terrainComplete || state.ack;
   }
 
+  // ------------------------------------------------------ mission labels --
+  /** The plan open in the library as { no, name }, or null (not saved/numbered). */
+  const planLabel = () => {
+    const l = library?.currentLabel?.() ?? null;
+    return hasLabel(l) ? l : null;
+  };
+
+  // The labelled pictures, drawn in the background (a canvas is async) and
+  // kept per mission; a download takes the ones that are ready.
+  const previews = new WeakMap(); // mission -> { key, bytes }
+  const previewKey = (label, i, n) =>
+    `${flightCode(label.no, i, n)}|${label.name}`;
+  const previewOf = (mission) => previews.get(mission)?.bytes ?? null;
+
+  function previewSpec(label, result, i, n) {
+    const mission = result.missions[i];
+    return {
+      code: flightCode(label.no, i, n),
+      title: flightTitle(label, i, n),
+      points: (mission.waypoints ?? []).map((w) => ({
+        lat: w.lat,
+        lon: w.lon,
+      })),
+      takeoff: result.plan?.takeoff ?? null,
+    };
+  }
+
+  async function makePreview(label, result, i) {
+    const n = result.missions.length;
+    const mission = result.missions[i];
+    const key = previewKey(label, i, n);
+    if (previews.get(mission)?.key === key) return previews.get(mission).bytes;
+    const out = await renderPreview(previewSpec(label, result, i, n));
+    if (!out?.bytes) return null;
+    previews.set(mission, { key, bytes: out.bytes });
+    return out.bytes;
+  }
+
+  /** Start drawing the pictures of the current plan (and suite passes). */
+  function ensurePreviews() {
+    const label = planLabel();
+    if (!label) return;
+    const results = [
+      state.result,
+      ...(state.suite?.passes ?? []).map((p) => p.result),
+    ].filter(Boolean);
+    for (const result of results) {
+      result.missions.forEach((_, i) => {
+        makePreview(label, result, i).catch(() => {});
+      });
+    }
+  }
+
+  async function downloadPreview(index) {
+    const result = state.result;
+    const label = planLabel();
+    if (!downloadsAllowed() || !label || !result?.missions[index]) {
+      return false;
+    }
+    const bytes = await makePreview(label, result, index);
+    if (!bytes) {
+      status(t('The picture could not be drawn in this browser'), 'warn');
+      return false;
+    }
+    const total = result.missions.length;
+    downloadFile(
+      flightFileName(label, index, total, 'jpg').replace(
+        /\.jpg$/,
+        '_preview.jpg',
+      ),
+      bytes,
+      'image/jpeg',
+    );
+    return true;
+  }
+
   function downloadMission(index, when = new Date()) {
     const result = state.result;
     if (!downloadsAllowed() || !result.missions[index]) return false;
+    const label = planLabel();
+    const total = result.missions.length;
     const bytes = buildKmz(result.missions[index], result.plan, {
       when,
       wpml: wpmlOverride(),
-      name: `GEV Drone Flight Plan ${index + 1}/${result.missions.length}`,
+      name: label
+        ? flightTitle(label, index, total)
+        : `GEV Drone Flight Plan ${index + 1}/${total}`,
     });
     const named = (result.jobs ?? []).length > 1;
     const mission = result.missions[index];
@@ -3767,12 +3893,14 @@ export function initDronePlan({
     // A controller mission id names the file <UUID>.kmz, as DJI Fly does.
     const fileName = state.controllerIds[index]
       ? `${state.controllerIds[index]}.kmz`
-      : kmzFileName(
-          same.indexOf(mission),
-          same.length,
-          when,
-          named ? mission.jobName : '',
-        );
+      : label
+        ? flightFileName(label, index, total)
+        : kmzFileName(
+            same.indexOf(mission),
+            same.length,
+            when,
+            named ? mission.jobName : '',
+          );
     downloadFile(fileName, bytes, 'application/vnd.google-earth.kmz');
     library?.checkExport([{ bytes, name: fileName }], fileName);
     return true;
@@ -3781,12 +3909,17 @@ export function initDronePlan({
   function downloadAll(when = new Date()) {
     const result = state.result;
     if (!downloadsAllowed()) return false;
+    const label = planLabel();
     const bytes = buildBundleZip(result, {
       when,
       wpml: wpmlOverride(),
       controllerIds: state.controllerIds,
+      label,
+      previews: result.missions.map((m) => previewOf(m)),
     });
-    const stamp = kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
+    const stamp = label
+      ? labelStem(label)
+      : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
     downloadFile(`${stamp}-all.zip`, bytes, 'application/zip');
     checkBuilt(result);
     return true;
@@ -4003,6 +4136,11 @@ export function initDronePlan({
         refreshImportCheck(items).catch(() => {});
       },
       download: (name, bytes, type) => downloadFile(name, bytes, type),
+      // The open plan (or its number) changed: redraw labels and pictures.
+      labelChanged: () => {
+        ensurePreviews();
+        render();
+      },
     },
   });
 
@@ -4211,6 +4349,8 @@ export function initDronePlan({
       return addPolygon(ring);
     },
     downloadMission,
+    downloadPreview,
+    ensurePreviews,
     downloadAll,
     planSuite,
     downloadSuite,
