@@ -60,7 +60,7 @@ const sceneRuntime = computed(() => scenePanel.value?.runtime ?? '');
       id="map-layers-panel"
       start-collapsed
       hidden
-      :title="t(MAP LAYERS)"
+      :title="t('MAP LAYERS')"
       sideways
       rail-scroller
     >
@@ -68,7 +68,7 @@ const sceneRuntime = computed(() => scenePanel.value?.runtime ?? '');
         id="gev-map-layers-body"
         class="gev-ml-body"
         role="group"
-        :aria-label="t(Map layers)"
+        :aria-label="t('Map layers')"
       ></div>
     </RailPanel>
     <RailPanel

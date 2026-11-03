@@ -13,7 +13,7 @@ test('the Map layers card is its own collapsed rail launcher between TIME TRAVEL
   assert.match(tag, /start-collapsed/);
   assert.match(tag, /\bhidden\b/, 'hidden until the overlays are on offer');
   assert.match(tag, /sideways/);
-  assert.match(tag, /:title="t\(MAP LAYERS\)"/);
+  assert.match(tag, /:title="t\('MAP LAYERS'\)"/);
   assert.match(context, /id="gev-map-layers-body"/);
   const at = (id) => context.indexOf(`id="${id}"`);
   assert.ok(
