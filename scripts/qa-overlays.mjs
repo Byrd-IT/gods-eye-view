@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Rendered proof for the map overlay layers (Time travel card, "Map overlays"
- * section). QA_BASE_URL (default http://127.0.0.1:4392) must serve the app
+ * Rendered proof for the map overlay layers (Map layers dock card; the grouped
+ * layer list). scripts/qa-map-layers.mjs is the grouped-UI check against the
+ * full 63-layer manifest; this one assumes the 6-layer test manifest. QA_BASE_URL (default http://127.0.0.1:4392) must serve the app
  * with GEV_BASEMAP_OVERLAYS=1 and a reachable overlays.json. Flies to Wood
  * County (hires NAIP bounds), turns overlays on, checks the tile requests and
  * opacity, and screenshots to QA_OUT_DIR (default ./qa-artifacts-overlays).
@@ -37,7 +38,7 @@ async function run(label, viewport) {
   });
   page.on("pageerror", (e) => console.log("  pageerror:", e.message));
   await page.goto(appUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("#time-travel-panel", { timeout: 90000 });
+  await page.waitForSelector("#map-layers-panel", { timeout: 90000 });
   await sleep(Number(process.env.QA_SETTLE_MS || 12000));
   await page.keyboard.press("Escape");
   await sleep(500);
@@ -45,14 +46,14 @@ async function run(label, viewport) {
     await page.click('.mobile-tab[data-mobile-sheet="context"]');
     await sleep(600);
   }
-  await page.waitForSelector("#time-travel-panel", { visible: true, timeout: 30000 });
-  await page.click("#gev-time-travel-toggle");
+  await page.waitForSelector("#map-layers-panel", { visible: true, timeout: 30000 });
+  await page.click("#map-layers-panel .panel-collapse-btn");
   await sleep(800);
   const info = await page.evaluate(() => {
-    const p = document.querySelector('#time-travel-panel [data-section="overlays"] #gev-overlays-panel');
+    const p = document.querySelector('#map-layers-panel #gev-overlays-panel');
     return {
       inMenu: Boolean(p),
-      heading: p?.closest("section")?.querySelector(".gev-tt-heading")?.textContent,
+      heading: p?.closest("#map-layers-panel")?.querySelector(".panel-title")?.textContent.trim(),
       rows: [...(p?.querySelectorAll("[data-overlay]") ?? [])].map((r) => ({
         id: r.getAttribute("data-overlay"),
         name: r.querySelector("label")?.textContent.trim(),
@@ -64,7 +65,7 @@ async function run(label, viewport) {
     };
   });
   console.log(label, JSON.stringify(info));
-  check(`${label}: panel is in the Time travel card, heading "Map overlays"`, info.inMenu && info.heading === "Map overlays");
+  check(`${label}: panel is in the Map layers card, titled MAP LAYERS`, info.inMenu && info.heading === "MAP LAYERS");
   check(`${label}: 6 overlays, all off, opacity disabled while off`, info.rows.length === 6 && info.rows.every((r) => !r.checked && r.rangeDisabled));
   check(`${label}: no horizontal page overflow`, !info.overflow);
   // Styling by computed style (not by ids): the section is the card chrome's
@@ -115,7 +116,7 @@ async function run(label, viewport) {
   // (one scrolling column) the card keeps its content height: it used to be
   // squashed to 208 px with its own nested scrollbar.
   const fit = await page.evaluate(() => {
-    const card = document.querySelector("#time-travel-panel");
+    const card = document.querySelector("#map-layers-panel");
     const cr = card.getBoundingClientRect();
     const scroller = card.querySelector(":scope > [data-rail-scroller]");
     const ids = [...document.querySelectorAll("#right-context-rail > .panel-collapsible")]
@@ -130,7 +131,7 @@ async function run(label, viewport) {
     };
   });
   console.log(label, "fit", JSON.stringify(fit));
-  check(`${label}: no other rail card paints over the open Time travel card`, fit.ids.length === 0, fit.ids.join());
+  check(`${label}: no other rail card paints over the open Map layers card`, fit.ids.length === 0, fit.ids.join());
   check(`${label}: on the phone sheet the open card shows all its content (no nested scroll)`, !fit.sheet || fit.clipped <= 1, `clipped ${fit.clipped}px`);
   await page.screenshot({ path: path.join(outDir, `${label}-panel.png`) });
 
@@ -165,7 +166,7 @@ async function run(label, viewport) {
     check(`${label}: ${id} tiles requested, none failed`, byLayer(id).length > 0 && byLayer(id).every((t) => t.status === 200 || t.status === 204));
   await page.screenshot({ path: path.join(outDir, `${label}-on.png`) });
   // Stacking order: rows list the top first; raise hillshade with its button.
-  const rowIds = () => page.evaluate(() => [...document.querySelectorAll("#gev-overlays-panel [data-overlay]")].map((r) => r.getAttribute("data-overlay")));
+  const rowIds = () => page.evaluate(() => window.__gevOverlays.state().stack.slice().reverse());
   const before = await rowIds();
   check(`${label}: rows list the top of the stack first (vector above raster)`, before.join() === "lake-depth,contours,terrain-rgb,relief,hillshade,ustopo", before.join());
   for (let i = 0; i < 4; i++)
