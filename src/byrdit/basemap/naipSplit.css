@@ -1,0 +1,67 @@
+/* ── NAIP compare divider (Byrd-IT) ───────────────────────────────────────
+   The divider's line is rendered by ImagerySplitView (a Teleport to the body,
+   from the imagery split store), so it does not exist yet when
+   createNaipSplit() returns. Styling it from JS (the old inline Object.assign)
+   found no element and the line collapsed to a 21 px strip at the top-left
+   (t_862ba336). The look therefore lives here, keyed on the ids and classes
+   the view renders: #gev-naip-split-line, its .before / .after labels and the
+   .gev-naip-split-handle slider button. Above the right rail (z-index 110) so
+   the handle can always be grabbed. */
+#gev-naip-split-line {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: var(--gev-naip-split, 50%);
+  z-index: 130;
+  width: 2px;
+  margin-left: -1px;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 12px rgba(94, 216, 239, 0.6);
+  color: #fff;
+  font: 11px system-ui, sans-serif;
+  text-shadow: 0 0 3px #000;
+}
+#gev-naip-split-line[hidden] {
+  display: none;
+}
+#gev-naip-split-line span {
+  position: absolute;
+  top: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(4, 17, 27, 0.82);
+  white-space: nowrap;
+  pointer-events: none;
+}
+#gev-naip-split-line span.before {
+  right: 8px;
+}
+#gev-naip-split-line span.after {
+  left: 8px;
+}
+#gev-naip-split-line .gev-naip-split-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(180, 215, 222, 0.72);
+  border-radius: 50%;
+  outline: 0;
+  color: rgba(239, 247, 249, 0.96);
+  background: rgba(4, 17, 27, 0.96);
+  box-shadow:
+    0 0 0 5px rgba(62, 112, 125, 0.3),
+    0 0 13px rgba(94, 216, 239, 0.3);
+  font: 700 14px/1 var(--font-mono, ui-monospace, monospace);
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ew-resize;
+}
+#gev-naip-split-line .gev-naip-split-handle:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 4px;
+}

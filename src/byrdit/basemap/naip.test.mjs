@@ -761,22 +761,18 @@ test('naip slider: hidden while another stack is on screen', () => {
   assert.equal(panel.hidden, false);
 });
 
-test('naip split: shared divider with its own id and inline line style', () => {
+test('naip split: shared divider with its own id, handle class and css property', () => {
   const doc = fakeDoc();
   const parent = doc.createElement('div');
   doc.body.append(parent);
   let got = null;
+  const marker = { destroy() {} };
   const split = createNaipSplit({ parent, scene: {} }, (options) => {
     got = options;
-    const line = doc.createElement('div');
-    line.setAttribute('id', options.id);
-    parent.append(line);
-    return { destroy() {} };
+    return marker;
   });
-  assert.ok(split);
+  assert.equal(split, marker);
   assert.equal(got.id, 'gev-naip-split-line');
+  assert.equal(got.handleClass, 'gev-naip-split-handle');
   assert.equal(got.cssProperty, '--gev-naip-split');
-  const line = doc.getElementById('gev-naip-split-line');
-  assert.equal(line.style.position, 'absolute');
-  assert.equal(line.style.left, 'var(--gev-naip-split, 50%)');
 });

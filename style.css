@@ -36,6 +36,7 @@
 @import './src/byrdit/navControl/navControl.css';
 @import './src/byrdit/skyView/skyView.css';
 @import './src/byrdit/cleanView/cleanView.css';
+@import './src/byrdit/basemap/naipSplit.css';
 @import './src/ui/styles/segmented-control.css';
 @import './src/ui/styles/kit.css';
 @import './src/ui/styles/cjk.css';

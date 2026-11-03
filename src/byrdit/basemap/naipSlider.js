@@ -262,37 +262,21 @@ export function createNaipSlider({
 
 /**
  * The compare divider: the shared imagerySplit.js control (pointer, keyboard,
- * ARIA, scene.splitPosition) with its line styled inline.
+ * ARIA, scene.splitPosition). Its line is rendered by ImagerySplitView from
+ * the imagery split store, after this returns, so it is styled by
+ * basemap/naipSplit.css (keyed on the id and handle class below), never from
+ * JS: an inline style written here finds no element (t_862ba336).
  */
+export const NAIP_SPLIT_LINE_ID = 'gev-naip-split-line';
+export const NAIP_SPLIT_HANDLE_CLASS = 'gev-naip-split-handle';
+
 export function createNaipSplit(options, create = createImagerySplit) {
-  const doc = options.parent?.ownerDocument ?? globalThis.document;
-  const split = create({
+  return create({
     ...options,
-    id: 'gev-naip-split-line',
-    handleClass: 'gev-naip-split-handle',
+    id: NAIP_SPLIT_LINE_ID,
+    handleClass: NAIP_SPLIT_HANDLE_CLASS,
     cssProperty: '--gev-naip-split',
   });
-  const line = doc?.getElementById?.('gev-naip-split-line');
-  if (line)
-    Object.assign(line.style, {
-      position: 'absolute',
-      top: '0',
-      bottom: '0',
-      left: 'var(--gev-naip-split, 50%)',
-      width: '2px',
-      marginLeft: '-1px',
-      background: 'rgba(255, 255, 255, 0.85)',
-      zIndex: '19',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '6px',
-      color: '#fff',
-      font: '11px system-ui, sans-serif',
-      textShadow: '0 0 3px #000',
-    });
-  return split;
 }
 
 /**
