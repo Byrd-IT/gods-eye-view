@@ -3388,7 +3388,8 @@ export function initDronePlan({
             wp: num(m.waypointCount),
             photos: num(m.photoCount),
             time: durationText(m.durationS),
-          }) + (m.jobName && result.jobs?.length > 1 ? ` · ${m.jobName}` : ''),
+          }) +
+          (m.jobName && result.jobs?.length > 1 ? ` · ${m.jobName}` : ''),
       });
       const button = el(doc, 'button', row, {
         cls: 'data-toggle-chip',

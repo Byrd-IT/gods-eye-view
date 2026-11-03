@@ -15,7 +15,8 @@ const EARTH = 6378137;
 const rad = (d) => (d * Math.PI) / 180;
 const mercX = (lon) => EARTH * rad(lon);
 const mercY = (lat) =>
-  EARTH * Math.log(Math.tan(Math.PI / 4 + rad(Math.max(-85, Math.min(85, lat))) / 2));
+  EARTH *
+  Math.log(Math.tan(Math.PI / 4 + rad(Math.max(-85, Math.min(85, lat))) / 2));
 
 /**
  * Fit points (and the takeoff) into the picture, in web mercator so a tile of

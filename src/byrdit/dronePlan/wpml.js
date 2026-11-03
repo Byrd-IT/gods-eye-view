@@ -603,9 +603,7 @@ export function bundleEntries(result, opts = {}) {
       data: buildKmz(mission, result.plan, {
         ...opts,
         when,
-        ...(label
-          ? { name: flightTitle(label, flight, flightTotal) }
-          : {}),
+        ...(label ? { name: flightTitle(label, flight, flightTotal) } : {}),
       }),
     };
   });

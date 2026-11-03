@@ -54,7 +54,10 @@ export function cheatSheetText(plans, { when = new Date(), user = '' } = {}) {
     'Placeholder name = plan   (a plan that needs more than one battery makes M7-1, M7-2, ...)',
     '',
   ];
-  if (!list.length) lines.push('(No saved plans yet: save a plan in the Plan library to get its M number.)');
+  if (!list.length)
+    lines.push(
+      '(No saved plans yet: save a plan in the Plan library to get its M number.)',
+    );
   for (const p of list) {
     const flown = p.status !== 'planned';
     lines.push(
@@ -73,7 +76,10 @@ export function cheatSheetText(plans, { when = new Date(), user = '' } = {}) {
 const esc = (s) =>
   String(s ?? '').replace(
     /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+    (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
+        c
+      ],
   );
 
 /** A printable page of the same sheet. */
