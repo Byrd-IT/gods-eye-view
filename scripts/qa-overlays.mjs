@@ -46,8 +46,12 @@ async function run(label, viewport) {
     await page.click('.mobile-tab[data-mobile-sheet="context"]');
     await sleep(600);
   }
-  await page.waitForSelector("#map-layers-panel", { visible: true, timeout: 30000 });
-  await page.click("#map-layers-panel .panel-collapse-btn");
+  // Desktop: the collapsed card is not drawn, its dock button opens it.
+  if (await page.evaluate(() => document.body.classList.contains("mobile-shell"))) {
+    await page.waitForSelector("#map-layers-panel", { visible: true, timeout: 30000 });
+    await page.click("#map-layers-panel .panel-collapse-btn");
+  } else await page.click('[data-rail-item="map-layers-panel"]');
+  await page.waitForSelector("#map-layers-panel:not(.collapsed)", { visible: true, timeout: 30000 });
   await sleep(800);
   const info = await page.evaluate(() => {
     const p = document.querySelector('#map-layers-panel #gev-overlays-panel');

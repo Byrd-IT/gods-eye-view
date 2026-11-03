@@ -49,22 +49,32 @@ async function run(label, viewport, { touch = false } = {}) {
     await page.click('.mobile-tab[data-mobile-sheet="context"]');
     await sleep(600);
   }
-  await page.waitForSelector('#map-layers-panel', { visible: true, timeout: 30000 });
-
+  // Desktop: the dock lists every right-side card as a button; the collapsed
+  // card itself is not drawn. Phone: the card is a launcher in the Context sheet.
   const closed = await page.evaluate(() => {
     const card = document.getElementById('map-layers-panel');
-    const dock = [...document.querySelectorAll('#right-context-rail > .panel-collapsible')]
-      .filter((n) => getComputedStyle(n).display !== 'none' && !n.hidden)
-      .map((n) => n.id);
+    const dock = [...document.querySelectorAll('.gev-panel-rail--right [data-rail-item]')].map((b) => ({
+      id: b.getAttribute('data-rail-item'),
+      label: b.getAttribute('aria-label'),
+    }));
     return { collapsed: card.classList.contains('collapsed'), dock, title: card.querySelector('.panel-title')?.textContent.trim() };
   });
   console.log(label, 'launcher', JSON.stringify(closed));
-  check(`${label}: Map layers is a launcher in the dock, collapsed`, closed.collapsed && closed.dock.includes('map-layers-panel'), closed.dock.join());
-  check(`${label}: launcher is titled MAP LAYERS`, closed.title === 'MAP LAYERS', closed.title);
+  check(`${label}: card starts collapsed, titled MAP LAYERS`, closed.collapsed && closed.title === 'MAP LAYERS', closed.title);
+  if (!mobile) {
+    const ids = closed.dock.map((d) => d.id);
+    check(`${label}: dock button MAP LAYERS sits between TIME TRAVEL and DRONE FLIGHT PLAN`, ids.indexOf('map-layers-panel') === ids.indexOf('time-travel-panel') + 1 && ids.indexOf('drone-plan-panel') === ids.indexOf('map-layers-panel') + 1, ids.join());
+    check(`${label}: the dock button is labelled MAP LAYERS`, closed.dock.find((d) => d.id === 'map-layers-panel')?.label === 'MAP LAYERS');
+  }
   await page.screenshot({ path: path.join(outDir, `${label}-launcher.png`) });
-
-  await page.click('#map-layers-panel .panel-collapse-btn');
-  await sleep(1000);
+  if (mobile) {
+    await page.waitForSelector('#map-layers-panel', { visible: true, timeout: 30000 });
+    await page.click('#map-layers-panel .panel-collapse-btn');
+  } else {
+    await page.click('[data-rail-item="map-layers-panel"]');
+  }
+  await sleep(1500);
+  await page.waitForSelector('#map-layers-panel:not(.collapsed)', { visible: true, timeout: 30000 });
   const open = await page.evaluate(() => {
     const card = document.getElementById('map-layers-panel');
     const panel = document.getElementById('gev-overlays-panel');
@@ -129,21 +139,36 @@ async function run(label, viewport, { touch = false } = {}) {
   check(`${label}: lower moves the layer down one step`, stackDown.indexOf('lake-depth') === stackBefore.indexOf('lake-depth') - 1, `${stackBefore.indexOf('lake-depth')} -> ${stackDown.indexOf('lake-depth')}`);
   check(`${label}: raise moves it back`, stackUp.join() === stackBefore.join());
 
-  // Search.
-  await page.click('#gev-overlays-panel input[type="search"]');
-  await page.keyboard.type('hillshade');
-  await sleep(400);
-  const found = await page.evaluate(() => ({
-    rows: [...document.querySelectorAll('#gev-overlays-panel [data-overlay]')].filter((r) => r.offsetParent).map((r) => r.getAttribute('data-overlay')),
-    lakes: document.querySelector('#gev-overlays-panel [data-group="lakes"]').hidden,
-  }));
-  check(`${label}: search "hillshade" lists only hillshade layers`, found.rows.length >= 7 && found.rows.every((id) => /hillshade/.test(id)) && found.lakes, found.rows.join());
+  // Search: clear the box, then type like a person (one input event per key).
+  const setSearch = async (text) => {
+    await page.$eval('#gev-overlays-panel input[type="search"]', (el) => {
+      el.value = '';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.focus();
+    });
+    if (text) await page.keyboard.type(text);
+    await sleep(400);
+  };
+  const shownRows = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('#gev-overlays-panel [data-overlay]')]
+        .filter((r) => r.offsetParent)
+        .map((r) => r.getAttribute('data-overlay')),
+    );
+  await setSearch('hillshade');
+  const hill = await shownRows();
+  const lakesHidden = await page.evaluate(() => document.querySelector('#gev-overlays-panel [data-group="lakes"]').hidden);
+  check(`${label}: search "hillshade" lists only hillshade layers`, hill.length >= 7 && hill.every((id) => /hillshade/.test(id)) && lakesHidden, hill.join());
   await page.screenshot({ path: path.join(outDir, `${label}-search.png`) });
-  await page.click('#gev-overlays-panel input[type="search"]', { clickCount: 3 });
-  await page.keyboard.type('lake');
-  await sleep(400);
-  const lakeSearch = await page.evaluate(() => [...document.querySelectorAll('#gev-overlays-panel [data-overlay]')].filter((r) => r.offsetParent).map((r) => r.getAttribute('data-overlay')));
-  check(`${label}: search "lake" lists the 7 lake / bay layers`, lakeSearch.length === 7, lakeSearch.join());
+  await setSearch('lake');
+  const lakeSearch = await shownRows();
+  check(`${label}: search "lake" lists the 7 lake / bay layers`, lakeSearch.length === 7 && lakeSearch.includes('lake-depth'), lakeSearch.join());
+  await setSearch('zzz-no-such-layer');
+  const none = await page.evaluate(() => ({ note: !document.querySelector('#gev-overlays-panel .gev-ov-empty').hidden, rows: [...document.querySelectorAll('#gev-overlays-panel [data-overlay]')].filter((r) => r.offsetParent).length }));
+  check(`${label}: a search with no match shows the note and no rows`, none.note && none.rows === 0, JSON.stringify(none));
+  await setSearch('');
+  const back = await shownRows();
+  check(`${label}: clearing the search restores the default view (Lakes open)`, back.length === 7, String(back.length));
 
   if (mobile) {
     const sizes = await page.evaluate(() => {

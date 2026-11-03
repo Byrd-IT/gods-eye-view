@@ -36,7 +36,7 @@ test('panel chrome, rail layout and the dock catalog know the card', () => {
   const catalog = read('src/ui/panelRailCatalog.js');
   assert.match(
     catalog,
-    /\x27map-layers-panel\x27: \{ icon: \x27layers\x27, label: msg\(\x27MAP LAYERS\x27\) \}/,
+    /\x27map-layers-panel\x27: \{ icon: \x27map\x27, label: msg\(\x27MAP LAYERS\x27\) \}/,
   );
 });
 

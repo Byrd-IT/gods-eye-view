@@ -29,7 +29,7 @@ export const PANEL_RAIL_ITEMS = Object.freeze({
   'street-level-panel': { icon: 'streetview', label: msg('STREET LEVEL') },
   // Byrd-IT fork cards (byrdit/timeTravel, byrdit/dronePlan).
   'time-travel-panel': { icon: 'history', label: msg('TIME TRAVEL') },
-  'map-layers-panel': { icon: 'layers', label: msg('MAP LAYERS') },
+  'map-layers-panel': { icon: 'map', label: msg('MAP LAYERS') },
   'drone-plan-panel': { icon: 'flight', label: msg('DRONE FLIGHT PLAN') },
   'global-context-panel': { icon: 'radar', label: msg('CONTEXT') },
 });
