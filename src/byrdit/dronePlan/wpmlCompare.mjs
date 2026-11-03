@@ -115,7 +115,8 @@ export function compareSummaries(a, b, opts = {}) {
   const n = Math.min(a.waypoints.length, theirs.length);
   for (let i = 0; i < n; i += 1) {
     const d = metresBetween(a.waypoints[i].c, theirs[i].c);
-    if (d > tol) out.push(`waypoint ${i} position differs by ${d.toFixed(3)} m`);
+    if (d > tol)
+      out.push(`waypoint ${i} position differs by ${d.toFixed(3)} m`);
     let [x, y] = [a.waypoints[i].s, theirs[i].s];
     if (opts.relax) [x, y] = opts.relax(i, x, y);
     if (x !== y) out.push(`waypoint ${i}\n  ${x}\n  ${y}`);
@@ -169,7 +170,8 @@ export function missionFromWaylines(xml, shift = { dlon: 0, dlat: 0 }) {
       n.text.trim(),
     );
     speedMs ??= Number(textOf(mark, 'wpml:waypointSpeed'));
-    const smooth = textOf(mark, 'wpml:waypointHeadingMode') === 'smoothTransition';
+    const smooth =
+      textOf(mark, 'wpml:waypointHeadingMode') === 'smoothTransition';
     if (
       allOf(mark, 'wpml:actionTriggerType').some((n) =>
         ['multipleDistance', 'multipleTiming'].includes(n.text.trim()),
@@ -201,7 +203,10 @@ export function shiftSummary(summary, { dlon, dlat }) {
     ...summary,
     waypoints: summary.waypoints.map((w) => ({
       ...w,
-      c: [Number((w.c[0] + dlon).toFixed(8)), Number((w.c[1] + dlat).toFixed(8))],
+      c: [
+        Number((w.c[0] + dlon).toFixed(8)),
+        Number((w.c[1] + dlat).toFixed(8)),
+      ],
     })),
   };
 }

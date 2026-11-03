@@ -80,7 +80,7 @@ export function cameraChecklistLines(presetId, shutterDenominator) {
     p.width > 4096
       ? [
           '  - Waypoint mode (first Mini 5 Pro flight, 2026-11-01): all 302 mission',
-          '    photos came back 4096 x 3072 (12 MP), not the size above. DJI\'s waypoint guide',
+          "    photos came back 4096 x 3072 (12 MP), not the size above. DJI's waypoint guide",
           '    lists no photo-size setting, so expect 12 MP: the ground sample distance is',
           '    twice the planned one. Check the first photo of the flight.',
         ]

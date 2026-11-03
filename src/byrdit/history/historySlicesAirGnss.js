@@ -83,7 +83,12 @@ export function createAirGnssSlices({ es, now = () => Date.now() }) {
       const lat = fin(d.location?.lat);
       const lon = fin(d.location?.lon);
       const at = Date.parse(d['@timestamp']);
-      if (lat === null || lon === null || !Number.isFinite(at) || !d.location_id)
+      if (
+        lat === null ||
+        lon === null ||
+        !Number.isFinite(at) ||
+        !d.location_id
+      )
         continue;
       features.push({
         type: 'Feature',

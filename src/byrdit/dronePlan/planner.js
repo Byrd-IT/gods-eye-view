@@ -1397,19 +1397,21 @@ export function assembleMissions(plan, ground) {
     ...leg,
     // An outward photo is a waypoint of its own (see shotWaypoints.js), so
     // the counts, the 200-waypoint split and the time estimate all see it.
-    waypoints: splitOutwardShots(leg.waypoints.map((w) => {
-      const g = known ? ground.wpM[w.id] : 0;
-      const read = typeof g === 'number' && Number.isFinite(g);
-      if (read) lastGroundM = g;
-      else if (known) missing += 1;
-      const groundM = read ? g : lastGroundM;
-      return {
-        ...w,
-        groundM,
-        groundEstimated: !read && known,
-        relHeightM: round(groundM + w.aglM - takeoffM, 1),
-      };
-    })),
+    waypoints: splitOutwardShots(
+      leg.waypoints.map((w) => {
+        const g = known ? ground.wpM[w.id] : 0;
+        const read = typeof g === 'number' && Number.isFinite(g);
+        if (read) lastGroundM = g;
+        else if (known) missing += 1;
+        const groundM = read ? g : lastGroundM;
+        return {
+          ...w,
+          groundM,
+          groundEstimated: !read && known,
+          relHeightM: round(groundM + w.aglM - takeoffM, 1),
+        };
+      }),
+    ),
   }));
   if (missing) {
     warnings.push({ code: 'terrain-partial', params: { count: missing } });

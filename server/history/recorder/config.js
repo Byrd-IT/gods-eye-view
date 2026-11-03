@@ -5,7 +5,12 @@ import {
 } from '../config.js';
 
 /** Backends that can take `append`. A read-only backend is refused at boot. */
-export const APPEND_BACKENDS = Object.freeze(['sqlite', 'elasticsearch', 'mysql', 'postgres']);
+export const APPEND_BACKENDS = Object.freeze([
+  'sqlite',
+  'elasticsearch',
+  'mysql',
+  'postgres',
+]);
 
 export const DEFAULT_QUEUE_ROWS = 200_000;
 export const MIN_QUEUE_ROWS = 1_000;
@@ -123,7 +128,8 @@ export function loadRecorderConfig(
     }
     if (!adapter) continue;
     // A heavy feed (adapter.defaultOn === false) or an opt-in feed (adapter.optIn) records only when named.
-    const on = own ?? (adapter.optIn || adapter.defaultOn === false ? false : globalOn);
+    const on =
+      own ?? (adapter.optIn || adapter.defaultOn === false ? false : globalOn);
     const store = history?.feeds?.[feed]?.store;
     if (on && store && !appendBackends.includes(store)) {
       problems.push(

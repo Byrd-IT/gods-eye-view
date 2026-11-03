@@ -680,13 +680,14 @@ export function createHistoryRouter({
       // layers keep theirs and nothing is cleared or re-asked for them
       const sharedSame =
         wasPlaying === playing &&
-        (timeMs === prev || (!Number.isFinite(timeMs) && !Number.isFinite(prev)));
+        (timeMs === prev ||
+          (!Number.isFinite(timeMs) && !Number.isFinite(prev)));
       const jump =
         !sharedSame &&
         (!(wasPlaying && playing) ||
-        (Number.isFinite(prev) && Number.isFinite(timeMs)
-          ? timeMs < prev || timeMs - prev > PLAY_JUMP_MS
-          : true));
+          (Number.isFinite(prev) && Number.isFinite(timeMs)
+            ? timeMs < prev || timeMs - prev > PLAY_JUMP_MS
+            : true));
       if (jump) {
         out.seeked = true;
         gen++;
@@ -1038,7 +1039,8 @@ export function createHistoryRouter({
     }
     // a seek / LIVE meanwhile: never a track of another time (the new
     // frame asks again)
-    if (!activeFor(adapter) || gen !== myGen) return refuseTrack(TRACK_UNAVAILABLE);
+    if (!activeFor(adapter) || gen !== myGen)
+      return refuseTrack(TRACK_UNAVAILABLE);
     const ms = Math.round(monotonic() - started);
     // a superseded answer still goes to its caller (the layer's own
     // backfill token drops it); it never becomes the chip

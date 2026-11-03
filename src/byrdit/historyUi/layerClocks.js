@@ -33,11 +33,13 @@ const isTime = (v) => typeof v === 'number' && Number.isFinite(v);
 export function snapToRelease(releases, t) {
   if (!Array.isArray(releases) || !releases.length || !isTime(t)) return null;
   let best = null;
-  for (const r of releases) if (isTime(r) && r <= t && (best === null || r > best)) best = r;
+  for (const r of releases)
+    if (isTime(r) && r <= t && (best === null || r > best)) best = r;
   return best;
 }
 
-const iso = (ms) => new Date(Math.floor(ms / 1000) * 1000).toISOString().replace('.000Z', 'Z');
+const iso = (ms) =>
+  new Date(Math.floor(ms / 1000) * 1000).toISOString().replace('.000Z', 'Z');
 
 /** `hl` value -> Map(rowId -> ms | null), ignoring malformed entries. */
 export function decodeHl(value, now = Date.now()) {
@@ -89,13 +91,19 @@ export function createLayerClocks({ rows, now = () => Date.now() } = {}) {
       }
     }
   };
-  const floorOf = (row) => (isTime(row.earliest) ? Math.max(row.earliest, HISTORY_FLOOR_MS) : HISTORY_FLOOR_MS);
+  const floorOf = (row) =>
+    isTime(row.earliest)
+      ? Math.max(row.earliest, HISTORY_FLOOR_MS)
+      : HISTORY_FLOOR_MS;
   // own = a row's own slider stops at the row's coverage start; a locked row
   // follows the shared time exactly (it has no data before its start: a gap,
   // which the menu says, not a different time)
   const place = (row, ms, own = true) => {
     if (!isTime(ms)) return null;
-    const t = Math.min(now(), Math.max(own ? floorOf(row) : HISTORY_FLOOR_MS, ms));
+    const t = Math.min(
+      now(),
+      Math.max(own ? floorOf(row) : HISTORY_FLOOR_MS, ms),
+    );
     if (row.releases?.length) return snapToRelease(row.releases, t);
     return t;
   };
@@ -116,7 +124,9 @@ export function createLayerClocks({ rows, now = () => Date.now() } = {}) {
     getShared: () => shared,
     /** Shared (locked group) time from the main slider; null = LIVE. */
     setShared(ms) {
-      const next = isTime(ms) ? Math.min(now(), Math.max(HISTORY_FLOOR_MS, ms)) : null;
+      const next = isTime(ms)
+        ? Math.min(now(), Math.max(HISTORY_FLOOR_MS, ms))
+        : null;
       if (next === shared) return;
       shared = next;
       emit();
@@ -189,7 +199,9 @@ export function createLayerClocks({ rows, now = () => Date.now() } = {}) {
     },
     /** Unlocked rows for the URL, in row order. */
     urlEntries() {
-      return list.filter((r) => !st.get(r.id).locked).map((r) => [r.id, st.get(r.id).own]);
+      return list
+        .filter((r) => !st.get(r.id).locked)
+        .map((r) => [r.id, st.get(r.id).own]);
     },
     /** Apply an `hl` map (a shared link): listed rows unlocked. */
     applyHl(map) {

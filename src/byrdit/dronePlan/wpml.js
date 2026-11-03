@@ -350,7 +350,10 @@ function placemarks(mission, speedMs) {
       // always at least 2, even on a waypoint that has no photo group.
       const text = groups
         .map((group, g) =>
-          actionGroup({ ...group, id: group.evenly ? Math.max(2, owned + 1) : g + 1 }),
+          actionGroup({
+            ...group,
+            id: group.evenly ? Math.max(2, owned + 1) : g + 1,
+          }),
         )
         .join('');
       return placemark(wp, speedMs, text, k === 0 || k === total - 1);

@@ -100,8 +100,14 @@ export function mountHistoryMenu({
     attrs: { type: 'button', 'aria-expanded': 'false' },
     text: `▸ ${t('Layer times')}`,
   });
-  const lockAll = el(doc, 'button', { attrs: { type: 'button' }, text: t('Lock all') });
-  const unlockAll = el(doc, 'button', { attrs: { type: 'button' }, text: t('Unlock all') });
+  const lockAll = el(doc, 'button', {
+    attrs: { type: 'button' },
+    text: t('Lock all'),
+  });
+  const unlockAll = el(doc, 'button', {
+    attrs: { type: 'button' },
+    text: t('Unlock all'),
+  });
   head.append(toggle, lockAll, unlockAll);
   const list = el(doc, 'div', { cls: 'gev-hm-list' });
   list.hidden = true;
@@ -109,19 +115,32 @@ export function mountHistoryMenu({
 
   const rowEls = new Map();
   for (const def of ALL_ROW_DEFS) {
-    const row = el(doc, 'div', { cls: 'gev-hm-row', attrs: { 'data-row': def.id } });
+    const row = el(doc, 'div', {
+      cls: 'gev-hm-row',
+      attrs: { 'data-row': def.id },
+    });
     const lock = el(doc, 'input', {
       cls: 'gev-hm-lock',
-      attrs: { type: 'checkbox', 'aria-label': `${t('Lock to the shared time')}: ${t(def.label)}` },
+      attrs: {
+        type: 'checkbox',
+        'aria-label': `${t('Lock to the shared time')}: ${t(def.label)}`,
+      },
     });
     lock.checked = true;
     const name = el(doc, 'span', { cls: 'gev-hm-name', text: t(def.label) });
     const range = el(doc, 'input', {
       cls: 'gev-hm-range',
-      attrs: { type: 'range', 'aria-label': `${t('History time')}: ${t(def.label)}` },
+      attrs: {
+        type: 'range',
+        'aria-label': `${t('History time')}: ${t(def.label)}`,
+      },
     });
     const time = el(doc, 'span', { cls: 'gev-hm-time', text: t('LIVE') });
-    const live = el(doc, 'button', { cls: 'gev-hm-live', attrs: { type: 'button' }, text: t('LIVE') });
+    const live = el(doc, 'button', {
+      cls: 'gev-hm-live',
+      attrs: { type: 'button' },
+      text: t('LIVE'),
+    });
     const note = el(doc, 'span', { cls: 'gev-hm-note' });
     note.hidden = true;
     row.append(lock, name, range, time, live, note);
@@ -145,7 +164,9 @@ export function mountHistoryMenu({
   const releasesOf = (id) => clocks.row(id)?.releases ?? null;
   const floorOf = (id) => {
     const e = clocks.row(id)?.earliest;
-    return Number.isFinite(e) ? Math.max(e, HISTORY_FLOOR_MS) : HISTORY_FLOOR_MS;
+    return Number.isFinite(e)
+      ? Math.max(e, HISTORY_FLOOR_MS)
+      : HISTORY_FLOOR_MS;
   };
 
   function configureRange(id) {
@@ -164,7 +185,8 @@ export function mountHistoryMenu({
 
   function valueToMs(id, v) {
     const rel = releasesOf(id);
-    if (rel?.length) return rel[Math.max(0, Math.min(rel.length - 1, Math.round(v)))];
+    if (rel?.length)
+      return rel[Math.max(0, Math.min(rel.length - 1, Math.round(v)))];
     return Number(v) * MINUTE;
   }
 
@@ -184,7 +206,9 @@ export function mountHistoryMenu({
 
   function preview(id) {
     const e = rowEls.get(id);
-    e.time.textContent = formatUtc(valueToMs(id, e.range.value), { seconds: false });
+    e.time.textContent = formatUtc(valueToMs(id, e.range.value), {
+      seconds: false,
+    });
   }
 
   function statusOf(id, ms) {
@@ -202,7 +226,7 @@ export function mountHistoryMenu({
     for (const r of state.rows) {
       const e = rowEls.get(r.id);
       const driver = drivers.get(r.id);
-      const isDriverRow = !(defs.get(r.id).adapterIds?.length);
+      const isDriverRow = !defs.get(r.id).adapterIds?.length;
       e.row.hidden = isDriverRow && !driver?.available?.();
       if (e.row.hidden) continue;
       if (dragging !== r.id) {
@@ -215,7 +239,10 @@ export function mountHistoryMenu({
             : t('LIVE');
       }
       e.lock.checked = r.locked;
-      e.row.setAttribute('data-live', String(!Number.isFinite(r.timeMs) && !r.gap));
+      e.row.setAttribute(
+        'data-live',
+        String(!Number.isFinite(r.timeMs) && !r.gap),
+      );
       e.live.disabled = !Number.isFinite(r.timeMs) && !r.gap;
       const first = releasesOf(r.id)?.[0];
       const note = r.gap
@@ -234,7 +261,8 @@ export function mountHistoryMenu({
     if (!win?.history?.replaceState || !win?.location?.href) return;
     try {
       const next = writeHlToUrl(win.location.href, clocks.urlEntries());
-      if (next !== win.location.href) win.history.replaceState(win.history.state, '', next);
+      if (next !== win.location.href)
+        win.history.replaceState(win.history.state, '', next);
     } catch {
       /* an address we cannot write is not worth breaking the menu */
     }
@@ -252,7 +280,8 @@ export function mountHistoryMenu({
   }
 
   function syncNow() {
-    const sharedOn = Boolean(lastDetail.active) && Number.isFinite(lastDetail.timeMs);
+    const sharedOn =
+      Boolean(lastDetail.active) && Number.isFinite(lastDetail.timeMs);
     clocks.setShared(sharedOn ? lastDetail.timeMs : null);
     // router feeds: the main detail plus each unlocked row's own time
     const layerTimes = clocks.layerTimes();
@@ -332,7 +361,9 @@ export function mountHistoryMenu({
   // ── start ─────────────────────────────────────────────────
 
   parent.append(root);
-  const fromUrl = win?.location?.href ? readHlFromUrl(win.location.href, now()) : new Map();
+  const fromUrl = win?.location?.href
+    ? readHlFromUrl(win.location.href, now())
+    : new Map();
   if (fromUrl.size) {
     clocks.applyHl(fromUrl);
     list.hidden = false;
@@ -364,7 +395,8 @@ export function mountHistoryMenu({
       if (!def.snapFeed) continue;
       Promise.resolve(probeEarliest(def.snapFeed))
         .then((ms) => {
-          if (Number.isFinite(ms) && !destroyed) clocks.setRowInfo(def.id, { earliest: ms });
+          if (Number.isFinite(ms) && !destroyed)
+            clocks.setRowInfo(def.id, { earliest: ms });
         })
         .catch(() => {});
     }

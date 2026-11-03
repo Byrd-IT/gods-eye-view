@@ -442,11 +442,14 @@ export function createB12cSlices({
       members = await referenceMembers(groupFilter);
     }
     const ids = members.ids;
-    const histNear =
-      firstHist !== null && ids.length > 0;
+    const histNear = firstHist !== null && ids.length > 0;
     const histFilter = [
       { terms: { [field]: ids } },
-      range('epoch', Math.max(GP_HIST_MIN_EPOCH_MS, tBefore - GP_HIST_LOOKBACK_MS), tBefore),
+      range(
+        'epoch',
+        Math.max(GP_HIST_MIN_EPOCH_MS, tBefore - GP_HIST_LOOKBACK_MS),
+        tBefore,
+      ),
     ];
     const empty = { hits: [], truncated: false };
     const [before, after, histBefore, histAfter] = await Promise.all([
@@ -508,11 +511,7 @@ export function createB12cSlices({
         const g = out.get(id);
         const he = dateMs(h.doc.epoch);
         const ge = g ? dateMs(g.doc.epoch) : null;
-        if (
-          !g ||
-          (he !== null &&
-            (ge === null || (newer ? he > ge : he < ge)))
-        )
+        if (!g || (he !== null && (ge === null || (newer ? he > ge : he < ge))))
           out.set(id, h);
       }
       return out;

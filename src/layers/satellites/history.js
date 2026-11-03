@@ -38,7 +38,8 @@ export function createHistory({ state: layerState, parts = null }) {
   /** A satellite that is tracked cannot stay tracked once it is not drawn. */
   function untrackIfHidden() {
     const id = layerState._trackedNorad;
-    if (id && hidden().has(id)) parts?.tracking?._clearTracking?.(false, { origin: 'programmatic' });
+    if (id && hidden().has(id))
+      parts?.tracking?._clearTracking?.(false, { origin: 'programmatic' });
   }
 
   // Orbit paths are built from the live element sets: a satellite that is not
@@ -162,7 +163,10 @@ export function createHistory({ state: layerState, parts = null }) {
         }
         layerState._historyMs = ms;
         layerState._lastPropagation = 0;
-        if (Number.isFinite(fetchedAt) && Math.abs(ms - fetchedAt) < ELSET_REUSE_MS)
+        if (
+          Number.isFinite(fetchedAt) &&
+          Math.abs(ms - fetchedAt) < ELSET_REUSE_MS
+        )
           return { status: 'ok', reused: true };
         // the sets for this time are not here yet: draw nothing until they are,
         // never the live (or an older recorded) position at this time

@@ -1,4 +1,7 @@
-import { HISTORY_INDICES as IDX, HistoryUnavailableError } from './historyEs.js';
+import {
+  HISTORY_INDICES as IDX,
+  HistoryUnavailableError,
+} from './historyEs.js';
 import { FIRST_RECORD_TTL_MS, notRecorded } from './historySlicesB12c.js';
 
 /**
@@ -95,7 +98,8 @@ export function geoPoint(v) {
   let lat;
   let lon;
   if (Array.isArray(v)) [lon, lat] = v;
-  else if (typeof v === 'string') [lat, lon] = v.split(',').map((x) => Number(x));
+  else if (typeof v === 'string')
+    [lat, lon] = v.split(',').map((x) => Number(x));
   else if (v && typeof v === 'object') ({ lat, lon } = v);
   lat = fin(lat);
   lon = fin(lon);
@@ -143,7 +147,11 @@ export function recordedGaugeFeature(siteId, perCode) {
   };
 }
 
-export function createWaterSlices({ reader, es = null, now = () => Date.now() }) {
+export function createWaterSlices({
+  reader,
+  es = null,
+  now = () => Date.now(),
+}) {
   let running = 0;
   const waiting = [];
   async function esTurn() {
@@ -229,7 +237,11 @@ export function createWaterSlices({ reader, es = null, now = () => Date.now() })
         },
         aggs: {
           sites: {
-            terms: { field: 'site_id', size: maxRows + 1, order: { _key: 'asc' } },
+            terms: {
+              field: 'site_id',
+              size: maxRows + 1,
+              order: { _key: 'asc' },
+            },
             aggs: {
               p: {
                 terms: { field: 'parameter_code', size: RECORDED_CODES.length },

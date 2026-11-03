@@ -21,11 +21,13 @@
  *
  * D3: nothing recorded at t answers the live layer's EMPTY shape plus a chip.
  */
-import { passHeaders, rebaseDelta, rebaseIso, rebaseMs } from './historyAdapters.js';
 import {
-  HISTORY_NOTE_STATE,
-  emptyChip,
-} from './historyFieldAdapters.js';
+  passHeaders,
+  rebaseDelta,
+  rebaseIso,
+  rebaseMs,
+} from './historyAdapters.js';
+import { HISTORY_NOTE_STATE, emptyChip } from './historyFieldAdapters.js';
 
 const GEO_TYPE = 'application/geo+json; charset=utf-8';
 const JSON_TYPE = 'application/json; charset=utf-8';
@@ -61,7 +63,10 @@ function adaptAqhi(answers, { t, nowMs }) {
     ...f,
     properties: {
       ...f.properties,
-      observation_datetime: rebaseIso(f.properties?.observation_datetime, delta),
+      observation_datetime: rebaseIso(
+        f.properties?.observation_datetime,
+        delta,
+      ),
     },
   }));
   return {
@@ -126,12 +131,11 @@ function adaptGnss(answers, { t, nowMs }) {
   const expected = ok
     ? a.body.cells.reduce((n, c) => n + (Math.floor(Number(c?.total)) || 0), 0)
     : 0;
-  const chip =
-    emptyChipOf(a, rows.length) ?? {
-      state: HISTORY_NOTE_STATE,
-      text: GNSS_POPULATION_CHIP,
-      reason: null,
-    };
+  const chip = emptyChipOf(a, rows.length) ?? {
+    state: HISTORY_NOTE_STATE,
+    text: GNSS_POPULATION_CHIP,
+    reason: null,
+  };
   return {
     body: {
       rows,

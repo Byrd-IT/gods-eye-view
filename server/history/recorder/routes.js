@@ -5,9 +5,16 @@
  */
 import { answerClockMs } from './adapters/military.js';
 import { NOT_LIVE } from './adapters/vessels.js';
-import { createStationDirectory, statusInput, systemKeyOf } from './adapters/bikeshare.js';
+import {
+  createStationDirectory,
+  statusInput,
+  systemKeyOf,
+} from './adapters/bikeshare.js';
 import { FAILED, SKIP } from './tee.js';
-import { isAllowedGbfsHost, isAllowedGbfsPath } from '../../../src/data/gbfsSource.js';
+import {
+  isAllowedGbfsHost,
+  isAllowedGbfsPath,
+} from '../../../src/data/gbfsSource.js';
 
 const exactPath = (path) => (url) =>
   url.pathname === path ? { key: path } : null;
@@ -62,7 +69,6 @@ const cachedAt = (res) => {
   const ms = Date.parse(String(res.getHeader?.('x-gev-cached-at') ?? ''));
   return Number.isFinite(ms) && ms > 0 ? ms : null;
 };
-
 
 // The transit proxy marks every answer: MISS is a fresh fetch from the operator;
 // HIT, INFLIGHT (shared with a fetch already counted) and STALE-ERROR (the old

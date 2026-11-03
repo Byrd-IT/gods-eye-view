@@ -248,7 +248,8 @@
       "src/byrdit/basemap/naipConfig.js",
       "src/byrdit/basemap/naipProxy.js",
       "src/byrdit/basemap/overlaysConfig.js",
-      "src/byrdit/basemap/overlaysProxy.js"
+      "src/byrdit/basemap/overlaysProxy.js",
+      "src/byrdit/basemap/layerCap.js"
     ],
     "external": []
   },
@@ -726,6 +727,8 @@
       "src/ui/railCards.js",
       "src/ui/railCardBlocks.js",
       "src/ui/slider.js",
+      "src/byrdit/layerOpacity/opacityModel.js",
+      "src/byrdit/layerOpacity/opacityRow.js",
       "src/ui/chipGroup.js",
       "src/ui/combinedRows.js",
       "src/ui/layerRowText.js",
@@ -1265,7 +1268,10 @@
       "src/ui/kit/UiBadge.vue",
       "src/ui/stores/globeActions.js",
       "src/ui/stores/recording.js",
-      "src/ui/i18n.js"
+      "src/ui/i18n.js",
+      "src/ui/slider.js",
+      "src/byrdit/layerOpacity/opacityModel.js",
+      "src/byrdit/layerOpacity/opacityRow.js"
     ],
     "external": [
       "cesium",
@@ -3364,6 +3370,11 @@
       "src/byrdit/wayback/model.js",
       "src/byrdit/wayback/layer.js",
       "src/byrdit/wayback/panel.js",
+      "src/byrdit/layerOpacity/index.js",
+      "src/byrdit/layerOpacity/install.js",
+      "src/byrdit/layerOpacity/applyOpacity.js",
+      "src/byrdit/layerOpacity/opacityModel.js",
+      "src/byrdit/layerOpacity/opacityRow.js",
       "src/byrdit/basemap/config.js",
       "src/byrdit/basemap/stack.js",
       "src/byrdit/basemap/imagery.js",
@@ -3485,7 +3496,10 @@
       "src/data/placeBoundaries.js",
       "src/data/placeNames.js",
       "src/data/local_data/us_census_places/files.js",
-      "src/data/local_data/wof_neighborhoods/files.js"
+      "src/data/local_data/wof_neighborhoods/files.js",
+      "src/ui/slider.js",
+      "src/byrdit/dronePlan/cameraSettings.js",
+      "src/byrdit/dronePlan/shotWaypoints.js"
     ],
     "external": [
       "hls.js",

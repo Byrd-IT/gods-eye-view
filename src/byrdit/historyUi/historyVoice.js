@@ -120,7 +120,10 @@ export function createHistoryVoice({
         const minutes = Number(minutesAgo);
         if (!Number.isFinite(minutes) || minutes < 0)
           return fail('minutesAgo must be a number of minutes, zero or more');
-        ms = t - Math.min(minutes, Math.floor((t - HISTORY_FLOOR_MS) / 60_000)) * 60_000;
+        ms =
+          t -
+          Math.min(minutes, Math.floor((t - HISTORY_FLOOR_MS) / 60_000)) *
+            60_000;
       } else return fail('jump needs time (ISO 8601) or minutesAgo');
       const earliest = HISTORY_FLOOR_MS;
       const clamped = ms > t ? 'future' : ms < earliest ? 'past' : null;
