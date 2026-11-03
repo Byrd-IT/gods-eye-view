@@ -118,6 +118,7 @@ export class PanelLayoutController {
     this._recentImageryPanel = document.getElementById('recent-imagery-panel');
     this._streetLevelPanel = document.getElementById('street-level-panel');
     this._timeTravelPanel = document.getElementById('time-travel-panel');
+    this._mapLayersPanel = document.getElementById('map-layers-panel');
     this._dronePlanPanel = document.getElementById('drone-plan-panel');
   }
   /**
@@ -273,6 +274,7 @@ export class PanelLayoutController {
       this._recentImageryPanel,
       this._streetLevelPanel,
       this._timeTravelPanel,
+      this._mapLayersPanel,
       this._dronePlanPanel,
     ]) {
       if (!panel) continue;
@@ -290,6 +292,7 @@ export class PanelLayoutController {
         this._recentImageryPanel,
         this._streetLevelPanel,
         this._timeTravelPanel,
+        this._mapLayersPanel,
         this._dronePlanPanel,
         globalContextPanel,
         document.getElementById('radio-panel'),

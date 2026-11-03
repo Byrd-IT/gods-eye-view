@@ -54,6 +54,23 @@ const sceneRuntime = computed(() => scenePanel.value?.runtime ?? '');
         :aria-label="t('Time travel')"
       ></div>
     </RailPanel>
+    <!-- byrdit/basemap/overlaysPanel.js fills the body: the map overlay layers
+         (lake depth, hillshade, topo, contours ...), grouped, with a search. -->
+    <RailPanel
+      id="map-layers-panel"
+      start-collapsed
+      hidden
+      :title="t(MAP LAYERS)"
+      sideways
+      rail-scroller
+    >
+      <div
+        id="gev-map-layers-body"
+        class="gev-ml-body"
+        role="group"
+        :aria-label="t(Map layers)"
+      ></div>
+    </RailPanel>
     <RailPanel
       id="drone-plan-panel"
       start-collapsed

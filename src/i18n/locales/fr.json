@@ -3003,7 +3003,6 @@
   "Aerial": "Aérienne",
   "Compare": "Comparer",
   "Compare with year (right side)": "Comparer avec l'année (côté droit)",
-  "Map overlays": "Surcouches de la carte",
   "Raise layer": "Monter la couche",
   "Lower layer": "Descendre la couche",
   "Height capped at {cap} above ground; you asked for {requested}": "Hauteur plafonnée à {cap} au-dessus du sol ; vous aviez demandé {requested}",
@@ -3528,5 +3527,17 @@
   "UTILITIES": "OUTILS",
   "Exit cockpit to fly to a drawing": "Quittez le cockpit pour rejoindre un dessin",
   "Directions, drawing and your own files": "Itinéraire, dessin et vos propres fichiers",
-  "Expand panel": "Développer le panneau"
+  "Expand panel": "Développer le panneau",
+  "Lakes and bays (depth)": "Lacs et baies (profondeur)",
+  "Topo maps": "Cartes topographiques",
+  "Hillshade": "Ombrage du relief",
+  "Colour relief and terrain": "Relief en couleur et terrain",
+  "Contour lines": "Courbes de niveau",
+  "Rivers, floods and wetlands": "Rivières, inondations et zones humides",
+  "Land, boundaries and geology": "Terrains, limites et géologie",
+  "Map layers": "Couches de la carte",
+  "Search map layers": "Rechercher des couches de la carte",
+  "Aerial and historic imagery: open Time Travel": "Imagerie aérienne et historique : ouvrir Voyage dans le temps",
+  "No map layers match your search": "Aucune couche de la carte ne correspond à la recherche",
+  "MAP LAYERS": "COUCHES DE LA CARTE"
 }

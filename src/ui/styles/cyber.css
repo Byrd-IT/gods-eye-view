@@ -201,6 +201,7 @@
     .recent-imagery-panel-inner,
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
+    .map-layers-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -225,6 +226,7 @@
     .recent-imagery-panel-inner,
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
+    .map-layers-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -250,6 +252,7 @@
     .recent-imagery-panel-inner,
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
+    .map-layers-panel-inner,
     .street-level-panel-inner,
     .global-context-panel-inner
   ) {
@@ -267,6 +270,7 @@
     #recent-imagery-panel,
     #time-travel-panel,
     #drone-plan-panel,
+    #map-layers-panel,
     #street-level-panel,
     #global-context-panel
   ).collapsed
@@ -276,6 +280,7 @@
     .recent-imagery-panel-inner,
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
+    .map-layers-panel-inner,
     .street-level-panel-inner,
     .global-context-panel-inner
   ) {
@@ -290,6 +295,7 @@
     #recent-imagery-panel,
     #time-travel-panel,
     #drone-plan-panel,
+    #map-layers-panel,
     #street-level-panel,
     #global-context-panel
   ).collapsed
@@ -299,6 +305,7 @@
     .recent-imagery-panel-inner,
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
+    .map-layers-panel-inner,
     .street-level-panel-inner,
     .global-context-panel-inner
   )
@@ -320,6 +327,7 @@
     .recent-imagery-panel-inner,
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
+    .map-layers-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -339,6 +347,7 @@
     .recent-imagery-panel-inner,
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
+    .map-layers-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -366,6 +375,7 @@
     .recent-imagery-panel-inner,
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
+    .map-layers-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -1805,6 +1815,7 @@
       #recent-imagery-panel,
       #time-travel-panel,
       #drone-plan-panel,
+      #map-layers-panel,
       #street-level-panel,
       #global-context-panel
     ):not(.collapsed) {

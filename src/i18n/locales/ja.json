@@ -2863,7 +2863,6 @@
   "Aerial": "航空写真",
   "Compare": "比較",
   "Compare with year (right side)": "年と比較（右側）",
-  "Map overlays": "地図オーバーレイ",
   "Raise layer": "レイヤーを上げる",
   "Lower layer": "レイヤーを下げる",
   "Height capped at {cap} above ground; you asked for {requested}": "対地高度を{cap}に制限しました。指定は{requested}でした",
@@ -3370,5 +3369,17 @@
   "UTILITIES": "ユーティリティ",
   "Exit cockpit to fly to a drawing": "描画の位置へ移動するにはコックピットを終了してください",
   "Directions, drawing and your own files": "ルート案内、描画、自分のファイル",
-  "Expand panel": "パネルを展開"
+  "Expand panel": "パネルを展開",
+  "Lakes and bays (depth)": "湖と湾（水深）",
+  "Topo maps": "地形図",
+  "Hillshade": "陰影起伏",
+  "Colour relief and terrain": "色別標高図と地形",
+  "Contour lines": "等高線",
+  "Rivers, floods and wetlands": "河川・洪水・湿地",
+  "Land, boundaries and geology": "土地・境界・地質",
+  "Map layers": "地図レイヤー",
+  "Search map layers": "地図レイヤーを検索",
+  "Aerial and historic imagery: open Time Travel": "航空写真と過去の画像：タイムトラベルを開く",
+  "No map layers match your search": "検索に一致する地図レイヤーはありません",
+  "MAP LAYERS": "地図レイヤー"
 }

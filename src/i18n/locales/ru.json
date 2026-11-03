@@ -3090,7 +3090,6 @@
   "Automatic stop is unavailable for this voice connection.": "Автоматическая остановка недоступна для этого голосового подключения.",
   "TIME TRAVEL": "ПУТЕШЕСТВИЕ ВО ВРЕМЕНИ",
   "Aerial (NAIP)": "Аэрофотосъёмка (NAIP)",
-  "Map overlays": "Слои карты",
   "Aerial": "Аэрофото",
   "Compare": "Сравнить",
   "Aerial imagery year": "Год аэрофотоснимков",
@@ -3607,5 +3606,17 @@
   "UTILITIES": "ИНСТРУМЕНТЫ",
   "Exit cockpit to fly to a drawing": "Выйдите из кабины, чтобы перелететь к рисунку",
   "Directions, drawing and your own files": "Маршруты, рисование и ваши файлы",
-  "Expand panel": "Развернуть панель"
+  "Expand panel": "Развернуть панель",
+  "Lakes and bays (depth)": "Озёра и заливы (глубина)",
+  "Topo maps": "Топографические карты",
+  "Hillshade": "Отмывка рельефа",
+  "Colour relief and terrain": "Цветной рельеф и местность",
+  "Contour lines": "Горизонтали",
+  "Rivers, floods and wetlands": "Реки, наводнения и водно-болотные угодья",
+  "Land, boundaries and geology": "Земли, границы и геология",
+  "Map layers": "Слои карты",
+  "Search map layers": "Поиск слоёв карты",
+  "Aerial and historic imagery: open Time Travel": "Аэро- и исторические снимки: открыть «Путешествие во времени»",
+  "No map layers match your search": "Нет слоёв карты, подходящих под запрос",
+  "MAP LAYERS": "СЛОИ КАРТЫ"
 }

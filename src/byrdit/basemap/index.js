@@ -19,6 +19,7 @@ import {
 import { createNaipMenuSlider, createNaipSplit } from './naipSlider.js';
 import { attachOverlays } from './overlays.js';
 import { createOverlaysMenuPanel } from './overlaysPanel.js';
+import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
 import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
 
 /**
@@ -189,7 +190,18 @@ export async function openBasemap({
               controller,
               session,
               overlays: config.overlays,
-              createPanel: createOverlaysMenuPanel,
+              // The NAIP / historic aerial year slider stays in Time Travel;
+              // the Map layers card links to it.
+              createPanel: (options) =>
+                createOverlaysMenuPanel({
+                  ...options,
+                  onOpenAerial: naip
+                    ? () =>
+                        ensureTimeTravelMenu(
+                          viewer?.container?.ownerDocument ?? undefined,
+                        )?.setOpen(true)
+                    : null,
+                }),
             })
           : null;
       const hookWindow = viewer?.container?.ownerDocument?.defaultView ?? null;

@@ -36,7 +36,6 @@ export const SECTIONS = Object.freeze([
   Object.freeze({ name: 'history', title: msg('History') }),
   Object.freeze({ name: 'imagery', title: msg('Imagery') }),
   Object.freeze({ name: 'aerial', title: msg('Aerial (NAIP)') }),
-  Object.freeze({ name: 'overlays', title: msg('Map overlays') }),
 ]);
 
 export const TIME_TRAVEL_CSS = `

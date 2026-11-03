@@ -2871,7 +2871,6 @@
   "Aerial": "航拍",
   "Compare": "比較",
   "Compare with year (right side)": "與年份比較（右側）",
-  "Map overlays": "地圖疊加層",
   "Raise layer": "上移圖層",
   "Lower layer": "下移圖層",
   "Height capped at {cap} above ground; you asked for {requested}": "對地高度已限制為 {cap}；要求的是 {requested}",
@@ -3370,5 +3369,17 @@
   "UTILITIES": "工具",
   "Exit cockpit to fly to a drawing": "請先退出座艙，再飛往繪製位置",
   "Directions, drawing and your own files": "路線導航、繪製和你自己的文件",
-  "Expand panel": "展開面板"
+  "Expand panel": "展開面板",
+  "Lakes and bays (depth)": "湖泊與海灣（水深）",
+  "Topo maps": "地形圖",
+  "Hillshade": "山體陰影",
+  "Colour relief and terrain": "彩色地勢與地形",
+  "Contour lines": "等高線",
+  "Rivers, floods and wetlands": "河流、洪水與濕地",
+  "Land, boundaries and geology": "土地、邊界與地質",
+  "Map layers": "地圖圖層",
+  "Search map layers": "搜尋地圖圖層",
+  "Aerial and historic imagery: open Time Travel": "航空與歷史影像：開啟時間旅行",
+  "No map layers match your search": "沒有符合搜尋的地圖圖層",
+  "MAP LAYERS": "地圖圖層"
 }

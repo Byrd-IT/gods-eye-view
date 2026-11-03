@@ -3073,7 +3073,6 @@
   "Aerial": "Аерофото",
   "Compare": "Порівняти",
   "Compare with year (right side)": "Порівняти з роком (правий бік)",
-  "Map overlays": "Накладання карти",
   "Raise layer": "Підняти шар",
   "Lower layer": "Опустити шар",
   "Height capped at {cap} above ground; you asked for {requested}": "Висоту обмежено до {cap} над землею; ви просили {requested}",
@@ -3607,5 +3606,17 @@
   "UTILITIES": "ІНСТРУМЕНТИ",
   "Exit cockpit to fly to a drawing": "Вийдіть із кабіни, щоб перелетіти до малюнка",
   "Directions, drawing and your own files": "Маршрути, малювання та ваші файли",
-  "Expand panel": "Розгорнути панель"
+  "Expand panel": "Розгорнути панель",
+  "Lakes and bays (depth)": "Озера та затоки (глибина)",
+  "Topo maps": "Топографічні карти",
+  "Hillshade": "Відмивка рельєфу",
+  "Colour relief and terrain": "Кольоровий рельєф і місцевість",
+  "Contour lines": "Горизонталі",
+  "Rivers, floods and wetlands": "Річки, повені та водно-болотні угіддя",
+  "Land, boundaries and geology": "Землі, межі та геологія",
+  "Map layers": "Шари карти",
+  "Search map layers": "Пошук шарів карти",
+  "Aerial and historic imagery: open Time Travel": "Аерознімки та історичні знімки: відкрити «Подорож у часі»",
+  "No map layers match your search": "Жоден шар карти не відповідає пошуку",
+  "MAP LAYERS": "ШАРИ КАРТИ"
 }

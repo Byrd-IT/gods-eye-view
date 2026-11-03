@@ -1,19 +1,28 @@
 import { t } from '../../i18n/index.js';
-import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
+import { ensureMapLayersCard } from './mapLayersCard.js';
 import { syncChipGroup } from '../../ui/chipGroup.js';
 import { createSlider } from '../../ui/slider.js';
+import {
+  ALL_OVERLAY_GROUPS,
+  groupOfOverlay,
+  overlayMatches,
+} from './overlayGroups.js';
 
 /**
- * Map overlays panel (BASEMAP M2 follow-up): one row per overlay with a
- * checkbox, an opacity range and raise/lower buttons; rows are listed top of
- * the stack first. Hosted in the Time travel card's "Map
- * overlays" section; floats bottom-left when no card can host it.
+ * Map layers panel (BASEMAP M2 follow-up): one row per overlay with a
+ * checkbox, an opacity range and raise/lower buttons. In the Map layers rail
+ * card (grouped) the rows sit in collapsible groups (Lakes, Topo, Hillshade
+ * ...) under a search box; elsewhere (and in tests) they are one flat list,
+ * top of the stack first. Floats bottom-left when no card can host it.
  * Plain DOM, text via textContent only.
  */
 
 export const OVERLAYS_PANEL_ID = 'gev-overlays-panel';
 
-// All look and layout is CSS (src/ui/styles/time-travel.css, .gev-ov-*) on the
+/** Groups that start expanded in the card; the others open on demand. */
+const DEFAULT_OPEN_GROUPS = Object.freeze(['lakes']);
+
+// All look and layout is CSS (src/ui/styles/map-layers.css, .gev-ov-*) on the
 // shared tokens; raise/lower are the shared .data-toggle-chip (chipGroup.js)
 // and the opacity range is the shared .gev-quantitative-slider (ui/slider.js).
 
@@ -28,7 +37,8 @@ function el(doc, tag, parent, { text, cls, attrs } = {}) {
 
 /**
  * @param {{container: object, state: {layers: object[]}, onEnabled: Function,
- *   onOpacity: Function, embedded?: boolean, doc?: object}} options
+ *   onOpacity: Function, onMove?: Function, embedded?: boolean,
+ *   grouped?: boolean, onOpenAerial?: Function|null, doc?: object}} options
  */
 export function createOverlaysPanel({
   container,
@@ -37,6 +47,8 @@ export function createOverlaysPanel({
   onOpacity,
   onMove = () => {},
   embedded = false,
+  grouped = false,
+  onOpenAerial = null,
   doc = container?.ownerDocument ?? globalThis.document,
 }) {
   if (!doc?.createElement || !container) return null;
@@ -44,17 +56,83 @@ export function createOverlaysPanel({
     attrs: {
       id: OVERLAYS_PANEL_ID,
       role: 'group',
-      'aria-label': t('Map overlays'),
+      'aria-label': t('Map layers'),
       ...(embedded ? { 'data-embedded': 'true' } : {}),
     },
     cls: embedded ? 'gev-ov-panel' : 'gev-ov-panel gev-ov-float',
   });
+
+  // ---- grouped chrome: search, aerial hint, empty note, group sections ----
+  const groups = new Map(); // group id -> {section, head, count, body, open, title}
+  let search = null;
+  let empty = null;
+  let query = '';
+  if (grouped) {
+    const bar = el(doc, 'div', panel, { cls: 'gev-ov-search' });
+    search = el(doc, 'input', bar, {
+      cls: 'gev-ov-search-input',
+      attrs: {
+        type: 'search',
+        'aria-label': t('Search map layers'),
+        placeholder: t('Search map layers'),
+        autocomplete: 'off',
+        spellcheck: 'false',
+      },
+    });
+    if (typeof onOpenAerial === 'function') {
+      const aerial = el(doc, 'button', panel, {
+        cls: 'data-toggle-chip gev-ov-aerial',
+        text: t('Aerial and historic imagery: open Time Travel'),
+        attrs: { type: 'button' },
+      });
+      aerial.addEventListener('click', () => onOpenAerial());
+    }
+    empty = el(doc, 'p', panel, {
+      cls: 'gev-ov-empty',
+      text: t('No map layers match your search'),
+      attrs: { role: 'status' },
+    });
+    empty.hidden = true;
+    for (const group of ALL_OVERLAY_GROUPS) {
+      const section = el(doc, 'section', panel, {
+        cls: 'gev-ov-group',
+        attrs: { 'data-group': group.id },
+      });
+      const title = t(group.title);
+      const head = el(doc, 'button', section, {
+        cls: 'gev-ov-group-head',
+        attrs: { type: 'button', 'aria-expanded': 'false' },
+      });
+      el(doc, 'span', head, { cls: 'gev-ov-group-title', text: title });
+      const count = el(doc, 'span', head, { cls: 'gev-ov-group-count' });
+      const body = el(doc, 'div', section, { cls: 'gev-ov-group-body' });
+      const entry = {
+        section,
+        head,
+        count,
+        body,
+        title,
+        open: DEFAULT_OPEN_GROUPS.includes(group.id),
+        rows: 0,
+      };
+      head.addEventListener('click', () => {
+        entry.open = !entry.open;
+        applyView();
+      });
+      groups.set(group.id, entry);
+    }
+  }
+
   const rows = new Map();
+  const rowGroup = new Map(); // layer id -> group id
   for (const layer of state.layers) {
-    const row = el(doc, 'div', panel, {
+    const groupId = groupOfOverlay(layer.id).id;
+    rowGroup.set(layer.id, groupId);
+    const row = el(doc, 'div', grouped ? groups.get(groupId).body : panel, {
       cls: 'gev-ov-row',
       attrs: { 'data-overlay': layer.id },
     });
+    if (grouped) groups.get(groupId).rows += 1;
     const head = el(doc, 'div', row, { cls: 'gev-ov-head' });
     const label = el(doc, 'label', head, {
       text: ` ${layer.name}`,
@@ -103,8 +181,54 @@ export function createOverlaysPanel({
     range.addEventListener('input', () =>
       onOpacity(layer.id, Number(range.value) / 100),
     );
-    rows.set(layer.id, { row, box, range, out, up, down });
+    rows.set(layer.id, {
+      row,
+      box,
+      range,
+      out,
+      up,
+      down,
+      layer,
+      on: Boolean(layer.enabled),
+    });
   }
+
+  /** Search + expand state -> row / group visibility and the group counts. */
+  function applyView() {
+    if (!grouped) return;
+    const searching = query.trim() !== '';
+    let shown = 0;
+    for (const [groupId, entry] of groups) {
+      let matches = 0;
+      let on = 0;
+      for (const [id, r] of rows) {
+        if (rowGroup.get(id) !== groupId) continue;
+        const hit = overlayMatches(r.layer, entry.title, query);
+        r.row.hidden = !hit;
+        if (hit) matches += 1;
+        if (r.on) on += 1;
+      }
+      shown += matches;
+      entry.section.hidden = entry.rows === 0 || matches === 0;
+      const expanded = searching ? matches > 0 : entry.open;
+      entry.body.hidden = !expanded;
+      entry.head.setAttribute('aria-expanded', String(expanded));
+      entry.count.textContent = on
+        ? `${on}/${entry.rows}`
+        : searching
+          ? `${matches}`
+          : `${entry.rows}`;
+    }
+    empty.hidden = shown > 0 || !rows.size;
+  }
+  if (grouped) {
+    search.addEventListener('input', () => {
+      query = String(search.value ?? '');
+      applyView();
+    });
+    applyView();
+  }
+
   container.append(panel);
   let shownOrder = state.layers.map((layer) => layer.id).join();
   const api = {
@@ -118,13 +242,17 @@ export function createOverlaysPanel({
         nextOrder.join() !== shownOrder
       ) {
         shownOrder = nextOrder.join();
-        for (const id of nextOrder) panel.append(rows.get(id).row);
+        for (const id of nextOrder)
+          (grouped ? groups.get(rowGroup.get(id)).body : panel).append(
+            rows.get(id).row,
+          );
       }
       next.layers.forEach((layer, index) => {
         const row = rows.get(layer.id);
         if (!row) return;
         const pct = Math.round(layer.opacity * 100);
-        row.box.checked = Boolean(layer.enabled);
+        row.on = Boolean(layer.enabled);
+        row.box.checked = row.on;
         row.range.value = String(pct);
         row.range.disabled = !layer.enabled;
         row.range.setAttribute('aria-valuetext', `${pct}%`);
@@ -134,9 +262,10 @@ export function createOverlaysPanel({
           row.down.disabled = index === nextOrder.length - 1;
         }
       });
+      applyView();
     },
     setVisible(visible) {
-      panel.hidden = !visible; // .gev-ov-panel[hidden] in time-travel.css
+      panel.hidden = !visible; // .gev-ov-panel[hidden] in map-layers.css
     },
     destroy() {
       panel.remove();
@@ -146,23 +275,32 @@ export function createOverlaysPanel({
   return api;
 }
 
-/** createPanel for attachOverlays(): the Time travel card's section, else float. */
+/**
+ * createPanel for attachOverlays(): the Map layers rail card, else float.
+ * `onOpenAerial` (optional) adds the "open Time Travel" shortcut for the
+ * NAIP / historic aerial year slider, which stays in the Time Travel card.
+ */
 export function createOverlaysMenuPanel(
   options,
-  { ensureMenu = ensureTimeTravelMenu, create = createOverlaysPanel } = {},
+  { ensureCard = ensureMapLayersCard, create = createOverlaysPanel } = {},
 ) {
   const doc =
     options.doc ?? options.container?.ownerDocument ?? globalThis.document;
-  const menu = ensureMenu(doc);
-  const host = menu?.slot('overlays') ?? null;
-  if (!host) return create(options);
-  const panel = create({ ...options, container: host, embedded: true, doc });
+  const card = ensureCard(doc);
+  if (!card) return create(options);
+  const panel = create({
+    ...options,
+    container: card.body,
+    embedded: true,
+    grouped: true,
+    doc,
+  });
   if (!panel) return null;
   let claimed = false;
   const release = () => {
     if (!claimed) return;
     claimed = false;
-    menu.release('overlays');
+    card.hide();
   };
   return {
     element: panel.element,
@@ -171,7 +309,7 @@ export function createOverlaysMenuPanel(
       panel.setVisible(visible);
       if (visible && !claimed) {
         claimed = true;
-        menu.claim('overlays');
+        card.show();
       } else if (!visible) release();
     },
     destroy() {

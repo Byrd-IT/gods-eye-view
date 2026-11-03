@@ -161,7 +161,8 @@ body.mobile-shell #right-context-rail > *,
 body.mobile-shell #right-context-rail > #weather-panel,
 body.mobile-shell #right-context-rail > #recent-imagery-panel,
 body.mobile-shell #right-context-rail > #time-travel-panel,
-body.mobile-shell #right-context-rail > #drone-plan-panel {
+body.mobile-shell #right-context-rail > #drone-plan-panel ,
+body.mobile-shell #right-context-rail > #map-layers-panel {
   display: none;
 }
 
@@ -193,6 +194,9 @@ body.mobile-shell[data-mobile-sheet='context']
 body.mobile-shell[data-mobile-sheet='context']
   #right-context-rail
   > #drone-plan-panel:not([hidden]),
+body.mobile-shell[data-mobile-sheet='context']
+  #right-context-rail
+  > #map-layers-panel:not([hidden]),
 body.mobile-shell[data-mobile-sheet='more'] #right-context-rail > #pp-toggles {
   position: relative;
   inset: auto;
@@ -211,7 +215,10 @@ body.mobile-shell[data-mobile-sheet='context']
   > #time-travel-panel:not([hidden]),
 body.mobile-shell[data-mobile-sheet='context']
   #right-context-rail
-  > #drone-plan-panel:not([hidden]) {
+  > #drone-plan-panel:not([hidden]),
+body.mobile-shell[data-mobile-sheet='context']
+  #right-context-rail
+  > #map-layers-panel:not([hidden]) {
   flex: 0 0 auto;
 }
 

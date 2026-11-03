@@ -2933,7 +2933,6 @@
   "Aerial": "Luftbild",
   "Compare": "Vergleichen",
   "Compare with year (right side)": "Mit Jahr vergleichen (rechte Seite)",
-  "Map overlays": "Karten-Overlays",
   "Raise layer": "Ebene anheben",
   "Lower layer": "Ebene absenken",
   "Height capped at {cap} above ground; you asked for {requested}": "Höhe auf {cap} über Grund begrenzt; angefordert waren {requested}",
@@ -3449,5 +3448,17 @@
   "UTILITIES": "WERKZEUGE",
   "Exit cockpit to fly to a drawing": "Cockpit verlassen, um zu einer Zeichnung zu fliegen",
   "Directions, drawing and your own files": "Route, Zeichnen und eigene Dateien",
-  "Expand panel": "Bereich ausklappen"
+  "Expand panel": "Bereich ausklappen",
+  "Lakes and bays (depth)": "Seen und Buchten (Tiefe)",
+  "Topo maps": "Topografische Karten",
+  "Hillshade": "Schummerung",
+  "Colour relief and terrain": "Farbreliefs und Gelände",
+  "Contour lines": "Höhenlinien",
+  "Rivers, floods and wetlands": "Flüsse, Hochwasser und Feuchtgebiete",
+  "Land, boundaries and geology": "Land, Grenzen und Geologie",
+  "Map layers": "Kartenebenen",
+  "Search map layers": "Kartenebenen suchen",
+  "Aerial and historic imagery: open Time Travel": "Luft- und historische Bilder: Zeitreise öffnen",
+  "No map layers match your search": "Keine Kartenebene passt zur Suche",
+  "MAP LAYERS": "KARTENEBENEN"
 }

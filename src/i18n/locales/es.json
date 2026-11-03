@@ -3020,7 +3020,6 @@
   "Automatic stop is unavailable for this voice connection.": "La parada automática no está disponible para esta conexión de voz.",
   "TIME TRAVEL": "VIAJE EN EL TIEMPO",
   "Aerial (NAIP)": "Aérea (NAIP)",
-  "Map overlays": "Capas del mapa",
   "Aerial": "Aérea",
   "Compare": "Comparar",
   "Aerial imagery year": "Año de las imágenes aéreas",
@@ -3528,5 +3527,17 @@
   "UTILITIES": "UTILIDADES",
   "Exit cockpit to fly to a drawing": "Sal de la cabina para volar a un dibujo",
   "Directions, drawing and your own files": "Indicaciones, dibujo y tus propios archivos",
-  "Expand panel": "Expandir panel"
+  "Expand panel": "Expandir panel",
+  "Lakes and bays (depth)": "Lagos y bahías (profundidad)",
+  "Topo maps": "Mapas topográficos",
+  "Hillshade": "Sombreado del relieve",
+  "Colour relief and terrain": "Relieve en color y terreno",
+  "Contour lines": "Curvas de nivel",
+  "Rivers, floods and wetlands": "Ríos, inundaciones y humedales",
+  "Land, boundaries and geology": "Terreno, límites y geología",
+  "Map layers": "Capas del mapa",
+  "Search map layers": "Buscar capas del mapa",
+  "Aerial and historic imagery: open Time Travel": "Imágenes aéreas e históricas: abrir Viaje en el tiempo",
+  "No map layers match your search": "Ninguna capa del mapa coincide con la búsqueda",
+  "MAP LAYERS": "CAPAS DEL MAPA"
 }

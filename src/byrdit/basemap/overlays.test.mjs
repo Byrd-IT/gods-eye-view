@@ -9,6 +9,9 @@ import {
   drawVectorTile,
 } from './overlaysVector.js';
 import { createOverlaysPanel, createOverlaysMenuPanel } from './overlaysPanel.js';
+import { ensureMapLayersCard } from './mapLayersCard.js';
+import { ALL_OVERLAY_GROUPS, groupOfOverlay, overlayMatches } from './overlayGroups.js';
+import { LIVE_OVERLAY_LAYERS } from './fixtures/overlayManifest.mjs';
 import { BYRDIT_OPEN_STACK_ID } from './stack.js';
 
 const OVERLAYS = normalizeOverlays(composeOverlays(OVERLAYS_PUBLISH).browser);
@@ -479,25 +482,173 @@ test('panel: styled by shared classes (chips, slider, value), no inline style, n
   assert.match(floated.element.className, /\bgev-ov-float\b/);
 });
 
-test('panel: hosted in the menu slot when there is one, claimed only while visible', () => {
+test("map layers card: adopted by id, shown and hidden, null without the static card", () => {
+  const root = { hidden: true, classList: { contains: (c) => c === "collapsed" } };
+  const body = {};
+  const doc = { getElementById: (id) => ({ "map-layers-panel": root, "gev-map-layers-body": body })[id] ?? null };
+  const card = ensureMapLayersCard(doc);
+  assert.equal(card.root, root);
+  assert.equal(card.body, body);
+  card.show();
+  assert.equal(root.hidden, false);
+  card.hide();
+  assert.equal(root.hidden, true);
+  assert.equal(card.isOpen(), false, "collapsed launcher");
+  assert.equal(ensureMapLayersCard({ getElementById: () => null }), null);
+  assert.equal(ensureMapLayersCard({}), null);
+  assert.equal(ensureMapLayersCard(null), null);
+});
+
+test("panel: hosted in the Map layers card when there is one, shown only while visible", () => {
   const log = [];
-  const slot = {};
-  const menu = { slot: (n) => (n === 'overlays' ? slot : null), claim: (n) => log.push(['claim', n]), release: (n) => log.push(['release', n]) };
-  const inner = { element: {}, update() {}, setVisible() {}, destroy() { log.push(['destroy']); } };
+  const body = {};
+  const card = { body, show: () => log.push(["show"]), hide: () => log.push(["hide"]) };
+  const inner = { element: {}, update() {}, setVisible() {}, destroy() { log.push(["destroy"]); } };
   let seen;
-  const panel = createOverlaysMenuPanel({ container: {}, doc: {} }, { ensureMenu: () => menu, create: (o) => ((seen = o), inner) });
-  assert.equal(seen.container, slot);
+  const panel = createOverlaysMenuPanel({ container: {}, doc: {} }, { ensureCard: () => card, create: (o) => ((seen = o), inner) });
+  assert.equal(seen.container, body);
   assert.equal(seen.embedded, true);
+  assert.equal(seen.grouped, true);
   panel.setVisible(true);
   panel.setVisible(true);
   panel.setVisible(false);
   panel.setVisible(true);
   panel.destroy();
-  assert.deepEqual(log, [['claim', 'overlays'], ['release', 'overlays'], ['claim', 'overlays'], ['release', 'overlays'], ['destroy']]);
-  // no card: floats
+  assert.deepEqual(log, [["show"], ["hide"], ["show"], ["hide"], ["destroy"]]);
+  // no card: floats, flat list
   let floated;
-  createOverlaysMenuPanel({ container: {}, doc: {} }, { ensureMenu: () => null, create: (o) => ((floated = o), inner) });
+  createOverlaysMenuPanel({ container: {}, doc: {} }, { ensureCard: () => null, create: (o) => ((floated = o), inner) });
   assert.equal(floated.embedded, undefined);
+  assert.equal(floated.grouped, undefined);
+});
+
+test("groups: every live overlay lands in a named group, Lakes holds all lake and bay depth layers", () => {
+  const byGroup = new Map();
+  for (const [id] of LIVE_OVERLAY_LAYERS) {
+    const g = groupOfOverlay(id).id;
+    byGroup.set(g, [...(byGroup.get(g) ?? []), id]);
+  }
+  assert.equal(LIVE_OVERLAY_LAYERS.length, 63);
+  assert.equal(byGroup.get("other"), undefined, "nothing falls into Other");
+  assert.deepEqual(byGroup.get("lakes").sort(), ["gc-bay-depth", "lake-depth", "r1a-lake-depth", "r1b-lake-depth", "r2a-lake-depth", "r2b-lake-depth", "rm-lake-depth"]);
+  assert.equal(groupOfOverlay("ustopo-wu").id, "topo");
+  assert.equal(groupOfOverlay("rm-hillshade").id, "hillshade");
+  assert.equal(groupOfOverlay("terrain-rgb-wu").id, "relief");
+  assert.equal(groupOfOverlay("r2a-relief").id, "relief");
+  assert.equal(groupOfOverlay("gc-contours").id, "contours");
+  assert.equal(groupOfOverlay("wetlands").id, "water");
+  assert.equal(groupOfOverlay("parcels").id, "land");
+  assert.equal(groupOfOverlay("brand-new-layer").id, "other");
+  assert.equal(ALL_OVERLAY_GROUPS[0].id, "lakes", "Lakes is listed first");
+  assert.equal(ALL_OVERLAY_GROUPS.at(-1).id, "other");
+  const total = [...byGroup.values()].reduce((n, ids) => n + ids.length, 0);
+  assert.equal(total, 63);
+});
+
+test("search: every word must match name, id or group title; empty matches all", () => {
+  const layer = { id: "r1a-lake-depth", name: "TWDB lake depth contours (R1A)" };
+  assert.equal(overlayMatches(layer, "Lakes", ""), true);
+  assert.equal(overlayMatches(layer, "Lakes", "  "), true);
+  assert.equal(overlayMatches(layer, "Lakes", "LAKE"), true);
+  assert.equal(overlayMatches(layer, "Lakes", "twdb r1a"), true);
+  assert.equal(overlayMatches(layer, "Lakes", "twdb hillshade"), false);
+  assert.equal(overlayMatches({ id: "x", name: "X" }, "Lakes and bays", "bays"), true, "group title counts");
+});
+
+function groupedPanel(extra = {}) {
+  const calls = [];
+  const layers = LIVE_OVERLAY_LAYERS.map(([id, name]) => ({ id, name, enabled: false, opacity: 0.8 }));
+  const panel = createOverlaysPanel({
+    container: new Node("div"), doc: fakeDoc(), state: { layers }, grouped: true, embedded: true,
+    onEnabled: (id, on) => calls.push(["on", id, on]),
+    onOpacity: (id, v) => calls.push(["op", id, v]),
+    onMove: (id, d) => calls.push(["move", id, d]),
+    ...extra,
+  });
+  const group = (id) => panel.element.find((n) => n.attrs["data-group"] === id)[0];
+  const visibleRows = (g) => group(g).find((n) => n.attrs["data-overlay"] && !n.hidden).map((n) => n.attrs["data-overlay"]);
+  return { panel, calls, layers, group, visibleRows };
+}
+
+test("grouped panel: Lakes open first, other groups collapsed, 63 rows, search box", () => {
+  const { panel, group, visibleRows } = groupedPanel();
+  assert.equal(panel.element.find((n) => n.attrs["data-overlay"]).length, 63);
+  assert.equal(panel.element.find((n) => n.attrs.type === "search").length, 1);
+  const order = panel.element.find((n) => n.attrs["data-group"]).map((n) => n.attrs["data-group"]);
+  assert.deepEqual(order, ["lakes", "topo", "hillshade", "relief", "contours", "water", "land", "other"]);
+  assert.equal(group("lakes").find((n) => n.tag === "div" && /gev-ov-group-body/.test(n.className))[0].hidden, false);
+  assert.equal(group("topo").find((n) => /gev-ov-group-body/.test(n.className))[0].hidden, true);
+  assert.equal(group("lakes").find((n) => /gev-ov-group-head/.test(n.className))[0].attrs["aria-expanded"], "true");
+  assert.equal(group("topo").find((n) => /gev-ov-group-head/.test(n.className))[0].attrs["aria-expanded"], "false");
+  assert.equal(group("other").hidden, true, "an empty group is not listed");
+  assert.equal(visibleRows("lakes").length, 7);
+  assert.equal(group("lakes").find((n) => /gev-ov-group-count/.test(n.className))[0].textContent, "7");
+});
+
+test("grouped panel: group heads open and close; toggles, opacity and raise/lower still call back", () => {
+  const { panel, calls, group } = groupedPanel();
+  const head = (g) => group(g).find((n) => /gev-ov-group-head/.test(n.className))[0];
+  const body = (g) => group(g).find((n) => /gev-ov-group-body/.test(n.className))[0];
+  head("topo").listeners.click();
+  assert.equal(body("topo").hidden, false);
+  assert.equal(head("topo").attrs["aria-expanded"], "true");
+  head("topo").listeners.click();
+  assert.equal(body("topo").hidden, true);
+  const lake = panel.element.find((n) => n.attrs["data-overlay"] === "lake-depth")[0];
+  const box = lake.find((n) => n.attrs.type === "checkbox")[0];
+  box.checked = true;
+  box.listeners.change();
+  const range = lake.find((n) => n.attrs.type === "range")[0];
+  range.value = "40";
+  range.listeners.input();
+  lake.find((n) => n.attrs["data-move"] === "up")[0].listeners.click();
+  assert.deepEqual(calls, [["on", "lake-depth", true], ["op", "lake-depth", 0.4], ["move", "lake-depth", "up"]]);
+});
+
+test("grouped panel: search filters rows, opens matching groups, shows a note when nothing matches", () => {
+  const { panel, group, visibleRows } = groupedPanel();
+  const input = panel.element.find((n) => n.attrs.type === "search")[0];
+  const empty = panel.element.find((n) => /gev-ov-empty/.test(n.className))[0];
+  const type = (v) => { input.value = v; input.listeners.input(); };
+  type("lake");
+  assert.equal(visibleRows("lakes").length, 7);
+  assert.equal(group("topo").hidden, true, "no lake in Topo");
+  assert.equal(empty.hidden, true);
+  type("hillshade 1 m lidar");
+  assert.ok(visibleRows("hillshade").length >= 7);
+  assert.equal(group("lakes").hidden, true);
+  assert.equal(group("hillshade").find((n) => /gev-ov-group-body/.test(n.className))[0].hidden, false, "a matching group opens while searching");
+  type("r1a");
+  assert.ok(visibleRows("lakes").includes("r1a-lake-depth"));
+  assert.equal(visibleRows("lakes").length, 1);
+  type("zzz-no-such-layer");
+  assert.equal(empty.hidden, false);
+  type("");
+  assert.equal(empty.hidden, true);
+  assert.equal(visibleRows("lakes").length, 7);
+  assert.equal(group("topo").find((n) => /gev-ov-group-body/.test(n.className))[0].hidden, true, "back to the collapsed default");
+});
+
+test("grouped panel: counts show enabled layers; rows reorder inside their group", () => {
+  const { panel, layers, group, visibleRows } = groupedPanel();
+  const next = layers.map((l) => (l.id === "lake-depth" ? { ...l, enabled: true } : l));
+  panel.update({ layers: next });
+  assert.equal(group("lakes").find((n) => /gev-ov-group-count/.test(n.className))[0].textContent, "1/7");
+  // lift r1b-lake-depth to the top of the whole stack: it leads its group
+  const reordered = [next.find((l) => l.id === "r1b-lake-depth"), ...next.filter((l) => l.id !== "r1b-lake-depth")];
+  panel.update({ layers: reordered });
+  // the fake DOM append does not move a node, so read the tail like the flat test
+  assert.equal(visibleRows("lakes").slice(-7)[0], "r1b-lake-depth");
+  assert.equal(panel.element.find((n) => n.attrs["data-overlay"] === "r1b-lake-depth")[0].find((n) => n.attrs["data-move"] === "up")[0].disabled, true);
+});
+
+test("grouped panel: the aerial shortcut appears only when given and calls back", () => {
+  assert.equal(groupedPanel().panel.element.find((n) => /gev-ov-aerial/.test(n.className)).length, 0);
+  let opened = 0;
+  const { panel } = groupedPanel({ onOpenAerial: () => { opened += 1; } });
+  const [btn] = panel.element.find((n) => /gev-ov-aerial/.test(n.className));
+  btn.listeners.click();
+  assert.equal(opened, 1);
 });
 
 test('vector: a real gzipped TWDB lake-depth tile (z15 7678/13211) decodes and draws depth labels', async () => {

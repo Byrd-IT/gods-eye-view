@@ -3228,7 +3228,6 @@
   "Aerial": "صور جوية",
   "Compare": "مقارنة",
   "Compare with year (right side)": "مقارنة مع السنة (الجانب الأيمن)",
-  "Map overlays": "تراكبات الخريطة",
   "Raise layer": "رفع الطبقة",
   "Lower layer": "خفض الطبقة",
   "Height capped at {cap} above ground; you asked for {requested}": "الارتفاع مُقيَّد عند {cap} فوق الأرض؛ طلبت {requested}",
@@ -3765,5 +3764,17 @@
   "Control history": "التحكم في السجل",
   "Control sky": "التحكم في السماء",
   "Control imagery": "التحكم في المرئيات",
-  "Control drone plan": "التحكم في خطة الطيران"
+  "Control drone plan": "التحكم في خطة الطيران",
+  "Lakes and bays (depth)": "البحيرات والخلجان (العمق)",
+  "Topo maps": "الخرائط الطبوغرافية",
+  "Hillshade": "التظليل التضاريسي",
+  "Colour relief and terrain": "التضاريس الملونة والأرض",
+  "Contour lines": "خطوط الكنتور",
+  "Rivers, floods and wetlands": "الأنهار والفيضانات والأراضي الرطبة",
+  "Land, boundaries and geology": "الأراضي والحدود والجيولوجيا",
+  "Map layers": "طبقات الخريطة",
+  "Search map layers": "البحث في طبقات الخريطة",
+  "Aerial and historic imagery: open Time Travel": "صور جوية وتاريخية: افتح السفر عبر الزمن",
+  "No map layers match your search": "لا توجد طبقة خريطة تطابق بحثك",
+  "MAP LAYERS": "طبقات الخريطة"
 }

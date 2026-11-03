@@ -3391,6 +3391,8 @@
       "src/byrdit/basemap/overlays.js",
       "src/byrdit/basemap/overlaysConfig.js",
       "src/byrdit/basemap/overlaysPanel.js",
+      "src/byrdit/basemap/overlayGroups.js",
+      "src/byrdit/basemap/mapLayersCard.js",
       "src/byrdit/basemap/overlaysVector.js",
       "src/i18n/index.js",
       "src/i18n/locale.js",
