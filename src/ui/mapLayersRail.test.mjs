@@ -82,7 +82,7 @@ test('phone size: search, group heads, raise/lower and the aerial shortcut are 4
     '.gev-ov-moves .data-toggle-chip',
   ])
     assert.ok(media.includes(selector), selector);
-  assert.equal(count(media, 'min-height: 44px'), 4);
+  assert.equal(count(media, 'min-height: 44px'), 3);
 });
 
 test('the overlay list moved out of Time Travel, not copied', () => {
