@@ -45,7 +45,7 @@ import { makeZip } from './zip.js';
 import { cameraChecklistLines } from './cameraSettings.js';
 import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
 import {
-  flightCodePadded,
+  flightCode,
   flightFileName,
   flightTitle,
   hasLabel,
@@ -591,7 +591,7 @@ export function bundleEntries(result, opts = {}) {
         }
       }
       labelFlights.push({
-        code: flightCodePadded(label.no, flight, flightTotal),
+        code: flightCode(label.no, flight, flightTotal),
         title: flightTitle(label, flight, flightTotal),
         file: `${folder}${file}`,
         uuid,

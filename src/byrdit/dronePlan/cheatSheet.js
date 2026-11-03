@@ -128,7 +128,9 @@ export function labelReadmeLines(flights) {
         `  ${f.code.padEnd(6)} ${f.title}\n         file: ${f.file}${f.uuid ? `\n         controller folder: waypoint/${f.uuid}/${f.uuid}.kmz` : ''}${f.preview ? `\n         picture: ${f.preview}` : ''}`,
     ),
     'DJI Fly takes the NAME from the placeholder mission, not from the KMZ, and',
-    'keeps the old list picture until the mission is opened.',
+    'keeps the old list picture until the mission is opened. DJI Mission Installer',
+    '(Windows) writes a new list picture with the KMZ FILE NAME on it, so the M??',
+    'file names above show up on the controller picture.',
     '',
   ];
 }
