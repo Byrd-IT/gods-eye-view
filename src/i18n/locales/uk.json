@@ -3437,7 +3437,6 @@
   "Control drone plan": "Керувати планом польоту",
   "DRONE FLIGHT PLAN": "ПЛАН ПОЛЬОТУ БЕЗПІЛОТНИКА",
   "Drone Flight Plan": "План польоту безпілотника",
-  "Clean view: hide the controls (V)": "Чистий вигляд: сховати елементи керування (V)",
   "{count} orbit rings were made wider so the viewing angle holds above the obstacle or roof": "{count} кілець орбіти розширено, щоб кут огляду залишався вище перешкоди або даху",
   "{count} orbit rings could not keep their viewing angle under the {cap} height limit": "{count} кілець орбіти не змогли зберегти кут огляду під обмеженням висоти {cap}",
   "The blocked sector of {label} leaves no open arc to fly": "Заблокований сектор {label} не залишає відкритої дуги для польоту",

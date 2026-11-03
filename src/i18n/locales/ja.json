@@ -3227,7 +3227,6 @@
   "Control drone plan": "ドローン計画を操作",
   "DRONE FLIGHT PLAN": "ドローン飛行計画",
   "Drone Flight Plan": "ドローン飛行計画",
-  "Clean view: hide the controls (V)": "クリーンビュー: 操作を隠す (V)",
   "{count} orbit rings were made wider so the viewing angle holds above the obstacle or roof": "{count} 個のオービットリングを広げ、障害物や屋根の上で視角を保つようにしました",
   "{count} orbit rings could not keep their viewing angle under the {cap} height limit": "{count} 個のオービットリングは、高度上限 {cap} の下では視角を保てませんでした",
   "The blocked sector of {label} leaves no open arc to fly": "{label} の遮断セクターには、飛行できる開いた弧が残っていません",

@@ -3367,7 +3367,6 @@
   "Control drone plan": "Controlla il piano drone",
   "DRONE FLIGHT PLAN": "PIANO DI VOLO DRONE",
   "Drone Flight Plan": "Piano di volo drone",
-  "Clean view: hide the controls (V)": "Vista pulita: nascondi i comandi (V)",
   "{count} orbit rings were made wider so the viewing angle holds above the obstacle or roof": "{count} anelli di orbita sono stati allargati perché l'angolo di visuale resti sopra l'ostacolo o il tetto",
   "{count} orbit rings could not keep their viewing angle under the {cap} height limit": "{count} anelli di orbita non hanno potuto mantenere l'angolo di visuale entro il limite di altezza di {cap}",
   "The blocked sector of {label} leaves no open arc to fly": "Il settore bloccato di {label} non lascia alcun arco aperto da percorrere",

@@ -3235,7 +3235,6 @@
   "Control drone plan": "控制無人機計劃",
   "DRONE FLIGHT PLAN": "無人機飛行計劃",
   "Drone Flight Plan": "無人機飛行計劃",
-  "Clean view: hide the controls (V)": "純淨界面：隱藏控件 (V)",
   "{count} orbit rings were made wider so the viewing angle holds above the obstacle or roof": "已加寬 {count} 個環繞圈，使視角保持在障礙物或屋頂之上",
   "{count} orbit rings could not keep their viewing angle under the {cap} height limit": "{count} 個環繞圈在 {cap} 的高度限制下無法保持其視角",
   "The blocked sector of {label} leaves no open arc to fly": "{label} 的封鎖扇區沒有留下可飛行的開放弧段",

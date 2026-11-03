@@ -3297,7 +3297,6 @@
   "Control drone plan": "Drohnenplan steuern",
   "DRONE FLIGHT PLAN": "DROHNENFLUGPLAN",
   "Drone Flight Plan": "Drohnenflugplan",
-  "Clean view: hide the controls (V)": "Klare Ansicht: Steuerelemente ausblenden (V)",
   "{count} orbit rings were made wider so the viewing angle holds above the obstacle or roof": "{count} Orbitringe wurden erweitert, damit der Blickwinkel über dem Hindernis oder Dach erhalten bleibt",
   "{count} orbit rings could not keep their viewing angle under the {cap} height limit": "{count} Orbitringe konnten ihren Blickwinkel unter der Höhengrenze von {cap} nicht halten",
   "The blocked sector of {label} leaves no open arc to fly": "Der gesperrte Sektor von {label} lässt keinen offenen Bogen zum Fliegen übrig",
