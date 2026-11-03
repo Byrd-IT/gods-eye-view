@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { t } from '../../i18n/index.js';
 import { createOpacityRow } from '../../byrdit/layerOpacity/opacityRow.js';
 
@@ -13,7 +13,10 @@ const props = defineProps({
 });
 const host = ref(null);
 let control = null;
-onMounted(() => {
+function build() {
+  control?.dispose();
+  control = null;
+  host.value?.replaceChildren();
   if (!props.model || !host.value) return;
   control = createOpacityRow({
     documentRef: host.value.ownerDocument,
@@ -23,7 +26,10 @@ onMounted(() => {
     translate: (text) => t(text),
   });
   host.value.append(control.element);
-});
+}
+onMounted(build);
+// Rebuild when the row's inputs change (new model, relabel on a language switch).
+watch(() => [props.model, props.layerId, props.label], build);
 onBeforeUnmount(() => control?.dispose());
 </script>
 
