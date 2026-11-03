@@ -10,7 +10,7 @@ test('the Drone Flight Plan card is a collapsed top-level rail launcher', () => 
   const context = read('src/ui/views/ContextView.vue');
   const tag = context.match(/<RailPanel\s+id="drone-plan-panel"[^>]*>/)?.[0] ?? '';
   assert.match(tag, /start-collapsed/);
-  assert.doesNotMatch(tag, /hidden/, 'always present on the rail');
+  assert.doesNotMatch(tag, /\bhidden\b/, 'always present on the rail');
   assert.match(context, /id="drone-plan-panel-body"/);
   assert.ok(
     context.indexOf('id="time-travel-panel"') <

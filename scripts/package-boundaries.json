@@ -498,7 +498,8 @@
       "src/i18n/marker.js",
       "src/sources/rateLimit.js",
       "server/providers/common/same-site.js",
-      "src/localRequestGate.mjs"
+      "src/localRequestGate.mjs",
+      "server/byrdit/trustedProxy.js"
     ],
     "external": []
   },
@@ -536,7 +537,8 @@
       "src/localRequestGate.mjs",
       "src/data/adminBoundaries.js",
       "src/data/placeNames.js",
-      "src/sources/featureGeometry.js"
+      "src/sources/featureGeometry.js",
+      "server/byrdit/trustedProxy.js"
     ],
     "external": []
   },
@@ -726,9 +728,9 @@
       "src/ui/slider.js",
       "src/ui/chipGroup.js",
       "src/ui/combinedRows.js",
-      "src/ui/rowList.js",
       "src/ui/layerRowText.js",
       "src/ui/layerPanel/LayerRows.vue",
+      "src/ui/layerPanel/OpacityHost.vue",
       "src/ui/rail/classToggle.js",
       "src/ui/rail/focusSafeChildren.js",
       "src/ui/layerPanel/RowText.vue",
@@ -1126,7 +1128,6 @@
       "src/ui/contextTransactions.js",
       "src/ui/displayControls.js",
       "src/ui/cleanViewEye.js",
-      "src/ui/segmentedControl.js",
       "src/ui/effects.js",
       "src/ui/frameRateMonitor.js",
       "src/ui/layerPanel.js",
@@ -1135,9 +1136,9 @@
       "src/ui/railCardBlocks.js",
       "src/ui/chipGroup.js",
       "src/ui/combinedRows.js",
-      "src/ui/rowList.js",
       "src/ui/layerRowText.js",
       "src/ui/layerPanel/LayerRows.vue",
+      "src/ui/layerPanel/OpacityHost.vue",
       "src/ui/rail/classToggle.js",
       "src/ui/rail/focusSafeChildren.js",
       "src/ui/layerPanel/RowText.vue",
@@ -1267,7 +1268,6 @@
       "src/ui/i18n.js"
     ],
     "external": [
-      "external",
       "cesium",
       "satellite.js",
       "astronomy-engine",
@@ -3029,7 +3029,6 @@
       "src/ui/contextTransactions.js",
       "src/ui/displayControls.js",
       "src/ui/cleanViewEye.js",
-      "src/ui/segmentedControl.js",
       "src/ui/effects.js",
       "src/ui/frameRateMonitor.js",
       "src/ui/layerPanel.js",
@@ -3038,9 +3037,9 @@
       "src/ui/railCardBlocks.js",
       "src/ui/chipGroup.js",
       "src/ui/combinedRows.js",
-      "src/ui/rowList.js",
       "src/ui/layerRowText.js",
       "src/ui/layerPanel/LayerRows.vue",
+      "src/ui/layerPanel/OpacityHost.vue",
       "src/ui/rail/classToggle.js",
       "src/ui/rail/focusSafeChildren.js",
       "src/ui/layerPanel/RowText.vue",
