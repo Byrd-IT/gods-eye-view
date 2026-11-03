@@ -3618,5 +3618,18 @@
   "Search map layers": "Поиск слоёв карты",
   "Aerial and historic imagery: open Time Travel": "Аэро- и исторические снимки: открыть «Путешествие во времени»",
   "No map layers match your search": "Нет слоёв карты, подходящих под запрос",
-  "MAP LAYERS": "СЛОИ КАРТЫ"
+  "MAP LAYERS": "СЛОИ КАРТЫ",
+  "COPY CHEAT SHEET": "КОПИРОВАТЬ ПАМЯТКУ",
+  "Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown": "Скопировать список номеров M, названия для каждой миссии-заготовки в DJI Fly и какие планы уже облетаны",
+  "PRINT CHEAT SHEET": "РАСПЕЧАТАТЬ ПАМЯТКУ",
+  "Download a printable page of the same list": "Скачать печатную страницу с тем же списком",
+  "MARK FLOWN": "ОТМЕТИТЬ КАК ОБЛЕТАННЫЙ",
+  "NOT FLOWN": "НЕ ОБЛЕТАН",
+  "Cheat sheet copied": "Памятка скопирована",
+  "Cheat sheet downloaded": "Памятка скачана",
+  "Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)": "Полёты помечены кодом {code}: назовите каждую миссию-заготовку в DJI Fly её кодом (см. памятку в библиотеке планов)",
+  "Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture": "Сохраните этот план в библиотеке планов, чтобы его миссии получили номер M (M1, M2, ...) и подписанную картинку",
+  "PICTURE": "КАРТИНКА",
+  "Download the labelled preview picture of this mission (JPG)": "Скачать подписанную картинку предпросмотра этой миссии (JPG)",
+  "The picture could not be drawn in this browser": "В этом браузере не удалось нарисовать картинку"
 }

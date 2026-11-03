@@ -3776,5 +3776,18 @@
   "Search map layers": "البحث في طبقات الخريطة",
   "Aerial and historic imagery: open Time Travel": "صور جوية وتاريخية: افتح السفر عبر الزمن",
   "No map layers match your search": "لا توجد طبقة خريطة تطابق بحثك",
-  "MAP LAYERS": "طبقات الخريطة"
+  "MAP LAYERS": "طبقات الخريطة",
+  "COPY CHEAT SHEET": "نسخ ورقة المرجع",
+  "Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown": "انسخ قائمة أرقام M والاسم الذي تعطيه لكل مهمة بديلة في DJI Fly والخطط التي تم الطيران بها",
+  "PRINT CHEAT SHEET": "طباعة ورقة المرجع",
+  "Download a printable page of the same list": "نزّل صفحة قابلة للطباعة للقائمة نفسها",
+  "MARK FLOWN": "وضع علامة تم الطيران",
+  "NOT FLOWN": "لم يتم الطيران",
+  "Cheat sheet copied": "تم نسخ ورقة المرجع",
+  "Cheat sheet downloaded": "تم تنزيل ورقة المرجع",
+  "Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)": "الرحلات تحمل الرمز {code}: سمِّ كل مهمة بديلة في DJI Fly برمزها (انظر ورقة المرجع في مكتبة الخطط)",
+  "Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture": "احفظ هذه الخطة في مكتبة الخطط لتحصل مهامها على رقم M (M1 وM2 ...) وصورة موسومة",
+  "PICTURE": "صورة",
+  "Download the labelled preview picture of this mission (JPG)": "نزّل صورة المعاينة الموسومة لهذه المهمة (JPG)",
+  "The picture could not be drawn in this browser": "تعذّر رسم الصورة في هذا المتصفح"
 }

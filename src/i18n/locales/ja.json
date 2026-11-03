@@ -3381,5 +3381,18 @@
   "Search map layers": "地図レイヤーを検索",
   "Aerial and historic imagery: open Time Travel": "航空写真と過去の画像：タイムトラベルを開く",
   "No map layers match your search": "検索に一致する地図レイヤーはありません",
-  "MAP LAYERS": "地図レイヤー"
+  "MAP LAYERS": "地図レイヤー",
+  "COPY CHEAT SHEET": "早見表をコピー",
+  "Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown": "M 番号の一覧、DJI Fly で各仮ミッションに付ける名前、飛行済みのプランをコピーします",
+  "PRINT CHEAT SHEET": "早見表を印刷",
+  "Download a printable page of the same list": "同じ一覧の印刷用ページをダウンロード",
+  "MARK FLOWN": "飛行済みにする",
+  "NOT FLOWN": "未飛行に戻す",
+  "Cheat sheet copied": "早見表をコピーしました",
+  "Cheat sheet downloaded": "早見表をダウンロードしました",
+  "Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)": "フライトには {code} のラベルが付いています。DJI Fly の各仮ミッションにそのコードを名前として付けてください（プランライブラリの早見表を参照）",
+  "Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture": "このプランをプランライブラリに保存すると、ミッションに M 番号（M1、M2、…）とラベル付きの画像が付きます",
+  "PICTURE": "画像",
+  "Download the labelled preview picture of this mission (JPG)": "このミッションのラベル付きプレビュー画像（JPG）をダウンロード",
+  "The picture could not be drawn in this browser": "このブラウザでは画像を描画できませんでした"
 }

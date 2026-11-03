@@ -3539,5 +3539,18 @@
   "Search map layers": "Rechercher des couches de la carte",
   "Aerial and historic imagery: open Time Travel": "Imagerie aérienne et historique : ouvrir Voyage dans le temps",
   "No map layers match your search": "Aucune couche de la carte ne correspond à la recherche",
-  "MAP LAYERS": "COUCHES DE LA CARTE"
+  "MAP LAYERS": "COUCHES DE LA CARTE",
+  "COPY CHEAT SHEET": "COPIER L'AIDE-MÉMOIRE",
+  "Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown": "Copier la liste des numéros M, le nom à donner à chaque mission de remplacement dans DJI Fly et les plans déjà volés",
+  "PRINT CHEAT SHEET": "IMPRIMER L'AIDE-MÉMOIRE",
+  "Download a printable page of the same list": "Télécharger une page imprimable de la même liste",
+  "MARK FLOWN": "MARQUER COMME VOLÉ",
+  "NOT FLOWN": "NON VOLÉ",
+  "Cheat sheet copied": "Aide-mémoire copié",
+  "Cheat sheet downloaded": "Aide-mémoire téléchargé",
+  "Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)": "Les vols portent l'étiquette {code} : donnez à chaque mission de remplacement dans DJI Fly son code (voir l'aide-mémoire dans la bibliothèque de plans)",
+  "Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture": "Enregistrez ce plan dans la bibliothèque de plans pour donner à ses missions un numéro M (M1, M2, ...) et une image étiquetée",
+  "PICTURE": "IMAGE",
+  "Download the labelled preview picture of this mission (JPG)": "Télécharger l'image d'aperçu étiquetée de cette mission (JPG)",
+  "The picture could not be drawn in this browser": "L'image n'a pas pu être dessinée dans ce navigateur"
 }

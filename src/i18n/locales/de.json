@@ -3460,5 +3460,18 @@
   "Search map layers": "Kartenebenen suchen",
   "Aerial and historic imagery: open Time Travel": "Luft- und historische Bilder: Zeitreise öffnen",
   "No map layers match your search": "Keine Kartenebene passt zur Suche",
-  "MAP LAYERS": "KARTENEBENEN"
+  "MAP LAYERS": "KARTENEBENEN",
+  "COPY CHEAT SHEET": "MERKBLATT KOPIEREN",
+  "Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown": "Liste der M-Nummern kopieren: wie jede Platzhalter-Mission in DJI Fly heißen soll und welche Pläne schon geflogen wurden",
+  "PRINT CHEAT SHEET": "MERKBLATT DRUCKEN",
+  "Download a printable page of the same list": "Druckbare Seite mit derselben Liste herunterladen",
+  "MARK FLOWN": "ALS GEFLOGEN MARKIEREN",
+  "NOT FLOWN": "NICHT GEFLOGEN",
+  "Cheat sheet copied": "Merkblatt kopiert",
+  "Cheat sheet downloaded": "Merkblatt heruntergeladen",
+  "Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)": "Die Flüge tragen die Kennung {code}: Benennen Sie jede Platzhalter-Mission in DJI Fly mit ihrem Code (siehe Merkblatt in der Planbibliothek)",
+  "Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture": "Speichern Sie diesen Plan in der Planbibliothek, damit seine Missionen eine M-Nummer (M1, M2, ...) und ein beschriftetes Bild erhalten",
+  "PICTURE": "BILD",
+  "Download the labelled preview picture of this mission (JPG)": "Das beschriftete Vorschaubild dieser Mission herunterladen (JPG)",
+  "The picture could not be drawn in this browser": "Das Bild konnte in diesem Browser nicht gezeichnet werden"
 }

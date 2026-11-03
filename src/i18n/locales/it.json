@@ -3539,5 +3539,18 @@
   "Search map layers": "Cerca livelli della mappa",
   "Aerial and historic imagery: open Time Travel": "Immagini aeree e storiche: apri Viaggio nel tempo",
   "No map layers match your search": "Nessun livello della mappa corrisponde alla ricerca",
-  "MAP LAYERS": "LIVELLI DELLA MAPPA"
+  "MAP LAYERS": "LIVELLI DELLA MAPPA",
+  "COPY CHEAT SHEET": "COPIA PROMEMORIA",
+  "Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown": "Copia l'elenco dei numeri M, il nome da dare a ogni missione segnaposto in DJI Fly e quali piani sono già stati volati",
+  "PRINT CHEAT SHEET": "STAMPA PROMEMORIA",
+  "Download a printable page of the same list": "Scarica una pagina stampabile con lo stesso elenco",
+  "MARK FLOWN": "SEGNA COME VOLATO",
+  "NOT FLOWN": "NON VOLATO",
+  "Cheat sheet copied": "Promemoria copiato",
+  "Cheat sheet downloaded": "Promemoria scaricato",
+  "Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)": "I voli hanno l'etichetta {code}: assegna a ogni missione segnaposto in DJI Fly il suo codice (vedi il promemoria nella libreria dei piani)",
+  "Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture": "Salva questo piano nella libreria dei piani per dare alle sue missioni un numero M (M1, M2, ...) e un'immagine con etichetta",
+  "PICTURE": "IMMAGINE",
+  "Download the labelled preview picture of this mission (JPG)": "Scarica l'immagine di anteprima con etichetta di questa missione (JPG)",
+  "The picture could not be drawn in this browser": "Impossibile disegnare l'immagine in questo browser"
 }

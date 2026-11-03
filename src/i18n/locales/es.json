@@ -3539,5 +3539,18 @@
   "Search map layers": "Buscar capas del mapa",
   "Aerial and historic imagery: open Time Travel": "Imágenes aéreas e históricas: abrir Viaje en el tiempo",
   "No map layers match your search": "Ninguna capa del mapa coincide con la búsqueda",
-  "MAP LAYERS": "CAPAS DEL MAPA"
+  "MAP LAYERS": "CAPAS DEL MAPA",
+  "COPY CHEAT SHEET": "COPIAR HOJA DE REFERENCIA",
+  "Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown": "Copiar la lista de números M, cómo nombrar cada misión de relleno en DJI Fly y qué planes ya se volaron",
+  "PRINT CHEAT SHEET": "IMPRIMIR HOJA DE REFERENCIA",
+  "Download a printable page of the same list": "Descargar una página imprimible con la misma lista",
+  "MARK FLOWN": "MARCAR VOLADO",
+  "NOT FLOWN": "NO VOLADO",
+  "Cheat sheet copied": "Hoja de referencia copiada",
+  "Cheat sheet downloaded": "Hoja de referencia descargada",
+  "Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)": "Los vuelos llevan la etiqueta {code}: ponga a cada misión de relleno en DJI Fly su código (vea la hoja de referencia en la biblioteca de planes)",
+  "Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture": "Guarde este plan en la biblioteca de planes para dar a sus misiones un número M (M1, M2, ...) y una imagen con etiqueta",
+  "PICTURE": "IMAGEN",
+  "Download the labelled preview picture of this mission (JPG)": "Descargar la imagen de vista previa con etiqueta de esta misión (JPG)",
+  "The picture could not be drawn in this browser": "No se pudo dibujar la imagen en este navegador"
 }

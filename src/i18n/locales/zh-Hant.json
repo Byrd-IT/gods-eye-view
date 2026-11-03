@@ -3381,5 +3381,18 @@
   "Search map layers": "搜尋地圖圖層",
   "Aerial and historic imagery: open Time Travel": "航空與歷史影像：開啟時間旅行",
   "No map layers match your search": "沒有符合搜尋的地圖圖層",
-  "MAP LAYERS": "地圖圖層"
+  "MAP LAYERS": "地圖圖層",
+  "COPY CHEAT SHEET": "複製速查表",
+  "Copy the list of M numbers, what to name each placeholder in DJI Fly, and which plans are flown": "複製 M 編號清單、DJI Fly 中每個佔位任務應取的名稱，以及哪些計畫已飛過",
+  "PRINT CHEAT SHEET": "列印速查表",
+  "Download a printable page of the same list": "下載同一清單的可列印頁面",
+  "MARK FLOWN": "標記為已飛",
+  "NOT FLOWN": "未飛",
+  "Cheat sheet copied": "速查表已複製",
+  "Cheat sheet downloaded": "速查表已下載",
+  "Flights are labelled {code}: name each placeholder mission in DJI Fly with its code (see the cheat sheet in the Plan library)": "航線已標註為 {code}：請在 DJI Fly 中把每個佔位任務命名為對應的代碼（見計畫庫中的速查表）",
+  "Save this plan in the Plan library to give its missions an M number (M1, M2, ...) and a labelled picture": "將此計畫儲存到計畫庫，即可為其任務指派 M 編號（M1、M2……）和帶標籤的圖片",
+  "PICTURE": "圖片",
+  "Download the labelled preview picture of this mission (JPG)": "下載此任務帶標籤的預覽圖片（JPG）",
+  "The picture could not be drawn in this browser": "此瀏覽器無法繪製圖片"
 }
