@@ -196,10 +196,18 @@ export async function openBasemap({
                 createOverlaysMenuPanel({
                   ...options,
                   onOpenAerial: naip
-                    ? () =>
-                        ensureTimeTravelMenu(
+                    ? () => {
+                        const menu = ensureTimeTravelMenu(
                           viewer?.container?.ownerDocument ?? undefined,
-                        )?.setOpen(true)
+                        );
+                        menu?.setOpen(true);
+                        // The Aerial section sits below Imagery: bring it
+                        // into view once the card has opened.
+                        menu
+                          ?.slot('aerial')
+                          ?.closest('section')
+                          ?.scrollIntoView?.({ block: 'start' });
+                      }
                     : null,
                 }),
             })

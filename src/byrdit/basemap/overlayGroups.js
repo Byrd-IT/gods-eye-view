@@ -16,7 +16,7 @@ export const OVERLAY_GROUPS = Object.freeze([
   Object.freeze({
     id: 'topo',
     title: msg('Topo maps'),
-    test: /(^|-)ustopo($|-)/,
+    test: /(^|-)ustopo($|-)|^htmc-/,
   }),
   Object.freeze({
     id: 'hillshade',
@@ -41,7 +41,7 @@ export const OVERLAY_GROUPS = Object.freeze([
   Object.freeze({
     id: 'land',
     title: msg('Land, boundaries and geology'),
-    test: /^(address-points|boundaries|parcels|geology|nlcd)$/,
+    test: /^(address-points|boundaries|parcels|geology|nlcd|land-surveys-rrc|rrc-oil-gas|tceq-sites|txdot-transport)$/,
   }),
 ]);
 

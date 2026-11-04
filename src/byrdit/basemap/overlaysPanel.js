@@ -121,6 +121,9 @@ export function createOverlaysPanel({
         rows: 0,
       };
       head.addEventListener('click', () => {
+        // While searching every matching group is forced open, so a click
+        // would change nothing on screen: ignore it and keep the saved state.
+        if (query.trim() !== '') return;
         entry.open = !entry.open;
         applyView();
       });
@@ -205,13 +208,15 @@ export function createOverlaysPanel({
     let shown = 0;
     for (const [groupId, entry] of groups) {
       let matches = 0;
-      let on = 0;
+      let on = 0; // enabled layers in the group
+      let onShown = 0; // enabled layers among the rows the search shows
       for (const [id, r] of rows) {
         if (rowGroup.get(id) !== groupId) continue;
         const hit = overlayMatches(r.layer, entry.title, query);
         r.row.hidden = !hit;
         if (hit) matches += 1;
         if (r.on) on += 1;
+        if (r.on && hit) onShown += 1;
       }
       shown += matches;
       entry.section.hidden = entry.rows === 0 || matches === 0;
@@ -219,10 +224,14 @@ export function createOverlaysPanel({
       entry.body.hidden = !expanded;
       entry.head.setAttribute('aria-expanded', String(expanded));
       entry.caret.textContent = expanded ? '\u25BE' : '\u25B8';
-      entry.count.textContent = on
-        ? `${on}/${entry.rows}`
-        : searching
-          ? `${matches}`
+      // The badge always describes the rows on screen: on/total, or the match
+      // count while searching (on among the matches / the matches).
+      entry.count.textContent = searching
+        ? onShown
+          ? `${onShown}/${matches}`
+          : `${matches}`
+        : on
+          ? `${on}/${entry.rows}`
           : `${entry.rows}`;
     }
     empty.hidden = shown > 0 || !rows.size;
