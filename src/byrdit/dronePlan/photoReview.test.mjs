@@ -62,6 +62,16 @@ test('pre-aborted review reads nothing; cap accounts for omitted files', async (
   assert.equal(capped.photos.length, 1);
 });
 
+test('fingerprints complete bytes without retaining buffers and handles hash failure', async () => {
+  const input = file('a');
+  input.arrayBuffer = async () => Uint8Array.of(1, 2, 3).buffer;
+  const result = await reviewPhotoFiles([input], { readTiles: async () => [tile] });
+  assert.equal(result.photos[0].digest, '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81');
+  const failed = await reviewPhotoFiles([file('b')], { readTiles: async () => [tile] });
+  assert.equal(failed.photos[0].digest, null);
+  assert.ok(failed.photos[0].review.reasons.includes('duplicate-check-unavailable'));
+});
+
 test('empty samples remain unassessed rather than passing', async () => {
   const result = await reviewPhotoFiles([file('a')], { readTiles: async () => [] });
   assert.equal(result.photos[0].review.score, null);

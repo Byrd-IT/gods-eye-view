@@ -66,7 +66,19 @@ export async function reviewPhotoFiles(files, {
         // An unreadable image is unknown, never a clean image or a lost row.
       }
       if (signal?.aborted) break;
-      result.photos.push({ ...metadata.photo, review: summarize(samples, metadata.photo) });
+      let digest = null;
+      try {
+        const bytes = await file.arrayBuffer();
+        if (signal?.aborted) break;
+        const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+        digest = Array.from(new Uint8Array(hash), (v) => v.toString(16).padStart(2, '0')).join('');
+      } catch {
+        // No name/metadata-only fallback: a copy suffix is not proof of identity.
+      }
+      if (signal?.aborted) break;
+      const review = summarize(samples, metadata.photo);
+      if (digest == null) review.reasons.push('duplicate-check-unavailable');
+      result.photos.push({ ...metadata.photo, digest, review });
     }
     await yieldControl();
   }
