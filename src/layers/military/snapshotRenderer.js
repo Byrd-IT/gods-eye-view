@@ -274,6 +274,7 @@ export function createMilitarySnapshotRenderer({
         ? 'remove' // GEV history seam: absent from the frame = not there at t
         : records.absence(icao24, {
             complete: snapshot.complete,
+            retainIds: snapshot.retainIds,
             likelyLanded: queries._likelyLanded(icao24),
           });
       if (absence === 'retain') continue;

@@ -30,10 +30,12 @@ export const LAYER_NAME_KEYS = Object.freeze({
   'telegeography-submarine-cables': msg('Submarine Cables'),
   'local-firms': msg('FIRMS Active Fires'),
   'local-adsb': msg('Local ADS-B'),
+  'osm-places': msg('OSM Places'),
   transit: msg('Transit'),
   'recent-imagery': msg('Recent Imagery'),
   'fire-perimeters': msg('Fire Perimeters'),
   'gnss-integrity': msg('GNSS Integrity'),
+  'drone-airspace': msg('Prohibited & Restricted Airspace'),
   's2-ghostmaps': msg('S2 GhostMaps'),
   wind: msg('Wind'),
   'weather-radar': msg('Rain radar'),
@@ -48,6 +50,8 @@ export const LAYER_NAME_KEYS = Object.freeze({
   'local-usgs-wells': msg('USGS Groundwater Wells'),
   'local-usgs-lakes': msg('USGS Lakes & Reservoirs'),
   'local-usgs-springs': msg('USGS Springs'),
+  'sea-marks': msg('Sea Marks'),
+  'ski-pistes': msg('Ski Pistes'),
 });
 
 /** The layer panel's own English names, where they differ from the module's. */

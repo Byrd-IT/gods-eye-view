@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { GEV_ACTION_SCHEMAS, createActionTools } from './actionSchemas.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
+import { createAreaStore } from '../data/areaStore.js';
+import { createAreaResolver } from '../data/areaResolver.js';
+import { findAdminCandidates } from '../data/adminBoundaries.js';
 import {
   validateArgs,
   validateCall,
@@ -59,7 +62,16 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // waybackStillOn and starting speaking rule, description only.
     // Snow leaves the set_visual_style enum.
     // The Operator HUD layout leaves set_hud's layout enum.
-    'a57d71a6f8b1363f41f0df7198c62c8cd61975076c3b6fc3015eda3769a94a48',
+    // The layer alias hint leaves out aliases the layer id already spells.
+    // Voice geometry adds resolve_area, find_imagery, osm_query, the analyst
+    // area scopes and the osm-places layer; natural-region candidates and the
+    // tightened area tool wording follow review.
+    // Byrd-IT fork: re-pinned at the 73c14ac7 upstream merge. Upstream's pin
+    // d0c5ad73...2c3 reproduces from origin/main; the only drift is fork-only
+    // (control_history/sky/imagery/droneplan, byrdit-open and basemap-auto in
+    // set_map_stack, the four USGS water layers in the layer enums and the
+    // water alias hint).
+    'a817a3c20aae4b60dab6097dda72dc5e5067004cdbb11dc1e57833353ed2701b',
   );
 });
 
@@ -87,6 +99,37 @@ test('descriptions customize wording without changing immutable shared arguments
     JSON.stringify(GEV_ACTION_SCHEMAS).includes('"description"'),
     false,
   );
+});
+
+test('every emitted area candidate round-trips through the production schema', async () => {
+  const candidateSchema = GEV_ACTION_SCHEMAS.find(
+    (tool) => tool.name === 'resolve_area',
+  ).parameters.properties.candidateId;
+  const resolver = createAreaResolver({
+    store: createAreaStore(),
+    findAdminCandidates,
+  });
+  const ambiguous = await resolver.resolve({ query: 'Georgia' });
+  assert.equal(ambiguous.needsClarification, true);
+  for (const choice of ambiguous.candidates) {
+    assert.ok(choice.candidateId.length >= candidateSchema.minLength);
+    assert.ok(choice.candidateId.length <= candidateSchema.maxLength);
+    assert.match(choice.candidateId, new RegExp(candidateSchema.pattern, 'u'));
+    assert.equal(
+      (await resolver.resolve({ candidateId: choice.candidateId })).ok,
+      true,
+    );
+  }
+  assert.equal(ambiguous.candidates[0].candidateId.length, 44);
+  const grammar = new RegExp(candidateSchema.pattern, 'u');
+  for (const malformed of [
+    'ne:state:bad slug',
+    'ne:state:../../etc',
+    'ne:state:!!!',
+    'ne:state:a_b',
+  ])
+    assert.doesNotMatch(malformed, grammar);
+  assert.ok(`ne:state:${'x'.repeat(80)}`.length > candidateSchema.maxLength);
 });
 
 test('metadata cannot add tools, fields, types or enum values', () => {
@@ -126,6 +169,9 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'control_sky',
         'control_imagery',
         'control_droneplan',
+        'resolve_area',
+        'find_imagery',
+        'osm_query',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by
@@ -182,6 +228,13 @@ test('all legacy action arguments are byte-identical after removing the delibera
   analystScopeKind.enum = analystScopeKind.enum.filter(
     (key) => key !== 'pointer',
   );
+  // Area handles add three scope kinds and their two identifiers.
+  const scope = property('analyst_query').scope;
+  scope.properties.kind.enum = scope.properties.kind.enum.filter(
+    (kind) => !['area', 'drawn', 'annotation'].includes(kind),
+  );
+  delete scope.properties.areaId;
+  delete scope.properties.id;
   // The analyst centre now requires a real coordinate.
   const center = property('analyst_query').scope.properties.center;
   delete center.required;

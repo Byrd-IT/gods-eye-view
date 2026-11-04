@@ -535,7 +535,7 @@ test('HUD: identifier facts that are not in the context are kept', async (t) => 
   assert.ok(!logs[0].includes('abc123'), logs[0]);
 });
 
-const HUD_EMPTY_200 = { status: 200, body: { summary: null, error: null } };
+const HUD_EMPTY_200 = { status: 200, body: { summary: null, feedState: null, error: null } };
 
 test('HUD: HTTP 200 whose body read times out keeps the reply and logs the cause', async (t) => {
   const logs = captureLogs(t);
@@ -555,7 +555,7 @@ test('HUD: body reset after headers keeps the reply and logs the network cause',
 test('HUD: HTTP 500 whose body read fails logs both the read cause and the status', async (t) => {
   const logs = captureLogs(t);
   const res = await hudRequest(t, async () => bodyThrows(500, bodyTimeout()));
-  assert.deepEqual(res, { status: 500, body: { summary: null, error: 'OpenAI HUD summary request failed' } });
+  assert.deepEqual(res, { status: 500, body: { summary: null, feedState: null, error: 'OpenAI HUD summary request failed' } });
   assert.match(logs[0], /body read failed class=timeout .*status=500/);
   assert.match(logs[1], /upstream HTTP 500 .*status=500 elapsed_ms=\d+ body_bytes=0/);
 });
@@ -568,10 +568,13 @@ test('HUD: malformed JSON 200 keeps the reply and logs class=malformed', async (
   assert.match(logs[0], /upstream body malformed class=malformed .*status=200 elapsed_ms=\d+ body_bytes=20 body_format=non-json/);
 });
 
+// Upstream replies to the HUD with structured JSON ({ summary, feedState }).
+const HUD_REPLY_JSON = JSON.stringify({ summary: 'Two aircraft over Austin now', feedState: null });
+
 test('HUD: a healthy reply adds no log line', async (t) => {
   const logs = captureLogs(t);
-  const res = await hudRequest(t, async () => Response.json({ output_text: 'Two aircraft over Austin now' }));
-  assert.deepEqual(res, { status: 200, body: { summary: 'Two aircraft over Austin now', error: null } });
+  const res = await hudRequest(t, async () => Response.json({ output_text: HUD_REPLY_JSON }));
+  assert.deepEqual(res, { status: 200, body: { summary: 'Two aircraft over Austin now', feedState: null, error: null } });
   assert.deepEqual(logs, []);
 });
 
@@ -934,9 +937,9 @@ test('HUD: a valid reply after 14.9 s is served; GEV_HUD_SUMMARY_TIMEOUT_MS is h
   const logs = captureLogs(t);
   const slow = simulatedLatency(t, 14_999);
   const res = await hudRequest(t, (_u, init) =>
-    slow.answerAfter(init, () => Response.json({ output_text: 'Two aircraft over Austin now' })),
+    slow.answerAfter(init, () => Response.json({ output_text: HUD_REPLY_JSON })),
   );
-  assert.deepEqual(res, { status: 200, body: { summary: 'Two aircraft over Austin now', error: null } });
+  assert.deepEqual(res, { status: 200, body: { summary: 'Two aircraft over Austin now', feedState: null, error: null } });
   assert.deepEqual(slow.requested, [15_000]);
   assert.deepEqual(logs, []);
   t.mock.restoreAll();
