@@ -187,7 +187,7 @@ test('a lone shot still matches when the photo attitude is unknown, and says so'
   assert.equal(report.unknown.length, 0);
 });
 
-test('an extra photo at a matched shot is a retake, and a bare shot stays missing', () => {
+test('an extra photo is not a waypoint needing a retake, and a bare shot stays missing', () => {
   const shots = [
     shotAt(0, 0, { waypointId: 8, shot: 'in' }),
     shotAt(20, 0, { waypointId: 9, shot: null }),
@@ -199,15 +199,17 @@ test('an extra photo at a matched shot is a retake, and a bare shot stays missin
   assert.equal(report.matches[0].waypointId, 8);
   assert.equal(report.missing.length, 1);
   assert.equal(report.missing[0].waypointId, 9);
-  assert.equal(report.retakes.length, 1);
-  assert.equal(report.retakes[0].photoName, 'DJI_0002.JPG');
-  assert.equal(report.retakes[0].photoIndex, 1);
-  assert.equal(report.retakes[0].waypointId, 8);
-  assert.equal(report.retakes[0].shot, 'in');
-  assert.ok(report.retakes[0].offsetM <= 1.5);
+  assert.equal(report.retakes.length, 0);
+  assert.equal(report.extraPhotos.length, 1);
+  assert.equal(report.extraPhotos[0].photoName, 'DJI_0002.JPG');
+  assert.equal(report.extraPhotos[0].photoIndex, 1);
+  assert.equal(report.extraPhotos[0].waypointId, 8);
+  assert.equal(report.extraPhotos[0].shot, 'in');
+  assert.ok(report.extraPhotos[0].offsetM <= 1.5);
   assert.equal(report.unmatchedPhotos.length, 1);
   assert.equal(report.unmatchedPhotos[0].photoName, 'DJI_0003.JPG');
-  assert.equal(report.summary.retakeCount, 1);
+  assert.equal(report.summary.retakeCount, 0);
+  assert.equal(report.summary.extraPhotoCount, 1);
   assert.equal(report.summary.missingCount, 1);
 });
 

@@ -355,7 +355,9 @@ export function matchPhotosToShots(photos = [], shots = []) {
       .filter((block) => !matchedPhotos.has(block.photoIndex))
       .map((block) => block.photoIndex),
   );
+  // Existing extra captures are not instructions to re-fly a waypoint.
   const retakes = [];
+  const extraPhotos = [];
   const unmatchedPhotos = [];
   list.forEach((photo, photoIndex) => {
     if (matchedPhotos.has(photoIndex) || unknownPhotoIndexes.has(photoIndex))
@@ -388,7 +390,7 @@ export function matchPhotosToShots(photos = [], shots = []) {
       });
       return;
     }
-    retakes.push({
+    extraPhotos.push({
       photoIndex,
       photoName: photo?.name ?? null,
       offsetM: nearest.offsetM,
@@ -424,6 +426,7 @@ export function matchPhotosToShots(photos = [], shots = []) {
     matches,
     missing,
     retakes,
+    extraPhotos,
     unmatchedPhotos,
     unknown,
     summary: {
@@ -431,6 +434,7 @@ export function matchPhotosToShots(photos = [], shots = []) {
       matchedCount: matches.length,
       missingCount: missing.length,
       retakeCount: retakes.length,
+      extraPhotoCount: extraPhotos.length,
       unknownCount: unknown.length,
     },
   };
