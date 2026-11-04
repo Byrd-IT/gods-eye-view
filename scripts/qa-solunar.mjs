@@ -18,8 +18,8 @@ fs.mkdirSync(outDir, { recursive: true });
 // URLs in page errors can carry keys: mask userinfo and every query value
 const mask = (s) =>
   String(s)
-    .replace(/\/\/[^\/\s@]+@/g, '//***@')
-    .replace(/([?&][^=&\s]+)=[^&\s\]\)"']*/g, '\=***');
+    .replace(/\/\/[^/\s@]+@/g, '//***@')
+    .replace(/([?&][^=&\s]+)=[^&\s\])"']*/g, '$1=***');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const failures = [];
 const check = (name, ok, detail = '') => {
