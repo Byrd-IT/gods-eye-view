@@ -18,7 +18,7 @@ export function buildPhotoReviewReport(photos = [], shots = []) {
     }
     const reasons = [...(photo.review?.reasons ?? [])];
     if (!Number.isFinite(photo.lon) || !Number.isFinite(photo.lat)) reasons.push('no-position');
-    if (!photo.review?.sampleCount) reasons.push('quality-unknown');
+    if (!photo.review?.sampleCount || !Number.isFinite(photo.review?.score)) reasons.push('quality-unknown');
     if (duplicateOf != null) reasons.push('exact-duplicate');
     return {
       index, name: photo.name, score: photo.review?.score ?? null,

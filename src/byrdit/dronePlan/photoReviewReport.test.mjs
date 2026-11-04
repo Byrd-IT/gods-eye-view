@@ -27,6 +27,13 @@ test('unknown quality and angles never count as verified coverage', () => {
   assert.ok(report.refly[0].reasons.includes('attitude-unknown'));
 });
 
+test('sampled images with unknown score remain inspection candidates', () => {
+  const report = buildPhotoReviewReport([photo({ review: { score: null, reasons: [], sampleCount: 9 } })], [shot]);
+  assert.ok(report.photos[0].reasons.includes('quality-unknown'));
+  assert.equal(report.refly.length, 1);
+  assert.ok(report.refly[0].reasons.includes('quality-unknown'));
+});
+
 test('no plan preserves per-photo findings but does not invent refly waypoints', () => {
   const report = buildPhotoReviewReport([photo({ lon: null, lat: null, review: { score: null, reasons: ['no-position'], sampleCount: 0 } })]);
   assert.equal(report.photos.length, 1);
