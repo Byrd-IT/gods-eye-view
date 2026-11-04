@@ -366,7 +366,7 @@ export function matchPhotosToShots(photos = [], shots = []) {
       unmatchedPhotos.push({
         photoIndex,
         photoName: photo?.name ?? null,
-        reason: 'off-plan',
+        reason: planned.length ? 'off-plan' : 'no-plan',
       });
       return;
     }
