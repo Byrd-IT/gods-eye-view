@@ -1,0 +1,269 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import { Window } from 'happy-dom';
+import {
+  SOLUNAR_BODY_ID,
+  SOLUNAR_ID,
+  SPOT_MARKER_ID,
+  mapCenterSpot,
+  mountSolunarForShell,
+  pickSpot,
+} from './solunarShell.js';
+
+const DEG = Math.PI / 180;
+
+function fakeViewer({ hit = (x, y) => ({ x, y }) } = {}) {
+  const added = [];
+  const removed = [];
+  const canvas = new Window().document.createElement('canvas');
+  Object.defineProperty(canvas, 'clientWidth', { value: 800 });
+  Object.defineProperty(canvas, 'clientHeight', { value: 600 });
+  canvas.getBoundingClientRect = () => ({ left: 10, top: 20 });
+  // pixel (x, y) -> lat 30 + y/100, lon -100 + x/100 (rad conversion in the fake ellipsoid)
+  const ellipsoid = {
+    cartesianToCartographic: (c) => ({
+      latitude: (30 + c.y / 100) * DEG,
+      longitude: (-100 + c.x / 100) * DEG,
+    }),
+  };
+  return {
+    added,
+    removed,
+    scene: { canvas, globe: { ellipsoid } },
+    camera: {
+      positionCartographic: { latitude: 10 * DEG, longitude: 20 * DEG },
+      pickEllipsoid: (px) => hit(px.x, px.y),
+    },
+    entities: {
+      add: (e) => {
+        added.push(e);
+        return e;
+      },
+      remove: (e) => removed.push(e),
+    },
+  };
+}
+
+function setup({ open = false, viewer = fakeViewer() } = {}) {
+  const window = new Window();
+  const doc = window.document;
+  const root = doc.createElement('div');
+  root.id = SOLUNAR_ID;
+  root.className = open ? '' : 'collapsed';
+  const body = doc.createElement('div');
+  body.id = SOLUNAR_BODY_ID;
+  root.append(body);
+  doc.body.append(root);
+  const mount = mountSolunarForShell(
+    { viewer },
+    { document: doc, now: () => Date.UTC(2026, 10, 3, 18) },
+  );
+  const fire = (type, init) =>
+    viewer.scene.canvas.dispatchEvent(
+      new window.MouseEvent(type, { button: 0, ...init }),
+    );
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  return { window, doc, root, body, viewer, mount, fire, tick };
+}
+const spotText = (body) =>
+  body.querySelector('.gev-sl-spot')?.textContent ?? '';
+
+test('pickSpot converts a pixel pick to degrees, and says null for the sky', () => {
+  const v = fakeViewer();
+  const s = pickSpot(v, 100, 200);
+  assert.ok(Math.abs(s.latDeg - 32) < 1e-9 && Math.abs(s.lonDeg - -99) < 1e-9);
+  assert.equal(pickSpot(fakeViewer({ hit: () => undefined }), 1, 1), null);
+  assert.equal(pickSpot(null, 1, 1), null);
+});
+
+test('mapCenterSpot picks the middle pixel, else the camera position', () => {
+  const picks = [];
+  const v = fakeViewer({
+    hit: (x, y) => {
+      picks.push([x, y]);
+      return { x, y };
+    },
+  });
+  mapCenterSpot(v);
+  assert.deepEqual(picks, [[400, 300]]);
+  const sky = mapCenterSpot(fakeViewer({ hit: () => undefined }));
+  assert.ok(
+    Math.abs(sky.latDeg - 10) < 1e-9 && Math.abs(sky.lonDeg - 20) < 1e-9,
+  );
+});
+
+test('a closed card shows nothing until it opens; opening picks the map centre and marks it', async () => {
+  const { root, body, viewer, tick } = setup();
+  assert.equal(body.querySelector('.gev-sl-day'), null);
+  assert.equal(viewer.added.length, 0);
+  root.classList.remove('collapsed');
+  await tick();
+  assert.equal(body.querySelectorAll('.gev-sl-day').length, 7);
+  assert.match(spotText(body), /^33\.000°N 96\.000°W/);
+  assert.equal(viewer.added.length, 1);
+  assert.equal(viewer.added[0].id, SPOT_MARKER_ID);
+  root.classList.add('collapsed');
+  await tick();
+  assert.equal(viewer.removed.length, 1, 'marker leaves with the card');
+});
+
+test('a click on the map picks the spot only while the card is open', async () => {
+  const { root, body, fire, tick, viewer } = setup();
+  fire('pointerdown', { clientX: 110, clientY: 220 });
+  fire('pointerup', { clientX: 110, clientY: 220 });
+  assert.equal(
+    body.querySelector('.gev-sl-day'),
+    null,
+    'closed card ignores the map',
+  );
+  root.classList.remove('collapsed');
+  await tick();
+  fire('pointerdown', { clientX: 110, clientY: 220 });
+  fire('pointerup', { clientX: 110, clientY: 220 });
+  // client (110, 220) -> canvas (100, 200)
+  assert.match(spotText(body), /^32\.000°N 99\.000°W/);
+  assert.equal(viewer.added.length, 2);
+  assert.equal(viewer.removed.length, 1, 'the old dot is replaced');
+});
+
+test('a drag or a long press is not a click', async () => {
+  const { root, body, fire, tick } = setup({ open: true });
+  await tick();
+  const before = spotText(body);
+  fire('pointerdown', { clientX: 110, clientY: 220 });
+  fire('pointerup', { clientX: 150, clientY: 260 });
+  assert.equal(spotText(body), before);
+  const realNow = Date.now;
+  try {
+    fire('pointerdown', { clientX: 110, clientY: 220 });
+    Date.now = () => realNow() + 2000;
+    fire('pointerup', { clientX: 110, clientY: 220 });
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(spotText(body), before);
+  fire('pointerup', { clientX: 110, clientY: 220, button: 2 });
+  assert.equal(spotText(body), before, 'a right button never picks');
+  assert.ok(root);
+});
+
+test('a click on the sky keeps the old spot', async () => {
+  let sky = false;
+  const viewer = fakeViewer({ hit: (x, y) => (sky ? undefined : { x, y }) });
+  const { body, fire, tick } = setup({ open: true, viewer });
+  await tick();
+  const before = spotText(body);
+  sky = true;
+  fire('pointerdown', { clientX: 110, clientY: 220 });
+  fire('pointerup', { clientX: 110, clientY: 220 });
+  assert.equal(spotText(body), before);
+});
+
+test('a chosen spot survives closing and reopening; "Use map centre" goes back', async () => {
+  const { root, body, fire, tick } = setup({ open: true });
+  await tick();
+  fire('pointerdown', { clientX: 110, clientY: 220 });
+  fire('pointerup', { clientX: 110, clientY: 220 });
+  root.classList.add('collapsed');
+  await tick();
+  root.classList.remove('collapsed');
+  await tick();
+  assert.match(spotText(body), /^32\.000°N 99\.000°W/);
+  body.querySelector('.gev-sl-center').click();
+  assert.match(spotText(body), /^33\.000°N 96\.000°W/);
+});
+
+test('mounting twice does nothing; destroy removes listeners and the dot', async () => {
+  const { doc, mount, root, viewer, body, fire, tick } = setup({ open: true });
+  await tick();
+  assert.equal(mountSolunarForShell({ viewer }, { document: doc }), null);
+  mount.destroy();
+  assert.equal(viewer.removed.length, 1);
+  assert.equal(body.children.length, 0);
+  fire('pointerdown', { clientX: 1, clientY: 1 });
+  fire('pointerup', { clientX: 1, clientY: 1 });
+  assert.equal(body.children.length, 0);
+  assert.equal(root.dataset.solunarMounted, undefined);
+});
+
+test('no card or no viewer: nothing mounts', () => {
+  const doc = new Window().document;
+  assert.equal(
+    mountSolunarForShell({ viewer: fakeViewer() }, { document: doc }),
+    null,
+  );
+  assert.equal(mountSolunarForShell({}, { document: doc }), null);
+});
+
+// ── rail wiring (same checks the other fork cards have) ──
+const read = (file) =>
+  readFileSync(new URL(`../../../${file}`, import.meta.url), 'utf8');
+const count = (text, needle) => text.split(needle).length - 1;
+
+test('the SOLUNAR card is a collapsed rail launcher between MAP LAYERS and DRONE FLIGHT PLAN', () => {
+  const context = read('src/ui/views/ContextView.vue');
+  const tag = context.match(/<RailPanel\s+id="solunar-panel"[^>]*>/)?.[0] ?? '';
+  assert.match(tag, /start-collapsed/);
+  assert.doesNotMatch(tag, /\bhidden\b/, 'the menu item is always on offer');
+  assert.match(tag, /sideways/);
+  assert.match(tag, /:title="t\('SOLUNAR'\)"/);
+  assert.match(context, /id="gev-solunar-body"/);
+  const at = (id) => context.indexOf(`id="${id}"`);
+  assert.ok(
+    at('map-layers-panel') < at('solunar-panel') &&
+      at('solunar-panel') < at('drone-plan-panel'),
+  );
+});
+
+test('panel chrome, rail layout, dock catalog and the shell know the card', () => {
+  assert.equal(count(read('src/ui/panelChrome.js'), "'solunar-panel'"), 1);
+  assert.equal(
+    count(read('src/ui/panelLayoutController.js'), '_solunarPanel'),
+    3,
+  );
+  assert.match(
+    read('src/ui/panelRailCatalog.js'),
+    /'solunar-panel': \{ icon: 'dark_mode', label: msg\('SOLUNAR'\) \}/,
+  );
+  const shell = read('src/ui/applicationShell.js');
+  assert.match(shell, /import\('\.\.\/byrdit\/solunar\/solunarShell\.js'\)/);
+  assert.equal(count(shell, 'this._solunar?.destroy()'), 2);
+  assert.match(read('style.css'), /styles\/solunar\.css/);
+  assert.match(read('index.html'), /icon_names=[^"&]*\bdark_mode\b/);
+});
+
+test('every rail rule written for MAP LAYERS has its Solunar twin', () => {
+  for (const file of [
+    'layers.css',
+    'responsive.css',
+    'mobile-shell.css',
+    'cyber.css',
+  ]) {
+    const css = read(`src/ui/styles/${file}`);
+    assert.equal(
+      count(css, 'solunar-panel'),
+      count(css, 'map-layers-panel'),
+      `${file} selector parity`,
+    );
+  }
+});
+
+test('the SOLUNAR launcher wraps its title, hides its body while collapsed, and has 44px phone targets', () => {
+  const css = read('src/ui/styles/solunar.css');
+  const title = css.match(
+    /#right-context-rail #solunar-panel \.panel-title \{([^}]*)\}/,
+  )?.[1];
+  assert.ok(title);
+  assert.match(title, /white-space: normal/);
+  assert.match(title, /min-width: 0/);
+  assert.match(
+    css,
+    /#solunar-panel\.collapsed \.gev-sl-body \{\s*display: none !important;/,
+  );
+  const media = css.slice(
+    css.indexOf('@media (max-width: 720px), (pointer: coarse)'),
+  );
+  assert.ok(media.includes('.gev-sl-controls .data-toggle-chip'));
+  assert.ok(media.includes('min-height: 44px'));
+});

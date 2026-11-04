@@ -1704,6 +1704,12 @@ export class StyleManager extends ShellFacade {
     import('../byrdit/historyUi/historyShell.js')
       .then((h) => h.mountHistoryForShell(this))
       .catch((error) => console.warn('[History] control unavailable:', error));
+    import('../byrdit/solunar/solunarShell.js')
+      .then((solunar) => {
+        this._solunar?.destroy();
+        this._solunar = solunar.mountSolunarForShell(this);
+      })
+      .catch((error) => console.warn('[Solunar] card unavailable:', error));
   }
 
   // ── Share Button ─────────────────────────────
@@ -1845,6 +1851,7 @@ export class StyleManager extends ShellFacade {
     useDisplayStore(applicationPinia()).publishMapSource(null);
     this._cameraOrientationControls?.destroy();
     this._navControl?.destroy();
+    this._solunar?.destroy();
     this._cleanViewEye?.destroy();
     this._clearLayersControl?.destroy();
     this._releaseGlobeActions();

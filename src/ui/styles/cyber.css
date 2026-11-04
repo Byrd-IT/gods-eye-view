@@ -202,6 +202,7 @@
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
     .map-layers-panel-inner,
+    .solunar-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -227,6 +228,7 @@
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
     .map-layers-panel-inner,
+    .solunar-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -253,6 +255,7 @@
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
     .map-layers-panel-inner,
+    .solunar-panel-inner,
     .street-level-panel-inner,
     .global-context-panel-inner
   ) {
@@ -271,6 +274,7 @@
     #time-travel-panel,
     #drone-plan-panel,
     #map-layers-panel,
+    #solunar-panel,
     #street-level-panel,
     #global-context-panel
   ).collapsed
@@ -281,6 +285,7 @@
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
     .map-layers-panel-inner,
+    .solunar-panel-inner,
     .street-level-panel-inner,
     .global-context-panel-inner
   ) {
@@ -296,6 +301,7 @@
     #time-travel-panel,
     #drone-plan-panel,
     #map-layers-panel,
+    #solunar-panel,
     #street-level-panel,
     #global-context-panel
   ).collapsed
@@ -306,6 +312,7 @@
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
     .map-layers-panel-inner,
+    .solunar-panel-inner,
     .street-level-panel-inner,
     .global-context-panel-inner
   )
@@ -328,6 +335,7 @@
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
     .map-layers-panel-inner,
+    .solunar-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -348,6 +356,7 @@
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
     .map-layers-panel-inner,
+    .solunar-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -376,6 +385,7 @@
     .time-travel-panel-inner,
     .drone-plan-panel-inner,
     .map-layers-panel-inner,
+    .solunar-panel-inner,
     .street-level-panel-inner,
     .scene-panel-inner,
     .utilities-panel-inner,
@@ -1816,6 +1826,7 @@
       #time-travel-panel,
       #drone-plan-panel,
       #map-layers-panel,
+      #solunar-panel,
       #street-level-panel,
       #global-context-panel
     ):not(.collapsed) {

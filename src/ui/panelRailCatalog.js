@@ -30,6 +30,7 @@ export const PANEL_RAIL_ITEMS = Object.freeze({
   // Byrd-IT fork cards (byrdit/timeTravel, byrdit/dronePlan).
   'time-travel-panel': { icon: 'history', label: msg('TIME TRAVEL') },
   'map-layers-panel': { icon: 'map', label: msg('MAP LAYERS') },
+  'solunar-panel': { icon: 'dark_mode', label: msg('SOLUNAR') },
   'drone-plan-panel': { icon: 'flight', label: msg('DRONE FLIGHT PLAN') },
   'global-context-panel': { icon: 'radar', label: msg('CONTEXT') },
 });

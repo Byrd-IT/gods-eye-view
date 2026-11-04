@@ -203,7 +203,9 @@
     "{value} KM/S",
     "ΔN",
     "Ⅱ PAUSE",
-    "▲ {frp} MW"
+    "▲ {frp} MW",
+    "SOLUNAR",
+    "Solunar"
   ],
   "es": [
     "1090 MHz",
@@ -334,7 +336,9 @@
     "{value} KM/S",
     "ΔE",
     "ΔN",
-    "▲ {frp} MW"
+    "▲ {frp} MW",
+    "SOLUNAR",
+    "Solunar"
   ],
   "fr": [
     "1090 MHz",
@@ -873,7 +877,9 @@
     "{value} KM/H",
     "{value} KM/S",
     "ΔN",
-    "▲ {frp} MW"
+    "▲ {frp} MW",
+    "SOLUNAR",
+    "Solunar"
   ],
   "ru": [
     "AIS: --",

@@ -71,6 +71,22 @@ const sceneRuntime = computed(() => scenePanel.value?.runtime ?? '');
         :aria-label="t('Map layers')"
       ></div>
     </RailPanel>
+    <!-- byrdit/solunar/panel.js fills the body: the next 7 days of hunting and
+         fishing windows, sun and moon times and the day rating for a map spot. -->
+    <RailPanel
+      id="solunar-panel"
+      start-collapsed
+      :title="t('SOLUNAR')"
+      sideways
+      rail-scroller
+    >
+      <div
+        id="gev-solunar-body"
+        class="gev-sl-body"
+        role="group"
+        :aria-label="t('Solunar')"
+      ></div>
+    </RailPanel>
     <RailPanel
       id="drone-plan-panel"
       start-collapsed
