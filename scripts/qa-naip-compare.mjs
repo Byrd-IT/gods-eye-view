@@ -19,21 +19,29 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import puppeteer from 'puppeteer';
+import { makeNaipRedactors, safeUrl } from './qa-naip-compare-redact.mjs';
 
 const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : fallback;
 };
 const BASE = arg('--url', 'http://127.0.0.1:4392').replace(/\/+$/, '');
+const { scrub, redact } = makeNaipRedactors(BASE);
 const OUT = path.resolve(arg('--out', 'qa-naip-compare'));
 const SETTLE_MS = Number(arg('--settle-ms', '9000'));
 fs.mkdirSync(OUT, { recursive: true });
 
+for (const ev of ['uncaughtException', 'unhandledRejection']) {
+  process.on(ev, (e) => {
+    console.error(`${ev}: ${redact(e?.stack ?? e).slice(0, 1500)}`);
+    process.exit(2);
+  });
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const checks = [];
 const say = (...p) =>
   console.log(
-    p.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' '),
+    scrub(p.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')),
   );
 const check = (name, ok, detail) => {
   checks.push({ name, ok: Boolean(ok), detail });
@@ -65,30 +73,6 @@ const browser = await puppeteer.launch({
     '--ignore-gpu-blocklist',
   ],
 });
-/** Origin and path only: a request URL can carry a key or token in its query. */
-const safeUrl = (raw) => {
-  try {
-    const u = new URL(raw);
-    return `${u.origin}${u.pathname}`.slice(0, 140);
-  } catch {
-    return '(unparsable url)';
-  }
-};
-/**
- * Page error text with credentials masked: URL userinfo, query and fragment
- * values, auth and key headers, bearer tokens, then any bare run of 20 or more
- * token characters (a token with no context around it).
- */
-const redact = (text) =>
-  String(text)
-    .replace(/\/\/[^/\s@]+@/g, '//<redacted>@')
-    .replace(/([?&#;][^=\s&#]+)=[^\s&#'"]+/g, '$1=<redacted>')
-    .replace(
-      /\b(x-api-key|api-key|authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]+/gi,
-      '$1: <redacted>',
-    )
-    .replace(/(bearer|basic)\s+\S+/gi, '$1 <redacted>')
-    .replace(/[A-Za-z0-9_-]{20,}/g, '<redacted>');
 const pageErrors = [];
 const failed = [];
 
@@ -101,7 +85,7 @@ async function openMap(vp, name) {
     pageErrors.push(`${name}: ${redact(e).slice(0, 300)}`),
   );
   page.on('requestfailed', (r) =>
-    failed.push(`${name}: ${safeUrl(r.url())} ${r.failure()?.errorText}`),
+    failed.push(`${name}: ${safeUrl(r.url())} ${redact(r.failure()?.errorText ?? '')}`),
   );
   page.on('request', (r) => {
     if (HIST_TILE.test(r.url())) page.__hist += 1;
@@ -130,7 +114,11 @@ async function openMap(vp, name) {
       destination: { x, y, z },
       orientation: {
         direction: { x: -x / len, y: -y / len, z: -z / len },
-        up: { x: -Math.sin(lat) * Math.cos(lon) * 0, y: 0, z: 1 },
+        up: {
+          x: -Math.sin(lat) * Math.cos(lon),
+          y: -Math.sin(lat) * Math.sin(lon),
+          z: Math.cos(lat),
+        },
       },
     });
   }, PLACE);

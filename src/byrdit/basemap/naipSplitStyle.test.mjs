@@ -37,7 +37,8 @@ test('the line spans the screen from the split property', () => {
   assert.match(line, /top:\s*0/);
   assert.match(line, /bottom:\s*0/);
   assert.match(line, /left:\s*var\(--gev-naip-split,\s*50%\)/);
-  assert.match(line, /z-index:\s*1[1-9]\d/);
+  const z = Number(/z-index:\s*(\d+)/.exec(line)?.[1]);
+  assert.ok(z > 110, `z-index ${z} must be above the right rail (110)`);
 });
 
 test('the handle is a visible, grabbable circle above the rails', () => {
@@ -52,4 +53,14 @@ test('the view still renders the id, the labels and a handle button', () => {
   assert.match(view, /:class="optional\(split\.view\.handleClass\)"/);
   assert.match(view, /class="before"/);
   assert.match(view, /class="after"/);
+});
+
+test('this sheet never overrides the clean view and sky view hides', () => {
+  for (const sel of ['#gev-naip-split-line', '#gev-naip-split-line .gev-naip-split-handle']) {
+    assert.doesNotMatch(
+      rule(sel),
+      /(display|opacity|visibility)\s*:[^;]*!important/,
+      `${sel} must not force display, opacity or visibility`,
+    );
+  }
 });
