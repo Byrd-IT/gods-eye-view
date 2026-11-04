@@ -165,7 +165,8 @@ function selectPairs(list, planned, photoXY, shotXY) {
       }
       // Uniqueness is determined jointly across axes, not independently on
       // each axis. An unknown candidate can still be the intended shot.
-      if (eligible.length === 1 && unknownShots.length === 0) kept.push(eligible[0]);
+      if (eligible.length === 1 && unknownShots.length === 0)
+        kept.push(eligible[0]);
       else if (unknownShots.length || eligible.length > 1)
         blocks.push({
           photoIndex: j,
@@ -192,7 +193,12 @@ function maximumMatch(pairs, planned, photos) {
   const graph = Array.from({ length: sink + 1 }, () => []);
   const add = (from, to, cost) => {
     const forward = { to, cost, capacity: 1, reverse: graph[to].length };
-    const reverse = { to: from, cost: -cost, capacity: 0, reverse: graph[from].length };
+    const reverse = {
+      to: from,
+      cost: -cost,
+      capacity: 0,
+      reverse: graph[from].length,
+    };
     graph[from].push(forward);
     graph[to].push(reverse);
     return forward;
@@ -203,9 +209,16 @@ function maximumMatch(pairs, planned, photos) {
   const penalty = Math.min(shotCount, photoCount) * MATCH_PROXIMITY_M + 1;
   const assignments = pairs.map(([d, i, j]) => {
     const review = photos[j].review;
-    const qualityConcern = !review?.sampleCount || !finite(review.score) || review.reasons?.length;
-    const concern = qualityConcern || attitudeLabel(photos[j], planned[i]) !== 'agreed';
-    return { i, j, d, edge: add(shotCount + j, i, d + (concern ? penalty : 0)) };
+    const qualityConcern =
+      !review?.sampleCount || !finite(review.score) || review.reasons?.length;
+    const concern =
+      qualityConcern || attitudeLabel(photos[j], planned[i]) !== 'agreed';
+    return {
+      i,
+      j,
+      d,
+      edge: add(shotCount + j, i, d + (concern ? penalty : 0)),
+    };
   });
   while (true) {
     const distances = new Array(graph.length).fill(Infinity);
@@ -310,8 +323,10 @@ export function matchPhotosToShots(photos = [], shots = []) {
       photoName: photo ? (photo.name ?? null) : null,
       offsetM: hit ? hit.d : null,
       // Meaningful only when the plan and flight share the same takeoff datum.
-      altitudeOffsetM: photo && finite(photo.relAltM) && finite(shot.relHeightM)
-        ? photo.relAltM - shot.relHeightM : null,
+      altitudeOffsetM:
+        photo && finite(photo.relAltM) && finite(shot.relHeightM)
+          ? photo.relAltM - shot.relHeightM
+          : null,
       attitude: hit ? attitudeLabel(photo, shot) : null,
     };
   });

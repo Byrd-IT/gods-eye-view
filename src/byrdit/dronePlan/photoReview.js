@@ -10,18 +10,25 @@ import { analyzePhotoQuality } from './photoQuality.js';
 const yieldToBrowser = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function summarize(samples, photo) {
-  const measured = samples.filter((sample) => sample.ok && sample.code === 'measured');
+  const measured = samples.filter(
+    (sample) => sample.ok && sample.code === 'measured',
+  );
   const reasons = new Set();
   if (photo.positionSource == null) reasons.add('no-position');
   if (!measured.length) reasons.add('pixels-unavailable');
   for (const sample of measured) {
     for (const id of sample.findings) reasons.add(sample.metrics[id].code);
-    if (sample.metrics.shadows.code === 'dark-contrast-unknown') reasons.add('dark-contrast-unknown');
+    if (sample.metrics.shadows.code === 'dark-contrast-unknown')
+      reasons.add('dark-contrast-unknown');
   }
-  const scores = measured.map((s) => s.score).filter(Number.isFinite).sort((a, b) => a - b);
+  const scores = measured
+    .map((s) => s.score)
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
   return {
     score: scores.length ? scores[Math.floor(scores.length / 2)] : null,
-    scoreNote: 'Median native-tile heuristic score, not a calibrated pass/fail grade. Unsampled regions may contain defects. Inspect findings before planning retakes.',
+    scoreNote:
+      'Median native-tile heuristic score, not a calibrated pass/fail grade. Unsampled regions may contain defects. Inspect findings before planning retakes.',
     sampleCount: measured.length,
     reasons: [...reasons],
     samples,
@@ -32,22 +39,36 @@ function summarize(samples, photo) {
  * file; the decoder still completes its finally/bitmap.close before returning.
  * Injected readers make the same orchestration usable in local offline probes.
  */
-export async function reviewPhotoFiles(files, {
-  signal,
-  maxPhotos = MAX_PHOTOS,
-  readTiles = readNativePhotoTiles,
-  yieldControl = yieldToBrowser,
-} = {}) {
+export async function reviewPhotoFiles(
+  files,
+  {
+    signal,
+    maxPhotos = MAX_PHOTOS,
+    readTiles = readNativePhotoTiles,
+    yieldControl = yieldToBrowser,
+  } = {},
+) {
   const list = Array.from(files ?? []);
-  const cap = Number.isSafeInteger(maxPhotos) && maxPhotos >= 0
-    ? Math.min(maxPhotos, MAX_PHOTOS) : MAX_PHOTOS;
-  const result = { photos: [], rejected: [], skippedOver: Math.max(0, list.length - cap), cancelled: false };
+  const cap =
+    Number.isSafeInteger(maxPhotos) && maxPhotos >= 0
+      ? Math.min(maxPhotos, MAX_PHOTOS)
+      : MAX_PHOTOS;
+  const result = {
+    photos: [],
+    rejected: [],
+    skippedOver: Math.max(0, list.length - cap),
+    cancelled: false,
+  };
   for (const file of list.slice(0, cap)) {
     if (signal?.aborted) break;
     let metadata;
     try {
-      const bytes = new Uint8Array(await file.slice(0, HEADER_BYTES).arrayBuffer());
-      metadata = readPhotoMeta(bytes, String(file.name ?? ''), { includeUnlocated: true });
+      const bytes = new Uint8Array(
+        await file.slice(0, HEADER_BYTES).arrayBuffer(),
+      );
+      metadata = readPhotoMeta(bytes, String(file.name ?? ''), {
+        includeUnlocated: true,
+      });
     } catch {
       // Do not retain exception messages: browser/decoder errors may contain
       // user-controlled strings. Names remain deliberate report data only.
@@ -55,7 +76,10 @@ export async function reviewPhotoFiles(files, {
     }
     if (signal?.aborted) break;
     if (!metadata.ok) {
-      result.rejected.push({ name: String(file.name ?? ''), reason: metadata.reason });
+      result.rejected.push({
+        name: String(file.name ?? ''),
+        reason: metadata.reason,
+      });
     } else {
       let samples = [];
       try {
@@ -71,7 +95,9 @@ export async function reviewPhotoFiles(files, {
         const bytes = await file.arrayBuffer();
         if (signal?.aborted) break;
         const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
-        digest = Array.from(new Uint8Array(hash), (v) => v.toString(16).padStart(2, '0')).join('');
+        digest = Array.from(new Uint8Array(hash), (v) =>
+          v.toString(16).padStart(2, '0'),
+        ).join('');
       } catch {
         // No name/metadata-only fallback: a copy suffix is not proof of identity.
       }

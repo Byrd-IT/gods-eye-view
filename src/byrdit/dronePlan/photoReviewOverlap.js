@@ -7,11 +7,15 @@ import { focalPx } from './photoCheck.js';
 import { makeFrame } from './geo.js';
 
 const finite = Number.isFinite;
-const cross = (a, b, p) => (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
-const area = (points) => Math.abs(points.reduce((sum, a, i) => {
-  const b = points[(i + 1) % points.length];
-  return sum + a.x * b.y - a.y * b.x;
-}, 0)) / 2;
+const cross = (a, b, p) =>
+  (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+const area = (points) =>
+  Math.abs(
+    points.reduce((sum, a, i) => {
+      const b = points[(i + 1) % points.length];
+      return sum + a.x * b.y - a.y * b.x;
+    }, 0),
+  ) / 2;
 
 // Sutherland–Hodgman clipping of convex camera quadrilaterals.
 function intersection(subject, clip) {
@@ -30,9 +34,12 @@ function intersection(subject, clip) {
     let dp = sign * cross(a, b, previous);
     for (const point of input) {
       const dc = sign * cross(a, b, point);
-      if ((dc >= 0) !== (dp >= 0)) {
+      if (dc >= 0 !== dp >= 0) {
         const t = dp / (dp - dc);
-        result.push({ x: previous.x + t * (point.x - previous.x), y: previous.y + t * (point.y - previous.y) });
+        result.push({
+          x: previous.x + t * (point.x - previous.x),
+          y: previous.y + t * (point.y - previous.y),
+        });
       }
       if (dc >= 0) result.push(point);
       previous = point;
@@ -43,14 +50,34 @@ function intersection(subject, clip) {
 }
 
 function footprint(photo, shot) {
-  if (!photo || ![photo.lon, photo.lat, photo.relAltM, photo.gimbalPitchDeg,
-    photo.gimbalYawDeg, photo.widthPx, photo.heightPx, shot.aglM, shot.relHeightM].every(finite)) return null;
+  if (
+    !photo ||
+    ![
+      photo.lon,
+      photo.lat,
+      photo.relAltM,
+      photo.gimbalPitchDeg,
+      photo.gimbalYawDeg,
+      photo.widthPx,
+      photo.heightPx,
+      shot.aglM,
+      shot.relHeightM,
+    ].every(finite)
+  )
+    return null;
   const f = focalPx(photo);
   const aglM = shot.aglM + photo.relAltM - shot.relHeightM;
-  if (!(f > 0 && aglM > 0 && photo.widthPx > 0 && photo.heightPx > 0)) return null;
-  const out = photoFootprint({ lon: photo.lon, lat: photo.lat, aglM, pitchDeg: photo.gimbalPitchDeg }, photo.gimbalYawDeg, {
-    sensorWidthMm: photo.widthPx, sensorHeightMm: photo.heightPx, focalMm: f,
-  });
+  if (!(f > 0 && aglM > 0 && photo.widthPx > 0 && photo.heightPx > 0))
+    return null;
+  const out = photoFootprint(
+    { lon: photo.lon, lat: photo.lat, aglM, pitchDeg: photo.gimbalPitchDeg },
+    photo.gimbalYawDeg,
+    {
+      sensorWidthMm: photo.widthPx,
+      sensorHeightMm: photo.heightPx,
+      focalMm: f,
+    },
+  );
   return out.empty || out.clipped ? null : out.corners;
 }
 
@@ -66,13 +93,23 @@ export function assessPhotoOverlap(photos = [], shots = []) {
     for (let i = 1; i < group.length; i += 1) {
       const left = group[i - 1];
       const right = group[i];
-      const row = { shotKeys: [left.key, right.key], status: 'unknown', overlapFraction: null, reason: 'overlap-unknown' };
+      const row = {
+        shotKeys: [left.key, right.key],
+        status: 'unknown',
+        overlapFraction: null,
+        reason: 'overlap-unknown',
+      };
       pairs.push(row);
       if (left.status !== 'matched' || right.status !== 'matched') continue;
       // Unequal ground elevations cannot be intersected on one common plane.
       const groundLeft = left.relHeightM - left.aglM;
       const groundRight = right.relHeightM - right.aglM;
-      if (!finite(groundLeft) || !finite(groundRight) || Math.abs(groundLeft - groundRight) > 0.5) continue;
+      if (
+        !finite(groundLeft) ||
+        !finite(groundRight) ||
+        Math.abs(groundLeft - groundRight) > 0.5
+      )
+        continue;
       const a = footprint(photos[left.photoIndex], left);
       const b = footprint(photos[right.photoIndex], right);
       if (!a || !b) continue;
@@ -81,7 +118,10 @@ export function assessPhotoOverlap(photos = [], shots = []) {
       const bx = b.map((p) => frame.toXY(p.lon, p.lat));
       const denominator = Math.min(area(ax), area(bx));
       if (!(denominator > 0)) continue;
-      row.overlapFraction = Math.max(0, Math.min(1, area(intersection(ax, bx)) / denominator));
+      row.overlapFraction = Math.max(
+        0,
+        Math.min(1, area(intersection(ax, bx)) / denominator),
+      );
       row.status = 'modeled';
       row.reason = row.overlapFraction < 0.01 ? 'modeled-overlap-gap' : null;
     }

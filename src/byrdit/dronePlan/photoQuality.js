@@ -269,8 +269,12 @@ function measureAcutance(img) {
       const bin = L <= 0 ? 0 : L >= 255 ? 255 : Math.round(L);
       lumaHist[bin] += 1;
       nLuma += 1;
-      const dx = Math.abs(lumaAt(data, width, x + 1, y) - lumaAt(data, width, x - 1, y));
-      const dy = Math.abs(lumaAt(data, width, x, y + 1) - lumaAt(data, width, x, y - 1));
+      const dx = Math.abs(
+        lumaAt(data, width, x + 1, y) - lumaAt(data, width, x - 1, y),
+      );
+      const dy = Math.abs(
+        lumaAt(data, width, x, y + 1) - lumaAt(data, width, x, y - 1),
+      );
       const ix = dx >= 510 ? 510 : Math.round(dx);
       const iy = dy >= 510 ? 510 : Math.round(dy);
       hx[ix] += 1;
@@ -279,8 +283,11 @@ function measureAcutance(img) {
       n += 1;
     }
   }
-  const contrast = histPercentile(lumaHist, nLuma, 0.99) - histPercentile(lumaHist, nLuma, 0.01);
-  const axis = (hist) => (contrast > 0 && n > 0 ? histPercentile(hist, n, 0.99) / contrast : null);
+  const contrast =
+    histPercentile(lumaHist, nLuma, 0.99) -
+    histPercentile(lumaHist, nLuma, 0.01);
+  const axis = (hist) =>
+    contrast > 0 && n > 0 ? histPercentile(hist, n, 0.99) / contrast : null;
   return {
     contrast,
     samples: n,
@@ -364,7 +371,11 @@ function scanPixels(img, t) {
       const max = r > g ? (r > b ? r : b) : g > b ? g : b;
       const min = r < g ? (r < b ? r : b) : g < b ? g : b;
       sampleCount += 1;
-      if (r >= t.clipNearWhite || g >= t.clipNearWhite || b >= t.clipNearWhite) {
+      if (
+        r >= t.clipNearWhite ||
+        g >= t.clipNearWhite ||
+        b >= t.clipNearWhite
+      ) {
         highlightCount += 1;
       }
       const shadowClipped =
@@ -466,7 +477,8 @@ function blockNoise(grid, t) {
 }
 
 function prepare(img, thresholds) {
-  const tooSmall = img.width < thresholds.minEdge || img.height < thresholds.minEdge;
+  const tooSmall =
+    img.width < thresholds.minEdge || img.height < thresholds.minEdge;
   return {
     img,
     thresholds,
@@ -478,7 +490,8 @@ function prepare(img, thresholds) {
 }
 
 function sampleFields(grid) {
-  if (!grid) return { sampledWidth: null, sampledHeight: null, sampleFactor: null };
+  if (!grid)
+    return { sampledWidth: null, sampledHeight: null, sampleFactor: null };
   return {
     sampledWidth: grid.width,
     sampledHeight: grid.height,
@@ -523,7 +536,9 @@ function blurFrom(bundle) {
     return {
       id: 'blur',
       status: 'sharp',
-      score: fromWorkingSample ? clampScore((100 * variance) / t.blurScoreFull) : 100,
+      score: fromWorkingSample
+        ? clampScore((100 * variance) / t.blurScoreFull)
+        : 100,
       countsTowardScore: true,
       code: 'sharp-edges',
       reason: fromWorkingSample
@@ -665,8 +680,7 @@ function shadowsFrom(bundle) {
       score: null,
       countsTowardScore: false,
       code: 'dark-areas-have-contrast',
-      reason:
-        'Dark areas keep local contrast. This is not an exposure grade.',
+      reason: 'Dark areas keep local contrast. This is not an exposure grade.',
       metrics,
     };
   }
@@ -769,8 +783,7 @@ function glareFrom(bundle) {
       score: null,
       countsTowardScore: false,
       code: 'cue-absent',
-      reason:
-        'No sizable bright desaturated region. Glare is not ruled out.',
+      reason: 'No sizable bright desaturated region. Glare is not ruled out.',
       metrics,
     };
   }
@@ -832,7 +845,9 @@ function compositeScore(metrics) {
     }
   }
   if (!parts.length) return null;
-  const mean = clampScore(parts.reduce((sum, score) => sum + score, 0) / parts.length);
+  const mean = clampScore(
+    parts.reduce((sum, score) => sum + score, 0) / parts.length,
+  );
   const blur = metrics.blur;
   return blur.status === 'soft' && typeof blur.score === 'number'
     ? Math.min(mean, blur.score)
@@ -876,7 +891,13 @@ export function analyzePhotoQuality(image, options = {}) {
   const unknown = METRIC_IDS.filter((id) => metrics[id].status === 'unknown');
   const findings = METRIC_IDS.filter((id) => {
     const status = metrics[id].status;
-    return status === 'clipped' || status === 'moderate' || status === 'elevated' || status === 'possible' || status === 'soft';
+    return (
+      status === 'clipped' ||
+      status === 'moderate' ||
+      status === 'elevated' ||
+      status === 'possible' ||
+      status === 'soft'
+    );
   });
   return {
     ok: true,
