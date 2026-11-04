@@ -65,6 +65,30 @@ const browser = await puppeteer.launch({
     '--ignore-gpu-blocklist',
   ],
 });
+/** Origin and path only: a request URL can carry a key or token in its query. */
+const safeUrl = (raw) => {
+  try {
+    const u = new URL(raw);
+    return `${u.origin}${u.pathname}`.slice(0, 140);
+  } catch {
+    return '(unparsable url)';
+  }
+};
+/**
+ * Page error text with credentials masked: URL userinfo, query and fragment
+ * values, auth and key headers, bearer tokens, then any bare run of 20 or more
+ * token characters (a token with no context around it).
+ */
+const redact = (text) =>
+  String(text)
+    .replace(/\/\/[^/\s@]+@/g, '//<redacted>@')
+    .replace(/([?&#;][^=\s&#]+)=[^\s&#'"]+/g, '$1=<redacted>')
+    .replace(
+      /\b(x-api-key|api-key|authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]+/gi,
+      '$1: <redacted>',
+    )
+    .replace(/(bearer|basic)\s+\S+/gi, '$1 <redacted>')
+    .replace(/[A-Za-z0-9_-]{20,}/g, '<redacted>');
 const pageErrors = [];
 const failed = [];
 
@@ -74,10 +98,10 @@ async function openMap(vp, name) {
   page.__hist = 0;
   await page.setViewport(vp);
   page.on('pageerror', (e) =>
-    pageErrors.push(`${name}: ${String(e).slice(0, 300)}`),
+    pageErrors.push(`${name}: ${redact(e).slice(0, 300)}`),
   );
   page.on('requestfailed', (r) =>
-    failed.push(`${name}: ${r.url().slice(0, 140)} ${r.failure()?.errorText}`),
+    failed.push(`${name}: ${safeUrl(r.url())} ${r.failure()?.errorText}`),
   );
   page.on('request', (r) => {
     if (HIST_TILE.test(r.url())) page.__hist += 1;
