@@ -229,3 +229,15 @@ test('helpers', () => {
     '07:06',
   );
 });
+
+test('a day with two major windows lists them one per line', () => {
+  const { container, panel } = setup();
+  panel.setSpot(...LAKE);
+  const value = container.querySelector(
+    '.gev-sl-day[data-date="2026-11-03"] .gev-sl-major .gev-sl-value',
+  );
+  assert.deepEqual(value.textContent.split('\n'), [
+    '6:48 AM – 8:48 AM (Moon overhead)',
+    '7:11 PM – 9:11 PM (Moon underfoot)',
+  ]);
+});

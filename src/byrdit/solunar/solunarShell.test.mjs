@@ -59,10 +59,12 @@ function setup({ open = false, viewer = fakeViewer() } = {}) {
     { viewer },
     { document: doc, now: () => Date.UTC(2026, 10, 3, 18) },
   );
-  const fire = (type, init) =>
-    viewer.scene.canvas.dispatchEvent(
-      new window.MouseEvent(type, { button: 0, ...init }),
-    );
+  const fire = (type, { timeStamp, ...init } = {}) => {
+    const event = new window.MouseEvent(type, { button: 0, ...init });
+    if (timeStamp != null)
+      Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+    return viewer.scene.canvas.dispatchEvent(event);
+  };
   const tick = () => new Promise((r) => setTimeout(r, 5));
   return { window, doc, root, body, viewer, mount, fire, tick };
 }
@@ -134,14 +136,16 @@ test('a drag or a long press is not a click', async () => {
   fire('pointerdown', { clientX: 110, clientY: 220 });
   fire('pointerup', { clientX: 150, clientY: 260 });
   assert.equal(spotText(body), before);
-  const realNow = Date.now;
-  try {
-    fire('pointerdown', { clientX: 110, clientY: 220 });
-    Date.now = () => realNow() + 2000;
-    fire('pointerup', { clientX: 110, clientY: 220 });
-  } finally {
-    Date.now = realNow;
-  }
+  // held for 2 s by the event clock (a busy page can delay the handlers, not the stamps)
+  fire('pointerdown', { clientX: 110, clientY: 220, timeStamp: 1000 });
+  fire('pointerup', { clientX: 110, clientY: 220, timeStamp: 3000 });
+  assert.equal(spotText(body), before);
+  // a slow page between the two handlers is still a click
+  fire('pointerdown', { clientX: 110, clientY: 220, timeStamp: 5000 });
+  await new Promise((r) => setTimeout(r, 700));
+  fire('pointerup', { clientX: 110, clientY: 220, timeStamp: 5080 });
+  assert.match(spotText(body), /^32\.000°N 99\.000°W/);
+  body.querySelector('.gev-sl-center').click();
   assert.equal(spotText(body), before);
   fire('pointerup', { clientX: 110, clientY: 220, button: 2 });
   assert.equal(spotText(body), before, 'a right button never picks');

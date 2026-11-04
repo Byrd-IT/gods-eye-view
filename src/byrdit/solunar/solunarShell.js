@@ -107,7 +107,7 @@ export function mountSolunarForShell(
   let down = null;
   const onDown = (e) => {
     down =
-      e.button === 0 ? { x: e.clientX, y: e.clientY, at: Date.now() } : null;
+      e.button === 0 ? { x: e.clientX, y: e.clientY, at: e.timeStamp } : null;
   };
   const onUp = (e) => {
     const start = down;
@@ -115,7 +115,7 @@ export function mountSolunarForShell(
     if (!start || !isOpen() || e.button !== 0) return;
     if (
       Math.hypot(e.clientX - start.x, e.clientY - start.y) > CLICK_SLOP_PX ||
-      Date.now() - start.at > CLICK_MAX_MS
+      e.timeStamp - start.at > CLICK_MAX_MS
     )
       return;
     const rect = canvas.getBoundingClientRect();

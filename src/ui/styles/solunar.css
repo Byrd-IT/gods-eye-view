@@ -149,6 +149,10 @@
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
+.gev-sl-major .gev-sl-value,
+.gev-sl-minor .gev-sl-value {
+  white-space: pre-line;
+}
 .gev-sl-none {
   color: var(--text-dim);
   font-style: italic;

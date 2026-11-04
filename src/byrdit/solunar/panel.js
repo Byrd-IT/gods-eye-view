@@ -221,7 +221,7 @@ export function createSolunarPanel({
               (w) =>
                 `${formatClock(w.startMs, zone, hour12)} – ${formatClock(w.endMs, zone, hour12)} (${WINDOW_SOURCE_LABEL[w.source]()})`,
             )
-            .join(' · ')
+            .join('\n')
         : t('none');
       row(wins, label, text, `gev-sl-${kind}`);
     }
