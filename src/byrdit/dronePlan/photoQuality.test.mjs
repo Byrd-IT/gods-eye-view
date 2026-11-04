@@ -38,16 +38,17 @@ function checker(cell = 8, size = 64, dark = 20, light = 220) {
   });
 }
 
-/** Box average along x. Used only to build a fixture, not by the module. */
-function smearX(img, radius) {
+/** Box average along one axis. Used only to build a fixture, not by the module. */
+function smearAxis(img, radius, axis) {
   return image(img.width, img.height, (x, y) => {
     let r = 0;
     let g = 0;
     let b = 0;
     let n = 0;
-    for (let dx = -radius; dx <= radius; dx += 1) {
-      const xx = Math.min(img.width - 1, Math.max(0, x + dx));
-      const o = (y * img.width + xx) * 4;
+    for (let d = -radius; d <= radius; d += 1) {
+      const xx = axis === 'x' ? Math.min(img.width - 1, Math.max(0, x + d)) : x;
+      const yy = axis === 'y' ? Math.min(img.height - 1, Math.max(0, y + d)) : y;
+      const o = (yy * img.width + xx) * 4;
       r += img.data[o];
       g += img.data[o + 1];
       b += img.data[o + 2];
@@ -55,6 +56,14 @@ function smearX(img, radius) {
     }
     return [r / n, g / n, b / n];
   });
+}
+
+function smearX(img, radius) {
+  return smearAxis(img, radius, 'x');
+}
+
+function smearBoth(img, radius) {
+  return smearAxis(smearAxis(img, radius, 'x'), radius, 'y');
 }
 
 function addNoise(img, amp, seed = 1) {
@@ -161,28 +170,118 @@ test('blur thresholds are configurable and non-finite overrides are ignored', ()
   assert.equal(resolved.blurSharpMin, DEFAULT_THRESHOLDS.blurSharpMin);
 });
 
-test('directional smear is reported as an observation and never as a warning', () => {
+test('spread edges with contrast left are scored as soft, not left unknown', () => {
+  const soft = analyzeBlur(smearBoth(checker(), 3));
+  assert.equal(soft.status, 'soft');
+  assert.equal(soft.code, 'soft-detail');
+  assert.equal(soft.countsTowardScore, true);
+  assert.equal(soft.score, Math.min(99, Math.round(100 * soft.metrics.acutance)));
+  assert.ok(soft.score > 0 && soft.score < 60);
+  assert.match(soft.reason, /not a focus/i);
+  assert.doesNotMatch(soft.reason, /out of focus/i);
+  assert.ok(soft.metrics.contrast >= DEFAULT_THRESHOLDS.blurContrastFloor);
+  assert.ok(soft.metrics.acutance < DEFAULT_THRESHOLDS.blurAcutanceSoft);
+
+  const washed = analyzeBlur(smearBoth(checker(), 6));
+  assert.equal(washed.status, 'soft');
+  assert.equal(washed.countsTowardScore, true);
+  assert.ok(washed.score > 0 && washed.score < 100);
+
+  const smearedBars = analyzeBlur(smearX(barsV(), 5));
+  assert.equal(smearedBars.status, 'soft');
+  assert.equal(smearedBars.countsTowardScore, true);
+  assert.ok(smearedBars.score < 40);
+
+  const loosened = analyzeBlur(smearBoth(checker(), 3), { blurAcutanceSoft: 0.05 });
+  assert.notEqual(loosened.status, 'soft');
+  const nanIgnored = analyzeBlur(smearBoth(checker(), 3), { blurAcutanceSoft: Number.NaN });
+  assert.equal(nanIgnored.status, 'soft');
+  const graded = analyzePhotoQuality(smearBoth(checker(), 3));
+  assert.equal(graded.metrics.blur.status, 'soft');
+  assert.equal(graded.unknown.includes('blur'), false);
+  assert.ok(graded.findings.includes('blur'));
+  assert.equal(typeof graded.score, 'number');
+  assert.ok(graded.score < 100);
+  assertNoOverclaim(graded);
+});
+
+test('fine texture the working sample averages away is still sharp', () => {
+  const fine = checker(2, 64);
+  const r = analyzeBlur(fine, { maxSampleEdge: 16 });
+  assert.ok(r.metrics.sampledWidth <= 16);
+  assert.ok(r.metrics.laplacianVariance < DEFAULT_THRESHOLDS.blurSharpMin);
+  assert.equal(r.status, 'sharp');
+  assert.equal(r.code, 'sharp-edges');
+  assert.equal(r.score, 100);
+  assert.equal(r.countsTowardScore, true);
+
+  const dead = analyzeBlur(smearBoth(fine, 2), { maxSampleEdge: 16 });
+  assert.equal(dead.status, 'unknown');
+  assert.equal(dead.score, null);
+  assert.equal(dead.code, 'low-edge-energy');
+  assert.match(dead.reason, /not inferred/i);
+});
+
+test('directional smear is scored only when both axes have texture, and never as a warning', () => {
   const none = analyzeDirectionalMotion(checker());
   const smeared = analyzeDirectionalMotion(smearX(checker(), 5));
   const facade = analyzeDirectionalMotion(barsV());
   const blank = analyzeDirectionalMotion(flat());
+  const lintel = analyzeDirectionalMotion(image(64, 64, (x, y) => {
+    const bar = Math.floor(x / 8) % 2 === 0;
+    const line = y % 32 < 1;
+    return gray(bar || line ? 20 : 220);
+  }));
+  const smearedBars = analyzeDirectionalMotion(smearX(barsV(), 5));
 
   assert.equal(none.metrics.observation, 'balanced');
   assert.equal(smeared.metrics.observation, 'horizontal-detail-weaker');
   assert.equal(facade.metrics.observation, 'vertical-detail-weaker');
   assert.equal(blank.metrics.observation, 'unmeasurable');
 
-  for (const r of [none, smeared, facade, blank]) {
+  assert.equal(smeared.status, 'possible');
+  assert.equal(smeared.code, 'directional-softness');
+  assert.equal(smeared.warning, null);
+  assert.equal(smeared.countsTowardScore, true);
+  const ratio = Math.min(smeared.metrics.acutanceX, smeared.metrics.acutanceY)
+    / Math.max(smeared.metrics.acutanceX, smeared.metrics.acutanceY);
+  assert.ok(ratio < DEFAULT_THRESHOLDS.motionPeakRatio);
+  assert.equal(smeared.score, Math.round(100 * ratio));
+  assert.ok(smeared.score > 0 && smeared.score < 50);
+  assert.match(smeared.reason, /no directional motion warning/i);
+  assert.match(smeared.reason, /scene/i);
+  assert.doesNotMatch(smeared.reason, /motion blur detected/i);
+
+  for (const r of [none, facade, blank, lintel, smearedBars]) {
     assert.equal(r.status, 'unknown');
     assert.equal(r.warning, null);
     assert.equal(r.score, null);
     assert.equal(r.countsTowardScore, false);
     assert.equal(r.code, 'not-inferable');
     assert.match(r.reason, /no directional motion warning/i);
-    assert.match(r.reason, /scene/i);
   }
   assert.ok(smeared.metrics.horizontalEnergy < smeared.metrics.verticalEnergy);
   assert.ok(facade.metrics.horizontalEnergy > facade.metrics.verticalEnergy);
+  assert.ok(lintel.metrics.acutanceX >= DEFAULT_THRESHOLDS.motionAcutanceMin);
+  assert.ok(lintel.metrics.acutanceY >= DEFAULT_THRESHOLDS.motionAcutanceMin);
+
+  const hidden = analyzeDirectionalMotion(smearX(checker(8, 128), 5), { maxSampleEdge: 32 });
+  assert.equal(hidden.metrics.sampledWidth <= 32, true);
+  assert.equal(hidden.status, 'possible');
+  assert.equal(hidden.warning, null);
+  assert.equal(hidden.countsTowardScore, true);
+
+  const tightened = analyzeDirectionalMotion(smearX(checker(), 5), { motionPeakRatio: 0.05 });
+  assert.equal(tightened.status, 'unknown');
+  const nanIgnored = analyzeDirectionalMotion(smearX(checker(), 5), { motionPeakRatio: Number.NaN });
+  assert.equal(nanIgnored.status, 'possible');
+
+  const graded = analyzePhotoQuality(smearX(checker(), 5));
+  assert.ok(graded.findings.includes('directionalMotion'));
+  assert.equal(graded.unknown.includes('directionalMotion'), false);
+  assert.equal(graded.metrics.directionalMotion.warning, null);
+  assert.equal(analyzePhotoQuality(barsV()).unknown.includes('directionalMotion'), true);
+  assertNoOverclaim(graded);
 });
 
 test('clipping counts 8-bit end-of-range samples and does not call a clean frame a pass', () => {

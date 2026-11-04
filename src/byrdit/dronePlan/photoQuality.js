@@ -6,11 +6,14 @@
  * These are pixel measurements with explicit holes, not a grade of the photo
  * and not a photogrammetry accept/reject:
  *
- * - Blur is edge energy on a downsampled working sample. High energy means
- *   the sample has sharp edges. Low energy is unknown: blur and a flat scene
- *   look the same.
- * - Directional motion is an observation only. A single frame cannot separate
- *   smear from scene edges (a facade, a horizon), so no warning is issued.
+ * - Blur reads two things. Laplacian energy on the working sample, and
+ *   full-resolution acutance (steepest edge divided by frame contrast). A
+ *   steep edge is sharp. Spread edges with contrast left are a softness
+ *   reading, not a focus grade. No contrast is unknown: blur and a flat
+ *   scene look the same.
+ * - Directional motion is not a detection. A score is given only when both
+ *   axes have texture and one is spread. A facade, a horizon, or sharp edges
+ *   on both axes are not scored, and no warning is issued.
  * - Clipping counts samples already at the end of the 8-bit range. It does
  *   not say whether the camera or a later step put them there.
  * - Shadows report dark-pixel share and local contrast. A flat dark area is
@@ -38,12 +41,32 @@ export const DEFAULT_THRESHOLDS = Object.freeze({
   /** Variance that maps to a sharpness score of 100. */
   blurScoreFull: 800,
   /**
+   * p99 luminance minus p01 luminance. Below this, acutance is not trusted
+   * and a flat frame stays unknown.
+   */
+  blurContrastFloor: 12,
+  /**
+   * Full-resolution acutance (p99 gradient / contrast) below this, with
+   * contrast still present, is a softness reading. It is not a focus grade.
+   */
+  blurAcutanceSoft: 0.62,
+  /**
    * Axis energy below this fraction of the other axis is an observation.
    * It never becomes a motion warning.
    */
   motionWeakRatio: 0.35,
   /** Axis energy below this is too weak to describe a direction. */
   motionMinEnergy: 30,
+  /**
+   * Full-resolution axis acutance below this is an absent axis, not smear.
+   * A facade fails this gate and is not scored.
+   */
+  motionAcutanceMin: 0.12,
+  /**
+   * Weaker-axis acutance over stronger-axis acutance below this is a
+   * directional-softness reading. It never becomes a motion warning.
+   */
+  motionPeakRatio: 0.55,
   /** Channel at or above this counts as highlight clipping. */
   clipNearWhite: 250,
   /** All channels at or below this count as shadow clipping. */
@@ -82,9 +105,9 @@ export const DEFAULT_THRESHOLDS = Object.freeze({
 
 export const LIMITATIONS = Object.freeze([
   'Pixels only. No network, no cloud, and no EXIF. Alpha is ignored, and the layout must be RGBA.',
-  'Spatial metrics use a downsampled working sample, so they are not full-resolution lab figures. Histogram metrics stride above maxFullScanPixels, and that stride can miss a small speck.',
-  'Low edge energy is not inferred as blur. A flat or low-texture scene looks the same.',
-  'A single frame cannot separate directional smear from scene edges, so no directional motion warning is issued.',
+  'Laplacian, noise, and shadow spatial metrics use a downsampled working sample, so they are not full-resolution lab figures. Blur acutance is a full-resolution percentile, not a lab MTF. Histogram metrics stride above maxFullScanPixels, and that stride can miss a small speck.',
+  'Low edge energy is not inferred as blur when the frame has no contrast. A flat scene stays unknown. Softness is scored only when contrast is present and edges are spread, and it is not a focus grade.',
+  'A single frame cannot separate directional smear from scene edges, so no directional motion warning is issued. A directional-softness score is only given when both axes have texture and one is spread.',
   'Clipping is an 8-bit end-of-range count, not a camera diagnosis.',
   'Shadows are not an exposure grade. A flat dark area is unknown.',
   'Noise is estimated only from flat blocks. JPEG artifacts and fine texture are not separated, and a busy scene is not called noisy.',
@@ -175,6 +198,7 @@ function luminanceGrid(img, maxEdge) {
   const h = Math.floor(height / factor);
   if (w < 1 || h < 1) return null;
   const grid = new Float64Array(w * h);
+  let withinVariance = 0;
   if (factor === 1) {
     for (let i = 0; i < w * h; i += 1) {
       const o = i * 4;
@@ -182,23 +206,88 @@ function luminanceGrid(img, maxEdge) {
     }
   } else {
     const area = factor * factor;
+    let withinSum = 0;
     for (let y = 0; y < h; y += 1) {
       for (let x = 0; x < w; x += 1) {
         let sum = 0;
+        let sum2 = 0;
         const y0 = y * factor;
         const x0 = x * factor;
         for (let dy = 0; dy < factor; dy += 1) {
           let o = ((y0 + dy) * width + x0) * 4;
           for (let dx = 0; dx < factor; dx += 1) {
-            sum += lumaOf(data[o], data[o + 1], data[o + 2]);
+            const L = lumaOf(data[o], data[o + 1], data[o + 2]);
+            sum += L;
+            sum2 += L * L;
             o += 4;
           }
         }
-        grid[y * w + x] = sum / area;
+        const mean = sum / area;
+        withinSum += sum2 / area - mean * mean;
+        grid[y * w + x] = mean;
       }
     }
+    withinVariance = withinSum / (w * h);
   }
-  return { width: w, height: h, data: grid, factor };
+  return { width: w, height: h, data: grid, factor, withinVariance };
+}
+
+function histPercentile(hist, total, p) {
+  if (!(total > 0)) return 0;
+  const target = Math.floor(p * (total - 1));
+  let seen = 0;
+  for (let i = 0; i < hist.length; i += 1) {
+    seen += hist[i];
+    if (seen > target) return i;
+  }
+  return hist.length - 1;
+}
+
+function lumaAt(data, width, x, y) {
+  const o = (y * width + x) * 4;
+  return lumaOf(data[o], data[o + 1], data[o + 2]);
+}
+
+/**
+ * Full-resolution edge steepness on interior pixels. A clamped border is not
+ * contrast. Acutance is the 99th-percentile central difference divided by
+ * robust contrast. A step edge is near 1. A ramp is lower. Contrast below a
+ * floor makes the ratio meaningless, so callers must check it.
+ */
+function measureAcutance(img) {
+  const { width, height, data } = img;
+  const lumaHist = new Uint32Array(256);
+  const hx = new Uint32Array(511);
+  const hy = new Uint32Array(511);
+  const hBoth = new Uint32Array(511);
+  let nLuma = 0;
+  let n = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) continue;
+      const L = lumaAt(data, width, x, y);
+      const bin = L <= 0 ? 0 : L >= 255 ? 255 : Math.round(L);
+      lumaHist[bin] += 1;
+      nLuma += 1;
+      const dx = Math.abs(lumaAt(data, width, x + 1, y) - lumaAt(data, width, x - 1, y));
+      const dy = Math.abs(lumaAt(data, width, x, y + 1) - lumaAt(data, width, x, y - 1));
+      const ix = dx >= 510 ? 510 : Math.round(dx);
+      const iy = dy >= 510 ? 510 : Math.round(dy);
+      hx[ix] += 1;
+      hy[iy] += 1;
+      hBoth[Math.max(ix, iy)] += 1;
+      n += 1;
+    }
+  }
+  const contrast = histPercentile(lumaHist, nLuma, 0.99) - histPercentile(lumaHist, nLuma, 0.01);
+  const axis = (hist) => (contrast > 0 && n > 0 ? histPercentile(hist, n, 0.99) / contrast : null);
+  return {
+    contrast,
+    samples: n,
+    x: axis(hx),
+    y: axis(hy),
+    combined: axis(hBoth),
+  };
 }
 
 function spatialEnergies(grid) {
@@ -384,6 +473,7 @@ function prepare(img, thresholds) {
     tooSmall,
     grid: tooSmall ? null : luminanceGrid(img, thresholds.maxSampleEdge),
     scan: tooSmall ? null : scanPixels(img, thresholds),
+    acutance: tooSmall ? null : measureAcutance(img),
   };
 }
 
@@ -400,31 +490,56 @@ function blurFrom(bundle) {
   if (bundle.tooSmall) return tooSmallMetric('blur');
   const energies = spatialEnergies(bundle.grid);
   const variance = energies ? energies.laplacianVariance : null;
+  const within = bundle.grid ? bundle.grid.withinVariance : 0;
+  const detail = Math.max(variance ?? 0, within ?? 0);
+  const ac = bundle.acutance;
+  const t = bundle.thresholds;
   const base = {
     ...sampleFields(bundle.grid),
     laplacianVariance: variance,
+    withinVariance: within,
+    acutance: ac ? ac.combined : null,
+    contrast: ac ? ac.contrast : null,
   };
-  const t = bundle.thresholds;
-  if (variance == null || variance < t.blurSharpMin) {
+  const spread =
+    ac &&
+    ac.contrast >= t.blurContrastFloor &&
+    ac.combined != null &&
+    ac.combined < t.blurAcutanceSoft;
+  if (spread) {
     return {
       id: 'blur',
-      status: 'unknown',
-      score: null,
-      countsTowardScore: false,
-      code: 'low-edge-energy',
+      status: 'soft',
+      score: Math.min(99, clampScore(100 * ac.combined)),
+      countsTowardScore: true,
+      code: 'soft-detail',
       reason:
-        'Edge energy is low. That fits blur and it also fits a low-texture or flat scene, so blur is not inferred.',
+        'Edges are spread relative to the contrast in the frame. That is a softness reading, not a focus grade.',
+      metrics: base,
+    };
+  }
+  if (detail >= t.blurSharpMin) {
+    const fromWorkingSample = variance != null && variance >= t.blurSharpMin;
+    return {
+      id: 'blur',
+      status: 'sharp',
+      score: fromWorkingSample ? clampScore((100 * variance) / t.blurScoreFull) : 100,
+      countsTowardScore: true,
+      code: 'sharp-edges',
+      reason: fromWorkingSample
+        ? 'Edge energy is high enough to call the working sample sharp. This is not a focus measurement.'
+        : 'Fine detail is sharp at full resolution. The working sample averages it away. This is not a focus measurement.',
       metrics: base,
     };
   }
   return {
     id: 'blur',
-    status: 'sharp',
-    score: clampScore((100 * variance) / t.blurScoreFull),
-    countsTowardScore: true,
-    code: 'sharp-edges',
+    status: 'unknown',
+    score: null,
+    countsTowardScore: false,
+    code: 'low-edge-energy',
     reason:
-      'Edge energy is high enough to call the working sample sharp. This is not a focus measurement.',
+      'Edge energy is low. That fits blur and it also fits a low-texture or flat scene, so blur is not inferred.',
     metrics: base,
   };
 }
@@ -437,6 +552,39 @@ function motionFrom(bundle) {
   const observation = energies
     ? observationOf(horizontalEnergy, verticalEnergy, bundle.thresholds)
     : 'unmeasurable';
+  const ac = bundle.acutance;
+  const t = bundle.thresholds;
+  const metrics = {
+    ...sampleFields(bundle.grid),
+    observation,
+    horizontalEnergy,
+    verticalEnergy,
+    acutanceX: ac ? ac.x : null,
+    acutanceY: ac ? ac.y : null,
+  };
+  const ax = ac && ac.x != null ? ac.x : 0;
+  const ay = ac && ac.y != null ? ac.y : 0;
+  const bothAxes =
+    ac &&
+    ac.contrast >= t.blurContrastFloor &&
+    ax >= t.motionAcutanceMin &&
+    ay >= t.motionAcutanceMin;
+  if (bothAxes) {
+    const ratio = Math.min(ax, ay) / Math.max(ax, ay);
+    if (ratio < t.motionPeakRatio) {
+      return {
+        id: 'directionalMotion',
+        status: 'possible',
+        warning: null,
+        score: clampScore(100 * ratio),
+        countsTowardScore: true,
+        code: 'directional-softness',
+        reason:
+          'One axis is softer than the other. That fits directional smear and it can also fit the scene, so no directional motion warning is issued.',
+        metrics,
+      };
+    }
+  }
   return {
     id: 'directionalMotion',
     status: 'unknown',
@@ -446,12 +594,7 @@ function motionFrom(bundle) {
     code: 'not-inferable',
     reason:
       'No directional motion warning is issued. A single frame cannot separate directional smear from scene edges.',
-    metrics: {
-      ...sampleFields(bundle.grid),
-      observation,
-      horizontalEnergy,
-      verticalEnergy,
-    },
+    metrics,
   };
 }
 
@@ -655,7 +798,7 @@ export function analyzeBlur(image, thresholds) {
   return withImage(image, thresholds, 'blur', blurFrom);
 }
 
-/** Observation only. `warning` is always null. */
+/** Directional-softness heuristic. `warning` is always null. */
 export function analyzeDirectionalMotion(image, thresholds) {
   return withImage(image, thresholds, 'directionalMotion', motionFrom);
 }
@@ -729,7 +872,7 @@ export function analyzePhotoQuality(image, options = {}) {
   const unknown = METRIC_IDS.filter((id) => metrics[id].status === 'unknown');
   const findings = METRIC_IDS.filter((id) => {
     const status = metrics[id].status;
-    return status === 'clipped' || status === 'moderate' || status === 'elevated' || status === 'possible';
+    return status === 'clipped' || status === 'moderate' || status === 'elevated' || status === 'possible' || status === 'soft';
   });
   return {
     ok: true,
