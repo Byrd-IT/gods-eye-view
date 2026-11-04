@@ -72,5 +72,16 @@ export function flightFileName(label, index = 0, total = 1, ext = 'kmz') {
 export const labelStem = (label) =>
   flightFileName(label, 0, 1, 'x').replace(/\.x$/, '');
 
+const CONTROLLER_ID =
+  /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+
+/**
+ * A controller mission id as it may be used in a file name: only a real UUID
+ * (the plan body is stored as opaque JSON, so an id can hold anything).
+ * @returns {string|null}
+ */
+export const controllerFileId = (id) =>
+  typeof id === 'string' && CONTROLLER_ID.test(id) ? id : null;
+
 /** Does this label carry a usable plan number? */
 export const hasLabel = (label) => Boolean(label && isNo(label.no));

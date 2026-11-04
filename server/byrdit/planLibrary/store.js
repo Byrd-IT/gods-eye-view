@@ -268,10 +268,10 @@ export function createStore({
    */
   function flownStamp(meta, clean) {
     if (clean.status === undefined) return {};
-    if (clean.status === 'flown' && meta.status !== 'flown') {
-      return { flownAt: now() };
-    }
     if (clean.status === 'planned') return { flownAt: null };
+    // flown, or processed (which was flown): keep a date already there, so
+    // moving from processed back to flown does not restamp it.
+    if (!Number.isFinite(meta.flownAt)) return { flownAt: now() };
     return {};
   }
 
@@ -367,7 +367,8 @@ export function createStore({
         notes: clean.notes ?? '',
         status: clean.status ?? 'planned',
         missionNo,
-        flownAt: clean.status === 'flown' ? t : null,
+        flownAt:
+          clean.status === 'flown' || clean.status === 'processed' ? t : null,
         createdAt: t,
         updatedAt: t,
         version: 1,

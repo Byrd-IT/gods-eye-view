@@ -423,7 +423,19 @@ test('flown tracking: the date follows the status', () => {
     store.update('amy', p.id, { status: 'processed' }).flownAt,
     flown.flownAt,
   );
+  // processed -> flown keeps the original date.
+  assert.equal(
+    store.update('amy', p.id, { status: 'flown' }).flownAt,
+    flown.flownAt,
+  );
+  store.update('amy', p.id, { status: 'processed' });
   assert.equal(store.update('amy', p.id, { status: 'planned' }).flownAt, null);
+  // A plan that goes straight to processed (flown elsewhere) gets a date too.
+  assert.equal(
+    typeof store.update('amy', p.id, { status: 'processed' }).flownAt,
+    'number',
+  );
+  store.update('amy', p.id, { status: 'planned' });
   // Saving a new version with status flown stamps too.
   const saved = store.save('amy', p.id, PLAN, { status: 'flown' });
   assert.equal(typeof saved.flownAt, 'number');

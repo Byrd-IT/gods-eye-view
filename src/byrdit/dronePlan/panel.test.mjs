@@ -3066,3 +3066,104 @@ test('mission labels: a processed plan has no one-click flown toggle', async () 
     await srv.close();
   }
 });
+
+test('mission labels: a suite zip stamps each picture with the code of its file, numbered across the passes', async () => {
+  const srv = await server();
+  try {
+    const w = setup({
+      libraryClient: srv.clientFor('alice'),
+      renderPreview: async (spec) => ({
+        bytes: new TextEncoder().encode(`PIC:${spec.code}`),
+        tile: false,
+      }),
+    });
+    w.doc.defaultView = { prompt: () => '', confirm: () => true };
+    await settleUi();
+    w.handle.setBox(boxM(300, 200));
+    await w.handle.replan();
+    field(w, 'name').value = 'Suite';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    await w.handle.planSuite();
+    const passes = w.handle.getState().suite.passes;
+    const total = passes.reduce((n, p) => n + p.result.missions.length, 0);
+    assert.ok(total >= 4, 'several passes, so flights run across them');
+    const before = w.downloads.length;
+    assert.equal(await w.handle.downloadSuite(), true);
+    assert.equal(w.downloads.length, before + 1);
+    const files = readZip(w.downloads.at(-1).bytes);
+    const names = [...files.keys()];
+    const kmz = names.filter((n) => n.endsWith('.kmz'));
+    assert.equal(kmz.length, total);
+    for (const k of kmz) {
+      const code = /\/(M01(?:-\d+)?)_Suite\.kmz$/.exec(k)?.[1];
+      assert.ok(code, k);
+      const pic = names.find((n) => n === k.replace(/\.kmz$/, '_preview.jpg'));
+      assert.ok(pic, `${k} has its picture`);
+      // The picture says M1-n (unpadded) where the file says M01-n.
+      assert.equal(
+        new TextDecoder().decode(files.get(pic)),
+        `PIC:${code.replace(/^M0/, 'M')}`,
+      );
+    }
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
+test('mission labels: a replan while the zip waits for its pictures drops the stale download', async () => {
+  const srv = await server();
+  try {
+    const w = setup({
+      libraryClient: srv.clientFor('alice'),
+      renderPreview: async () => {
+        await new Promise((r) => setTimeout(r, 120));
+        return { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), tile: false };
+      },
+    });
+    w.doc.defaultView = { prompt: () => '', confirm: () => true };
+    await settleUi();
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    field(w, 'name').value = 'Stale';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    w.handle.applyOptions({ aglM: 66 }, { planNow: true });
+    await w.handle.replan();
+    const before = w.downloads.length;
+    const pending = w.handle.downloadAll();
+    assert.equal(typeof pending.then, 'function', 'it is waiting for pictures');
+    w.handle.applyOptions({ aglM: 62 }, { planNow: true });
+    await w.handle.replan();
+    assert.equal(await pending, false, 'the old plan is not shipped');
+    assert.equal(w.downloads.length, before);
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
+test('mission labels: a crafted controller id is not used as the single-download file name', async () => {
+  const srv = await server();
+  try {
+    const w = setup({ libraryClient: srv.clientFor('alice') });
+    w.doc.defaultView = { prompt: () => '', confirm: () => true };
+    await settleUi();
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    field(w, 'name').value = 'Id';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    w.handle.getState().controllerIds = ['../../evil'];
+    w.handle.downloadMission(0);
+    assert.match(w.downloads.at(-1).name, /^M01(-1)?_Id\.kmz$/);
+    const uuid = '8A05BD5F-A9CE-4867-923F-7AACC02AF9A9';
+    w.handle.getState().controllerIds = [uuid];
+    w.handle.downloadMission(0);
+    assert.equal(w.downloads.at(-1).name, `${uuid}.kmz`);
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});

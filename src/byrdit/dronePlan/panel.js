@@ -87,6 +87,7 @@ import {
   flightFileName,
   flightTitle,
   hasLabel,
+  controllerFileId,
   labelStem,
 } from './missionLabel.js';
 import { renderThumb } from './missionThumb.js';
@@ -3743,9 +3744,9 @@ export function initDronePlan({
         wpml: wpmlOverride(),
         controllerIds: state.controllerIds,
         label,
-        previews: suite.passes.flatMap((pass) =>
-          (pass.result?.missions ?? []).map((m) => previewOf(m)),
-        ),
+        previews: flightsOf(
+          suite.passes.map((p) => p.result).filter(Boolean),
+        ).map((item) => previewFor(label, item)),
       });
       for (const pass of suite.passes) if (pass.result) checkBuilt(pass.result);
       const stamp = label
@@ -3755,7 +3756,7 @@ export function initDronePlan({
       return true;
     };
     const results = suite.passes.map((p) => p.result).filter(Boolean);
-    if (label && results.some((r) => r.missions.some((m) => !previewOf(m)))) {
+    if (label && flightsOf(results).some((item) => !previewFor(label, item))) {
       return allPreviews(label, results).then(finish);
     }
     return finish();
@@ -3817,15 +3818,38 @@ export function initDronePlan({
   // The labelled pictures, drawn in the background (a canvas is async) and
   // kept per mission; a download takes the ones that are ready.
   const previews = new WeakMap(); // mission -> { key, bytes }
-  const previewKey = (label, i, n) =>
-    `${flightCode(label.no, i, n)}|${label.name}`;
-  const previewOf = (mission) => previews.get(mission)?.bytes ?? null;
+  const previewKey = (label, flight, total) =>
+    `${flightCode(label.no, flight, total)}|${label.name}`;
+  /** The picture of this flight, only when it was drawn with this flight's code. */
+  const previewFor = (label, { mission, flight, total }) => {
+    if (!label) return null;
+    const have = previews.get(mission);
+    return have?.key === previewKey(label, flight, total) ? have.bytes : null;
+  };
 
-  function previewSpec(label, result, i, n) {
-    const mission = result.missions[i];
+  /**
+   * The flights of a group of results in export order. A suite zip numbers its
+   * flights across the passes, so its pictures must too (M5-2 is the second
+   * flight of the whole suite, whichever pass it is in).
+   */
+  const flightsOf = (results) => {
+    const total = results.reduce((sum, r) => sum + r.missions.length, 0);
+    let flight = 0;
+    return results.flatMap((result) =>
+      result.missions.map((mission, index) => ({
+        result,
+        mission,
+        index,
+        flight: flight++,
+        total,
+      })),
+    );
+  };
+
+  function previewSpec(label, { result, mission, flight, total }) {
     return {
-      code: flightCode(label.no, i, n),
-      title: flightTitle(label, i, n),
+      code: flightCode(label.no, flight, total),
+      title: flightTitle(label, flight, total),
       points: (mission.waypoints ?? []).map((w) => ({
         lat: w.lat,
         lon: w.lon,
@@ -3836,17 +3860,16 @@ export function initDronePlan({
 
   const inflight = new WeakMap(); // mission -> { key, promise }
 
-  function makePreview(label, result, i) {
-    const n = result.missions.length;
-    const mission = result.missions[i];
-    const key = previewKey(label, i, n);
+  function makePreview(label, item) {
+    const { mission, flight, total } = item;
+    const key = previewKey(label, flight, total);
     const have = previews.get(mission);
     if (have?.key === key) return Promise.resolve(have.bytes);
     const running = inflight.get(mission);
     if (running?.key === key) return running.promise;
     const promise = (async () => {
       try {
-        const out = await renderPreview(previewSpec(label, result, i, n));
+        const out = await renderPreview(previewSpec(label, item));
         if (!out?.bytes) return null;
         previews.set(mission, { key, bytes: out.bytes });
         return out.bytes;
@@ -3858,13 +3881,18 @@ export function initDronePlan({
     return promise;
   }
 
-  /** Wait for the pictures of every flight of these results (null = could not draw). */
+  /** The two groups that can be exported: the open plan, and the suite zip. */
+  const exportGroups = () =>
+    [
+      state.result ? [state.result] : [],
+      (state.suite?.passes ?? []).map((p) => p.result).filter(Boolean),
+    ].filter((g) => g.length);
+
+  /** Wait for the pictures of every flight of a group (null = could not draw). */
   const allPreviews = (label, results) =>
     Promise.all(
-      results.flatMap((result) =>
-        result.missions.map((_, i) =>
-          makePreview(label, result, i).catch(() => null),
-        ),
+      flightsOf(results).map((item) =>
+        makePreview(label, item).catch(() => null),
       ),
     );
 
@@ -3872,14 +3900,10 @@ export function initDronePlan({
   function ensurePreviews() {
     const label = planLabel();
     if (!label) return;
-    const results = [
-      state.result,
-      ...(state.suite?.passes ?? []).map((p) => p.result),
-    ].filter(Boolean);
-    for (const result of results) {
-      result.missions.forEach((_, i) => {
-        makePreview(label, result, i).catch(() => {});
-      });
+    for (const group of exportGroups()) {
+      for (const item of flightsOf(group)) {
+        makePreview(label, item).catch(() => {});
+      }
     }
   }
 
@@ -3889,12 +3913,18 @@ export function initDronePlan({
     if (!downloadsAllowed() || !label || !result?.missions[index]) {
       return false;
     }
-    const bytes = await makePreview(label, result, index);
+    const total = result.missions.length;
+    const bytes = await makePreview(label, {
+      result,
+      mission: result.missions[index],
+      index,
+      flight: index,
+      total,
+    });
     if (!bytes) {
       status(t('The picture could not be drawn in this browser'), 'warn');
       return false;
     }
-    const total = result.missions.length;
     downloadFile(
       flightFileName(label, index, total, 'jpg').replace(
         /\.jpg$/,
@@ -3924,8 +3954,9 @@ export function initDronePlan({
       ? result.missions.filter((item) => item.jobId === mission.jobId)
       : result.missions;
     // A controller mission id names the file <UUID>.kmz, as DJI Fly does.
-    const fileName = state.controllerIds[index]
-      ? `${state.controllerIds[index]}.kmz`
+    const controllerId = controllerFileId(state.controllerIds[index]);
+    const fileName = controllerId
+      ? `${controllerId}.kmz`
       : label
         ? flightFileName(label, index, total)
         : kmzFileName(
@@ -3954,7 +3985,7 @@ export function initDronePlan({
         wpml: wpmlOverride(),
         controllerIds: state.controllerIds,
         label,
-        previews: result.missions.map((m) => previewOf(m)),
+        previews: flightsOf([result]).map((item) => previewFor(label, item)),
       });
       const stamp = label
         ? labelStem(label)
@@ -3963,7 +3994,7 @@ export function initDronePlan({
       checkBuilt(result);
       return true;
     };
-    if (label && result.missions.some((m) => !previewOf(m))) {
+    if (label && flightsOf([result]).some((item) => !previewFor(label, item))) {
       return allPreviews(label, [result]).then(finish);
     }
     return finish();

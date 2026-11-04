@@ -45,15 +45,13 @@ import { makeZip } from './zip.js';
 import { cameraChecklistLines } from './cameraSettings.js';
 import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
 import {
+  controllerFileId,
   flightCode,
   flightFileName,
   flightTitle,
   hasLabel,
 } from './missionLabel.js';
 import { labelReadmeLines } from './cheatSheet.js';
-
-const CONTROLLER_ID =
-  /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 
 /** Namespace used by DJI Fly's own consumer-drone missions. */
 export const WPML_NAMESPACE = 'http://www.uav.com/wpmz/1.0.2';
@@ -569,8 +567,7 @@ export function bundleEntries(result, opts = {}) {
     // Optional chaining would skip the increment when there are no ids.
     const flight = counter.n++;
     // The id becomes a file name: only a real controller mission id is used.
-    const id = opts.controllerIds?.[flight];
-    const uuid = typeof id === 'string' && CONTROLLER_ID.test(id) ? id : null;
+    const uuid = controllerFileId(opts.controllerIds?.[flight]);
     const labelFile = label ? flightFileName(label, flight, flightTotal) : null;
     const file = uuid
       ? `${uuid}.kmz`
