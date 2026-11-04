@@ -56,6 +56,35 @@ test('exact fingerprints count once and cannot fill two planned shots', () => {
   assert.equal(report.refly.length, 1);
 });
 
+test('useful alternative capture avoids unnecessary refly candidate', () => {
+  const report = buildPhotoReviewReport([
+    photo({ review: { sampleCount: 9, score: 20, reasons: ['soft-detail'] } }),
+    photo({ name: 'better.jpg', lon: -95 + 0.000005 }),
+  ], [shot]);
+  assert.equal(report.matches.shots[0].photoIndex, 1);
+  assert.equal(report.refly.length, 0);
+  assert.ok(report.photos[0].reasons.includes('soft-detail'));
+});
+
+test('useful preference does not sacrifice cardinality for an isolated shot', () => {
+  const east = 0.0000106; // approximately one metre here
+  const report = buildPhotoReviewReport([
+    photo({ lon: -95 + east }), // can serve both shots
+    photo({ lon: -95 - east, review: { sampleCount: 9, score: 20, reasons: ['soft-detail'] } }),
+  ], [shot, { ...shot, lon: -95 + 2 * east, waypointId: 2 }]);
+  assert.equal(report.matches.matches.length, 2);
+  assert.equal(report.matches.shots[1].photoIndex, 0);
+  assert.equal(report.matches.shots[0].photoIndex, 1);
+});
+
+test('a wrong-angle alternative never clears a quality retake candidate', () => {
+  const report = buildPhotoReviewReport([
+    photo({ review: { sampleCount: 9, score: 20, reasons: ['soft-detail'] } }),
+    photo({ gimbalPitchDeg: 0 }),
+  ], [shot]);
+  assert.equal(report.refly.length, 1);
+});
+
 test('unmatched extras are not incorrectly attached as replacement quality', () => {
   const report = buildPhotoReviewReport([
     photo({ review: { sampleCount: 9, score: 20, reasons: ['soft-detail'] } }),

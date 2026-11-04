@@ -180,57 +180,67 @@ function selectPairs(list, planned, photoXY, shotXY) {
   };
 }
 
-/**
- * Maximum-cardinality one-to-one assignment. Closest pairs are tried first,
- * then augmenting paths recover a shot the greedy pass would leave bare.
- * @param {Array<[number, number, number]>} pairs [distanceM, shotIndex, photoIndex]
+/** Maximum-cardinality, minimum-cost assignment on the eligible edges.
+ * Prefer captures with no review/attitude concerns before minimizing distance.
+ * Residual reverse edges permit reassignment without losing cardinality.
  */
-function maximumMatch(pairs, shotCount, photoCount) {
-  const photoEdges = Array.from({ length: photoCount }, () => []);
-  const distOf = new Map();
-  for (const [d, i, j] of pairs) {
-    photoEdges[j].push(i);
-    const key = `${i},${j}`;
-    const prev = distOf.get(key);
-    if (prev == null || d < prev) distOf.set(key, d);
-  }
-  for (let j = 0; j < photoCount; j += 1) {
-    photoEdges[j].sort(
-      (a, b) => distOf.get(`${a},${j}`) - distOf.get(`${b},${j}`) || a - b,
-    );
-  }
-  const photoOfShot = new Array(shotCount).fill(-1);
-  const shotOfPhoto = new Array(photoCount).fill(-1);
-  const sorted = pairs
-    .slice()
-    .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
-  for (const [, i, j] of sorted) {
-    if (photoOfShot[i] === -1 && shotOfPhoto[j] === -1) {
-      photoOfShot[i] = j;
-      shotOfPhoto[j] = i;
-    }
-  }
-  const dfs = (photo, seen) => {
-    for (const i of photoEdges[photo]) {
-      if (seen[i]) continue;
-      seen[i] = true;
-      const cur = photoOfShot[i];
-      if (cur === -1 || dfs(cur, seen)) {
-        photoOfShot[i] = photo;
-        shotOfPhoto[photo] = i;
-        return true;
+function maximumMatch(pairs, planned, photos) {
+  const shotCount = planned.length;
+  const photoCount = photos.length;
+  const source = shotCount + photoCount;
+  const sink = source + 1;
+  const graph = Array.from({ length: sink + 1 }, () => []);
+  const add = (from, to, cost) => {
+    const forward = { to, cost, capacity: 1, reverse: graph[to].length };
+    const reverse = { to: from, cost: -cost, capacity: 0, reverse: graph[from].length };
+    graph[from].push(forward);
+    graph[to].push(reverse);
+    return forward;
+  };
+  for (let j = 0; j < photoCount; j += 1) add(source, shotCount + j, 0);
+  for (let i = 0; i < shotCount; i += 1) add(i, sink, 0);
+  // One additional concern must outweigh every possible distance improvement.
+  const penalty = Math.min(shotCount, photoCount) * MATCH_PROXIMITY_M + 1;
+  const assignments = pairs.map(([d, i, j]) => {
+    const review = photos[j].review;
+    const qualityConcern = !review?.sampleCount || !finite(review.score) || review.reasons?.length;
+    const concern = qualityConcern || attitudeLabel(photos[j], planned[i]) !== 'agreed';
+    return { i, j, d, edge: add(shotCount + j, i, d + (concern ? penalty : 0)) };
+  });
+  while (true) {
+    const distances = new Array(graph.length).fill(Infinity);
+    const previous = new Array(graph.length).fill(null);
+    const queued = new Array(graph.length).fill(false);
+    const queue = [source];
+    distances[source] = 0;
+    queued[source] = true;
+    for (let q = 0; q < queue.length; q += 1) {
+      const from = queue[q];
+      queued[from] = false;
+      for (let k = 0; k < graph[from].length; k += 1) {
+        const edge = graph[from][k];
+        const distance = distances[from] + edge.cost;
+        if (!edge.capacity || distance >= distances[edge.to] - 1e-9) continue;
+        distances[edge.to] = distance;
+        previous[edge.to] = { from, k };
+        if (!queued[edge.to]) {
+          queue.push(edge.to);
+          queued[edge.to] = true;
+        }
       }
     }
-    return false;
-  };
-  for (let j = 0; j < photoCount; j += 1) {
-    if (shotOfPhoto[j] !== -1) continue;
-    dfs(j, new Array(shotCount).fill(false));
+    if (!previous[sink]) break;
+    for (let to = sink; to !== source;) {
+      const { from, k } = previous[to];
+      const edge = graph[from][k];
+      edge.capacity = 0;
+      graph[to][edge.reverse].capacity = 1;
+      to = from;
+    }
   }
   const taken = new Map();
-  for (let i = 0; i < shotCount; i += 1) {
-    const j = photoOfShot[i];
-    if (j !== -1) taken.set(i, { j, d: distOf.get(`${i},${j}`) });
+  for (const { i, j, d, edge } of assignments) {
+    if (!edge.capacity) taken.set(i, { j, d });
   }
   return taken;
 }
@@ -263,7 +273,7 @@ export function matchPhotosToShots(photos = [], shots = []) {
     finite(p?.lon) && finite(p?.lat) ? frame.toXY(p.lon, p.lat) : null,
   );
   const { pairs, blocks } = selectPairs(list, planned, photoXY, shotXY);
-  const takenShot = maximumMatch(pairs, planned.length, list.length);
+  const takenShot = maximumMatch(pairs, planned, list);
   const unknownShot = new Map();
   for (const block of blocks) {
     for (const index of block.shotIndexes) {
