@@ -157,40 +157,19 @@ function selectPairs(list, planned, photoXY, shotXY) {
       const eligible = [];
       for (const edge of edges) {
         const shot = planned[edge.i];
-        let ok = true;
-        let unknown = false;
-        for (const axis of needed) {
-          const shotValue = shot[axis.shot];
-          const photoValue = list[j][axis.photo];
-          if (!finite(shotValue) || !finite(photoValue)) {
-            ok = false;
-            unknown = true;
-            break;
-          }
-          if (agreesOn(list[j], shot, axis) !== true) {
-            ok = false;
-            break;
-          }
-          const tied = group.some(
-            (other) =>
-              other !== edge.i &&
-              finite(planned[other][axis.shot]) &&
-              agreesOn(list[j], planned[other], axis) === true,
-          );
-          if (tied) {
-            ok = false;
-            unknown = true;
-            break;
-          }
-        }
-        if (ok) eligible.push(edge);
-        else if (unknown) unknownShots.push(edge.i);
+        const agreements = needed.map((axis) => agreesOn(list[j], shot, axis));
+        // A known disagreement excludes a shot even when another axis is missing.
+        if (agreements.includes(false)) continue;
+        if (agreements.includes(null)) unknownShots.push(edge.i);
+        else eligible.push(edge);
       }
-      if (eligible.length === 1) kept.push(eligible[0]);
-      else if (unknownShots.length)
+      // Uniqueness is determined jointly across axes, not independently on
+      // each axis. An unknown candidate can still be the intended shot.
+      if (eligible.length === 1 && unknownShots.length === 0) kept.push(eligible[0]);
+      else if (unknownShots.length || eligible.length > 1)
         blocks.push({
           photoIndex: j,
-          shotIndexes: unknownShots,
+          shotIndexes: [...unknownShots, ...eligible.map((edge) => edge.i)],
           reason: 'attitude-unknown',
         });
     }

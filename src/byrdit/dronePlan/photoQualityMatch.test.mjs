@@ -33,6 +33,28 @@ const photoAt = (x, y, i, extra = {}) => ({
   ...extra,
 });
 
+test('co-located shots are distinguished by the combination of attitude axes', () => {
+  const shots = [
+    shotAt(0, 0, { waypointId: 1, pitchDeg: -55, headingDeg: 90 }),
+    shotAt(0, 0, { waypointId: 2, pitchDeg: -55, headingDeg: 180 }),
+    shotAt(0, 0, { waypointId: 3, pitchDeg: -30, headingDeg: 90 }),
+  ];
+  const report = matchPhotosToShots([photoAt(0, 0, 1)], shots);
+  assert.equal(report.matches.length, 1);
+  assert.equal(report.matches[0].waypointId, 1);
+});
+
+test('an otherwise matching shot cannot hide an unknown co-located candidate', () => {
+  const shots = [
+    shotAt(0, 0, { waypointId: 1, headingDeg: 90 }),
+    shotAt(0, 0, { waypointId: 2, headingDeg: null }),
+  ];
+  const report = matchPhotosToShots([photoAt(0, 0, 1)], shots);
+  assert.equal(report.matches.length, 0);
+  assert.equal(report.shots[0].status, 'unknown');
+  assert.equal(report.shots[1].status, 'unknown');
+});
+
 test('a photo within 1.5 m matches one planned shot and keeps waypoint identity', () => {
   assert.equal(MATCH_PROXIMITY_M, 1.5);
   const shots = [
