@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { makeNaipRedactors, safeUrl } from './qa-naip-compare-redact.mjs';
+import { makeNaipRedactors, safeUrl } from '../../../scripts/qa-naip-compare-redact.mjs';
 
 const TOKEN = 'sk_synthetic_Zq81mXw4';
 const PASS = 'p4ssSynth9';
