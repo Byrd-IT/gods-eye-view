@@ -297,6 +297,9 @@ export function matchPhotosToShots(photos = [], shots = []) {
       photoIndex: hit ? hit.j : null,
       photoName: photo ? (photo.name ?? null) : null,
       offsetM: hit ? hit.d : null,
+      // Meaningful only when the plan and flight share the same takeoff datum.
+      altitudeOffsetM: photo && finite(photo.relAltM) && finite(shot.relHeightM)
+        ? photo.relAltM - shot.relHeightM : null,
       attitude: hit ? attitudeLabel(photo, shot) : null,
     };
   });
@@ -312,6 +315,7 @@ export function matchPhotosToShots(photos = [], shots = []) {
       leg: s.leg,
       pass: s.pass,
       offsetM: s.offsetM,
+      altitudeOffsetM: s.altitudeOffsetM,
       attitude: s.attitude,
     }));
   const missing = shotRows.filter((s) => s.status === 'missing');

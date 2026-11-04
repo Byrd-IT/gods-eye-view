@@ -40,6 +40,13 @@ test('without a plan the report still accounts for every input photo', () => {
   assert.deepEqual(report.unmatchedPhotos.map((p) => p.reason), ['no-plan', 'no-position']);
 });
 
+test('matched shots expose takeoff-relative altitude difference without confusing AGL', () => {
+  const report = matchPhotosToShots([photoAt(0, 0, 1, { relAltM: 64 })], [shotAt(0, 0, { relHeightM: 60, aglM: 64 })]);
+  assert.equal(report.matches[0].altitudeOffsetM, 4);
+  const unknown = matchPhotosToShots([photoAt(0, 0, 1)], [shotAt(0, 0)]);
+  assert.equal(unknown.matches[0].altitudeOffsetM, null);
+});
+
 test('co-located shots are distinguished by the combination of attitude axes', () => {
   const shots = [
     shotAt(0, 0, { waypointId: 1, pitchDeg: -55, headingDeg: 90 }),
