@@ -38,6 +38,43 @@ test('interval heading gaps remain unknown rather than inheriting a distant angl
   assert.equal(shots[1].headingDeg, null);
   assert.equal(shots[2].headingDeg, null);
 });
+test('interval heights use known endpoints but never bridge an unknown span', () => {
+  const frame = makeFrame(-95, 32);
+  for (const values of [[50, null], [null, 70]]) {
+    const shots = plannedShots({ result: { missions: [{ legs: [{
+      photoMode: 'interval', photoSpacingM: 10, pitchDeg: -45,
+      waypoints: values.map((v, i) => ({ ...frame.toLonLat(i * 20, 0), aglM: v, relHeightM: v })),
+    }] }] } });
+    for (const key of ['aglM', 'relHeightM']) {
+      assert.deepEqual(shots.map(s => s[key]), [values[0], null, values[1]]);
+    }
+  }
+});
+
+test('nearby capture with neither co-located attitude remains linked inspection evidence', () => {
+  const shots = [shot, { ...shot, headingDeg: 180, waypointId: 2 }];
+  const report = buildPhotoReviewReport([photo({ gimbalYawDeg: 90 })], shots);
+  assert.equal(report.matches.matches.length, 0);
+  assert.equal(report.refly.length, 2);
+  for (const row of report.refly) {
+    assert.equal(row.decision, 'inspect-before-refly');
+    assert.equal(row.photoIndex, 0);
+    assert.ok(row.reasons.includes('attitude-disagreed'));
+    assert.ok(!row.reasons.includes('missing-photo'));
+  }
+  assert.ok(report.photos[0].reasons.includes('attitude-disagreed'));
+  assert.ok(!report.photos[0].reasons.includes('off-plan'));
+});
+
+test('ambiguous disagreement evidence keeps original indexes after dedupe', () => {
+  const unrelated = photo({ lon: -94, digest: 'a'.repeat(64) });
+  const wrong = photo({ gimbalYawDeg: 90 });
+  const report = buildPhotoReviewReport([unrelated, { ...unrelated }, wrong], [shot, { ...shot, headingDeg: 180, waypointId: 2 }]);
+  assert.ok(report.refly.every(r => r.photoIndex === 2 && r.status === 'unknown'));
+  assert.ok(report.matches.shots.every(r => r.photoIndex === 2));
+  assert.equal(report.matches.matches.length, 0);
+});
+
 const shot = { lon: -95, lat: 32, pitchDeg: -45, headingDeg: 0, waypointId: 1 };
 const photo = (extra = {}) => ({ name: 'a.jpg', lon: -95, lat: 32, gimbalPitchDeg: -45, gimbalYawDeg: 0, review: { score: 90, reasons: [], sampleCount: 9 }, ...extra });
 

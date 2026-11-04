@@ -173,6 +173,12 @@ function selectPairs(list, planned, photoXY, shotXY) {
           shotIndexes: [...unknownShots, ...eligible.map((edge) => edge.i)],
           reason: 'attitude-unknown',
         });
+      else
+        blocks.push({
+          photoIndex: j,
+          shotIndexes: group,
+          reason: 'attitude-disagreed',
+        });
     }
   }
   return {
@@ -291,14 +297,16 @@ export function matchPhotosToShots(photos = [], shots = []) {
   for (const block of blocks) {
     for (const index of block.shotIndexes) {
       if (!takenShot.has(index) && !unknownShot.has(index))
-        unknownShot.set(index, block.reason);
+        unknownShot.set(index, block);
     }
   }
   const shotRows = planned.map((shot, index) => {
     const hit = takenShot.get(index);
     const blocked = unknownShot.get(index);
     const status = hit ? 'matched' : blocked ? 'unknown' : 'missing';
-    const photo = hit ? list[hit.j] : null;
+    // A blocked association is evidence of a nearby capture, not an assignment.
+    const photoIndex = hit ? hit.j : (blocked?.photoIndex ?? null);
+    const photo = photoIndex == null ? null : list[photoIndex];
     return {
       key: shotKey(shot, index),
       index,
@@ -318,8 +326,8 @@ export function matchPhotosToShots(photos = [], shots = []) {
       pitchDeg: finite(shot.pitchDeg) ? shot.pitchDeg : null,
       headingDeg: finite(shot.headingDeg) ? shot.headingDeg : null,
       status,
-      reason: blocked && !hit ? blocked : null,
-      photoIndex: hit ? hit.j : null,
+      reason: blocked && !hit ? blocked.reason : null,
+      photoIndex,
       photoName: photo ? (photo.name ?? null) : null,
       offsetM: hit ? hit.d : null,
       // Meaningful only when the plan and flight share the same takeoff datum.
@@ -493,9 +501,11 @@ function intervalPoints(wps, stepM) {
     const lerp = (k) =>
       finite(a[k]) && finite(b[k])
         ? a[k] + (b[k] - a[k]) * t
-        : finite(a[k])
+        : t <= 1e-9 && finite(a[k])
           ? a[k]
-          : null;
+          : t >= 1 - 1e-9 && finite(b[k])
+            ? b[k]
+            : null;
     out.push({
       lon: ll.lon,
       lat: ll.lat,
