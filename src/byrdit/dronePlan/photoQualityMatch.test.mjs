@@ -176,6 +176,14 @@ test('a co-located pair is unknown when the photo has no pitch or heading, and n
   assert.equal(zero.shots.find((s) => s.shot === 'out').status, 'missing');
 });
 
+test('known incorrect pitch remains a disagreement even if heading is unknown', () => {
+  const report = matchPhotosToShots(
+    [photoAt(0, 0, 1, { gimbalPitchDeg: -20, gimbalYawDeg: null })],
+    [shotAt(0, 0)],
+  );
+  assert.equal(report.matches[0].attitude, 'disagreed');
+});
+
 test('a lone shot still matches when the photo attitude is unknown, and says so', () => {
   const report = matchPhotosToShots(
     [photoAt(0.4, 0, 1, { gimbalPitchDeg: null, gimbalYawDeg: null })],

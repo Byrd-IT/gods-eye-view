@@ -111,8 +111,9 @@ function incompleteAxes(indexes, planned) {
 function attitudeLabel(photo, shot) {
   const pitch = agreesOn(photo, shot, AXES[0]);
   const heading = agreesOn(photo, shot, AXES[1]);
+  if (pitch === false || heading === false) return 'disagreed';
   if (pitch == null || heading == null) return 'unknown';
-  return pitch && heading ? 'agreed' : 'disagreed';
+  return 'agreed';
 }
 
 /**
