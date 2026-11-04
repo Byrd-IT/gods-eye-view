@@ -3200,3 +3200,33 @@ test('mission labels: a rename while the picture loads does not strip the pictur
     await srv.close();
   }
 });
+
+test('mission labels: trashing the open plan clears the labels at once; a picture that cannot be drawn warns before the zip', async () => {
+  const srv = await server();
+  try {
+    const w = setup({
+      libraryClient: srv.clientFor('alice'),
+      renderPreview: async () => null,
+    });
+    w.doc.defaultView = { prompt: () => '', confirm: () => true };
+    await settleUi();
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    field(w, 'name').value = 'Warn';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    const note = () => w.find((n) => n.getAttribute?.('data-role') === 'mission-label-note')[0].textContent;
+    assert.match(note(), /labelled M1/);
+    assert.equal(await w.handle.downloadAll(), true);
+    assert.match(
+      w.find((n) => n.dataset?.tone === 'warn')[0]?.textContent ?? '',
+      /picture could not be drawn/,
+    );
+    btn(w, 'plan-delete')[0].click();
+    await settleUi();
+    assert.match(note(), /Save this plan in the Plan library/);
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});

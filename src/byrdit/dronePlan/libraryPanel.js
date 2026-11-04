@@ -736,7 +736,10 @@ export function mountLibrary({
         return;
       await client.trash(plan.id);
       s.shown.delete(plan.id);
-      if (s.current?.id === plan.id) s.current = null;
+      if (s.current?.id === plan.id) {
+        s.current = null;
+        host.labelChanged?.();
+      }
       drawMap();
       await refresh();
     });
@@ -854,6 +857,7 @@ export function mountLibrary({
     if (out.kind === 'gevplan') {
       setDetails(out.details);
       s.current = null;
+      host.labelChanged?.();
       await host.load(out.plan);
       f.controllers.value = idsText(host.controllerIds());
       renderImports();

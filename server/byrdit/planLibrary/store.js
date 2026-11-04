@@ -394,6 +394,7 @@ export function createStore({
 
     /** A new version (the old ones stay), and optional detail edits. */
     save(user, id, plan, details = {}) {
+      ensureNumbers(user);
       const meta = loadMeta(user, id);
       if (meta.deletedAt) {
         throw new LibraryError(

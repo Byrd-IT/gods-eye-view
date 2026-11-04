@@ -3751,6 +3751,9 @@ export function initDronePlan({
         ? labelStem(label)
         : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
       downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
+      if (label && pics.some((b) => !b)) {
+        status(t('The picture could not be drawn in this browser'), 'warn');
+      }
       return true;
     };
     const results = suite.passes.map((p) => p.result).filter(Boolean);
@@ -3991,6 +3994,9 @@ export function initDronePlan({
         : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
       downloadFile(`${stamp}-all.zip`, bytes, 'application/zip');
       checkBuilt(result);
+      if (label && pics.some((b) => !b)) {
+        status(t('The picture could not be drawn in this browser'), 'warn');
+      }
       return true;
     };
     const items = flightsOf([result]);

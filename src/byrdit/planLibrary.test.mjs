@@ -466,3 +466,17 @@ test('mission numbers are not reused after the trash is purged (a placeholder ma
   assert.equal(store.create('amy', { name: 'd' }, PLAN).missionNo, 4);
   rmSync(root, { recursive: true, force: true });
 });
+
+test('save() numbers a legacy plan too (first call after the upgrade)', () => {
+  const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevlib-'));
+  const store = createStore({ root, now: () => 1_000_000 });
+  const a = store.create('amy', { name: 'a' }, PLAN);
+  const f = path.join(root, 'amy', a.id, 'meta.json');
+  const m = JSON.parse(readFileSync(f, 'utf8'));
+  delete m.missionNo;
+  writeFileSync(f, JSON.stringify(m));
+  rmSync(path.join(root, 'amy', 'counter.json'), { force: true });
+  const saved = store.save('amy', a.id, PLAN, {});
+  assert.equal((saved.plan ?? saved).missionNo, 1);
+  rmSync(root, { recursive: true, force: true });
+});
