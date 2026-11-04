@@ -115,7 +115,7 @@ export const LIMITATIONS = Object.freeze([
 ]);
 
 const SCORE_NOTE =
-  'Averages only sharpness readings and defect findings. Unknown metrics and absent cues are left out, not treated as passes. This is not a photogrammetry grade.';
+  'Averages sharpness readings and defect findings, capped by any soft-detail score. Unknown metrics and absent cues are left out, not treated as passes. This is not a photogrammetry grade; changes in other findings can still change the score.';
 
 const METRIC_IDS = Object.freeze([
   'blur',
@@ -832,7 +832,11 @@ function compositeScore(metrics) {
     }
   }
   if (!parts.length) return null;
-  return clampScore(parts.reduce((sum, score) => sum + score, 0) / parts.length);
+  const mean = clampScore(parts.reduce((sum, score) => sum + score, 0) / parts.length);
+  const blur = metrics.blur;
+  return blur.status === 'soft' && typeof blur.score === 'number'
+    ? Math.min(mean, blur.score)
+    : mean;
 }
 
 /**

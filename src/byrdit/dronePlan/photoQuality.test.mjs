@@ -389,6 +389,14 @@ test('glare is a heuristic and is withheld when the cue is the whole frame or ha
   assert.equal(analyzeGlare(blobOnFlat).status, 'unknown');
 });
 
+test('a soft-detail score caps the composite even when noise findings change', () => {
+  const sample = smearBoth(checker(8, 64), 3);
+  const result = analyzePhotoQuality(sample, { thresholds: { clipFractionWarn: 0 } });
+  assert.equal(result.metrics.blur.status, 'soft');
+  assert.equal(result.metrics.clipping.status, 'clipped');
+  assert.ok(result.score <= result.metrics.blur.score, `composite ${result.score} exceeds soft-detail score ${result.metrics.blur.score}`);
+});
+
 test('the composite scores only sharpness readings and defect findings', () => {
   const blank = analyzePhotoQuality(flat());
   assert.equal(blank.ok, true);
