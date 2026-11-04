@@ -271,3 +271,46 @@ test('the SOLUNAR launcher wraps its title, hides its body while collapsed, and 
   assert.ok(media.includes('.gev-sl-controls .data-toggle-chip'));
   assert.ok(media.includes('min-height: 44px'));
 });
+
+test('reopening the card redraws it, so a card left closed overnight shows the new week', async () => {
+  let nowMs = Date.UTC(2026, 10, 3, 18);
+  const viewer = fakeViewer();
+  const window = new Window();
+  const doc = window.document;
+  const root = doc.createElement('div');
+  root.id = SOLUNAR_ID;
+  const body = doc.createElement('div');
+  body.id = SOLUNAR_BODY_ID;
+  root.append(body);
+  doc.body.append(root);
+  mountSolunarForShell({ viewer }, { document: doc, now: () => nowMs });
+  const first = () => body.querySelector('.gev-sl-day').dataset.date;
+  assert.equal(first(), '2026-11-03');
+  body.querySelector('.gev-sl-center'); // spot came from the centre
+  // the user picks a spot, closes the card, a day passes, it is reopened
+  const canvas = viewer.scene.canvas;
+  canvas.dispatchEvent(
+    new window.MouseEvent('pointerdown', {
+      button: 0,
+      clientX: 110,
+      clientY: 220,
+    }),
+  );
+  canvas.dispatchEvent(
+    new window.MouseEvent('pointerup', {
+      button: 0,
+      clientX: 110,
+      clientY: 220,
+    }),
+  );
+  root.classList.add('collapsed');
+  await new Promise((r) => setTimeout(r, 5));
+  nowMs += 86_400_000;
+  root.classList.remove('collapsed');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(first(), '2026-11-04');
+  assert.match(
+    body.querySelector('.gev-sl-spot').textContent,
+    /^32\.000°N 99\.000°W/,
+  );
+});

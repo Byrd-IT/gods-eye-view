@@ -241,3 +241,9 @@ test('a day with two major windows lists them one per line', () => {
     '7:11 PM – 9:11 PM (Moon underfoot)',
   ]);
 });
+
+test('24 h clock shows 00:05, never 24:05', () => {
+  const midnight = Date.UTC(2026, 10, 3, 6, 5);
+  assert.equal(formatClock(midnight, 'America/Chicago', false), '00:05');
+  assert.equal(formatClock(midnight, 'America/Chicago', true), '12:05 AM');
+});

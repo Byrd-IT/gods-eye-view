@@ -52,7 +52,8 @@ export function formatClock(ms, zone, hour12) {
     timeZone: zone,
     hour: 'numeric',
     minute: '2-digit',
-    hour12,
+    // hour12:false alone gives "24:05" for 00:05 in some locales
+    ...(hour12 ? { hour12: true } : { hourCycle: 'h23' }),
   });
 }
 

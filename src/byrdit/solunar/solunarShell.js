@@ -94,7 +94,10 @@ export function mountSolunarForShell(
   const onToggle = () => {
     if (isOpen()) {
       if (!panel.getSpot() || panel.getSpot().source === 'center') useCenter();
-      else showMarker(lastCartesian);
+      else {
+        showMarker(lastCartesian);
+        panel.refresh(); // the card may have stayed closed past midnight
+      }
     } else clearMarker();
   };
   const Observer =
