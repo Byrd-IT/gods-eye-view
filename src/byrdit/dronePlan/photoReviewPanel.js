@@ -43,12 +43,19 @@ export function mountPhotoReviewPanel({
   const results = add('div', root, null, 'quality-results');
   let controller = null;
   let photos = [];
+  let batchInfo = null;
   let report = null;
   let destroyed = false;
   const render = () => {
     results.replaceChildren();
-    report = photos.length
-      ? buildPhotoReviewReport(photos, plannedShots(host.planned?.() ?? {}))
+    report = batchInfo
+      ? {
+          ...buildPhotoReviewReport(
+            photos,
+            plannedShots(host.planned?.() ?? {}),
+          ),
+          ...batchInfo,
+        }
       : null;
     save.disabled = report == null;
     if (!report) return;
@@ -67,6 +74,8 @@ export function mountPhotoReviewPanel({
         `${shot.key}: ${shot.lon}, ${shot.lat} — ${shot.reasons.join(', ')}`,
       );
     }
+    for (const rejected of report.rejected)
+      add('p', results, `${rejected.name}: — — ${rejected.reason}`);
     // User-controlled filenames are always text, never HTML.
     for (const row of report.photos) {
       add(
@@ -80,6 +89,7 @@ export function mountPhotoReviewPanel({
     controller?.abort();
     controller = null;
     photos = [];
+    batchInfo = null;
     report = null;
     input.value = '';
     input.disabled = false;
@@ -99,6 +109,7 @@ export function mountPhotoReviewPanel({
       if (destroyed || controller !== current || current.signal.aborted)
         return null;
       photos = batch.photos;
+      batchInfo = { rejected: batch.rejected, skippedOver: batch.skippedOver };
       render();
       status.textContent = t(
         '{rejected} unreadable files; {skipped} files over the limit',

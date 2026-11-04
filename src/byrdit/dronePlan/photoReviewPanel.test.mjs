@@ -26,6 +26,16 @@ test('local quality section renders text-only names and exports report on click 
   assert.equal(panel.report(), null);
 });
 
+test('rejected-only input still exports named failures and truncation count', async () => {
+  const rejected = [{ name: 'broken.jpg', reason: 'header-unavailable' }];
+  const { panel, nodes, downloads } = setup(async () => ({ photos: [], rejected, skippedOver: 2 }));
+  const report = await panel.addFiles([{}]);
+  assert.deepEqual(report?.rejected, rejected);
+  assert.equal(report.skippedOver, 2);
+  nodes.find(n => n.textContent === 'SAVE QUALITY REPORT (JSON)').handlers.click();
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(downloads[0][1])).rejected, rejected);
+});
+
 test('clearing or destroying during decode prevents stale publication', async () => {
   let resolve; let signal;
   const {panel} = setup((files, opts) => { signal=opts.signal; return new Promise(r => {resolve=r;}); });
