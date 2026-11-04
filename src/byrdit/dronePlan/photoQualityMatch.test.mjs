@@ -209,7 +209,8 @@ test('a co-located pair is unknown when the photo has no pitch or heading, and n
     'null planned pitch must not match a photo at 0',
   );
   assert.equal(zero.shots.find((s) => s.shot === 'in').status, 'unknown');
-  assert.equal(zero.shots.find((s) => s.shot === 'out').status, 'missing');
+  assert.equal(zero.shots.find((s) => s.shot === 'out').status, 'unknown');
+  assert.equal(zero.shots.find((s) => s.shot === 'out').reason, 'attitude-disagreed');
 });
 
 test('known incorrect pitch remains a disagreement even if heading is unknown', () => {

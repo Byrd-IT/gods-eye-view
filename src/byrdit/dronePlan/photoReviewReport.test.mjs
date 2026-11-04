@@ -75,6 +75,18 @@ test('ambiguous disagreement evidence keeps original indexes after dedupe', () =
   assert.equal(report.matches.matches.length, 0);
 });
 
+test('mixed unknown and disagreed co-located shots retain nearby evidence for both', () => {
+  const shots = [{ ...shot, pitchDeg: null }, { ...shot, headingDeg: 180, waypointId: 2 }];
+  const report = buildPhotoReviewReport([photo()], shots);
+  assert.equal(report.matches.matches.length, 0);
+  assert.equal(report.refly.length, 2);
+  assert.deepEqual(report.refly.map(r => r.reasons), [['attitude-unknown'], ['attitude-disagreed']]);
+  assert.ok(report.refly.every(r => r.photoIndex === 0 && r.decision === 'inspect-before-refly'));
+  assert.ok(report.photos[0].reasons.includes('attitude-unknown'));
+  assert.ok(report.photos[0].reasons.includes('attitude-disagreed'));
+  assert.equal(report.matches.unknown.filter(r => r.kind === 'photo').length, 2);
+});
+
 const shot = { lon: -95, lat: 32, pitchDeg: -45, headingDeg: 0, waypointId: 1 };
 const photo = (extra = {}) => ({ name: 'a.jpg', lon: -95, lat: 32, gimbalPitchDeg: -45, gimbalYawDeg: 0, review: { score: 90, reasons: [], sampleCount: 9 }, ...extra });
 

@@ -155,11 +155,15 @@ function selectPairs(list, planned, photoXY, shotXY) {
       const needed = [...separating, ...incomplete];
       const unknownShots = [];
       const eligible = [];
+      const disagreed = [];
       for (const edge of edges) {
         const shot = planned[edge.i];
         const agreements = needed.map((axis) => agreesOn(list[j], shot, axis));
         // A known disagreement excludes a shot even when another axis is missing.
-        if (agreements.includes(false)) continue;
+        if (agreements.includes(false)) {
+          disagreed.push(edge.i);
+          continue;
+        }
         if (agreements.includes(null)) unknownShots.push(edge.i);
         else eligible.push(edge);
       }
@@ -167,18 +171,20 @@ function selectPairs(list, planned, photoXY, shotXY) {
       // each axis. An unknown candidate can still be the intended shot.
       if (eligible.length === 1 && unknownShots.length === 0)
         kept.push(eligible[0]);
-      else if (unknownShots.length || eligible.length > 1)
-        blocks.push({
-          photoIndex: j,
-          shotIndexes: [...unknownShots, ...eligible.map((edge) => edge.i)],
-          reason: 'attitude-unknown',
-        });
-      else
-        blocks.push({
-          photoIndex: j,
-          shotIndexes: group,
-          reason: 'attitude-disagreed',
-        });
+      else {
+        if (unknownShots.length || eligible.length > 1)
+          blocks.push({
+            photoIndex: j,
+            shotIndexes: [...unknownShots, ...eligible.map((edge) => edge.i)],
+            reason: 'attitude-unknown',
+          });
+        if (disagreed.length)
+          blocks.push({
+            photoIndex: j,
+            shotIndexes: disagreed,
+            reason: 'attitude-disagreed',
+          });
+      }
     }
   }
   return {
@@ -424,19 +430,26 @@ export function matchPhotosToShots(photos = [], shots = []) {
   });
   for (const block of blocks) {
     if (matchedPhotos.has(block.photoIndex)) continue;
-    if (
-      unknown.some(
-        (row) => row.kind === 'photo' && row.photoIndex === block.photoIndex,
-      )
-    )
+    const candidateKeys = block.shotIndexes.map((index) => shotRows[index].key);
+    const existing = unknown.find(
+      (row) =>
+        row.kind === 'photo' &&
+        row.photoIndex === block.photoIndex &&
+        row.reason === block.reason,
+    );
+    if (existing) {
+      existing.candidateKeys = [
+        ...new Set([...existing.candidateKeys, ...candidateKeys]),
+      ];
       continue;
+    }
     const photo = list[block.photoIndex];
     unknown.push({
       kind: 'photo',
       reason: block.reason,
       photoIndex: block.photoIndex,
       photoName: photo?.name ?? null,
-      candidateKeys: block.shotIndexes.map((index) => shotRows[index].key),
+      candidateKeys,
     });
   }
   return {
