@@ -2,6 +2,7 @@
  * heuristic findings to confirmed defects. No inferred flight instructions.
  */
 import { matchPhotosToShots } from './photoQualityMatch.js';
+import { assessPhotoOverlap } from './photoReviewOverlap.js';
 
 export function buildPhotoReviewReport(photos = [], shots = []) {
   const seen = new Map();
@@ -37,9 +38,11 @@ export function buildPhotoReviewReport(photos = [], shots = []) {
     };
   });
   const matches = matchPhotosToShots(unique, shots);
+  const overlap = assessPhotoOverlap(unique, matches.shots);
+  const gapKeys = new Set(overlap.pairs.filter((pair) => pair.reason === 'modeled-overlap-gap').flatMap((pair) => pair.shotKeys));
   const refly = [];
   for (const shot of matches.shots) {
-    const reasons = [];
+    const reasons = gapKeys.has(shot.key) ? ['modeled-overlap-gap'] : [];
     if (shot.status === 'missing') reasons.push('missing-photo');
     else if (shot.status === 'unknown') reasons.push(shot.reason ?? 'assignment-unknown');
     else {
@@ -67,7 +70,7 @@ export function buildPhotoReviewReport(photos = [], shots = []) {
     row.reasons = [...new Set([...row.reasons, unknown.reason])];
   }
   return {
-    photos: rows, refly, matches, originalIndexes,
+    photos: rows, refly, matches, originalIndexes, overlap,
     note: 'Re-fly candidates require inspection. Pixel findings are heuristic, native tiles do not cover every pixel, and a matched photo is not proof of usable overlap. Altitude offsets require a common takeoff datum.',
   };
 }

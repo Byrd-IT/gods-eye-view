@@ -94,6 +94,16 @@ test('export retains local measurement evidence and planned height for KMZ input
   assert.equal(report.refly[0].aglM, 60);
 });
 
+test('modeled overlap gaps retain both waypoints as inspection candidates', () => {
+  const geometry = { widthPx: 4096, heightPx: 3072, focal35Mm: 24, relAltM: 80, gimbalPitchDeg: -90 };
+  const photos = [photo(geometry), photo({ ...geometry, lon: -94.99 })];
+  const shots = [{ ...shot, pitchDeg: -90, relHeightM: 80, aglM: 80 }, { ...shot, lon: -94.99, pitchDeg: -90, relHeightM: 80, aglM: 80, waypointId: 2 }];
+  const report = buildPhotoReviewReport(photos, shots);
+  assert.equal(report.refly.length, 2);
+  assert.ok(report.refly.every((s) => s.reasons.includes('modeled-overlap-gap')));
+  assert.equal(report.overlap.verified, false);
+});
+
 test('unmatched extras are not incorrectly attached as replacement quality', () => {
   const report = buildPhotoReviewReport([
     photo({ review: { sampleCount: 9, score: 20, reasons: ['soft-detail'] } }),
