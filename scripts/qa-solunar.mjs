@@ -17,11 +17,20 @@ const appUrl = process.env.QA_BASE_URL || 'http://127.0.0.1:4392';
 const outDir = path.resolve(process.env.QA_OUT_DIR || 'qa-artifacts-solunar');
 fs.mkdirSync(outDir, { recursive: true });
 const redact = makeRedactor(urlSecrets(appUrl));
+// a refused or failed navigation echoes the URL: mask it in every crash path
+const fatal = (e) => {
+  console.error(redact(e?.stack || e?.message || String(e)));
+  process.exit(1);
+};
+process.on('uncaughtException', fatal);
+process.on('unhandledRejection', fatal);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const failures = [];
 const check = (name, ok, detail = '') => {
   console.log(
-    `  [${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? ' - ' + detail : ''}`,
+    redact(
+      `  [${ok ? 'PASS' : 'FAIL'}] ${name}${detail ? ' - ' + detail : ''}`,
+    ),
   );
   if (!ok) failures.push(name);
 };
@@ -156,7 +165,12 @@ async function run(label, viewport, { touch = false } = {}) {
       })(),
     };
   });
-  console.log(label, 'open', JSON.stringify(opened.days[0]), opened.spot);
+  console.log(
+    label,
+    'open',
+    redact(JSON.stringify(opened.days[0])),
+    opened.spot,
+  );
   check(`${label}: the card opens`, !opened.collapsed && opened.inView);
   check(
     `${label}: default spot is the map centre (Lake Bob Sandlin 33.05,-95.1)`,
@@ -241,12 +255,14 @@ async function run(label, viewport, { touch = false } = {}) {
 try {
   await run('desktop', { width: 1600, height: 900 });
   await run('phone', { width: 390, height: 844 }, { touch: true });
+} catch (e) {
+  fatal(e);
 } finally {
   await browser.close();
 }
 if (failures.length) {
   console.error(
-    `\n${failures.length} check(s) failed:\n- ${failures.join('\n- ')}`,
+    redact(`\n${failures.length} check(s) failed:\n- ${failures.join('\n- ')}`),
   );
   process.exit(1);
 }

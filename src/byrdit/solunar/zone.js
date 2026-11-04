@@ -89,16 +89,43 @@ export function zoneOffsetMs(zone, ms) {
   return wallAsUtc - Math.floor(ms / 1000) * 1000;
 }
 
-/** The instant a local calendar day starts (00:00 wall clock) in a zone. */
+/** True when `ms` is exactly 00:00:00 on the given local calendar date. */
+function isLocalMidnight(zone, ms, year, month, day) {
+  const p = zonedParts(zone, ms);
+  return (
+    p.year === year &&
+    p.month === month &&
+    p.day === day &&
+    p.hour === 0 &&
+    p.minute === 0 &&
+    p.second === 0
+  );
+}
+
+/**
+ * The instant a local calendar day starts in a zone: 00:00 wall clock, or the
+ * first instant of that date when a clock change skips 00:00 (Havana and some
+ * other zones spring forward AT midnight, so the day starts at 01:00).
+ */
 export function localDayStartMs(zone, year, month, day) {
   const wall = Date.UTC(year, month - 1, day);
-  let guess = wall - zoneOffsetMs(zone, wall);
-  for (let i = 0; i < 3; i++) {
-    const next = wall - zoneOffsetMs(zone, guess);
-    if (next === guess) break;
-    guess = next;
-  }
-  return guess;
+  // 00:00 under the offset in force the day before, that day, and the day after
+  const candidates = [-DAY_MS, 0, DAY_MS]
+    .map((shift) => wall - zoneOffsetMs(zone, wall + shift))
+    .filter((c) => isLocalMidnight(zone, c, year, month, day));
+  if (candidates.length) return Math.min(...candidates);
+  // 00:00 does not exist that day: first instant whose local date is the day
+  const STEP = 15 * 60_000;
+  const sameDay = (ms) => {
+    const p = zonedParts(zone, ms);
+    return p.year === year && p.month === month && p.day === day;
+  };
+  let t = wall - 26 * 60 * 60_000;
+  while (!sameDay(t) && t < wall + 26 * 60 * 60_000) t += STEP;
+  // refine to the minute
+  for (let back = t - STEP; back < t; back += 60_000)
+    if (sameDay(back)) return back;
+  return t;
 }
 
 /** Calendar date `n` days after (year, month, day). */

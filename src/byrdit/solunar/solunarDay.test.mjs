@@ -281,3 +281,18 @@ test('a runtime that prints local midnight as 24:00 on the previous date still g
     Intl.DateTimeFormat.prototype.formatToParts = real;
   }
 });
+
+test('a zone that springs forward AT midnight (Havana 2026-03-08) starts the day at 01:00 local and the day is 23 h', async () => {
+  const { localDayStartMs, addDays } = await import('./zone.js');
+  const start = localDayStartMs('America/Havana', 2026, 3, 8);
+  assert.equal(new Date(start).toISOString(), '2026-03-08T05:00:00.000Z');
+  const n = addDays({ year: 2026, month: 3, day: 8 }, 1);
+  const end = localDayStartMs('America/Havana', n.year, n.month, n.day);
+  assert.equal((end - start) / 3_600_000, 23);
+  // the day before is a normal 24 h day and ends where this one starts
+  const p = addDays({ year: 2026, month: 3, day: 8 }, -1);
+  assert.equal(
+    start - localDayStartMs('America/Havana', p.year, p.month, p.day),
+    24 * 3_600_000,
+  );
+});
