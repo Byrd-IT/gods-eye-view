@@ -1,4 +1,13 @@
 {
+  "PHOTO QUALITY REVIEW": "FOTOQUALITÄT PRÜFEN",
+  "Local heuristic review only. Inspect flagged photos before re-flying; unflagged photos are not guaranteed usable. Nothing is uploaded.": "Nur lokale heuristische Prüfung. Markierte Fotos vor einem erneuten Flug prüfen; nicht markierte Fotos sind nicht garantiert brauchbar. Es wird nichts hochgeladen.",
+  "Choose a photo folder": "Fotoordner auswählen",
+  "SAVE QUALITY REPORT (JSON)": "QUALITÄTSBERICHT SPEICHERN (JSON)",
+  "{count} photos; {candidates} re-fly candidates require inspection": "{count} Fotos; {candidates} mögliche Wiederholungsaufnahmen erfordern Prüfung",
+  "No sampled finding": "Kein Befund in den Stichproben",
+  "Reviewing photos locally…": "Fotos werden lokal geprüft…",
+  "{rejected} unreadable files; {skipped} files over the limit": "{rejected} unlesbare Dateien; {skipped} Dateien über dem Limit",
+  "Photo review unavailable. No results were accepted.": "Fotoprüfung nicht verfügbar. Keine Ergebnisse übernommen.",
   "Flying to Austin, TX...": "Flug nach Austin, TX...",
   "Restoring shared view...": "Geteilte Ansicht wird wiederhergestellt...",
   "Configuring viewer...": "Viewer wird konfiguriert...",

@@ -1,4 +1,13 @@
 {
+  "PHOTO QUALITY REVIEW": "ПЕРЕВІРКА ЯКОСТІ ФОТО",
+  "Local heuristic review only. Inspect flagged photos before re-flying; unflagged photos are not guaranteed usable. Nothing is uploaded.": "Лише локальна евристична перевірка. Перевірте позначені фото перед повторним польотом; придатність решти фото не гарантована. Нічого не надсилається на сервер.",
+  "Choose a photo folder": "Вибрати папку з фото",
+  "SAVE QUALITY REPORT (JSON)": "ЗБЕРЕГТИ ЗВІТ ПРО ЯКІСТЬ (JSON)",
+  "{count} photos; {candidates} re-fly candidates require inspection": "Фото: {count}; можливих повторних знімків для перевірки: {candidates}",
+  "No sampled finding": "У зразках проблем не виявлено",
+  "Reviewing photos locally…": "Локальна перевірка фото…",
+  "{rejected} unreadable files; {skipped} files over the limit": "Нечитабельних файлів: {rejected}; понад ліміт: {skipped}",
+  "Photo review unavailable. No results were accepted.": "Перевірка фото недоступна. Результати не прийнято.",
   "Pick a shape, then click the map.": "Виберіть фігуру й клацніть на карті.",
   "Enter to place the pin, Esc to cancel.": "Enter — поставити мітку, Esc — скасувати.",
   "Click where the pin goes.": "Клацніть там, де має бути мітка.",

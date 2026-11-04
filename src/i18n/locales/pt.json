@@ -1,4 +1,13 @@
 {
+  "PHOTO QUALITY REVIEW": "REVISÃO DA QUALIDADE DAS FOTOS",
+  "Local heuristic review only. Inspect flagged photos before re-flying; unflagged photos are not guaranteed usable. Nothing is uploaded.": "Apenas análise heurística local. Inspecione as fotos sinalizadas antes de repetir o voo; as demais não têm garantia de uso. Nada é enviado.",
+  "Choose a photo folder": "Escolher uma pasta de fotos",
+  "SAVE QUALITY REPORT (JSON)": "SALVAR RELATÓRIO DE QUALIDADE (JSON)",
+  "{count} photos; {candidates} re-fly candidates require inspection": "{count} fotos; {candidates} possíveis novas capturas exigem inspeção",
+  "No sampled finding": "Nenhum problema nas amostras",
+  "Reviewing photos locally…": "Analisando fotos localmente…",
+  "{rejected} unreadable files; {skipped} files over the limit": "{rejected} arquivos ilegíveis; {skipped} arquivos acima do limite",
+  "Photo review unavailable. No results were accepted.": "Análise de fotos indisponível. Nenhum resultado aceito.",
   "Pick a shape, then click the map.": "Escolha uma forma e clique no mapa.",
   "Enter to place the pin, Esc to cancel.": "Enter para colocar o marcador, Esc para cancelar.",
   "Click where the pin goes.": "Clique onde o marcador deve ficar.",

@@ -1,4 +1,13 @@
 {
+  "PHOTO QUALITY REVIEW": "照片品質檢查",
+  "Local heuristic review only. Inspect flagged photos before re-flying; unflagged photos are not guaranteed usable. Nothing is uploaded.": "僅進行本機啟發式檢查。重新飛行前請檢查標記的照片；未標記的照片也不保證可用。不會上傳任何內容。",
+  "Choose a photo folder": "選擇照片資料夾",
+  "SAVE QUALITY REPORT (JSON)": "儲存品質報告（JSON）",
+  "{count} photos; {candidates} re-fly candidates require inspection": "{count} 張照片；{candidates} 個重拍候選點需要檢查",
+  "No sampled finding": "取樣中未發現問題",
+  "Reviewing photos locally…": "正在本機檢查照片…",
+  "{rejected} unreadable files; {skipped} files over the limit": "{rejected} 個檔案無法讀取；{skipped} 個檔案超出上限",
+  "Photo review unavailable. No results were accepted.": "照片檢查無法使用。未接受任何結果。",
   "Pick a shape, then click the map.": "先選擇形狀，再在地圖上點擊。",
   "Enter to place the pin, Esc to cancel.": "按 Enter 放置圖釘，按 Esc 取消。",
   "Click where the pin goes.": "點擊圖釘的放置位置。",

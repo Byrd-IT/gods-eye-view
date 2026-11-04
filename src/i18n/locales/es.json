@@ -1,4 +1,13 @@
 {
+  "PHOTO QUALITY REVIEW": "REVISIÓN DE CALIDAD DE FOTOS",
+  "Local heuristic review only. Inspect flagged photos before re-flying; unflagged photos are not guaranteed usable. Nothing is uploaded.": "Solo revisión heurística local. Inspeccione las fotos marcadas antes de repetir el vuelo; las fotos sin marcar no están garantizadas como utilizables. No se sube nada.",
+  "Choose a photo folder": "Elegir una carpeta de fotos",
+  "SAVE QUALITY REPORT (JSON)": "GUARDAR INFORME DE CALIDAD (JSON)",
+  "{count} photos; {candidates} re-fly candidates require inspection": "{count} fotos; {candidates} candidatos a repetir requieren inspección",
+  "No sampled finding": "Sin hallazgos en las muestras",
+  "Reviewing photos locally…": "Revisando fotos localmente…",
+  "{rejected} unreadable files; {skipped} files over the limit": "{rejected} archivos ilegibles; {skipped} archivos sobre el límite",
+  "Photo review unavailable. No results were accepted.": "Revisión de fotos no disponible. No se aceptaron resultados.",
   "NO PLACE LEFT BEHIND": "NINGÚN RINCÓN SIN VIGILAR",
   "Initializing photorealistic world...": "Inicializando el mundo fotorrealista...",
   "Configuring viewer...": "Configurando el visor...",

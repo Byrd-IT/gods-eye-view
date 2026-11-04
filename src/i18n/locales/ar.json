@@ -1,4 +1,13 @@
 {
+  "PHOTO QUALITY REVIEW": "مراجعة جودة الصور",
+  "Local heuristic review only. Inspect flagged photos before re-flying; unflagged photos are not guaranteed usable. Nothing is uploaded.": "فحص استدلالي محلي فقط. افحص الصور المحددة قبل إعادة الطيران؛ الصور غير المحددة ليست مضمونة الصلاحية. لا يتم رفع أي شيء.",
+  "Choose a photo folder": "اختر مجلد صور",
+  "SAVE QUALITY REPORT (JSON)": "حفظ تقرير الجودة (JSON)",
+  "{count} photos; {candidates} re-fly candidates require inspection": "{count} صور؛ {candidates} مواقع محتملة لإعادة التصوير تحتاج إلى فحص",
+  "No sampled finding": "لا ملاحظات في العينات",
+  "Reviewing photos locally…": "جارٍ فحص الصور محليًا…",
+  "{rejected} unreadable files; {skipped} files over the limit": "{rejected} ملفات غير قابلة للقراءة؛ {skipped} ملفات تتجاوز الحد",
+  "Photo review unavailable. No results were accepted.": "مراجعة الصور غير متاحة. لم تُقبل أي نتائج.",
   "NO PLACE LEFT BEHIND": "لا مكان يُترك خلفنا",
   "Initializing photorealistic world...": "جارٍ تهيئة العالم الواقعي…",
   "Configuring viewer...": "جارٍ إعداد العارض…",

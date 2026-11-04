@@ -517,7 +517,10 @@ export function mountPhotoCheck({ doc, container, host, dropZone = null }) {
 
   return {
     addFiles,
-    clear: reset,
+    clear() {
+      reset();
+      qualityReview.clear();
+    },
     /** Check again when the plan on the panel changed. */
     refresh() {
       qualityReview.refresh();

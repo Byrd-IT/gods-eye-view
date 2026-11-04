@@ -1,4 +1,13 @@
 {
+  "PHOTO QUALITY REVIEW": "写真の品質確認",
+  "Local heuristic review only. Inspect flagged photos before re-flying; unflagged photos are not guaranteed usable. Nothing is uploaded.": "ローカルでの推定評価のみです。再飛行の前に指摘された写真を確認してください。指摘のない写真も使用可能とは限りません。アップロードは行いません。",
+  "Choose a photo folder": "写真フォルダーを選択",
+  "SAVE QUALITY REPORT (JSON)": "品質レポートを保存（JSON）",
+  "{count} photos; {candidates} re-fly candidates require inspection": "写真 {count} 枚、再撮影候補 {candidates} 件は確認が必要です",
+  "No sampled finding": "サンプルに指摘なし",
+  "Reviewing photos locally…": "写真をローカルで確認中…",
+  "{rejected} unreadable files; {skipped} files over the limit": "読み取り不能 {rejected} ファイル、上限超過 {skipped} ファイル",
+  "Photo review unavailable. No results were accepted.": "写真の確認を利用できません。結果は受け付けられませんでした。",
   "Pick a shape, then click the map.": "図形を選んでから、地図をクリックしてください。",
   "Enter to place the pin, Esc to cancel.": "Enterでピンを配置、Escでキャンセル。",
   "Click where the pin goes.": "ピンを置く場所をクリックしてください。",
