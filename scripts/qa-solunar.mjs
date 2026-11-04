@@ -15,6 +15,11 @@ import puppeteer from 'puppeteer';
 const appUrl = process.env.QA_BASE_URL || 'http://127.0.0.1:4392';
 const outDir = path.resolve(process.env.QA_OUT_DIR || 'qa-artifacts-solunar');
 fs.mkdirSync(outDir, { recursive: true });
+// URLs in page errors can carry keys: mask userinfo and every query value
+const mask = (s) =>
+  String(s)
+    .replace(/\/\/[^\/\s@]+@/g, '//***@')
+    .replace(/([?&][^=&\s]+)=[^&\s\]\)"']*/g, '\=***');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const failures = [];
 const check = (name, ok, detail = '') => {
@@ -111,7 +116,10 @@ async function run(label, viewport, { touch = false } = {}) {
   });
   await sleep(1500);
   if (mobile) {
-    await page.waitForSelector('#solunar-panel', { visible: true, timeout: 30000 });
+    await page.waitForSelector('#solunar-panel', {
+      visible: true,
+      timeout: 30000,
+    });
     await page.click('#solunar-panel .panel-collapse-btn');
   } else {
     await page.click('[data-rail-item="solunar-panel"]');
@@ -177,11 +185,7 @@ async function run(label, viewport, { touch = false } = {}) {
     `${label}: a moon event a day does not have shows "none" and is not copied from the next day`,
     opened.days.every((d, i) => {
       const next = opened.days[i + 1];
-      return !(
-        d.moonrise !== 'none' &&
-        next &&
-        d.moonrise === next.moonrise
-      );
+      return !(d.moonrise !== 'none' && next && d.moonrise === next.moonrise);
     }),
     opened.days.map((d) => `${d.date}:${d.moonrise}`).join(' '),
   );
@@ -200,7 +204,8 @@ async function run(label, viewport, { touch = false } = {}) {
     await page.mouse.click(target.x, target.y);
     await sleep(800);
     const moved = await page.evaluate(() => ({
-      spot: document.querySelector('#gev-solunar-body .gev-sl-spot').textContent,
+      spot: document.querySelector('#gev-solunar-body .gev-sl-spot')
+        .textContent,
       days: document.querySelectorAll('#gev-solunar-body .gev-sl-day').length,
     }));
     check(
@@ -228,7 +233,11 @@ async function run(label, viewport, { touch = false } = {}) {
   const real = errors.filter(
     (e) => !/favicon|Failed to load resource|net::ERR|403|401|404|429/.test(e),
   );
-  check(`${label}: no console errors`, real.length === 0, real.slice(0, 3).join(' | '));
+  check(
+    `${label}: no console errors`,
+    real.length === 0,
+    mask(real.slice(0, 3).join(' | ')),
+  );
   await context.close();
 }
 
@@ -239,7 +248,9 @@ try {
   await browser.close();
 }
 if (failures.length) {
-  console.error(`\n${failures.length} check(s) failed:\n- ${failures.join('\n- ')}`);
+  console.error(
+    `\n${failures.length} check(s) failed:\n- ${failures.join('\n- ')}`,
+  );
   process.exit(1);
 }
 console.log('\nqa-solunar: all checks passed');
