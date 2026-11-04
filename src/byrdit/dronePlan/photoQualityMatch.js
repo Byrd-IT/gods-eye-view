@@ -550,7 +550,7 @@ export function matchPlanPhotos(photos = [], sources = {}) {
   const importsIgnored = countImports(sources?.plan);
   if (!planResults(sources)) {
     return {
-      ...matchPhotosToShots([], []),
+      ...matchPhotosToShots(photos, []),
       reason: 'plan-has-no-shots',
       importsIgnored,
     };

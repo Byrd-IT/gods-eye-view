@@ -33,6 +33,13 @@ const photoAt = (x, y, i, extra = {}) => ({
   ...extra,
 });
 
+test('without a plan the report still accounts for every input photo', () => {
+  const report = matchPlanPhotos([photoAt(0, 0, 1), { name: 'unlocated.JPG' }], {});
+  assert.equal(report.reason, 'plan-has-no-shots');
+  assert.deepEqual(report.unmatchedPhotos.map((p) => p.photoName), ['DJI_0001.JPG', 'unlocated.JPG']);
+  assert.deepEqual(report.unmatchedPhotos.map((p) => p.reason), ['off-plan', 'no-position']);
+});
+
 test('co-located shots are distinguished by the combination of attitude axes', () => {
   const shots = [
     shotAt(0, 0, { waypointId: 1, pitchDeg: -55, headingDeg: 90 }),
