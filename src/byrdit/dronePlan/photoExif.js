@@ -252,10 +252,15 @@ const validPosition = (lat, lon) =>
 /**
  * @param {Uint8Array} bytes the start of a JPEG (HEADER_BYTES is enough)
  * @param {string} [name] the file name, for messages only
+ * @param {{includeUnlocated?: boolean}} [options] retain metadata without GPS for quality review
  * @returns {{ ok: true, photo: object } | { ok: false, reason: string, name: string }}
  *   reason: 'not-jpeg' | 'no-position'
  */
-export function readPhotoMeta(bytes, name = '') {
+export function readPhotoMeta(
+  bytes,
+  name = '',
+  { includeUnlocated = false } = {},
+) {
   if (!(bytes instanceof Uint8Array) || bytes.length < 4)
     return { ok: false, reason: 'not-jpeg', name };
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8)
@@ -277,7 +282,8 @@ export function readPhotoMeta(bytes, name = '') {
     lon = xmp.lon;
     source = 'xmp';
   }
-  if (source == null) return { ok: false, reason: 'no-position', name };
+  if (source == null && !includeUnlocated)
+    return { ok: false, reason: 'no-position', name };
 
   const widthPx = exif?.widthPx ?? sizeFromFrame?.widthPx ?? null;
   const heightPx = exif?.heightPx ?? sizeFromFrame?.heightPx ?? null;

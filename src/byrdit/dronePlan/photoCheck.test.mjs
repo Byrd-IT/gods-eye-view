@@ -95,6 +95,24 @@ test('no position anywhere, 0,0, not a JPEG and junk are refused without throwin
   );
 });
 
+test('quality review can retain a JPEG without a usable position', () => {
+  const bytes = jpeg({ exif: tiff({ gps: 'empty' }) });
+  const r = readPhotoMeta(bytes, 'no-gps.jpg', { includeUnlocated: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.photo.name, 'no-gps.jpg');
+  assert.equal(r.photo.lat, null);
+  assert.equal(r.photo.lon, null);
+  assert.equal(r.photo.positionSource, null);
+  assert.equal(r.photo.focalMm, 8.67);
+  assert.equal(readPhotoMeta(bytes, 'no-gps.jpg').reason, 'no-position');
+  assert.equal(
+    readPhotoMeta(new Uint8Array([1, 2, 3, 4]), 'bad', {
+      includeUnlocated: true,
+    }).reason,
+    'not-jpeg',
+  );
+});
+
 test('truncated and corrupt EXIF never throws and cannot loop', () => {
   const good = jpeg({
     exif: tiff({ gps: { lat: 33, lon: -96, alt: 1 } }),
@@ -466,7 +484,9 @@ test('one photo covers one planned point: a photo between two points covers only
   assert.equal(a.planned[0].covered, true);
   assert.equal(a.planned[1].covered, false);
   // two photos, two points: both covered, each by its own photo
-  const b = analyzePhotos([photoAt(1, 0, 0), photoAt(9, 0, 1)], planned, { matchM: 10 });
+  const b = analyzePhotos([photoAt(1, 0, 0), photoAt(9, 0, 1)], planned, {
+    matchM: 10,
+  });
   assert.equal(b.summary.coveredCount, 2);
   assert.notEqual(b.planned[0].photo, b.planned[1].photo);
 });
@@ -479,7 +499,10 @@ test('mixed EXIF-local and XMP-UTC times: only the larger group keeps its times'
   ];
   const a = analyzePhotos(photos, [], {});
   assert.equal(a.mixedTime, true);
-  assert.deepEqual(a.photos.map((p) => p.name), ['p0.jpg', 'p1.jpg', 'p2.jpg']);
+  assert.deepEqual(
+    a.photos.map((p) => p.name),
+    ['p0.jpg', 'p1.jpg', 'p2.jpg'],
+  );
   assert.equal(a.photos[2].timeMs, null);
   const same = analyzePhotos(photos.slice(0, 2), [], {});
   assert.equal(same.mixedTime, false);
@@ -492,7 +515,11 @@ test('same second and place: different files are kept, a renamed copy is merged'
   assert.equal(dedupePhotos([base, other]).photos.length, 2);
   assert.equal(dedupePhotos([base, copy]).photos.length, 1);
   for (const n of ['p0 - Copy.jpg', 'p0 - Copy (2).jpg', 'p0 copy 2.jpg'])
-    assert.equal(dedupePhotos([base, { ...base, name: n }]).photos.length, 1, n);
+    assert.equal(
+      dedupePhotos([base, { ...base, name: n }]).photos.length,
+      1,
+      n,
+    );
   // with sub-second times a different name does not matter
   const ms = { ...base, timeMs: 2_000_123 };
   assert.equal(dedupePhotos([ms, { ...ms, name: 'x.jpg' }]).photos.length, 1);
