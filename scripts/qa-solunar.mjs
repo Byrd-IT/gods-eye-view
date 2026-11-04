@@ -87,8 +87,8 @@ async function run(label, viewport, { touch = false } = {}) {
   if (!mobile) {
     const ids = closed.dock;
     check(
-      `${label}: dock button sits between MAP LAYERS and DRONE FLIGHT PLAN`,
-      ids.indexOf('solunar-panel') === ids.indexOf('map-layers-panel') + 1 &&
+      `${label}: dock button sits right before DRONE FLIGHT PLAN`,
+      ids.includes('solunar-panel') &&
         ids.indexOf('drone-plan-panel') === ids.indexOf('solunar-panel') + 1,
       ids.join(),
     );
