@@ -53,6 +53,7 @@ export function mountPhotoReviewPanel({
           ...buildPhotoReviewReport(
             photos,
             plannedShots(host.planned?.() ?? {}),
+            batchInfo,
           ),
           ...batchInfo,
         }

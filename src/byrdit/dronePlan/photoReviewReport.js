@@ -4,7 +4,19 @@
 import { matchPhotosToShots } from './photoQualityMatch.js';
 import { assessPhotoOverlap } from './photoReviewOverlap.js';
 
-export function buildPhotoReviewReport(photos = [], shots = []) {
+export function buildPhotoReviewReport(
+  photos = [],
+  shots = [],
+  { rejected = [], skippedOver = 0, cancelled = false } = {},
+) {
+  // Unread, omitted or unlocated files may contain an unmatched planned shot.
+  // Keep positive associations, but never infer absence from a partial batch.
+  const coverageIncomplete = Boolean(
+    skippedOver > 0 ||
+    rejected.length ||
+    cancelled ||
+    photos.some((p) => !Number.isFinite(p.lon) || !Number.isFinite(p.lat)),
+  );
   const seen = new Map();
   const unique = [];
   const originalIndexes = [];
@@ -48,6 +60,19 @@ export function buildPhotoReviewReport(photos = [], shots = []) {
     };
   });
   const matches = matchPhotosToShots(unique, shots);
+  if (coverageIncomplete) {
+    matches.shots = matches.shots.map((shot) => {
+      if (shot.status !== 'missing') return shot;
+      const unknown = {
+        ...shot,
+        status: 'unknown',
+        reason: 'coverage-unknown',
+      };
+      matches.unknown.push({ ...unknown, kind: 'shot', shotKey: shot.key });
+      return unknown;
+    });
+    matches.missing = [];
+  }
   const overlap = assessPhotoOverlap(unique, matches.shots);
   const gapKeys = new Set(
     overlap.pairs
@@ -106,6 +131,7 @@ export function buildPhotoReviewReport(photos = [], shots = []) {
     );
   }
   return {
+    coverageIncomplete,
     photos: rows,
     refly,
     matches: exportedMatches,

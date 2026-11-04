@@ -97,6 +97,45 @@ test('missing shot becomes refly candidate retaining waypoint identity', () => {
   assert.deepEqual(report.refly[0].reasons, ['missing-photo']);
 });
 
+test('incomplete batches cannot confirm missing captures in any exported view', () => {
+  for (const incomplete of [
+    { skippedOver: 1 },
+    { rejected: [{ name: 'unread.jpg', reason: 'header-unavailable' }] },
+    { rejected: [{ name: 'bad.jpg', reason: 'not-jpeg' }] },
+    { cancelled: true },
+  ]) {
+    const report = buildPhotoReviewReport([photo()], [shot, { ...shot, lon: -94, waypointId: 2 }], incomplete);
+    assert.equal(report.coverageIncomplete, true);
+    assert.equal(report.matches.matches.length, 1);
+    assert.equal(report.matches.shots[0].status, 'matched');
+    assert.equal(report.matches.missing.length, 0);
+    assert.equal(report.matches.shots[1].status, 'unknown');
+    assert.equal(report.matches.shots[1].reason, 'coverage-unknown');
+    assert.ok(report.matches.unknown.some(r => r.kind === 'shot' && r.shotKey === report.matches.shots[1].key));
+    assert.equal(report.refly.length, 1);
+    assert.equal(report.refly[0].decision, 'inspect-before-refly');
+    assert.deepEqual(report.refly[0].reasons, ['coverage-unknown']);
+    assert.equal(report.refly[0].photoIndex, null);
+  }
+});
+
+test('unlocated captures also prevent confirming missing captures', () => {
+  const report = buildPhotoReviewReport([photo({ lon: null, lat: null })], [shot]);
+  assert.equal(report.refly[0].decision, 'inspect-before-refly');
+  assert.deepEqual(report.refly[0].reasons, ['coverage-unknown']);
+  assert.equal(report.matches.missing.length, 0);
+  assert.ok(report.photos[0].reasons.includes('no-position'));
+});
+
+test('complete empty batch can report missing and incomplete no-plan invents no shots', () => {
+  const complete = buildPhotoReviewReport([], [shot], { rejected: [], skippedOver: 0 });
+  assert.equal(complete.coverageIncomplete, false);
+  assert.equal(complete.refly[0].decision, 'missing-capture');
+  const noPlan = buildPhotoReviewReport([], [], { skippedOver: 1 });
+  assert.equal(noPlan.coverageIncomplete, true);
+  assert.equal(noPlan.refly.length, 0);
+});
+
 test('quality cues and attitude disagreement produce inspect-before-refly reasons', () => {
   const p = photo({ gimbalPitchDeg: -20, review: { score: 30, sampleCount: 9, reasons: ['soft-detail', 'flat-blocks-noisy'] } });
   const report = buildPhotoReviewReport([p], [shot]);
