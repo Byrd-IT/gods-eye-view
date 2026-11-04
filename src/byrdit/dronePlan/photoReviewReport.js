@@ -89,10 +89,26 @@ export function buildPhotoReviewReport(photos = [], shots = []) {
     const row = rows[originalIndexes[unknown.photoIndex]];
     row.reasons = [...new Set([...row.reasons, unknown.reason])];
   }
+  const exportedMatches = { ...matches };
+  for (const field of [
+    'shots',
+    'matches',
+    'missing',
+    'retakes',
+    'extraPhotos',
+    'unmatchedPhotos',
+    'unknown',
+  ]) {
+    exportedMatches[field] = matches[field].map((entry) =>
+      Number.isInteger(entry.photoIndex)
+        ? { ...entry, photoIndex: originalIndexes[entry.photoIndex] }
+        : entry,
+    );
+  }
   return {
     photos: rows,
     refly,
-    matches,
+    matches: exportedMatches,
     originalIndexes,
     overlap,
     note: 'Re-fly candidates require inspection. Pixel findings are heuristic, native tiles do not cover every pixel, and a matched photo is not proof of usable overlap. Altitude offsets require a common takeoff datum.',

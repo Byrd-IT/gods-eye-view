@@ -104,6 +104,13 @@ test('modeled overlap gaps retain both waypoints as inspection candidates', () =
   assert.equal(report.overlap.verified, false);
 });
 
+test('all exported match photo indexes refer to original rows after duplicates', () => {
+  const first = photo({ digest: 'a'.repeat(64) });
+  const report = buildPhotoReviewReport([first, { ...first, name: 'copy.jpg' }, photo({ name: 'next.jpg', lon: -94.99 })], [shot, { ...shot, lon: -94.99, waypointId: 2 }]);
+  assert.equal(report.matches.shots[1].photoIndex, 2);
+  assert.equal(report.matches.matches[1].photoIndex, 2);
+});
+
 test('unmatched extras are not incorrectly attached as replacement quality', () => {
   const report = buildPhotoReviewReport([
     photo({ review: { sampleCount: 9, score: 20, reasons: ['soft-detail'] } }),
