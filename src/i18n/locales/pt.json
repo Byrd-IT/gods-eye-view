@@ -3585,5 +3585,7 @@
   "Stars = points, at least 1 and at most 4.": "Estrelas = pontos, no mínimo 1 e no máximo 4.",
   "Computed in your browser from the Sun and Moon positions. No outside data is used.": "Calculado no seu navegador a partir das posições do Sol e da Lua. Nenhum dado externo é usado.",
   "SOLUNAR": "SOLUNAR",
-  "Solunar": "Solunar"
+  "Solunar": "Solunar",
+  "12 h": "12 h",
+  "24 h": "24 h"
 }

@@ -338,7 +338,9 @@
     "ΔN",
     "▲ {frp} MW",
     "SOLUNAR",
-    "Solunar"
+    "Solunar",
+    "12 h",
+    "24 h"
   ],
   "fr": [
     "1090 MHz",
@@ -522,7 +524,9 @@
     "ΔE",
     "ΔN",
     "Ⅱ PAUSE",
-    "▲ {frp} MW"
+    "▲ {frp} MW",
+    "12 h",
+    "24 h"
   ],
   "it": [
     "1090 MHz",
@@ -695,7 +699,9 @@
     "{value} conf",
     "ΔE",
     "ΔN",
-    "▲ {frp} MW"
+    "▲ {frp} MW",
+    "12 h",
+    "24 h"
   ],
   "ja": [
     "1090 MHz",
@@ -879,7 +885,9 @@
     "ΔN",
     "▲ {frp} MW",
     "SOLUNAR",
-    "Solunar"
+    "Solunar",
+    "12 h",
+    "24 h"
   ],
   "ru": [
     "AIS: --",

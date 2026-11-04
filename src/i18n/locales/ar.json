@@ -3822,5 +3822,7 @@
   "Stars = points, at least 1 and at most 4.": "النجوم = النقاط، من 1 على الأقل إلى 4 على الأكثر.",
   "Computed in your browser from the Sun and Moon positions. No outside data is used.": "تُحسب في متصفحك من مواضع الشمس والقمر. لا تُستخدم أي بيانات خارجية.",
   "SOLUNAR": "السولونار",
-  "Solunar": "السولونار"
+  "Solunar": "السولونار",
+  "12 h": "12 س",
+  "24 h": "24 س"
 }

@@ -5,6 +5,7 @@
  * the spot while the card is open. Fork module (DESIGN.md 4.1).
  */
 import * as Cesium from 'cesium';
+import { pickGroundPosition } from '../../data/scenePick.js';
 import { createSolunarPanel } from './panel.js';
 
 export const SOLUNAR_ID = 'solunar-panel';
@@ -19,7 +20,8 @@ const RAD = 180 / Math.PI;
 /** Lat/lon (deg) under a canvas pixel, or null (sky, off the globe). */
 export function pickSpot(viewer, x, y) {
   const ellipsoid = viewer?.scene?.globe?.ellipsoid;
-  const cartesian = viewer?.camera?.pickEllipsoid?.({ x, y }, ellipsoid);
+  // the surface under the cursor (terrain, tiles), else the ellipsoid
+  const cartesian = pickGroundPosition(viewer, { x, y });
   if (!cartesian || !ellipsoid) return null;
   const c = ellipsoid.cartesianToCartographic(cartesian);
   if (!c) return null;

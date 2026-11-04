@@ -226,18 +226,14 @@ async function run(label, viewport, { touch = false } = {}) {
     );
     // 12/24 h
     await page.evaluate(() =>
-      [...document.querySelectorAll('.gev-sl-clock')]
-        .find((b) => b.textContent === '24 h')
-        .click(),
+      document.querySelector('.gev-sl-clock[data-hour12="false"]').click(),
     );
     const t24 = await page.evaluate(
       () => document.querySelector('.gev-sl-sunrise .gev-sl-value').textContent,
     );
     check(`${label}: 24 h switch`, /^\d\d:\d\d$/.test(t24), t24);
     await page.evaluate(() =>
-      [...document.querySelectorAll('.gev-sl-clock')]
-        .find((b) => b.textContent === '12 h')
-        .click(),
+      document.querySelector('.gev-sl-clock[data-hour12="true"]').click(),
     );
     await page.screenshot({ path: path.join(outDir, `${label}-clicked.png`) });
   }

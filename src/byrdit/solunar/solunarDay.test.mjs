@@ -296,3 +296,51 @@ test('a zone that springs forward AT midnight (Havana 2026-03-08) starts the day
     24 * 3_600_000,
   );
 });
+
+test('phase name matches USNO curphase on every fixture day, and agrees with the lit percentage', () => {
+  for (const c of CASES) {
+    const day = solunarDay(
+      { latDeg: c.latDeg, lonDeg: c.lonDeg, zone: c.zone },
+      {
+        year: Number(c.date.slice(0, 4)),
+        month: Number(c.date.slice(5, 7)),
+        day: Number(c.date.slice(8, 10)),
+      },
+    );
+    // USNO's curphase is for the start of the UT day. On 2026-11-01 the exact
+    // Last Quarter falls that same local day (USNO phases API: 2026-11-01
+    // 20:28 UTC = 15:28 CDT), so the card names the day Last Quarter at 51%.
+    const expected =
+      c.name === 'chicago-2026-11-01-dst-end' ? 'Last Quarter' : c.curphase;
+    assert.equal(day.phase, expected, c.name);
+    const lit = day.illumination;
+    if (/Crescent/.test(day.phase)) assert.ok(lit < 0.5, c.name);
+    if (/Gibbous/.test(day.phase)) assert.ok(lit > 0.5, c.name);
+  }
+});
+
+test('phaseName: crescent below half, gibbous above, principal phases only near the exact moment', async () => {
+  const { phaseName } = await import('./solunarDay.js');
+  const at = (deg) => phaseName(deg);
+  assert.equal(at(0), 'New Moon');
+  assert.equal(at(355), 'New Moon');
+  assert.equal(at(40), 'Waxing Crescent');
+  assert.equal(at(90), 'First Quarter');
+  assert.equal(at(135), 'Waxing Gibbous');
+  assert.equal(at(180), 'Full Moon');
+  assert.equal(at(225), 'Waning Gibbous');
+  assert.equal(at(270), 'Last Quarter');
+  assert.equal(at(282), 'Waning Crescent'); // ~40% lit, was mislabelled Last Quarter
+  assert.equal(at(300), 'Waning Crescent');
+});
+
+test('days to the nearest new or full moon are searched, anchored on USNO new moon 2026-11-09 07:02 UTC and full moon 2026-11-24 14:53 UTC', async () => {
+  const { daysFromSyzygy } = await import('./solunarDay.js');
+  const nm = Date.UTC(2026, 10, 9, 7, 2);
+  const fm = Date.UTC(2026, 10, 24, 14, 53);
+  assert.ok(daysFromSyzygy(nm) < 0.01);
+  assert.ok(daysFromSyzygy(fm) < 0.01);
+  assert.ok(Math.abs(daysFromSyzygy(fm - 1.2 * 86_400_000) - 1.2) < 0.02);
+  assert.ok(Math.abs(daysFromSyzygy(nm + 1.5 * 86_400_000) - 1.5) < 0.05);
+  assert.ok(Math.abs(daysFromSyzygy(nm - 2.4 * 86_400_000) - 2.4) < 0.05);
+});

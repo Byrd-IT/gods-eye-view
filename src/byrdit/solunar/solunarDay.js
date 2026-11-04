@@ -18,6 +18,7 @@ import {
   MoonPhase,
   Observer,
   SearchHourAngle,
+  SearchMoonPhase,
   SearchRiseSet,
 } from 'astronomy-engine';
 import {
@@ -33,7 +34,6 @@ import { rateDay } from './rating.js';
 const MIN_MS = 60_000;
 export const MAJOR_HALF_MS = 60 * MIN_MS; // major window = transit +/- 1 h (2 h)
 export const MINOR_HALF_MS = 30 * MIN_MS; // minor window = rise/set +/- 30 min (1 h)
-const SYNODIC_DEG_PER_DAY = 360 / 29.530588;
 
 /** Rises (dir +1) or sets (dir -1) whose instant is in [startMs, endMs). */
 function riseSetsIn(body, observer, dir, startMs, endMs) {
@@ -61,42 +61,55 @@ function transitsIn(body, observer, hourAngle, startMs, endMs) {
   const out = [];
   let from = startMs;
   for (let guard = 0; guard < 4 && from < endMs; guard++) {
-    const found = SearchHourAngle(
-      body,
-      observer,
-      hourAngle,
-      MakeTime(new Date(from)),
-    );
-    const ms = found.time.date.getTime();
+    let ms;
+    try {
+      ms = SearchHourAngle(
+        body,
+        observer,
+        hourAngle,
+        MakeTime(new Date(from)),
+        +1,
+      ).time.date.getTime();
+    } catch {
+      break; // no crossing found: the row says "none" instead of blanking the card
+    }
     if (ms >= endMs) break;
     if (ms >= startMs) out.push(ms);
-    from = Math.max(from, ms) + 6 * 60 * MIN_MS;
+    from = Math.max(from, ms) + MIN_MS;
   }
   return out;
 }
 
-/** The eight common phase names from the Moon's elongation (0 = new). */
+/** An elongation this close to 0/90/180/270 deg (about 12 h) names the principal phase. */
+const PRINCIPAL_DEG = 6;
+
+/**
+ * The eight common phase names from the Moon's elongation (0 = new): crescent
+ * below half lit, gibbous above half, and New / Quarter / Full only within
+ * about half a day of the exact moment (the way USNO labels a day).
+ */
 export function phaseName(elongationDeg) {
-  const names = [
-    'New Moon',
-    'Waxing Crescent',
-    'First Quarter',
-    'Waxing Gibbous',
-    'Full Moon',
-    'Waning Gibbous',
-    'Last Quarter',
-    'Waning Crescent',
-  ];
   const e = ((elongationDeg % 360) + 360) % 360;
-  return names[Math.floor(((e + 22.5) % 360) / 45)];
+  const near = (target) => Math.abs(e - target) <= PRINCIPAL_DEG;
+  if (e <= PRINCIPAL_DEG || e >= 360 - PRINCIPAL_DEG) return 'New Moon';
+  if (near(90)) return 'First Quarter';
+  if (near(180)) return 'Full Moon';
+  if (near(270)) return 'Last Quarter';
+  if (e < 90) return 'Waxing Crescent';
+  if (e < 180) return 'Waxing Gibbous';
+  if (e < 270) return 'Waning Gibbous';
+  return 'Waning Crescent';
 }
 
-/** Days from `elongationDeg` to the nearest new or full moon. */
-export function daysFromSyzygy(elongationDeg) {
-  const e = ((elongationDeg % 360) + 360) % 360;
-  const fromNew = Math.min(e, 360 - e);
-  const fromFull = Math.abs(e - 180);
-  return Math.min(fromNew, fromFull) / SYNODIC_DEG_PER_DAY;
+/** Days from `atMs` to the nearest exact new or full moon (searched, not averaged). */
+export function daysFromSyzygy(atMs) {
+  const from = MakeTime(new Date(atMs - 8 * DAY_MS));
+  let best = Infinity;
+  for (const lon of [0, 180]) {
+    const hit = SearchMoonPhase(lon, from, 16);
+    if (hit) best = Math.min(best, Math.abs(hit.date.getTime() - atMs));
+  }
+  return best / DAY_MS;
 }
 
 const windowAround = (kind, source, ms, half) => ({
@@ -153,7 +166,7 @@ export function solunarDay(spot, date) {
     elongationDeg,
     phase: phaseName(elongationDeg),
     illumination: Illumination(Body.Moon, noon).phase_fraction,
-    daysFromSyzygy: daysFromSyzygy(elongationDeg),
+    daysFromSyzygy: daysFromSyzygy(noon.date.getTime()),
     windows,
   };
   return { ...base, ...rateDay(base) };

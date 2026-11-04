@@ -3664,5 +3664,7 @@
   "Stars = points, at least 1 and at most 4.": "Зірки = бали, не менше 1 і не більше 4.",
   "Computed in your browser from the Sun and Moon positions. No outside data is used.": "Обчислено у вашому браузері за положеннями Сонця та Місяця. Зовнішні дані не використовуються.",
   "SOLUNAR": "СОЛУНАР",
-  "Solunar": "Солунар"
+  "Solunar": "Солунар",
+  "12 h": "12 год",
+  "24 h": "24 год"
 }

@@ -3427,5 +3427,7 @@
   "Stars = points, at least 1 and at most 4.": "星 = 点数 (最小 1、最大 4)。",
   "Computed in your browser from the Sun and Moon positions. No outside data is used.": "ブラウザー内で太陽と月の位置から計算します。外部データは使用しません。",
   "SOLUNAR": "ソルナー",
-  "Solunar": "ソルナー"
+  "Solunar": "ソルナー",
+  "12 h": "12時間",
+  "24 h": "24時間"
 }

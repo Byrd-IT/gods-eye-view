@@ -138,13 +138,17 @@ export function createSolunarPanel({
     });
     center.addEventListener('click', () => onUseCenter());
     for (const [value, label] of [
-      [true, '12 h'],
-      [false, '24 h'],
+      [true, t('12 h')],
+      [false, t('24 h')],
     ]) {
       const chip = el(doc, 'button', controls, {
         cls: `data-toggle-chip gev-sl-clock${hour12 === value ? ' active' : ''}`,
         text: label,
-        attrs: { type: 'button', 'aria-pressed': String(hour12 === value) },
+        attrs: {
+          type: 'button',
+          'aria-pressed': String(hour12 === value),
+          'data-hour12': String(value),
+        },
       });
       chip.addEventListener('click', () => {
         hour12 = value;
@@ -266,7 +270,11 @@ export function createSolunarPanel({
   }
 
   function renderRule(parent) {
-    const details = el(doc, 'details', parent, { cls: 'gev-sl-rule' });
+    // open: the rule is part of what the card shows, not hidden behind a click
+    const details = el(doc, 'details', parent, {
+      cls: 'gev-sl-rule',
+      attrs: { open: '' },
+    });
     el(doc, 'summary', details, { text: t('How the stars are rated') });
     const list = el(doc, 'ul', details);
     const bandHours = BAND_HALF_MS / 3_600_000;

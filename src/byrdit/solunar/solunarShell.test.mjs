@@ -13,7 +13,10 @@ import {
 
 const DEG = Math.PI / 180;
 
-function fakeViewer({ hit = (x, y) => ({ x, y }) } = {}) {
+// pickGroundPosition rejects a Cartesian near the Earth's centre, so the fake
+// carries a real-sized z; the fake ellipsoid reads only x and y.
+const onGlobe = (x, y) => ({ x, y, z: 7_000_000 });
+function fakeViewer({ hit = onGlobe } = {}) {
   const added = [];
   const removed = [];
   const canvas = new Window().document.createElement('canvas');
@@ -93,7 +96,7 @@ test('mapCenterSpot picks the middle pixel, else the camera position', () => {
   const v = fakeViewer({
     hit: (x, y) => {
       picks.push([x, y]);
-      return { x, y };
+      return onGlobe(x, y);
     },
   });
   mapCenterSpot(v);
@@ -163,7 +166,9 @@ test('a drag or a long press is not a click', async () => {
 
 test('a click on the sky keeps the old spot', async () => {
   let sky = false;
-  const viewer = fakeViewer({ hit: (x, y) => (sky ? undefined : { x, y }) });
+  const viewer = fakeViewer({
+    hit: (x, y) => (sky ? undefined : onGlobe(x, y)),
+  });
   const { body, fire, tick } = setup({ open: true, viewer });
   await tick();
   const before = spotText(body);

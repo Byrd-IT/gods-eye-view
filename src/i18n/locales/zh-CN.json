@@ -3427,5 +3427,7 @@
   "Stars = points, at least 1 and at most 4.": "星级 = 得分，最低 1 星，最高 4 星。",
   "Computed in your browser from the Sun and Moon positions. No outside data is used.": "在浏览器中根据太阳和月亮的位置计算，不使用任何外部数据。",
   "SOLUNAR": "日月猎钓",
-  "Solunar": "日月猎钓历"
+  "Solunar": "日月猎钓历",
+  "12 h": "12 小时",
+  "24 h": "24 小时"
 }
