@@ -13,7 +13,8 @@
  *   C. the same at a phone size (412 x 915, touch)
  * Page errors and failed requests are listed, not failed on.
  *   node scripts/qa-naip-compare.mjs --url http://127.0.0.1:4392 --out <dir>
- * Never run against the live port 4173 with --write flows: it only reads.
+ * It only reads and toggles UI state in a fresh browser context, so it is safe
+ * against a live server too.
  */
 import fs from 'node:fs';
 import path from 'node:path';
