@@ -300,6 +300,8 @@ export function matchPhotosToShots(photos = [], shots = []) {
         : null,
       lon: shot.lon,
       lat: shot.lat,
+      relHeightM: finite(shot.relHeightM) ? shot.relHeightM : null,
+      aglM: finite(shot.aglM) ? shot.aglM : null,
       pitchDeg: finite(shot.pitchDeg) ? shot.pitchDeg : null,
       headingDeg: finite(shot.headingDeg) ? shot.headingDeg : null,
       status,

@@ -22,6 +22,17 @@ export function buildPhotoReviewReport(photos = [], shots = []) {
     if (duplicateOf != null) reasons.push('exact-duplicate');
     return {
       index, name: photo.name, score: photo.review?.score ?? null,
+      evidence: {
+        sampleCount: photo.review?.sampleCount ?? 0,
+        scoreNote: photo.review?.scoreNote ?? null,
+        samples: photo.review?.samples ?? [],
+        positionSource: photo.positionSource ?? null,
+        lon: photo.lon ?? null, lat: photo.lat ?? null,
+        relAltM: photo.relAltM ?? null,
+        gimbalPitchDeg: photo.gimbalPitchDeg ?? null,
+        gimbalYawDeg: photo.gimbalYawDeg ?? null,
+        digest,
+      },
       duplicateOf, reasons: [...new Set(reasons)], shotKey: null,
     };
   });

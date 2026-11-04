@@ -85,6 +85,15 @@ test('a wrong-angle alternative never clears a quality retake candidate', () => 
   assert.equal(report.refly.length, 1);
 });
 
+test('export retains local measurement evidence and planned height for KMZ input', () => {
+  const samples = [{ code: 'measured', score: 90, metrics: { blur: { score: 90 } } }];
+  const report = buildPhotoReviewReport([photo({ review: { score: 90, sampleCount: 1, reasons: ['soft-detail'], samples } })], [{ ...shot, relHeightM: 80, aglM: 60 }]);
+  assert.deepEqual(report.photos[0].evidence.samples, samples);
+  assert.equal(report.photos[0].evidence.sampleCount, 1);
+  assert.equal(report.refly[0].relHeightM, 80);
+  assert.equal(report.refly[0].aglM, 60);
+});
+
 test('unmatched extras are not incorrectly attached as replacement quality', () => {
   const report = buildPhotoReviewReport([
     photo({ review: { sampleCount: 9, score: 20, reasons: ['soft-detail'] } }),
