@@ -1,0 +1,749 @@
+/**
+ * Browser-local photo quality from RGBA pixels. Pure functions, no DOM, no
+ * network, no EXIF. A caller decodes the file (canvas, createImageBitmap) and
+ * passes `{ width, height, data }` with 4 bytes per pixel.
+ *
+ * These are pixel measurements with explicit holes, not a grade of the photo
+ * and not a photogrammetry accept/reject:
+ *
+ * - Blur is edge energy on a downsampled working sample. High energy means
+ *   the sample has sharp edges. Low energy is unknown: blur and a flat scene
+ *   look the same.
+ * - Directional motion is an observation only. A single frame cannot separate
+ *   smear from scene edges (a facade, a horizon), so no warning is issued.
+ * - Clipping counts samples already at the end of the 8-bit range. It does
+ *   not say whether the camera or a later step put them there.
+ * - Shadows report dark-pixel share and local contrast. A flat dark area is
+ *   unknown: crushed shadows and a dark scene look the same.
+ * - Noise is the spread in flat blocks only. A busy frame is unknown, not
+ *   "noisy". JPEG artifacts can raise the figure.
+ * - Glare is a heuristic for a bright, desaturated patch with contrast around
+ *   it. Snow, fog, sky, and a white wall are not called glare.
+ *
+ * Scores are 0-100 where a number exists, higher meaning fewer problems or
+ * more edge energy. Unknown metrics and absent cues have a null score and do
+ * not count as passes. Thresholds are overridable; non-finite overrides are
+ * ignored. See LIMITATIONS.
+ */
+
+export const DEFAULT_THRESHOLDS = Object.freeze({
+  /** Longest side of the working sample used for spatial metrics. */
+  maxSampleEdge: 256,
+  /** Below this, every metric is unknown. */
+  minEdge: 8,
+  /** Histogram metrics scan every pixel up to this count, then stride. */
+  maxFullScanPixels: 1_500_000,
+  /** Laplacian variance at or above this is "sharp edges", not a focus grade. */
+  blurSharpMin: 80,
+  /** Variance that maps to a sharpness score of 100. */
+  blurScoreFull: 800,
+  /**
+   * Axis energy below this fraction of the other axis is an observation.
+   * It never becomes a motion warning.
+   */
+  motionWeakRatio: 0.35,
+  /** Axis energy below this is too weak to describe a direction. */
+  motionMinEnergy: 30,
+  /** Channel at or above this counts as highlight clipping. */
+  clipNearWhite: 250,
+  /** All channels at or below this count as shadow clipping. */
+  clipNearBlack: 5,
+  /** Either clipped fraction at or above this is status `clipped`. */
+  clipFractionWarn: 0.02,
+  /** Clipped fraction that maps to a clipping score of 0. */
+  clipScoreZero: 0.25,
+  /** Luminance below this, and above the black clip, counts as dark. */
+  shadowLuma: 40,
+  /** Dark share at or above this is "a large dark area". */
+  shadowFractionMin: 0.2,
+  /** Mean neighbor difference that counts as contrast inside dark pixels. */
+  shadowLocalMin: 3,
+  noiseBlock: 8,
+  /** Mean neighbor difference below this is a flat block. */
+  noiseFlatGradMax: 16,
+  /** Fewer flat blocks than this, and noise is unknown. */
+  noiseMinFlatBlocks: 4,
+  /** Flat-block stddev at or above this is moderate. */
+  noiseModerate: 3.5,
+  /** Flat-block stddev at or above this is elevated. */
+  noiseElevated: 6.5,
+  noiseScoreModerate: 65,
+  noiseScoreElevated: 25,
+  glareLumaMin: 235,
+  /** (max-min)/max at or below this is desaturated. */
+  glareSaturationMax: 0.12,
+  /** Glare-pixel share below this is cue absent, not a proof. */
+  glareFractionMin: 0.01,
+  /** Share above this is the whole frame (snow, fog, sky): unknown. */
+  glareFractionMax: 0.45,
+  /** Non-glare luminance stddev below this is no context: unknown. */
+  glareRestStdMin: 12,
+});
+
+export const LIMITATIONS = Object.freeze([
+  'Pixels only. No network, no cloud, and no EXIF. Alpha is ignored, and the layout must be RGBA.',
+  'Spatial metrics use a downsampled working sample, so they are not full-resolution lab figures. Histogram metrics stride above maxFullScanPixels, and that stride can miss a small speck.',
+  'Low edge energy is not inferred as blur. A flat or low-texture scene looks the same.',
+  'A single frame cannot separate directional smear from scene edges, so no directional motion warning is issued.',
+  'Clipping is an 8-bit end-of-range count, not a camera diagnosis.',
+  'Shadows are not an exposure grade. A flat dark area is unknown.',
+  'Noise is estimated only from flat blocks. JPEG artifacts and fine texture are not separated, and a busy scene is not called noisy.',
+  'Glare is a heuristic for a bright desaturated region. It is not a detection of the sun, snow, fog, or a white surface.',
+]);
+
+const SCORE_NOTE =
+  'Averages only sharpness readings and defect findings. Unknown metrics and absent cues are left out, not treated as passes. This is not a photogrammetry grade.';
+
+const METRIC_IDS = Object.freeze([
+  'blur',
+  'directionalMotion',
+  'clipping',
+  'shadows',
+  'noise',
+  'glare',
+]);
+
+/**
+ * Copy defaults and apply finite numeric overrides. Unknown keys are ignored.
+ * @param {object} [overrides]
+ */
+export function normalizeThresholds(overrides) {
+  const out = { ...DEFAULT_THRESHOLDS };
+  if (!overrides || typeof overrides !== 'object') return out;
+  for (const key of Object.keys(DEFAULT_THRESHOLDS)) {
+    const value = overrides[key];
+    if (typeof value === 'number' && Number.isFinite(value)) out[key] = value;
+  }
+  return out;
+}
+
+function readImage(image) {
+  if (!image || typeof image !== 'object') return null;
+  const { width, height, data } = image;
+  if (!Number.isInteger(width) || !Number.isInteger(height)) return null;
+  if (width < 1 || height < 1) return null;
+  if (!data || typeof data.length !== 'number') return null;
+  if (data.length < width * height * 4) return null;
+  return { width, height, data };
+}
+
+function lumaOf(r, g, b) {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+function clampScore(value) {
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function emptyMetric(id, code, reason, extra = {}) {
+  return {
+    id,
+    status: 'unknown',
+    score: null,
+    countsTowardScore: false,
+    code,
+    reason,
+    metrics: {},
+    ...extra,
+  };
+}
+
+function tooSmallMetric(id) {
+  return emptyMetric(
+    id,
+    'too-small',
+    'The image is below the minimum edge. Nothing is inferred.',
+    id === 'directionalMotion' ? { warning: null } : {},
+  );
+}
+
+function notImageMetric(id) {
+  return emptyMetric(
+    id,
+    'not-image',
+    'Pixels must be an RGBA image with integer width and height.',
+    id === 'directionalMotion' ? { warning: null } : {},
+  );
+}
+
+/** Box-downsample luminance so clipping is not measured on this grid. */
+function luminanceGrid(img, maxEdge) {
+  const { width, height, data } = img;
+  const long = Math.max(width, height);
+  const factor = long > maxEdge ? Math.ceil(long / maxEdge) : 1;
+  const w = Math.floor(width / factor);
+  const h = Math.floor(height / factor);
+  if (w < 1 || h < 1) return null;
+  const grid = new Float64Array(w * h);
+  if (factor === 1) {
+    for (let i = 0; i < w * h; i += 1) {
+      const o = i * 4;
+      grid[i] = lumaOf(data[o], data[o + 1], data[o + 2]);
+    }
+  } else {
+    const area = factor * factor;
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        let sum = 0;
+        const y0 = y * factor;
+        const x0 = x * factor;
+        for (let dy = 0; dy < factor; dy += 1) {
+          let o = ((y0 + dy) * width + x0) * 4;
+          for (let dx = 0; dx < factor; dx += 1) {
+            sum += lumaOf(data[o], data[o + 1], data[o + 2]);
+            o += 4;
+          }
+        }
+        grid[y * w + x] = sum / area;
+      }
+    }
+  }
+  return { width: w, height: h, data: grid, factor };
+}
+
+function spatialEnergies(grid) {
+  if (!grid || grid.width < 3 || grid.height < 3) return null;
+  const { width: w, height: h, data } = grid;
+  let n = 0;
+  let sum = 0;
+  let sum2 = 0;
+  let xx = 0;
+  let yy = 0;
+  for (let y = 1; y < h - 1; y += 1) {
+    for (let x = 1; x < w - 1; x += 1) {
+      const i = y * w + x;
+      const c = data[i];
+      const lxx = data[i - 1] - 2 * c + data[i + 1];
+      const lyy = data[i - w] - 2 * c + data[i + w];
+      const lap = lxx + lyy;
+      sum += lap;
+      sum2 += lap * lap;
+      xx += lxx * lxx;
+      yy += lyy * lyy;
+      n += 1;
+    }
+  }
+  if (!n) return null;
+  const mean = sum / n;
+  return {
+    laplacianVariance: sum2 / n - mean * mean,
+    horizontalEnergy: xx / n,
+    verticalEnergy: yy / n,
+  };
+}
+
+function observationOf(horizontalEnergy, verticalEnergy, t) {
+  const strong = Math.max(horizontalEnergy, verticalEnergy);
+  if (!(strong >= t.motionMinEnergy)) return 'unmeasurable';
+  if (
+    horizontalEnergy < verticalEnergy * t.motionWeakRatio &&
+    verticalEnergy >= t.motionMinEnergy
+  ) {
+    return 'horizontal-detail-weaker';
+  }
+  if (
+    verticalEnergy < horizontalEnergy * t.motionWeakRatio &&
+    horizontalEnergy >= t.motionMinEnergy
+  ) {
+    return 'vertical-detail-weaker';
+  }
+  return 'balanced';
+}
+
+function scanPixels(img, t) {
+  const { width, height, data } = img;
+  const nPix = width * height;
+  const stride =
+    nPix <= t.maxFullScanPixels
+      ? 1
+      : Math.ceil(Math.sqrt(nPix / t.maxFullScanPixels));
+  let sampleCount = 0;
+  let highlightCount = 0;
+  let shadowClipCount = 0;
+  let darkCount = 0;
+  let glareCount = 0;
+  let restN = 0;
+  let restSum = 0;
+  let restSum2 = 0;
+  for (let y = 0; y < height; y += stride) {
+    for (let x = 0; x < width; x += stride) {
+      const o = (y * width + x) * 4;
+      const r = data[o];
+      const g = data[o + 1];
+      const b = data[o + 2];
+      const luma = lumaOf(r, g, b);
+      const max = r > g ? (r > b ? r : b) : g > b ? g : b;
+      const min = r < g ? (r < b ? r : b) : g < b ? g : b;
+      sampleCount += 1;
+      if (r >= t.clipNearWhite || g >= t.clipNearWhite || b >= t.clipNearWhite) {
+        highlightCount += 1;
+      }
+      const shadowClipped =
+        r <= t.clipNearBlack && g <= t.clipNearBlack && b <= t.clipNearBlack;
+      if (shadowClipped) shadowClipCount += 1;
+      else if (luma < t.shadowLuma) darkCount += 1;
+      const sat = max === 0 ? 0 : (max - min) / max;
+      const glare = luma >= t.glareLumaMin && sat <= t.glareSaturationMax;
+      if (glare) glareCount += 1;
+      else {
+        restN += 1;
+        restSum += luma;
+        restSum2 += luma * luma;
+      }
+    }
+  }
+  const restMean = restN ? restSum / restN : 0;
+  return {
+    sampleCount,
+    stride,
+    highlightCount,
+    shadowClipCount,
+    darkCount,
+    glareCount,
+    highlightFraction: sampleCount ? highlightCount / sampleCount : 0,
+    shadowClipFraction: sampleCount ? shadowClipCount / sampleCount : 0,
+    darkFraction: sampleCount ? darkCount / sampleCount : 0,
+    glareFraction: sampleCount ? glareCount / sampleCount : 0,
+    restStd: restN
+      ? Math.sqrt(Math.max(0, restSum2 / restN - restMean * restMean))
+      : 0,
+    restCount: restN,
+  };
+}
+
+function darkContrast(grid, t) {
+  if (!grid) return { darkLocalContrast: null };
+  const { width: w, height: h, data } = grid;
+  let n = 0;
+  let sum = 0;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const L = data[y * w + x];
+      if (!(L > t.clipNearBlack && L < t.shadowLuma)) continue;
+      if (x + 1 < w) {
+        sum += Math.abs(data[y * w + x + 1] - L);
+        n += 1;
+      }
+      if (y + 1 < h) {
+        sum += Math.abs(data[(y + 1) * w + x] - L);
+        n += 1;
+      }
+    }
+  }
+  return { darkLocalContrast: n ? sum / n : 0 };
+}
+
+function blockNoise(grid, t) {
+  if (!grid) return { flatBlocks: 0, noiseStd: null };
+  const { width: w, height: h, data } = grid;
+  const block = t.noiseBlock;
+  if (!(block >= 2) || w < block || h < block) {
+    return { flatBlocks: 0, noiseStd: null };
+  }
+  const stds = [];
+  for (let y0 = 0; y0 + block <= h; y0 += block) {
+    for (let x0 = 0; x0 + block <= w; x0 += block) {
+      let n = 0;
+      let sum = 0;
+      let sum2 = 0;
+      let g = 0;
+      let gn = 0;
+      for (let y = y0; y < y0 + block; y += 1) {
+        for (let x = x0; x < x0 + block; x += 1) {
+          const L = data[y * w + x];
+          sum += L;
+          sum2 += L * L;
+          n += 1;
+          if (x + 1 < x0 + block) {
+            g += Math.abs(data[y * w + x + 1] - L);
+            gn += 1;
+          }
+          if (y + 1 < y0 + block) {
+            g += Math.abs(data[(y + 1) * w + x] - L);
+            gn += 1;
+          }
+        }
+      }
+      if (!gn || g / gn >= t.noiseFlatGradMax) continue;
+      const mean = sum / n;
+      stds.push(Math.sqrt(Math.max(0, sum2 / n - mean * mean)));
+    }
+  }
+  if (stds.length < t.noiseMinFlatBlocks) {
+    return { flatBlocks: stds.length, noiseStd: null };
+  }
+  stds.sort((a, b) => a - b);
+  return { flatBlocks: stds.length, noiseStd: stds[stds.length >> 1] };
+}
+
+function prepare(img, thresholds) {
+  const tooSmall = img.width < thresholds.minEdge || img.height < thresholds.minEdge;
+  return {
+    img,
+    thresholds,
+    tooSmall,
+    grid: tooSmall ? null : luminanceGrid(img, thresholds.maxSampleEdge),
+    scan: tooSmall ? null : scanPixels(img, thresholds),
+  };
+}
+
+function sampleFields(grid) {
+  if (!grid) return { sampledWidth: null, sampledHeight: null, sampleFactor: null };
+  return {
+    sampledWidth: grid.width,
+    sampledHeight: grid.height,
+    sampleFactor: grid.factor,
+  };
+}
+
+function blurFrom(bundle) {
+  if (bundle.tooSmall) return tooSmallMetric('blur');
+  const energies = spatialEnergies(bundle.grid);
+  const variance = energies ? energies.laplacianVariance : null;
+  const base = {
+    ...sampleFields(bundle.grid),
+    laplacianVariance: variance,
+  };
+  const t = bundle.thresholds;
+  if (variance == null || variance < t.blurSharpMin) {
+    return {
+      id: 'blur',
+      status: 'unknown',
+      score: null,
+      countsTowardScore: false,
+      code: 'low-edge-energy',
+      reason:
+        'Edge energy is low. That fits blur and it also fits a low-texture or flat scene, so blur is not inferred.',
+      metrics: base,
+    };
+  }
+  return {
+    id: 'blur',
+    status: 'sharp',
+    score: clampScore((100 * variance) / t.blurScoreFull),
+    countsTowardScore: true,
+    code: 'sharp-edges',
+    reason:
+      'Edge energy is high enough to call the working sample sharp. This is not a focus measurement.',
+    metrics: base,
+  };
+}
+
+function motionFrom(bundle) {
+  if (bundle.tooSmall) return tooSmallMetric('directionalMotion');
+  const energies = spatialEnergies(bundle.grid);
+  const horizontalEnergy = energies ? energies.horizontalEnergy : 0;
+  const verticalEnergy = energies ? energies.verticalEnergy : 0;
+  const observation = energies
+    ? observationOf(horizontalEnergy, verticalEnergy, bundle.thresholds)
+    : 'unmeasurable';
+  return {
+    id: 'directionalMotion',
+    status: 'unknown',
+    warning: null,
+    score: null,
+    countsTowardScore: false,
+    code: 'not-inferable',
+    reason:
+      'No directional motion warning is issued. A single frame cannot separate directional smear from scene edges.',
+    metrics: {
+      ...sampleFields(bundle.grid),
+      observation,
+      horizontalEnergy,
+      verticalEnergy,
+    },
+  };
+}
+
+function clippingFrom(bundle) {
+  if (bundle.tooSmall) return tooSmallMetric('clipping');
+  const scan = bundle.scan;
+  const t = bundle.thresholds;
+  const fraction = Math.max(scan.highlightFraction, scan.shadowClipFraction);
+  const clipped =
+    scan.highlightFraction >= t.clipFractionWarn ||
+    scan.shadowClipFraction >= t.clipFractionWarn;
+  const score =
+    t.clipScoreZero > 0
+      ? clampScore(100 * (1 - fraction / t.clipScoreZero))
+      : clipped
+        ? 0
+        : 100;
+  return {
+    id: 'clipping',
+    status: clipped ? 'clipped' : 'ok',
+    score,
+    countsTowardScore: clipped,
+    code: clipped ? 'end-of-range' : 'within-threshold',
+    reason: clipped
+      ? 'Samples sit at the end of the 8-bit range. This does not say whether the camera or a later step clipped them.'
+      : 'Clipped-pixel share is under the threshold.',
+    metrics: {
+      highlightCount: scan.highlightCount,
+      shadowClipCount: scan.shadowClipCount,
+      highlightFraction: scan.highlightFraction,
+      shadowClipFraction: scan.shadowClipFraction,
+      sampleCount: scan.sampleCount,
+      stride: scan.stride,
+    },
+  };
+}
+
+function shadowsFrom(bundle) {
+  if (bundle.tooSmall) return tooSmallMetric('shadows');
+  const scan = bundle.scan;
+  const contrast = darkContrast(bundle.grid, bundle.thresholds);
+  const t = bundle.thresholds;
+  const metrics = {
+    darkFraction: scan.darkFraction,
+    darkCount: scan.darkCount,
+    darkLocalContrast: contrast.darkLocalContrast,
+    sampleCount: scan.sampleCount,
+  };
+  if (scan.darkFraction < t.shadowFractionMin) {
+    return {
+      id: 'shadows',
+      status: 'ok',
+      score: null,
+      countsTowardScore: false,
+      code: 'few-dark-pixels',
+      reason:
+        'Dark pixels are a small share of the frame. This is not an exposure grade.',
+      metrics,
+    };
+  }
+  if (
+    contrast.darkLocalContrast != null &&
+    contrast.darkLocalContrast >= t.shadowLocalMin
+  ) {
+    return {
+      id: 'shadows',
+      status: 'ok',
+      score: null,
+      countsTowardScore: false,
+      code: 'dark-areas-have-contrast',
+      reason:
+        'Dark areas keep local contrast. This is not an exposure grade.',
+      metrics,
+    };
+  }
+  return {
+    id: 'shadows',
+    status: 'unknown',
+    score: null,
+    countsTowardScore: false,
+    code: 'dark-contrast-unknown',
+    reason:
+      'A large dark area has almost no local contrast. Crushed shadows and a flat dark scene look the same here, so neither is inferred.',
+    metrics,
+  };
+}
+
+function noiseFrom(bundle) {
+  if (bundle.tooSmall) return tooSmallMetric('noise');
+  const found = blockNoise(bundle.grid, bundle.thresholds);
+  const metrics = {
+    ...sampleFields(bundle.grid),
+    flatBlocks: found.flatBlocks,
+    noiseStd: found.noiseStd,
+  };
+  if (found.noiseStd == null) {
+    return {
+      id: 'noise',
+      status: 'unknown',
+      score: null,
+      countsTowardScore: false,
+      code: 'no-flat-blocks',
+      reason:
+        'Not enough flat blocks to estimate noise. A busy scene is not called noisy.',
+      metrics,
+    };
+  }
+  const t = bundle.thresholds;
+  let status = 'low';
+  let score = 100;
+  let countsTowardScore = false;
+  let code = 'flat-blocks-quiet';
+  let reason =
+    'Quiet flat blocks vary little. Textured areas were not graded, and JPEG artifacts can still hide elsewhere.';
+  if (found.noiseStd >= t.noiseElevated) {
+    status = 'elevated';
+    score = t.noiseScoreElevated;
+    countsTowardScore = true;
+    code = 'flat-blocks-noisy';
+    reason =
+      'Quiet flat blocks still vary a lot. Sensor noise, JPEG artifacts, and fine texture are not separated.';
+  } else if (found.noiseStd >= t.noiseModerate) {
+    status = 'moderate';
+    score = t.noiseScoreModerate;
+    countsTowardScore = true;
+    code = 'flat-blocks-moderate';
+    reason =
+      'Quiet flat blocks show some variation. Sensor noise, JPEG artifacts, and fine texture are not separated.';
+  }
+  return {
+    id: 'noise',
+    status,
+    score: clampScore(score),
+    countsTowardScore,
+    code,
+    reason,
+    metrics,
+  };
+}
+
+function glareFrom(bundle) {
+  if (bundle.tooSmall) return tooSmallMetric('glare');
+  const scan = bundle.scan;
+  const t = bundle.thresholds;
+  const metrics = {
+    glareCount: scan.glareCount,
+    glareFraction: scan.glareFraction,
+    restStd: scan.restStd,
+    restCount: scan.restCount,
+    sampleCount: scan.sampleCount,
+  };
+  const inBand =
+    scan.glareFraction >= t.glareFractionMin &&
+    scan.glareFraction <= t.glareFractionMax;
+  const hasContext = scan.restCount > 0 && scan.restStd >= t.glareRestStdMin;
+  if (inBand && hasContext) {
+    return {
+      id: 'glare',
+      status: 'possible',
+      score: clampScore(100 * (1 - scan.glareFraction)),
+      countsTowardScore: true,
+      code: 'bright-desaturated-region',
+      reason:
+        'A bright desaturated region stands out from the rest of the frame. This is a glare heuristic, not a detection.',
+      metrics,
+    };
+  }
+  if (scan.glareFraction < t.glareFractionMin) {
+    return {
+      id: 'glare',
+      status: 'none',
+      score: null,
+      countsTowardScore: false,
+      code: 'cue-absent',
+      reason:
+        'No sizable bright desaturated region. Glare is not ruled out.',
+      metrics,
+    };
+  }
+  return {
+    id: 'glare',
+    status: 'unknown',
+    score: null,
+    countsTowardScore: false,
+    code: 'not-inferable',
+    reason:
+      'Most of the frame is bright and desaturated, or the rest has no contrast. Glare is not inferred.',
+    metrics,
+  };
+}
+
+function withImage(image, thresholds, id, from) {
+  const img = readImage(image);
+  const resolved = normalizeThresholds(thresholds);
+  if (!img) return notImageMetric(id);
+  return from(prepare(img, resolved));
+}
+
+/** @param {object} image `{ width, height, data }` RGBA. @param {object} [thresholds] */
+export function analyzeBlur(image, thresholds) {
+  return withImage(image, thresholds, 'blur', blurFrom);
+}
+
+/** Observation only. `warning` is always null. */
+export function analyzeDirectionalMotion(image, thresholds) {
+  return withImage(image, thresholds, 'directionalMotion', motionFrom);
+}
+
+/** @param {object} image @param {object} [thresholds] */
+export function analyzeClipping(image, thresholds) {
+  return withImage(image, thresholds, 'clipping', clippingFrom);
+}
+
+/** @param {object} image @param {object} [thresholds] */
+export function analyzeShadows(image, thresholds) {
+  return withImage(image, thresholds, 'shadows', shadowsFrom);
+}
+
+/** @param {object} image @param {object} [thresholds] */
+export function analyzeNoise(image, thresholds) {
+  return withImage(image, thresholds, 'noise', noiseFrom);
+}
+
+/** Heuristic. `possible` is not a detection. */
+export function analyzeGlare(image, thresholds) {
+  return withImage(image, thresholds, 'glare', glareFrom);
+}
+
+function compositeScore(metrics) {
+  const parts = [];
+  for (const id of METRIC_IDS) {
+    const metric = metrics[id];
+    if (metric.countsTowardScore && typeof metric.score === 'number') {
+      parts.push(metric.score);
+    }
+  }
+  if (!parts.length) return null;
+  return clampScore(parts.reduce((sum, score) => sum + score, 0) / parts.length);
+}
+
+/**
+ * Run every metric. `score` is null when nothing earned a score: unknowns and
+ * absent cues are excluded, not treated as passes.
+ * @param {object} image `{ width, height, data }` RGBA
+ * @param {{ thresholds?: object }} [options]
+ */
+export function analyzePhotoQuality(image, options = {}) {
+  const thresholds = normalizeThresholds(options?.thresholds);
+  const img = readImage(image);
+  if (!img) {
+    return {
+      ok: false,
+      code: 'not-image',
+      reason:
+        'Pixels must be an RGBA image: integer width and height, and data.length at least width*height*4.',
+      width: null,
+      height: null,
+      thresholds,
+      metrics: null,
+      unknown: [],
+      findings: [],
+      score: null,
+      scoreNote: SCORE_NOTE,
+    };
+  }
+  const bundle = prepare(img, thresholds);
+  const metrics = {
+    blur: blurFrom(bundle),
+    directionalMotion: motionFrom(bundle),
+    clipping: clippingFrom(bundle),
+    shadows: shadowsFrom(bundle),
+    noise: noiseFrom(bundle),
+    glare: glareFrom(bundle),
+  };
+  const unknown = METRIC_IDS.filter((id) => metrics[id].status === 'unknown');
+  const findings = METRIC_IDS.filter((id) => {
+    const status = metrics[id].status;
+    return status === 'clipped' || status === 'moderate' || status === 'elevated' || status === 'possible';
+  });
+  return {
+    ok: true,
+    code: bundle.tooSmall ? 'too-small' : 'measured',
+    reason: bundle.tooSmall
+      ? 'The image is below the minimum edge. Nothing is inferred.'
+      : 'Metrics that cannot be inferred are unknown. They are not passes.',
+    width: img.width,
+    height: img.height,
+    thresholds,
+    metrics,
+    unknown,
+    findings,
+    score: bundle.tooSmall ? null : compositeScore(metrics),
+    scoreNote: SCORE_NOTE,
+  };
+}
