@@ -479,6 +479,17 @@ function intervalPoints(wps, stepM) {
   const out = [];
   const emit = (x, y, a, b, t) => {
     const ll = frame.toLonLat(x, y);
+    // Interpolate known headings on the short arc, not through 180 at north.
+    // A missing endpoint cannot establish the attitude between waypoints.
+    let headingDeg = null;
+    if (finite(a.headingDeg) && finite(b.headingDeg)) {
+      const delta = ((((b.headingDeg - a.headingDeg) % 360) + 540) % 360) - 180;
+      headingDeg = (((a.headingDeg + delta * t) % 360) + 360) % 360;
+    } else if (t <= 1e-9 && finite(a.headingDeg)) {
+      headingDeg = a.headingDeg;
+    } else if (t >= 1 - 1e-9 && finite(b.headingDeg)) {
+      headingDeg = b.headingDeg;
+    }
     const lerp = (k) =>
       finite(a[k]) && finite(b[k])
         ? a[k] + (b[k] - a[k]) * t
@@ -490,6 +501,7 @@ function intervalPoints(wps, stepM) {
       lat: ll.lat,
       aglM: lerp('aglM'),
       relHeightM: lerp('relHeightM'),
+      headingDeg,
     });
   };
   emit(xy[0].x, xy[0].y, xy[0].w, xy[0].w, 0);
@@ -535,7 +547,6 @@ export function plannedShots(sources = {}) {
             out.push({
               ...point,
               pitchDeg: finite(leg.pitchDeg) ? leg.pitchDeg : null,
-              headingDeg: null,
               waypointId: null,
               shot: null,
               mission: missionIndex,

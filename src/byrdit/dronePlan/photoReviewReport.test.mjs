@@ -1,6 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPhotoReviewReport } from './photoReviewReport.js';
+import { plannedShots } from './photoQualityMatch.js';
+import { makeFrame } from './geo.js';
+
+test('headed interval captures retain circular heading and do not force refly', () => {
+  const frame = makeFrame(-95, 32);
+  const sources = { result: { missions: [{ legs: [{
+    photoMode: 'interval', photoSpacingM: 10, pitchDeg: -45,
+    waypoints: [
+      { ...frame.toLonLat(0, 0), headingDeg: 350 },
+      { ...frame.toLonLat(20, 0), headingDeg: 10 },
+    ],
+  }] }] } };
+  const shots = plannedShots(sources);
+  assert.equal(shots.length, 3);
+  for (const [i, expected] of [350, 0, 10].entries()) {
+    assert.ok(Math.abs(((shots[i].headingDeg - expected + 540) % 360) - 180) < 1e-6);
+    assert.notEqual(shots[i].headingDeg, null);
+  }
+  const photos = shots.map((s, i) => photo({ name: `${i}.jpg`, lon: s.lon, lat: s.lat, gimbalYawDeg: [350, 0, 10][i] }));
+  const report = buildPhotoReviewReport(photos, shots);
+  assert.equal(report.matches.matches.length, 3);
+  assert.equal(report.refly.length, 0);
+});
+
+test('interval heading gaps remain unknown rather than inheriting a distant angle', () => {
+  const frame = makeFrame(-95, 32);
+  const shots = plannedShots({ result: { missions: [{ legs: [{
+    photoMode: 'interval', photoSpacingM: 10, pitchDeg: -45,
+    waypoints: [
+      { ...frame.toLonLat(0, 0), headingDeg: 20 },
+      { ...frame.toLonLat(20, 0), headingDeg: null },
+    ],
+  }] }] } });
+  assert.equal(shots[0].headingDeg, 20);
+  assert.equal(shots[1].headingDeg, null);
+  assert.equal(shots[2].headingDeg, null);
+});
 const shot = { lon: -95, lat: 32, pitchDeg: -45, headingDeg: 0, waypointId: 1 };
 const photo = (extra = {}) => ({ name: 'a.jpg', lon: -95, lat: 32, gimbalPitchDeg: -45, gimbalYawDeg: 0, review: { score: 90, reasons: [], sampleCount: 9 }, ...extra });
 

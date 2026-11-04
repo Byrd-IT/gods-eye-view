@@ -2517,7 +2517,6 @@
       "src/byrdit/dronePlan/photoReviewReport.js",
       "src/byrdit/dronePlan/photoReviewOverlap.js",
       "src/byrdit/dronePlan/photoReviewPanel.js",
-      "src/byrdit/dronePlan/missionLabel.js",
       "src/byrdit/historyUi/historyVoice.js",
       "src/byrdit/historyUi/historyControl.js",
       "src/byrdit/historyUi/historyClient.js",
