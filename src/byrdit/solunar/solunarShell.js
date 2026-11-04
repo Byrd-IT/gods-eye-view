@@ -7,6 +7,7 @@
 import * as Cesium from 'cesium';
 import { pickGroundPosition } from '../../data/scenePick.js';
 import { createSolunarPanel } from './panel.js';
+import { addDays, localDateOf, localDayStartMs } from './zone.js';
 
 export const SOLUNAR_ID = 'solunar-panel';
 export const SOLUNAR_BODY_ID = 'gev-solunar-body';
@@ -47,7 +48,16 @@ export function mapCenterSpot(viewer) {
 
 export function mountSolunarForShell(
   shell,
-  { document: doc = globalThis.document, now } = {},
+  {
+    document: doc = globalThis.document,
+    now,
+    setTimer = (fn, ms) => {
+      const id = globalThis.setTimeout(fn, ms);
+      id?.unref?.(); // Node: a pending midnight never keeps a process alive
+      return id;
+    },
+    clearTimer = (id) => globalThis.clearTimeout(id),
+  } = {},
 ) {
   const root = doc?.getElementById?.(SOLUNAR_ID);
   const body = doc?.getElementById?.(SOLUNAR_BODY_ID);
@@ -85,6 +95,7 @@ export function mountSolunarForShell(
     lastCartesian = spot.cartesian;
     panel.setSpot(spot.latDeg, spot.lonDeg, source);
     if (isOpen()) showMarker(spot.cartesian);
+    armMidnightTimer(); // the new spot may be in another zone
   };
   const useCenter = () => useSpot(mapCenterSpot(viewer), 'center');
   const panel = createSolunarPanel({
@@ -94,6 +105,35 @@ export function mountSolunarForShell(
     onUseCenter: useCenter,
   });
 
+  // A card left open past the spot's local midnight re-draws itself then, so
+  // the week never shows yesterday as today.
+  let midnightTimer = null;
+  const stopMidnightTimer = () => {
+    if (midnightTimer != null) clearTimer(midnightTimer);
+    midnightTimer = null;
+  };
+  const armMidnightTimer = () => {
+    stopMidnightTimer();
+    const spot = panel.getSpot();
+    if (!spot || !isOpen()) return;
+    const clock = now ?? Date.now;
+    const at = clock();
+    const today = localDateOf(spot.zone, at);
+    const next = addDays(today, 1);
+    const wait =
+      localDayStartMs(spot.zone, next.year, next.month, next.day) - at;
+    // one second past midnight; never a hot loop if the clock misbehaves
+    midnightTimer = setTimer(
+      () => {
+        midnightTimer = null;
+        if (!isOpen()) return;
+        panel.refresh();
+        armMidnightTimer();
+      },
+      Math.max(1000, wait + 1000),
+    );
+  };
+
   // Open: default to the map centre unless the user already chose a spot.
   const onToggle = () => {
     if (isOpen()) {
@@ -102,7 +142,11 @@ export function mountSolunarForShell(
         showMarker(lastCartesian);
         panel.refresh(); // the card may have stayed closed past midnight
       }
-    } else clearMarker();
+      armMidnightTimer();
+    } else {
+      clearMarker();
+      stopMidnightTimer();
+    }
   };
   const Observer =
     doc.defaultView?.MutationObserver ?? globalThis.MutationObserver;
@@ -143,6 +187,7 @@ export function mountSolunarForShell(
       canvas?.removeEventListener('pointerdown', onDown);
       canvas?.removeEventListener('pointerup', onUp);
       clearMarker();
+      stopMidnightTimer();
       panel.destroy();
       delete root.dataset.solunarMounted;
     },

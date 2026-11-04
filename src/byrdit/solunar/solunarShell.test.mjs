@@ -346,3 +346,49 @@ test('showing and clearing the spot marker asks for a frame (the app idles betwe
     });
   });
 });
+
+test("a card left open past the spot's local midnight redraws itself then, and stops when closed", () => {
+  let nowMs = Date.UTC(2026, 10, 3, 18); // 12:00 CST
+  const timers = [];
+  const cleared = [];
+  const window = new Window();
+  const doc = window.document;
+  const root = doc.createElement('div');
+  root.id = SOLUNAR_ID;
+  root.className = 'collapsed';
+  const body = doc.createElement('div');
+  body.id = SOLUNAR_BODY_ID;
+  root.append(body);
+  doc.body.append(root);
+  const viewer = fakeViewer();
+  mountSolunarForShell(
+    { viewer },
+    {
+      document: doc,
+      now: () => nowMs,
+      setTimer: (fn, ms) => {
+        timers.push({ fn, ms });
+        return timers.length;
+      },
+      clearTimer: (id) => cleared.push(id),
+    },
+  );
+  const first = () => body.querySelector('.gev-sl-day').dataset.date;
+  root.classList.remove('collapsed');
+  return new Promise((r) => setTimeout(r, 5)).then(() => {
+    // pixel (400,300) of the fake globe is 33.0N 96.0W: America/Chicago
+    assert.equal(first(), '2026-11-03');
+    const armed = timers.at(-1);
+    assert.equal(armed.ms, 12 * 3_600_000 + 1000); // 12:00 -> next local midnight, +1 s
+    nowMs = Date.UTC(2026, 10, 4, 6, 0, 1); // just after midnight
+    armed.fn();
+    assert.equal(first(), '2026-11-04');
+    const rearmed = timers.at(-1);
+    assert.notEqual(rearmed, armed);
+    assert.ok(rearmed.ms > 23 * 3_600_000, 'next midnight is about a day away');
+    root.classList.add('collapsed');
+    return new Promise((r) => setTimeout(r, 5)).then(() => {
+      assert.ok(cleared.length >= 1, 'closing clears the pending timer');
+    });
+  });
+});

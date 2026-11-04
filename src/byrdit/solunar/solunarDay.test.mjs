@@ -344,3 +344,27 @@ test('days to the nearest new or full moon are searched, anchored on USNO new mo
   assert.ok(Math.abs(daysFromSyzygy(nm + 1.5 * 86_400_000) - 1.5) < 0.05);
   assert.ok(Math.abs(daysFromSyzygy(nm - 2.4 * 86_400_000) - 2.4) < 0.05);
 });
+
+test('moon underfoot (lower transit, drives the major windows) sits halfway between USNO upper transits, within 3 min', () => {
+  // USNO rstt gives upper transits only. The lower transit is the midpoint of
+  // the two surrounding upper transits (the Moon's hour angle advances
+  // smoothly), so two consecutive USNO days check it independently.
+  const pairs = [['chicago-2026-11-02', 'chicago-2026-11-03']];
+  const byName = Object.fromEntries(CASES.map((c) => [c.name, c]));
+  for (const [a, b] of pairs) {
+    const ca = byName[a];
+    const cb = byName[b];
+    const upperA = usnoUtcMs(ca, ca.moonUpperTransit[0]);
+    const upperB = usnoUtcMs(cb, cb.moonUpperTransit[0]);
+    const expected = (upperA + upperB) / 2;
+    const day = solunarDay(
+      { latDeg: ca.latDeg, lonDeg: ca.lonDeg, zone: ca.zone },
+      ymd(ca.date),
+    );
+    assert.equal(day.moonLower.length, 1, a);
+    assert.ok(
+      Math.abs(day.moonLower[0] - expected) <= 3 * 60_000,
+      `${a}: lower transit ${new Date(day.moonLower[0]).toISOString()} vs USNO midpoint ${new Date(expected).toISOString()}`,
+    );
+  }
+});
