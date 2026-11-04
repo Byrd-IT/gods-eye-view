@@ -109,6 +109,8 @@ test('incomplete batches cannot confirm missing captures in any exported view', 
     assert.equal(report.matches.matches.length, 1);
     assert.equal(report.matches.shots[0].status, 'matched');
     assert.equal(report.matches.missing.length, 0);
+    assert.equal(report.matches.summary.missingCount, 0);
+    assert.equal(report.matches.summary.unknownCount, report.matches.unknown.length);
     assert.equal(report.matches.shots[1].status, 'unknown');
     assert.equal(report.matches.shots[1].reason, 'coverage-unknown');
     assert.ok(report.matches.unknown.some(r => r.kind === 'shot' && r.shotKey === report.matches.shots[1].key));

@@ -72,6 +72,8 @@ export function buildPhotoReviewReport(
       return unknown;
     });
     matches.missing = [];
+    matches.summary.missingCount = 0;
+    matches.summary.unknownCount = matches.unknown.length;
   }
   const overlap = assessPhotoOverlap(unique, matches.shots);
   const gapKeys = new Set(
