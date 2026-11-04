@@ -2,6 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readPhotoPixels, readNativePhotoTiles } from './photoPixels.js';
 
+test('decoder boundaries never propagate foreign error messages, stacks or causes', async () => {
+  const secret = 'Bearer synthetic-private-ABC123';
+  const fail = () => { throw Object.assign(new Error(secret), { cause: secret }); };
+  for (const read of [readPhotoPixels, readNativePhotoTiles]) {
+    for (const phase of ['decode', 'canvas', 'pixels', 'close']) {
+      let closed = 0;
+      const bitmap = { width: 16, height: 16, close() { closed++; if (phase === 'close') fail(); } };
+      await assert.rejects(read({}, {
+        decode: phase === 'decode' ? fail : async () => bitmap,
+        createCanvas: phase === 'canvas' ? fail : () => ({ getContext: () => ({ drawImage() {}, getImageData: phase === 'pixels' ? fail : () => ({ width: 16, height: 16, data: [] }) }) }),
+      }), (error) => {
+        assert.equal(error.message, 'Photo pixels unavailable');
+        assert.equal(error.cause, undefined);
+        assert.equal(`${error.stack}${JSON.stringify(error)}`.includes(secret), false);
+        return true;
+      });
+      assert.equal(closed, phase === 'decode' ? 0 : 1);
+    }
+  }
+});
+
 test('native samples cover a 3x3 grid without resizing and release bitmap', async () => {
   let closed = 0;
   const bitmap = {

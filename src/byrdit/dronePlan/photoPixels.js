@@ -1,7 +1,7 @@
 /** Sample a bounded grid of native-resolution patches, without rescaling.
  * Samples are not a substitute for examining every pixel of the photograph.
  */
-export async function readNativePhotoTiles(
+async function nativePhotoTiles(
   file,
   {
     decode = (input) => createImageBitmap(input),
@@ -42,8 +42,27 @@ export async function readNativePhotoTiles(
   }
 }
 
+/** Sanitize decoder/canvas/cleanup failures at both exported boundaries.
+ * Never retain foreign messages, stacks or causes in a thrown error.
+ */
+async function safePixels(reader, file, options) {
+  try {
+    return await reader(file, options);
+  } catch {
+    throw new Error('Photo pixels unavailable');
+  }
+}
+
+export function readNativePhotoTiles(file, options) {
+  return safePixels(nativePhotoTiles, file, options);
+}
+
+export function readPhotoPixels(file, options) {
+  return safePixels(photoPixels, file, options);
+}
+
 /** Decode one local photo to bounded RGBA pixels. Nothing is uploaded or saved. */
-export async function readPhotoPixels(
+async function photoPixels(
   file,
   {
     decode = (input) => createImageBitmap(input),
