@@ -331,6 +331,7 @@ test('HUD summary: 500 keeps the generic reply and logs status/elapsed/body fact
   assert.equal(res.status, 500);
   assert.deepEqual(JSON.parse(res.body), {
     summary: null,
+    feedState: null,
     error: 'OpenAI HUD summary request failed',
   });
   assert.equal(logs.length, 1);

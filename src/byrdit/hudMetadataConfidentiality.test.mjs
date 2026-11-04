@@ -79,7 +79,7 @@ function assertNoSecrets(logs, secrets) {
 
 const FAILED_401 = {
   status: 401,
-  body: { summary: null, error: 'OpenAI HUD summary request failed' },
+  body: { summary: null, feedState: null, error: 'OpenAI HUD summary request failed' },
 };
 
 // Every reflected form of the key, the context and the prompt.
@@ -255,7 +255,7 @@ function bodyFails(status, headers) {
 test('HUD r5: body-read-failure path withholds a reflected request id', async (t) => {
   const logs = captureLogs(t);
   const res = await hud(t, () => bodyFails(200, { 'x-request-id': KEY }));
-  assert.deepEqual(res, { status: 200, body: { summary: null, error: null } });
+  assert.deepEqual(res, { status: 200, body: { summary: null, feedState: null, error: null } });
   assert.match(
     logs[0],
     /upstream body read failed class=network code=ECONNRESET .*status=200 elapsed_ms=\d+ timeout_ms=15000 request_id=withheld$/,
@@ -275,7 +275,7 @@ test('HUD r5: malformed-200 path withholds a reflected request id', async (t) =>
         },
       }),
   );
-  assert.deepEqual(res, { status: 200, body: { summary: null, error: null } });
+  assert.deepEqual(res, { status: 200, body: { summary: null, feedState: null, error: null } });
   assert.match(
     logs[0],
     /upstream body malformed class=malformed .*body_format=non-json request_id=withheld$/,
@@ -301,7 +301,7 @@ test('HUD r5: no-summary-200 path logs only allow-listed facts', async (t) => {
       },
     ),
   );
-  assert.deepEqual(res, { status: 200, body: { summary: null, error: null } });
+  assert.deepEqual(res, { status: 200, body: { summary: null, feedState: null, error: null } });
   assert.match(
     logs[0],
     /upstream reply has no summary text .*error_type=unlisted error_code=unlisted error_param=unlisted request_id=withheld$/,
@@ -495,7 +495,7 @@ for (const [label, [secret, make, cls]] of Object.entries(R6_THROWN)) {
     });
     assert.deepEqual(res, {
       status: 200,
-      body: { summary: null, error: null },
+      body: { summary: null, feedState: null, error: null },
     });
     assert.equal(logs.length, 1);
     assert.match(

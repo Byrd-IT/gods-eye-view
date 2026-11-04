@@ -343,25 +343,18 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // Budget: the whole Realtime prompt (instructions + tools), measured in
   // characters. It was 56,308 after the area/imagery/OSM merge; stating each
   // policy once (WHERE precedence, AREAS routing, AFTER TOOLS speech) brought
-  // it to 51,646. A new tool or rule has to fit under this ceiling.
+  // it to 51,646. Voice geometry (resolve_area, find_imagery, osm_query and
+  // the analyst area scopes) raised the ceiling to 55,500; tightening the
+  // AREAS rule and the area tool descriptions left it at 55,103 as measured
+  // below (every tool, osm_query included); main's Sea Marks and Ski Pistes
+  // layers bring it to 55,210, ~290 under. A new tool or rule has to fit
+  // under this ceiling.
   const size = instructions.length + JSON.stringify(GEV_REALTIME_TOOLS).length;
-  // Byrd-IT fork: + 297 characters for the four USGS water layers in
-  // src/voice/layerManifest.js (upstream ceiling 52000).
-  // + 89 characters: voice set_map_stack enum gains byrdit-open and basemap-auto.
-  // + 2113 characters: the control_history tool and its routing sentence.
-  // + 1812 characters: the control_sky tool and its routing sentence.
-  // + 159 characters: the routing sentence keeps map ISS questions on track_entity.
-  // + 2026 characters: the control_imagery tool and its routing sentence.
-  // + 302 characters: drawn, compare, and waybackOff speaking rule.
-  // + 230 characters: waybackStillOn and starting speaking rule (instructions + tool).
-  // + 4313 characters: the control_droneplan tool and its routing sentence.
-  // + 1 character: orbit height bounds match the planner cap.
-  // + 16 characters: the local-usgs-water id in the layer enum (t_7a4c6a57).
-  assert.ok(
-    size <=
-      52000 + 297 + 89 + 2113 + 1812 + 159 + 2026 + 302 + 230 + 4313 + 1 + 16,
-    `prompt size ${size}`,
-  );
+  // Byrd-IT fork: upstream's 55,500 ceiling plus the fork's additions (USGS
+  // water layers, byrdit-open/basemap-auto stacks, the control_history,
+  // control_sky, control_imagery and control_droneplan tools with their routing
+  // and speaking rules: 11,358 characters, as pinned before the 73c14ac7 merge).
+  assert.ok(size <= 55_500 + 11_358, `prompt size ${size}`);
 });
 
 test('after-tool speech allows returned items to answer requested lists and rankings', () => {

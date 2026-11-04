@@ -988,7 +988,13 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // ordering while allowing source formatting. Derived from the unchanged
   // release schema before formatting (the previous source-byte pin passed).
   const legacyTools = structuredClone(GEV_REALTIME_TOOLS).filter(
-    (tool) => tool.name !== 'set_cyber_sonar',
+    (tool) =>
+      ![
+        'set_cyber_sonar',
+        'resolve_area',
+        'find_imagery',
+        'osm_query',
+      ].includes(tool.name),
   );
   const hudLayout = legacyTools.find((tool) => tool.name === 'set_hud')
     .parameters.properties.layout;
@@ -1036,28 +1042,20 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // Panel adds timeout and named voice/provider targets; consolidated guidance
   // preserves the mission mapping and globe-rotation arguments.
   // S2 GhostMaps extends the generated layer enums; both feature contracts remain.
-  // Voice set_map_stack adds the byrdit-open and basemap-auto stacks (+93: 31499 -> 31592, the serialized tool block; pointAndAsk's +89 measures instructions + JSON.stringify(GEV_REALTIME_TOOLS)).
-  // History playback voice adds control_history (+1803: 31592 -> 33395).
-  // Sky view voice adds control_sky (+1492: 33395 -> 34887).
-  // Imagery-by-year voice adds control_imagery (+1581: 34887 -> 36468).
-  // drawn/compare/waybackOff speaking rule adds 151 characters (36468 -> 36619).
-  // waybackStillOn and starting speaking rule adds 115 characters (36619 -> 36734).
-  // Drone Flight Plan voice adds control_droneplan (+3754: 36734 -> 40488).
-  // Orbit height bounds match the planner cap (+1: 40488 -> 40489); the
-  // air-quality and gnss-integrity history feed ids add 31 (t_7d3de14d).
-  // Existing tool shapes are unchanged apart from that cap; the new tool is appended.
-  // +19: local-usgs-water in the layer enum (t_7a4c6a57).
-  // Re-pinned at the 0e27d69f upstream merge (-337: 40539 -> 40202): upstream
-  // description edits only; vs a canonical dump of upstream the sole delta is
-  // fork-only (control_sky/history/imagery/droneplan, set_map_stack byrdit-open
-  // and basemap-auto, the USGS water layer enum).
-  assert.equal(block.length, 40202, 'serialized tool schema length drifted');
-  // Description-only edits of tool text are allowed. Re-pin both the length
-  // (with a changelog line above) and this hash when they land.
+  // The layer alias hint leaves out aliases the layer id already spells.
+  // The Utilities panel adds one set_panel_open target; Sea Marks and Ski
+  // Pistes extend the generated layer enums and alias hint; voice geometry
+  // adds the analyst area scopes and the osm-places layer.
+  // Byrd-IT fork: re-pinned at the 73c14ac7 upstream merge (31318 -> 40601,
+  // +9283). Upstream's pin (31318 / f5b42f41...ddc) is the baseline; the drift
+  // is fork-only: set_map_stack byrdit-open and basemap-auto, the four USGS
+  // water layers in the layer enums and alias hint, and the control_sky,
+  // control_history, control_imagery and control_droneplan tools.
+  assert.equal(block.length, 40601, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '196d637dc74383aa70638e9adf0d48b4ab8a9bd731124346f2cc00f2c16649fa',
-    'the first-run missions must ride EXISTING tools: no schema-shape edits; description-only edits are allowed but must re-pin this hash and the length above',
+    'f717370db9b3858bae248d6b2fd51396467f3d8a4146e05c8c21d056477872a5',
+    'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(
     new URL('../server/providers/openai/instructions.js', import.meta.url),
