@@ -57,11 +57,19 @@ export function zonedParts(zone, ms) {
   const out = {};
   for (const p of partsFormatter(zone).formatToParts(new Date(ms)))
     if (p.type !== 'literal') out[p.type] = Number(p.value);
+  // Some runtimes print local midnight as 24:00 on the PREVIOUS date.
+  if (out.hour === 24) {
+    const next = new Date(Date.UTC(out.year, out.month - 1, out.day + 1));
+    out.year = next.getUTCFullYear();
+    out.month = next.getUTCMonth() + 1;
+    out.day = next.getUTCDate();
+    out.hour = 0;
+  }
   return {
     year: out.year,
     month: out.month,
     day: out.day,
-    hour: out.hour % 24,
+    hour: out.hour,
     minute: out.minute,
     second: out.second,
   };

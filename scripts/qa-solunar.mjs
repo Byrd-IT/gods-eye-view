@@ -11,15 +11,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import puppeteer from 'puppeteer';
+import { makeRedactor, urlSecrets } from './qa-map-clear-view-redact.mjs';
 
 const appUrl = process.env.QA_BASE_URL || 'http://127.0.0.1:4392';
 const outDir = path.resolve(process.env.QA_OUT_DIR || 'qa-artifacts-solunar');
 fs.mkdirSync(outDir, { recursive: true });
-// URLs in page errors can carry keys: mask userinfo and every query value
-const mask = (s) =>
-  String(s)
-    .replace(/\/\/[^/\s@]+@/g, '//***@')
-    .replace(/([?&][^=&\s]+)=[^&\s\])"']*/g, '$1=***');
+const redact = makeRedactor(urlSecrets(appUrl));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const failures = [];
 const check = (name, ok, detail = '') => {
@@ -236,7 +233,7 @@ async function run(label, viewport, { touch = false } = {}) {
   check(
     `${label}: no console errors`,
     real.length === 0,
-    mask(real.slice(0, 3).join(' | ')),
+    redact(real.slice(0, 3).join(' | ')),
   );
   await context.close();
 }

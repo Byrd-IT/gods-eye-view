@@ -1706,6 +1706,7 @@ export class StyleManager extends ShellFacade {
       .catch((error) => console.warn('[History] control unavailable:', error));
     import('../byrdit/solunar/solunarShell.js')
       .then((solunar) => {
+        if (this._disposed) return; // shell torn down while the module loaded
         this._solunar?.destroy();
         this._solunar = solunar.mountSolunarForShell(this);
       })

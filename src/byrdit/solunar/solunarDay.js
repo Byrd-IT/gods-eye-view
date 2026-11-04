@@ -50,8 +50,8 @@ function riseSetsIn(body, observer, dir, startMs, endMs) {
     if (!found) break;
     const ms = found.date.getTime();
     if (ms >= endMs) break;
-    out.push(ms);
-    from = ms + MIN_MS;
+    if (ms >= startMs) out.push(ms);
+    from = Math.max(from, ms) + MIN_MS;
   }
   return out;
 }
@@ -69,8 +69,8 @@ function transitsIn(body, observer, hourAngle, startMs, endMs) {
     );
     const ms = found.time.date.getTime();
     if (ms >= endMs) break;
-    out.push(ms);
-    from = ms + 6 * 60 * MIN_MS;
+    if (ms >= startMs) out.push(ms);
+    from = Math.max(from, ms) + 6 * 60 * MIN_MS;
   }
   return out;
 }

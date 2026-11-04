@@ -27,10 +27,17 @@ function fakeViewer({ hit = (x, y) => ({ x, y }) } = {}) {
       longitude: (-100 + c.x / 100) * DEG,
     }),
   };
-  return {
+  const viewer = {
     added,
     removed,
-    scene: { canvas, globe: { ellipsoid } },
+    renders: { n: 0 },
+    scene: {
+      canvas,
+      globe: { ellipsoid },
+      requestRender() {
+        this.owner.renders.n++;
+      },
+    },
     camera: {
       positionCartographic: { latitude: 10 * DEG, longitude: 20 * DEG },
       pickEllipsoid: (px) => hit(px.x, px.y),
@@ -43,6 +50,8 @@ function fakeViewer({ hit = (x, y) => ({ x, y }) } = {}) {
       remove: (e) => removed.push(e),
     },
   };
+  viewer.scene.owner = viewer;
+  return viewer;
 }
 
 function setup({ open = false, viewer = fakeViewer() } = {}) {
@@ -313,4 +322,22 @@ test('reopening the card redraws it, so a card left closed overnight shows the n
     body.querySelector('.gev-sl-spot').textContent,
     /^32\.000°N 99\.000°W/,
   );
+});
+
+test('showing and clearing the spot marker asks for a frame (the app idles between frames)', () => {
+  const viewer = fakeViewer();
+  const { root } = setup({ viewer });
+  const before = viewer.renders.n;
+  root.classList.remove('collapsed'); // opens: centre spot + marker
+  return new Promise((r) => setTimeout(r, 5)).then(() => {
+    assert.ok(viewer.renders.n > before, 'marker added -> frame requested');
+    const afterAdd = viewer.renders.n;
+    root.classList.add('collapsed'); // closes: marker removed
+    return new Promise((r) => setTimeout(r, 5)).then(() => {
+      assert.ok(
+        viewer.renders.n > afterAdd,
+        'marker removed -> frame requested',
+      );
+    });
+  });
 });

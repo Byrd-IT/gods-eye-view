@@ -59,6 +59,7 @@ export function mountSolunarForShell(
   const clearMarker = () => {
     if (marker) viewer.entities.remove(marker);
     marker = null;
+    viewer.scene?.requestRender?.(); // the app idles between frames
   };
   const showMarker = (cartesian) => {
     clearMarker();
@@ -74,6 +75,7 @@ export function mountSolunarForShell(
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
+    viewer.scene?.requestRender?.();
   };
   let lastCartesian = null;
   const useSpot = (spot, source) => {

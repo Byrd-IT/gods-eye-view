@@ -250,3 +250,34 @@ test('zone offsets follow daylight time', () => {
     day: 3,
   });
 });
+
+test('a runtime that prints local midnight as 24:00 on the previous date still gives the right local day', async () => {
+  const { localDayStartMs, localDateOf } = await import('./zone.js');
+  const real = Intl.DateTimeFormat.prototype.formatToParts;
+  Intl.DateTimeFormat.prototype.formatToParts = function (d) {
+    const parts = real.call(this, d);
+    const hour = parts.find((p) => p.type === 'hour');
+    if (
+      hour &&
+      Number(hour.value) === 0 &&
+      this.resolvedOptions().timeZone === 'America/Chicago'
+    ) {
+      // 00:xx on the 4th is reported as 24:xx on the 3rd
+      const day = parts.find((p) => p.type === 'day');
+      hour.value = '24';
+      day.value = String(Number(day.value) - 1);
+    }
+    return parts;
+  };
+  try {
+    const start = localDayStartMs('America/Chicago', 2026, 11, 4);
+    assert.equal(new Date(start).toISOString(), '2026-11-04T06:00:00.000Z');
+    assert.deepEqual(localDateOf('America/Chicago', start), {
+      year: 2026,
+      month: 11,
+      day: 4,
+    });
+  } finally {
+    Intl.DateTimeFormat.prototype.formatToParts = real;
+  }
+});
