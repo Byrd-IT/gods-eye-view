@@ -25,6 +25,7 @@ import {
   plannedPhotoPoints,
   reportCsv,
 } from './photoCheck.js';
+import { mountPhotoReviewPanel } from './photoReviewPanel.js';
 import { lengthText } from './format.js';
 import { lengthFromM, lengthToM, lengthUnit } from './units.js';
 
@@ -511,6 +512,7 @@ export function mountPhotoCheck({ doc, container, host, dropZone = null }) {
     panelTop.addEventListener('dragover', guardOver);
     panelTop.addEventListener('drop', guardDrop);
   }
+  const qualityReview = mountPhotoReviewPanel({ doc, container, host });
   render();
 
   return {
@@ -518,6 +520,7 @@ export function mountPhotoCheck({ doc, container, host, dropZone = null }) {
     clear: reset,
     /** Check again when the plan on the panel changed. */
     refresh() {
+      qualityReview.refresh();
       if (!s.photos.length || s.busy) return;
       const plan = host.planned?.() ?? {};
       const ref = plan.suite ?? plan.result ?? null;
@@ -526,6 +529,7 @@ export function mountPhotoCheck({ doc, container, host, dropZone = null }) {
     },
     analysis: () => s.analysis,
     destroy() {
+      qualityReview.destroy();
       panelTop.removeEventListener?.('dragover', guardOver);
       panelTop.removeEventListener?.('drop', guardDrop);
       s.token += 1;
