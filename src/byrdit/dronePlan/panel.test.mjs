@@ -3001,7 +3001,7 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
 
 const btnPreview = (w) => w.find((n) => n.tagName === 'BUTTON' && n.attributes.has('data-preview'));
 
-test('mission labels: the ZIP waits for a slow picture instead of shipping without it, and a replan in between drops the stale download', async () => {
+test('mission labels: the ZIP waits for a slow picture instead of shipping without it', async () => {
   const srv = await server();
   try {
     let calls = 0;
@@ -3162,6 +3162,39 @@ test('mission labels: a crafted controller id is not used as the single-download
     w.handle.getState().controllerIds = [uuid];
     w.handle.downloadMission(0);
     assert.equal(w.downloads.at(-1).name, `${uuid}.kmz`);
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
+test('mission labels: a rename while the picture loads does not strip the pictures from the zip that waited', async () => {
+  const srv = await server();
+  try {
+    const w = setup({
+      libraryClient: srv.clientFor('alice'),
+      renderPreview: async () => {
+        await new Promise((r) => setTimeout(r, 120));
+        return { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), tile: false };
+      },
+    });
+    w.doc.defaultView = { prompt: () => '', confirm: () => true };
+    await settleUi();
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    field(w, 'name').value = 'Before';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    w.handle.applyOptions({ aglM: 64 }, { planNow: true });
+    await w.handle.replan();
+    const pending = w.handle.downloadAll();
+    field(w, 'name').value = 'After';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    assert.equal(await pending, true);
+    const zip = w.downloads.find((d) => d.name.endsWith('-all.zip'));
+    const names = [...readZip(zip.bytes).keys()];
+    assert.ok(names.some((n) => n.endsWith('_preview.jpg')), names.join());
     w.handle.destroy();
   } finally {
     await srv.close();

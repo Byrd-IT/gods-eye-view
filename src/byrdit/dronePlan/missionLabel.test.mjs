@@ -331,3 +331,18 @@ test('a crafted controller id never becomes a path in the zip', () => {
   assert.ok(names.some((n) => /^M03_x\.kmz$|^M03-1_x\.kmz$/.test(n)), 'falls back to the label name');
   assert.ok(!names.some((n) => n.startsWith('map_preview/')));
 });
+
+test('a controller id that is not a UUID adds no <UUID>.kmz note to the README; a null image never throws', async () => {
+  const result = build();
+  const files = readZip(
+    buildBundleZip(result, { label: { no: 3, name: 'x' }, controllerIds: ['../../x'] }),
+  );
+  assert.doesNotMatch(decode(files.get('README.txt')), /waypoint\/\.\./);
+  assert.doesNotMatch(decode(files.get('README.txt')), /<UUID>|map_preview/);
+  const out = await renderThumb(spec0, { createCanvas: () => null, createImage: () => null });
+  assert.equal(out, null);
+  const f = fakeCanvas();
+  const plain = await renderThumb(spec0, { createCanvas: () => f.canvas, createImage: () => null });
+  assert.equal(plain.tile, false);
+});
+const spec0 = { code: 'M7', points: [{ lat: 30.27, lon: -97.77 }, { lat: 30.271, lon: -97.769 }] };

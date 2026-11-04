@@ -483,7 +483,7 @@ export function readmeText(result, when = new Date(), opts = {}) {
     ...(opts.labelFlights?.length
       ? ['', ...labelReadmeLines(opts.labelFlights)]
       : []),
-    ...(opts.controllerIds?.some(Boolean)
+    ...(opts.controllerIds?.some(controllerFileId)
       ? [
           'Files named <UUID>.kmz carry the mission id of a mission already on the',
           "controller: copy each one over DJI Fly's own file, waypoint/<UUID>/<UUID>.kmz",

@@ -143,6 +143,10 @@ const loadImage = (src, { timeoutMs = 4000, create } = {}) =>
       resolve(null);
       return;
     }
+    if (!img || typeof img !== 'object') {
+      resolve(null);
+      return;
+    }
     const timer = setTimeout(() => resolve(null), timeoutMs);
     img.onload = () => {
       clearTimeout(timer);

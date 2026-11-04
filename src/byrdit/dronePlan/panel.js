@@ -3737,16 +3737,14 @@ export function initDronePlan({
     if (!suiteAllowed()) return false;
     const suite = state.suite;
     const label = planLabel();
-    const finish = () => {
+    const finish = (pics) => {
       if (state.suite !== suite) return false; // replanned while waiting
       const bytes = buildSuiteZip(suite.passes, {
         when,
         wpml: wpmlOverride(),
         controllerIds: state.controllerIds,
         label,
-        previews: flightsOf(
-          suite.passes.map((p) => p.result).filter(Boolean),
-        ).map((item) => previewFor(label, item)),
+        previews: pics,
       });
       for (const pass of suite.passes) if (pass.result) checkBuilt(pass.result);
       const stamp = label
@@ -3756,10 +3754,11 @@ export function initDronePlan({
       return true;
     };
     const results = suite.passes.map((p) => p.result).filter(Boolean);
-    if (label && flightsOf(results).some((item) => !previewFor(label, item))) {
+    const have = flightsOf(results).map((item) => previewFor(label, item));
+    if (label && have.some((b) => !b)) {
       return allPreviews(label, results).then(finish);
     }
-    return finish();
+    return finish(have);
   }
 
   /** Run the DJI compatibility check on the KMZ files of a result. */
@@ -3978,14 +3977,14 @@ export function initDronePlan({
     const result = state.result;
     if (!downloadsAllowed()) return false;
     const label = planLabel();
-    const finish = () => {
+    const finish = (pics) => {
       if (state.result !== result) return false; // replanned while waiting
       const bytes = buildBundleZip(result, {
         when,
         wpml: wpmlOverride(),
         controllerIds: state.controllerIds,
         label,
-        previews: flightsOf([result]).map((item) => previewFor(label, item)),
+        previews: pics,
       });
       const stamp = label
         ? labelStem(label)
@@ -3994,10 +3993,14 @@ export function initDronePlan({
       checkBuilt(result);
       return true;
     };
-    if (label && flightsOf([result]).some((item) => !previewFor(label, item))) {
+    const items = flightsOf([result]);
+    const have = items.map((item) => previewFor(label, item));
+    if (label && have.some((b) => !b)) {
+      // Use the bytes that were just drawn, not a second cache read: a rename
+      // meanwhile changes the cache key but this zip keeps its own label.
       return allPreviews(label, [result]).then(finish);
     }
-    return finish();
+    return finish(have);
   }
 
   // --------------------------------------------------------- open/close --
