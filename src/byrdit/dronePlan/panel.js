@@ -3285,6 +3285,7 @@ export function initDronePlan({
     renderSummary();
     renderConflicts();
     photoCheck?.refresh();
+    ensurePreviews();
     panel.dataset.state = state.busy ? 'busy' : state.result ? 'ready' : 'idle';
     if (state.error) {
       status(planErrorText(state.error), 'warn');
@@ -3733,23 +3734,31 @@ export function initDronePlan({
 
   function downloadSuite(when = new Date()) {
     if (!suiteAllowed()) return false;
+    const suite = state.suite;
     const label = planLabel();
-    const bytes = buildSuiteZip(state.suite.passes, {
-      when,
-      wpml: wpmlOverride(),
-      controllerIds: state.controllerIds,
-      label,
-      previews: state.suite.passes.flatMap((pass) =>
-        (pass.result?.missions ?? []).map((m) => previewOf(m)),
-      ),
-    });
-    for (const pass of state.suite.passes)
-      if (pass.result) checkBuilt(pass.result);
-    const stamp = label
-      ? labelStem(label)
-      : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
-    downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
-    return true;
+    const finish = () => {
+      if (state.suite !== suite) return false; // replanned while waiting
+      const bytes = buildSuiteZip(suite.passes, {
+        when,
+        wpml: wpmlOverride(),
+        controllerIds: state.controllerIds,
+        label,
+        previews: suite.passes.flatMap((pass) =>
+          (pass.result?.missions ?? []).map((m) => previewOf(m)),
+        ),
+      });
+      for (const pass of suite.passes) if (pass.result) checkBuilt(pass.result);
+      const stamp = label
+        ? labelStem(label)
+        : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
+      downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
+      return true;
+    };
+    const results = suite.passes.map((p) => p.result).filter(Boolean);
+    if (label && results.some((r) => r.missions.some((m) => !previewOf(m)))) {
+      return allPreviews(label, results).then(finish);
+    }
+    return finish();
   }
 
   /** Run the DJI compatibility check on the KMZ files of a result. */
@@ -3825,16 +3834,39 @@ export function initDronePlan({
     };
   }
 
-  async function makePreview(label, result, i) {
+  const inflight = new WeakMap(); // mission -> { key, promise }
+
+  function makePreview(label, result, i) {
     const n = result.missions.length;
     const mission = result.missions[i];
     const key = previewKey(label, i, n);
-    if (previews.get(mission)?.key === key) return previews.get(mission).bytes;
-    const out = await renderPreview(previewSpec(label, result, i, n));
-    if (!out?.bytes) return null;
-    previews.set(mission, { key, bytes: out.bytes });
-    return out.bytes;
+    const have = previews.get(mission);
+    if (have?.key === key) return Promise.resolve(have.bytes);
+    const running = inflight.get(mission);
+    if (running?.key === key) return running.promise;
+    const promise = (async () => {
+      try {
+        const out = await renderPreview(previewSpec(label, result, i, n));
+        if (!out?.bytes) return null;
+        previews.set(mission, { key, bytes: out.bytes });
+        return out.bytes;
+      } finally {
+        if (inflight.get(mission)?.key === key) inflight.delete(mission);
+      }
+    })();
+    inflight.set(mission, { key, promise });
+    return promise;
   }
+
+  /** Wait for the pictures of every flight of these results (null = could not draw). */
+  const allPreviews = (label, results) =>
+    Promise.all(
+      results.flatMap((result) =>
+        result.missions.map((_, i) =>
+          makePreview(label, result, i).catch(() => null),
+        ),
+      ),
+    );
 
   /** Start drawing the pictures of the current plan (and suite passes). */
   function ensurePreviews() {
@@ -3907,23 +3939,34 @@ export function initDronePlan({
     return true;
   }
 
+  /**
+   * Returns true, or - when the labelled pictures are still being drawn - a
+   * promise of true: the zip waits for them so it never ships without.
+   */
   function downloadAll(when = new Date()) {
     const result = state.result;
     if (!downloadsAllowed()) return false;
     const label = planLabel();
-    const bytes = buildBundleZip(result, {
-      when,
-      wpml: wpmlOverride(),
-      controllerIds: state.controllerIds,
-      label,
-      previews: result.missions.map((m) => previewOf(m)),
-    });
-    const stamp = label
-      ? labelStem(label)
-      : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
-    downloadFile(`${stamp}-all.zip`, bytes, 'application/zip');
-    checkBuilt(result);
-    return true;
+    const finish = () => {
+      if (state.result !== result) return false; // replanned while waiting
+      const bytes = buildBundleZip(result, {
+        when,
+        wpml: wpmlOverride(),
+        controllerIds: state.controllerIds,
+        label,
+        previews: result.missions.map((m) => previewOf(m)),
+      });
+      const stamp = label
+        ? labelStem(label)
+        : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
+      downloadFile(`${stamp}-all.zip`, bytes, 'application/zip');
+      checkBuilt(result);
+      return true;
+    };
+    if (label && result.missions.some((m) => !previewOf(m))) {
+      return allPreviews(label, [result]).then(finish);
+    }
+    return finish();
   }
 
   // --------------------------------------------------------- open/close --

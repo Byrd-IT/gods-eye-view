@@ -316,3 +316,18 @@ test('buildKmz with a label writes the title as the author and nothing else chan
   const parsed = await parseDjiKmz(bytes);
   assert.equal(parsed.meta.author, 'M07 ring A');
 });
+
+test('a crafted controller id never becomes a path in the zip', () => {
+  const result = build();
+  const files = readZip(
+    buildBundleZip(result, {
+      label: { no: 3, name: 'x' },
+      previews: [new Uint8Array([0xff, 0xd8, 0xff, 0xd9])],
+      controllerIds: ['../../etc/passwd'],
+    }),
+  );
+  const names = [...files.keys()];
+  assert.ok(names.every((n) => !n.includes('..') && !n.startsWith('/')), names.join());
+  assert.ok(names.some((n) => /^M03_x\.kmz$|^M03-1_x\.kmz$/.test(n)), 'falls back to the label name');
+  assert.ok(!names.some((n) => n.startsWith('map_preview/')));
+});

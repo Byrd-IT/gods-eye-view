@@ -282,7 +282,7 @@ test('size limit, plan count limit, atomic files', async () => {
     for (let i = 0; i < 5; i += 1) small.create('carol', { name: `p${i}` }, { a: 1 });
     assert.throws(() => small.create('carol', { name: 'one more' }, { a: 1 }), /Too many/);
     const dir = path.join(s.root, 'carol');
-    const first = readdirSync(dir)[0];
+    const first = readdirSync(dir).find((n) => n.startsWith('p_'));
     assert.ok(!readdirSync(path.join(dir, first)).some((n) => n.endsWith('.tmp')));
     assert.ok(existsSync(path.join(dir, first, 'meta.json')));
   } finally {
@@ -393,6 +393,7 @@ test('mission numbers: plans saved before numbers existed are numbered once, old
     delete m.flownAt;
     writeFileSync(f, JSON.stringify(m));
   }
+  rmSync(path.join(root, 'amy', 'counter.json')); // no counter before this feature
   const list = store.list('amy');
   const byName = Object.fromEntries(list.map((p) => [p.name, p.missionNo]));
   assert.deepEqual(byName, { x: 1, y: 2, z: 3 });
@@ -431,5 +432,25 @@ test('flown tracking: the date follows the status', () => {
     typeof store.create('amy', { name: 'g', status: 'flown' }, PLAN).flownAt,
     'number',
   );
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('mission numbers are not reused after the trash is purged (a placeholder may still carry the number)', () => {
+  const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevlib-'));
+  let t = 1_000_000;
+  const store = createStore({ root, now: () => t });
+  const a = store.create('amy', { name: 'a' }, PLAN);
+  const b = store.create('amy', { name: 'b' }, PLAN);
+  assert.deepEqual([a.missionNo, b.missionNo], [1, 2]);
+  store.trash('amy', b.id);
+  t += 31 * 86_400_000; // past the 30-day trash
+  assert.equal(store.list('amy').length, 1);
+  assert.equal(store.list('amy', { trash: true }).length, 0, 'b is gone for good');
+  assert.equal(store.create('amy', { name: 'c' }, PLAN).missionNo, 3);
+  // Delete everything: the next plan still does not start over at 1.
+  for (const p of store.list('amy')) store.trash('amy', p.id);
+  t += 31 * 86_400_000;
+  assert.equal(store.list('amy').length, 0);
+  assert.equal(store.create('amy', { name: 'd' }, PLAN).missionNo, 4);
   rmSync(root, { recursive: true, force: true });
 });

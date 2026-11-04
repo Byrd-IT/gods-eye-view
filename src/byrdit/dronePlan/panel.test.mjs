@@ -2956,9 +2956,8 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
     assert.ok(rendered.at(-1).points.length > 2, 'the route is what is drawn');
 
     // The ZIP carries the picture and the label block.
-    w.handle.ensurePreviews();
-    await settleUi();
     w.buttons('data-download')[0].click();
+    await settleUi();
     const zip = w.downloads.at(-1);
     assert.match(zip.name, /^M01_Byrd-Ranch-ring-A-all\.zip$/);
     const files = readZip(zip.bytes);
@@ -3001,3 +3000,69 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
 });
 
 const btnPreview = (w) => w.find((n) => n.tagName === 'BUTTON' && n.attributes.has('data-preview'));
+
+test('mission labels: the ZIP waits for a slow picture instead of shipping without it, and a replan in between drops the stale download', async () => {
+  const srv = await server();
+  try {
+    let calls = 0;
+    const pic = new Uint8Array([0xff, 0xd8, 7, 0xff, 0xd9]);
+    const w = setup({
+      libraryClient: srv.clientFor('alice'),
+      renderPreview: async () => {
+        calls += 1;
+        await new Promise((r) => setTimeout(r, 120));
+        return { bytes: pic, tile: false };
+      },
+    });
+    w.doc.defaultView = { prompt: () => '', confirm: () => true };
+    await settleUi();
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    field(w, 'name').value = 'Slow';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    // A fresh plan: the pictures are not drawn yet when the button is pressed.
+    w.handle.applyOptions({ aglM: 70 }, { planNow: true });
+    await w.handle.replan();
+    const before = w.downloads.length;
+    const pending = w.handle.downloadAll();
+    assert.equal(w.downloads.length, before, 'nothing is shipped before the picture exists');
+    assert.equal(typeof pending.then, 'function');
+    assert.equal(await pending, true);
+    const files = readZip(w.downloads.at(-1).bytes);
+    assert.ok([...files.keys()].some((n) => n.endsWith('_preview.jpg')), 'the picture is in the zip');
+    assert.match(new TextDecoder().decode(files.get('README.txt')), /picture: M01(-1)?_Slow/);
+    assert.ok(calls >= 1);
+    // The picture is cached: a second download is immediate (a plain true).
+    assert.equal(w.handle.downloadAll(), true);
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
+test('mission labels: a processed plan has no one-click flown toggle', async () => {
+  const srv = await server();
+  try {
+    const w = setup({ libraryClient: srv.clientFor('alice') });
+    w.doc.defaultView = { prompt: () => '', confirm: () => true };
+    await settleUi();
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    field(w, 'name').value = 'P';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    assert.equal(btn(w, 'plan-flown').length, 1);
+    btn(w, 'plan-flown')[0].click();
+    await settleUi();
+    assert.equal(btn(w, 'plan-flown')[0].textContent, 'NOT FLOWN');
+    field(w, 'status').value = 'processed';
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    assert.match(rows(w)[0].textContent, /Processed/);
+    assert.equal(btn(w, 'plan-flown').length, 0, 'processed is not dropped by one click');
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});

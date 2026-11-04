@@ -226,6 +226,7 @@ export function createStore({
    * @returns {number} the highest number in use
    */
   function ensureNumbers(user) {
+    const floor = readCounter(user);
     const metas = [];
     for (const id of ids(user)) {
       try {
@@ -236,7 +237,7 @@ export function createStore({
     }
     let top = metas.reduce(
       (m, x) => (Number.isInteger(x.missionNo) ? Math.max(m, x.missionNo) : m),
-      0,
+      floor,
     );
     const missing = metas
       .filter((x) => !Number.isInteger(x.missionNo))
@@ -245,7 +246,20 @@ export function createStore({
       top += 1;
       saveMeta(user, meta.id, { ...meta, missionNo: top });
     }
+    if (top > floor) writeCounter(user, top);
     return top;
+  }
+
+  // The highest number ever given to this user, kept apart from the plans so
+  // that a number is never handed out again after its plan is purged from the
+  // trash (the controller may still have a placeholder named with it).
+  const counterFile = (user) => path.join(userDir(user), 'counter.json');
+  function readCounter(user) {
+    const n = readJson(counterFile(user))?.highest;
+    return Number.isInteger(n) && n > 0 ? n : 0;
+  }
+  function writeCounter(user, highest) {
+    atomicWrite(counterFile(user), JSON.stringify({ highest }));
   }
 
   /**
@@ -342,6 +356,7 @@ export function createStore({
         );
       }
       const missionNo = ensureNumbers(user) + 1;
+      writeCounter(user, missionNo);
       const id = `p_${randomBytes(8).toString('hex')}`;
       const t = now();
       const meta = {

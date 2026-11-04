@@ -472,11 +472,12 @@ export function mountLibrary({
         act(t('RESTORE'), 'plan-restore', restorePlan, mine);
       } else {
         act(t('OPEN'), 'plan-open', openPlan);
+        // planned <-> flown only: a processed plan is not taken back by one click.
         act(
           plan.status === 'planned' ? t('MARK FLOWN') : t('NOT FLOWN'),
           'plan-flown',
           toggleFlown,
-          mine,
+          mine && plan.status !== 'processed',
         );
         act(t('RENAME'), 'plan-rename', renamePlan, mine);
         act(t('DUPLICATE'), 'plan-duplicate', duplicatePlan, mine);
