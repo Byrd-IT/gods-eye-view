@@ -17,6 +17,7 @@ setUnitSystem('m');
 
 const CODES = [
   ['agl-capped', { requested: 200, cap: 120 }],
+  ['agl-above-400ft', { maxAglM: 300, capM: 457.2 }],
   ['speed-camera-limited', { requested: 5, limited: 4 }],
   ['vlos', { distanceM: 640 }],
   ['terrain-unknown', {}],
@@ -47,6 +48,14 @@ test('every warning code has a sentence with its numbers filled in', () => {
     warningText({ code: 'vlos', params: { distanceM: 640 } }),
     /640 m/,
   );
+  const high = warningText({
+    code: 'agl-above-400ft',
+    params: { maxAglM: 300, capM: 457.2 },
+  });
+  assert.match(high, /up to 300 m above ground, higher than 400 ft/);
+  assert.match(high, /457 m is only the most GEV will plan/);
+  assert.match(high, /does not approve a flight and changes no limit in the aircraft/);
+  assert.match(high, /airspace authorization, local rules and your duties as pilot still apply/);
   assert.equal(warningText({ code: 'mystery', params: {} }), '');
 });
 

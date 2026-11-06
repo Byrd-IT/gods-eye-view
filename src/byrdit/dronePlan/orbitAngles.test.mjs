@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assembleMissions, normalizeOptions, planFlight } from './planner.js';
+import {
+  AGL_CAP_M,
+  assembleMissions,
+  normalizeOptions,
+  planFlight,
+} from './planner.js';
 import { metersPerDegree } from './geo.js';
 import { buildMissionFiles } from './wpml.js';
 import { checkConflicts } from './conflicts.js';
@@ -82,10 +87,17 @@ test('rings: a floor widens the radius and keeps the angle; it never steepens', 
   assert.ok(low.radiusM > rings.find((r) => r.angleDeg === 55).radiusM);
 });
 
-test('rings: never above 400 ft (121.9 m); the cap makes the angle shallower', () => {
-  assert.equal(RING_MAX_AGL_M, 121.9);
-  const rings = angleRings({ aimM: 0, radiusM: 250, anglesDeg: [55], floorAglM: 0 });
-  assert.equal(rings[0].aglM, 121.9);
+test('rings: never above 1500 ft (457.2 m); the cap makes the angle shallower', () => {
+  assert.equal(RING_MAX_AGL_M, 457.2);
+  assert.equal(RING_MAX_AGL_M, AGL_CAP_M, 'the ring maximum is the planning maximum');
+  // 55 degrees down at 250 m out would need ~357 m: it now fits, uncapped.
+  const fits = angleRings({ aimM: 0, radiusM: 250, anglesDeg: [55], floorAglM: 0 });
+  assert.equal(fits[0].capped, false);
+  assert.ok(fits[0].aglM > 121.9 && fits[0].aglM < 457.2);
+  assert.equal(Math.round(-fits[0].pitchDeg), 55);
+  // 55 degrees down at 400 m out would need ~571 m: held at the maximum.
+  const rings = angleRings({ aimM: 0, radiusM: 400, anglesDeg: [55], floorAglM: 0 });
+  assert.equal(rings[0].aglM, 457.2);
   assert.equal(rings[0].capped, true);
   assert.ok(-rings[0].pitchDeg < 55);
 });
@@ -371,7 +383,7 @@ test('look-at: bad paths are dropped (one point, bad numbers, too many)', () => 
     ],
   });
   assert.deepEqual(options.lookAtPaths.map((x) => x.id), ['ok']);
-  assert.ok(options.lookAtPaths[0].aglM <= 120);
+  assert.equal(options.lookAtPaths[0].aglM, AGL_CAP_M, 'clamped to the 1500 ft maximum');
 });
 
 // -------------------------------------------------------------- 8 conflicts --

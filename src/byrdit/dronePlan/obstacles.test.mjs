@@ -238,8 +238,9 @@ test('clearance: waypoints already high enough are untouched and the legs are no
 test('clearance: where the cap cannot clear, the leg is marked blocked and capped', () => {
   const out = applyObstacleClearance(
     [legOf([CENTER.lon, east(CENTER.lon, 2)], 100)],
-    [tower({ heightM: 140 })],
-    { capM: AGL_CAP_M },
+    [tower({ heightM: 380 })],
+    // The column stands 100 m above the route: 380 + 5 + 100 is over the cap.
+    { capM: AGL_CAP_M, groundOf: () => 0, obstacleGroundOf: () => 100 },
   );
   assert.equal(out.legs[0].obstacleBlocked, true);
   assert.deepEqual(
@@ -250,8 +251,21 @@ test('clearance: where the cap cannot clear, the leg is marked blocked and cappe
     ],
   );
   assert.equal(out.blocked.length, 2);
-  assert.equal(out.blocked[0].needAglM, 145);
+  assert.equal(out.blocked[0].needAglM, 485);
   assert.equal(out.blocked[0].obstacleId, 'faa-48-1');
+});
+
+test('clearance: the tallest column the planner takes (400 m) is cleared under the 1500 ft maximum', () => {
+  const out = applyObstacleClearance(
+    [legOf([CENTER.lon, east(CENTER.lon, 2)], 100)],
+    [tower({ heightM: 400 })],
+    { capM: AGL_CAP_M },
+  );
+  assert.deepEqual(out.blocked, []);
+  assert.deepEqual(
+    out.legs[0].waypoints.map((w) => w.aglM),
+    [405, 405],
+  );
 });
 
 test('clearance: no obstacles means the very same legs back', () => {
@@ -282,17 +296,28 @@ test('plan: a grid flown at 40 m climbs over a 50 m tower and warns', () => {
   }
 });
 
+// A column on high ground: the planner clamps a column to 400 m, so the cap is
+// only out of reach when the ground under the column is above the route's.
+const groundWithColumn = (plan, columnId, columnGroundM) => ({
+  known: true,
+  takeoffM: 0,
+  wpM: Object.fromEntries(
+    plan.legs.flatMap((l) => l.waypoints).map((w) => [w.id, 0]),
+  ),
+  obstacleM: { [columnId]: columnGroundM },
+});
+
 test('plan: a tower too tall for the cap warns and marks the legs red', () => {
   const plan = planFlight(boxAround(160, 160), {
     pattern: 'grid',
     aglM: 40,
-    obstacles: [tower({ heightM: 150 })],
+    obstacles: [tower({ heightM: 380 })],
   });
-  const done = assembleMissions(plan, { known: false });
+  const done = assembleMissions(plan, groundWithColumn(plan, 'faa-48-1', 100));
   const warn = done.warnings.find((w) => w.code === 'obstacle-blocked');
   assert.ok(warn);
   assert.equal(warn.params.capM, AGL_CAP_M);
-  assert.equal(warn.params.needM, 155);
+  assert.equal(warn.params.needM, 485);
   const legs = done.missions.flatMap((mi) => mi.legs);
   assert.ok(legs.some((l) => l.obstacleBlocked));
   assert.ok(done.missions.flatMap((mi) => mi.waypoints).every((w) => w.aglM <= AGL_CAP_M));
@@ -540,8 +565,8 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
     const plan = planFlight(box, { ...wide, obstacles: [tower] });
     const out = assembleMissions(plan, { known: false });
     assert.ok(out.missions[1].waypoints[0].aglM >= 65, `lifted: ${out.missions[1].waypoints[0].aglM}`);
-    const tall = planFlight(box, { ...wide, obstacles: [{ ...tower, heightM: 200 }] });
-    const blocked = assembleMissions(tall, { known: false });
+    const tall = planFlight(box, { ...wide, obstacles: [{ ...tower, heightM: 380 }] });
+    const blocked = assembleMissions(tall, groundWithColumn(tall, 'mid', 100));
     assert.ok(blocked.warnings.some((w) => w.code === 'obstacle-blocked'));
     assert.equal(blocked.missions[1].waypoints[0].obstacleBlocked, true);
   });

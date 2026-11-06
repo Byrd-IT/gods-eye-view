@@ -534,6 +534,14 @@ The Drone Flight Plan panel lists tree, tower and building columns for the area 
 - **A visual check, not flight-tested.** Compare the columns with the 3D view by eye. Nothing detects a collision, and no code reads heights from Google Photorealistic 3D Tiles (its terms forbid measuring it).
 - **Credit:** tree canopy height from Meta and World Resources Institute, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Buildings © OpenStreetMap contributors. See `DATA_SOURCES.md`.
 
+### ✈️ Drone Flight Plan: heights and where things are drawn
+
+- **Planning maximum: 1,500 ft (457.2 m) above ground.** That is only the most GEV will plan. It is not approval to fly there, it changes nothing in the aircraft (DJI Fly still starts with its own 120 m height limit and warns when a plan is above it), and airspace authorization, local rules and your duties as pilot still apply. A plan above 400 ft says so. The defaults (80 m / 262 ft for a grid) are unchanged. Internally and in the KMZ heights are metres; the panel shows feet or metres.
+- **Where each overlay sits.** Waypoint markers, the tip of each camera pyramid and the **safety zone** (the corridor the aircraft flies) are in the air at the planned aircraft position. The height curtain runs from that route down to the surface. The pyramid base, photo footprints, ground track and takeoff are on the surface. **Obstacle columns** (yellow dot, orange column) stand on the ground at the obstruction; the safety zone is not an obstacle.
+- **Heights are above the takeoff point, not above local ground.** DJI flies "relative to takeoff", so on a slope the height above the ground under a waypoint differs from its height above takeoff. When the terrain could not be read, GEV plans on flat ground and draws the aircraft at the globe's own surface at the takeoff plus its height; if the globe cannot say either, it draws at height 0 and the plan carries a "terrain unavailable" warning.
+- **Imported files.** A KMZ does not record the takeoff point, so GEV takes the ground under the first waypoint as the start: a mission launched from somewhere else is drawn higher or lower than it flies. Heights measured from sea level (EGM96) are not guessed; only the ground track is drawn. A file that flies under the terrain is drawn under it.
+- **Ground only from the terrain model.** Nothing reads heights from Google Photorealistic 3D Tiles; trees and buildings in that view are not part of the ground the planner uses. The pyramid base is the flat plane under the aircraft; on a steep slope the true footprint differs. Look at it over the 3D view; nothing here detects a collision.
+
 ## 🔧 Under the Hood
 
 How the globe handles live data:

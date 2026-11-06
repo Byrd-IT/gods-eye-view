@@ -1153,7 +1153,7 @@ const schemas = [
         direction: { type: 'string', enum: ['auto', 'ew', 'ns'] },
         jobs: { type: 'string', enum: ['per-area', 'whole'] },
         photoMode: { type: 'string', enum: ['waypoint', 'interval'] },
-        aglM: { type: 'number', minimum: 10, maximum: 120 },
+        aglM: { type: 'number', minimum: 10, maximum: 457.2 },
         frontOverlap: { type: 'number', minimum: 50, maximum: 95 },
         sideOverlap: { type: 'number', minimum: 40, maximum: 95 },
         tiltPitchDeg: { type: 'number', minimum: -80, maximum: -45 },
@@ -1162,7 +1162,7 @@ const schemas = [
           type: 'array',
           minItems: 1,
           maxItems: 6,
-          items: { type: 'number', minimum: 10, maximum: 120 },
+          items: { type: 'number', minimum: 10, maximum: 457.2 },
         },
         speedMs: { type: 'number', minimum: 0.1, maximum: 15 },
         shutterDenominator: {

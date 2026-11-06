@@ -86,6 +86,11 @@ export function warningText(warning) {
       return t(
         'Terrain heights unavailable, so flat ground is assumed and heights are NOT terrain-aware',
       );
+    case 'agl-above-400ft':
+      return t(
+        'This plan flies up to {max} above ground, higher than 400 ft. {cap} is only the most GEV will plan: it does not approve a flight and changes no limit in the aircraft. The aircraft height limit, airspace authorization, local rules and your duties as pilot still apply',
+        { max: lengthText(p.maxAglM), cap: lengthText(p.capM) },
+      );
     case 'rel-height-over-limit':
       return t(
         'The ground varies by {range}: this plan reaches {max} above the takeoff point, over the {limit} height limit DJI Fly starts with. Lower the height, take off from higher ground, or raise the limit in DJI Fly',

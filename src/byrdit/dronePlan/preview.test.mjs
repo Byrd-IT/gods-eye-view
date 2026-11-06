@@ -86,7 +86,7 @@ function fakeViewer() {
     },
   };
 }
-function result(width, height, options = {}) {
+function result(width, height, options = {}, extraGround = {}) {
   const m = metersPerDegree(30.27);
   const box = {
     west: -97.77 - width / 2 / m.lon,
@@ -100,6 +100,7 @@ function result(width, height, options = {}) {
     known: true,
     takeoffM: 0,
     wpM: ids.map(() => 0),
+    ...extraGround,
   });
 }
 
@@ -645,7 +646,14 @@ test('obstacles: columns are drawn with the plan, and a leg the cap cannot lift 
   const viewer = fakeViewer();
   const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
   const source = viewer.dataSources.sources[0];
-  const planned = result(200, 200, { aglM: 60, obstacles: [tallTower()] });
+  // The planner clamps a column to 400 m, so the 1500 ft maximum is only out
+  // of reach for a column standing on higher ground than the route.
+  const planned = result(
+    200,
+    200,
+    { aglM: 60, obstacles: [tallTower({ heightM: 380 })] },
+    { obstacleM: { 'faa-1': 100 } },
+  );
   preview.showPlan(planned);
   const red = source.entities.values.filter((e) => e.name === 'Blocked by obstacle');
   assert.ok(red.length >= 1, 'a blocked leg is drawn red');

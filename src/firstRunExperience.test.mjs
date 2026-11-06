@@ -1051,10 +1051,12 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // is fork-only: set_map_stack byrdit-open and basemap-auto, the four USGS
   // water layers in the layer enums and alias hint, and the control_sky,
   // control_history, control_imagery and control_droneplan tools.
-  assert.equal(block.length, 40601, 'serialized tool schema length drifted');
+  // Byrd-IT fork: control_droneplan aglM / orbitHeightsM maximum 120 -> 457.2
+  // (the 1500 ft planning maximum, dronePlan/heightLimits.js): +4 characters.
+  assert.equal(block.length, 40605, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'f717370db9b3858bae248d6b2fd51396467f3d8a4146e05c8c21d056477872a5',
+    '3145331b4e729502ba3c7090ac8d1d1356e3efb0c568025eb75e6556eba0deb5',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

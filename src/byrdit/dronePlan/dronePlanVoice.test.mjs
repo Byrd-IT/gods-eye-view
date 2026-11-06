@@ -331,10 +331,27 @@ test('a takeoff point needs an area', async () => {
 test('an orbit height above the planner cap is refused', async () => {
   const { handle } = fakeHandle();
   const result = await createDronePlanVoice(handle).options({
-    orbitHeightsM: [200],
+    orbitHeightsM: [457.3],
   });
   assert.equal(result.ok, false);
   assert.equal(result.error, 'That option is outside the panel range');
+});
+
+test('heights up to the 1500 ft planning maximum (457.2 m) are accepted by voice, above it refused', async () => {
+  for (const aglM of [120, 200, 457.2]) {
+    const { handle, state } = fakeHandle();
+    const result = await createDronePlanVoice(handle).options({ aglM });
+    assert.equal(result.ok, true, `${aglM} m accepted`);
+    assert.equal(state.options.aglM, aglM);
+  }
+  const { handle } = fakeHandle();
+  const over = await createDronePlanVoice(handle).options({ aglM: 457.3 });
+  assert.equal(over.ok, false);
+  assert.equal(over.error, 'That option is outside the panel range');
+  const rings = await createDronePlanVoice(fakeHandle().handle).options({
+    orbitHeightsM: [200, 457.2],
+  });
+  assert.equal(rings.ok, true);
 });
 
 test('suite replans a dirty area before the passes', async () => {

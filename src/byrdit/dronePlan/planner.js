@@ -15,6 +15,11 @@ import {
 } from './obstacles.js';
 import { DEFAULT_PRESET_ID, getPreset } from './presets.js';
 import {
+  ADVISORY_AGL_M,
+  PLANNING_MAX_AGL_FT,
+  PLANNING_MAX_AGL_M,
+} from './heightLimits.js';
+import {
   DEFAULT_CAMERA_PRESET_ID,
   cameraPresetOrDefault,
 } from './cameraSettings.js';
@@ -53,14 +58,21 @@ import {
   wrapHeading,
 } from './geo.js';
 
-/** Hard height cap: 120 m, which is below the 400 ft (121.92 m) FAA limit. */
-export const AGL_CAP_M = 120;
-export const AGL_CAP_FT = 400;
+/**
+ * The planning maximum: the most height above ground this planner accepts,
+ * 1500 ft (457.2 m). A limit of GEV's planner only. It is not permission to
+ * fly that high and changes nothing in the aircraft (see heightLimits.js).
+ */
+export const AGL_CAP_M = PLANNING_MAX_AGL_M;
+export const AGL_CAP_FT = PLANNING_MAX_AGL_FT;
 export const FT_PER_M = 1 / 0.3048;
 export const MIN_AGL_M = 10;
 /** DJI Fly accepts at most 200 waypoints in one mission. */
 export const MAX_WAYPOINTS_PER_MISSION = 200;
-/** The DJI Fly default altitude limit above the takeoff point, metres. */
+/**
+ * The DJI Fly default altitude limit above the takeoff point, metres. This is
+ * a fact about the aircraft app, not the planning maximum, and it stays 120.
+ */
 export const DJI_DEFAULT_HEIGHT_LIMIT_M = 120;
 /** Refuse plans that would need more waypoints than this in total. */
 export const MAX_WAYPOINTS_TOTAL = 12000;
@@ -1657,6 +1669,17 @@ export function assembleMissions(plan, ground) {
         needM: Math.round(transitNeedM),
         capM: AGL_CAP_M,
       },
+    });
+  }
+  // Above 400 ft the plan still stands; the person is told that the planning
+  // maximum is only GEV's limit and approves nothing (see heightLimits.js).
+  const highestAglM = Math.max(
+    ...built.flatMap((m) => m.waypoints.map((w) => w.aglM)),
+  );
+  if (highestAglM > ADVISORY_AGL_M + 1e-9) {
+    warnings.push({
+      code: 'agl-above-400ft',
+      params: { maxAglM: highestAglM, capM: AGL_CAP_M },
     });
   }
 

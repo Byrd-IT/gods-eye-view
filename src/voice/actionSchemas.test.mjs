@@ -58,6 +58,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Sky view voice adds the control_sky tool (last).
     // Imagery-by-year voice adds the control_imagery tool (last).
     // Drone Flight Plan voice adds the control_droneplan tool (last).
+    // Drone Flight Plan height limits (aglM, orbitHeightsM) rise from 120 m to
+    // the 1500 ft planning maximum, 457.2 m (see dronePlan/heightLimits.js).
     // drawn/compare/waybackOff speaking rule, description only.
     // waybackStillOn and starting speaking rule, description only.
     // Snow leaves the set_visual_style enum.
@@ -71,7 +73,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // (control_history/sky/imagery/droneplan, byrdit-open and basemap-auto in
     // set_map_stack, the four USGS water layers in the layer enums and the
     // water alias hint).
-    'a817a3c20aae4b60dab6097dda72dc5e5067004cdbb11dc1e57833353ed2701b',
+    'a5ed4b782a428b80844cb5641684b79684f894d66c7acc28dd6d241dd9d28003',
   );
 });
 
@@ -342,4 +344,16 @@ test('direct voice timeout schema accepts None and exact integers, rejects malfo
     assert.equal(validateArgs(tool.parameters, { minutes }).length, 0);
   for (const minutes of [-1, 61, 1.5, '5'])
     assert.ok(validateArgs(tool.parameters, { minutes }).length > 0);
+});
+
+test('the control_droneplan height limits are the planner planning maximum (1500 ft)', async () => {
+  const { AGL_CAP_M, MIN_AGL_M } =
+    await import('../byrdit/dronePlan/planner.js');
+  const schema = GEV_ACTION_SCHEMAS.find((s) => s.name === 'control_droneplan');
+  const props = schema.parameters.properties;
+  assert.equal(props.aglM.maximum, AGL_CAP_M);
+  assert.equal(props.aglM.minimum, MIN_AGL_M);
+  assert.equal(props.orbitHeightsM.items.maximum, AGL_CAP_M);
+  assert.equal(props.orbitHeightsM.items.minimum, MIN_AGL_M);
+  assert.equal(AGL_CAP_M, 457.2);
 });

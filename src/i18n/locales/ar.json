@@ -3998,5 +3998,8 @@
   "FAA prohibited and restricted special-use airspace only, not the UAS Facility Map or UAS flight restrictions. Informational only — not a substitute for official UAS flight-planning tools (B4UFLY / LAANC).": "المجال الجوي الخاص المحظور والمقيّد لدى FAA فقط، ولا يشمل UAS Facility Map أو قيود طيران UAS. للعلم فقط — ولا يغني عن الأدوات الرسمية لتخطيط رحلات UAS (B4UFLY / LAANC).",
   "Prohibited": "محظور",
   "Restricted": "مقيّد",
-  "Prohibited & Restricted Airspace": "المجال الجوي المحظور والمقيّد"
+  "Prohibited & Restricted Airspace": "المجال الجوي المحظور والمقيّد",
+  "This plan flies up to {max} above ground, higher than 400 ft. {cap} is only the most GEV will plan: it does not approve a flight and changes no limit in the aircraft. The aircraft height limit, airspace authorization, local rules and your duties as pilot still apply": "تحلّق هذه الخطة حتى {max} فوق سطح الأرض، أي أعلى من 400 ft. {cap} هو فقط أقصى ما يخطط له GEV: فهو لا يوافق على رحلة ولا يغيّر أي حد في الطائرة. حد ارتفاع الطائرة وتصريح المجال الجوي والقواعد المحلية وواجباتك كطيار تظل سارية",
+  "The safety zone is the corridor the aircraft flies, in the air along the route; it is not an obstacle. Orange columns are obstacles, standing on the ground. Footprints lie on the surface.": "منطقة الأمان هي الممر الذي تحلّق فيه الطائرة، في الجو على امتداد المسار؛ وليست عائقًا. الأعمدة البرتقالية هي العوائق، وتقف على الأرض. وتقع البصمات على السطح.",
+  "Heights in {names} are measured from sea level, which GEV cannot place on the globe: only the ground track is drawn.": "ارتفاعات {names} مقيسة من مستوى سطح البحر، ولا يستطيع GEV وضعها على الكرة الأرضية: يُرسم مسار الأرض فقط."
 }

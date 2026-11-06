@@ -194,40 +194,87 @@ export function deriveImportShots(mission) {
       pitchDeg: pitches[i],
       headingDeg: headingAt(i, xy[i].x, xy[i].y),
       photo: isPhoto,
+      // One of the file's own waypoints (the others are interval stations
+      // worked out between them): the globe draws these as the aircraft.
+      waypoint: true,
     });
     for (const s of along.get(i) ?? []) {
       const { at: _at, ...rest } = s;
       path.push(rest);
     }
   });
-  return { path, stations: path.filter((p) => p.photo), photoActions };
+  return {
+    path,
+    stations: path.filter((p) => p.photo),
+    photoActions,
+    // What the file's heights are measured from (WPML executeHeightMode).
+    heightMode: mission?.wayline?.executeHeightMode ?? 'relativeToStartPoint',
+  };
 }
 
 /**
  * The mission the 3D check draws: the path with ground heights. Heights in the
  * file are above the start point (the first waypoint is taken as it), so a
  * station's height above the ground under it is
- * `ground at start + height - ground under it`. Without terrain heights the
- * ground is taken as flat at the start.
+ * `ground at start + height - ground under it`. The aircraft is therefore
+ * drawn at `ground at start + height` above the ellipsoid (groundM + aglM),
+ * never at the file's height measured from the ellipsoid itself.
+ *
+ * Without terrain heights the planner-style flat-ground assumption applies:
+ * the ground is taken as flat at `displayGroundM`, the globe's own terrain
+ * height at the start point (terrain model only, never the 3D tiles), or at
+ * height 0 when the globe cannot say either. Nothing is invented: that case
+ * is `verified: false`.
  *
  * @param {{ path: object[] }} shots deriveImportShots()
  * @param {{ known?: boolean, takeoffM?: number, wpM?: (number|null)[] }} [ground]
  *   as sampleGround returns it for the points `shots.path`
+ * @param {{ displayGroundM?: number|null,
+ *   groundAt?: (lon:number, lat:number) => number|null }} [display] the
+ *   globe's terrain height at the start point, and a lookup for the surface
+ *   under each point: used only when `ground` is not known
  */
-export function importCheckMission(shots, ground = null) {
+export function importCheckMission(shots, ground = null, display = {}) {
   const known = ground?.known === true;
-  const takeoffM = known ? ground.takeoffM : 0;
+  const flat = finite(display?.displayGroundM) ? display.displayGroundM : null;
+  const takeoffM = known ? ground.takeoffM : (flat ?? 0);
+  const mode = shots.heightMode ?? 'relativeToStartPoint';
+  // What each height in the file is measured from. Only the modes whose datum
+  // GEV can place are drawn: an EGM96 (sea level) height needs a geoid model
+  // the app does not have, and is not guessed.
+  const placeable = ['relativeToStartPoint', 'WGS84', 'realTimeFollowSurface'];
+  if (!placeable.includes(mode)) {
+    return { waypoints: [], verified: false, unsupportedHeightMode: mode };
+  }
   const waypoints = shots.path.map((p, i) => {
-    const under = known && finite(ground.wpM?.[i]) ? ground.wpM[i] : takeoffM;
+    // The surface under this point: the terrain read, else (terrain not read)
+    // the globe's own surface there, else flat at the start.
+    const globeUnder = known ? null : display?.groundAt?.(p.lon, p.lat);
+    const under =
+      known && finite(ground.wpM?.[i])
+        ? ground.wpM[i]
+        : finite(globeUnder)
+          ? globeUnder
+          : takeoffM;
+    // Height above the ellipsoid the aircraft is drawn at, m.
+    const aircraftM =
+      mode === 'WGS84'
+        ? p.heightM
+        : mode === 'realTimeFollowSurface'
+          ? under + p.heightM
+          : takeoffM + p.heightM;
     return {
       lon: p.lon,
       lat: p.lat,
       groundM: under,
-      aglM: Math.max(0, takeoffM + p.heightM - under),
+      // Signed on purpose: a file that flies BELOW the terrain under it is
+      // drawn there, not lifted onto the ground.
+      aglM: aircraftM - under,
       pitchDeg: p.pitchDeg,
       headingDeg: p.headingDeg,
       photo: p.photo,
+      waypoint: p.waypoint === true,
     };
   });
-  return { waypoints };
+  return { waypoints, verified: known || flat !== null };
 }

@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   AGL_CAP_FT,
   AGL_CAP_M,
+  DEFAULT_OPTIONS,
+  DJI_DEFAULT_HEIGHT_LIMIT_M,
   FT_PER_M,
   MAX_ORBIT_TARGETS,
   MAX_WAYPOINTS_PER_MISSION,
@@ -84,14 +86,18 @@ test('a forward-tilted camera sees a longer, narrower-at-the-near-edge footprint
   assert.throws(() => footprint(mini, 120, 70), RangeError);
 });
 
-test('the height cap is 120 m and stays under 400 ft', () => {
-  assert.equal(AGL_CAP_M, 120);
-  assert.equal(AGL_CAP_FT, 400);
-  assert.ok(AGL_CAP_M <= 400 * 0.3048);
-  near(AGL_CAP_M * FT_PER_M, 393.7, 0.05, '120 m in feet');
+test('the planning maximum is 1500 ft (457.2 m); the DJI default limit stays 120 m', () => {
+  assert.equal(AGL_CAP_FT, 1500);
+  assert.equal(AGL_CAP_M, 457.2);
+  near(AGL_CAP_FT * 0.3048, AGL_CAP_M, 1e-9, '1500 ft in metres');
+  near(AGL_CAP_M * FT_PER_M, 1500, 1e-9, '457.2 m in feet');
+  // The aircraft app's own starting limit is a different fact and is kept.
+  assert.equal(DJI_DEFAULT_HEIGHT_LIMIT_M, 120);
+  assert.equal(DEFAULT_OPTIONS.aglM, 80, 'the default mission height is unchanged');
   const { options, notes } = normalizeOptions({ aglM: 500 });
   assert.equal(options.aglM, AGL_CAP_M);
   assert.equal(notes[0].code, 'agl-capped');
+  assert.deepEqual(notes[0].params, { requested: 500, cap: 457.2 });
   assert.equal(normalizeOptions({ aglM: 1 }).options.aglM, 10);
   const plan = planFlight(boxAround(CENTER.lon, CENTER.lat, 300, 300), {
     aglM: 999,
@@ -99,6 +105,84 @@ test('the height cap is 120 m and stays under 400 ft', () => {
   assert.ok(
     plan.legs.every((l) => l.waypoints.every((w) => w.aglM <= AGL_CAP_M)),
   );
+});
+
+test('heights up to and including 1500 ft are kept as asked; only above it is capped', () => {
+  for (const aglM of [120, 121.92, 122, 300, 456.9, 457.2]) {
+    const { options, notes } = normalizeOptions({ aglM });
+    assert.equal(options.aglM, aglM, `${aglM} m kept`);
+    assert.deepEqual(notes, [], `${aglM} m raises no cap note`);
+  }
+  const over = normalizeOptions({ aglM: 457.21 });
+  assert.equal(over.options.aglM, 457.2);
+  assert.equal(over.notes[0].code, 'agl-capped');
+  // What the feet slider hands over at its top stop is the cap, not above it.
+  const topFeetAsMetres = Math.round((1500 / FT_PER_M) * 100) / 100;
+  assert.equal(topFeetAsMetres, AGL_CAP_M);
+  assert.deepEqual(normalizeOptions({ aglM: topFeetAsMetres }).notes, []);
+});
+
+test('a grid at 1500 ft plans at 457.2 m, keeps relative heights, and says what the maximum is not', () => {
+  const plan = planFlight(boxAround(CENTER.lon, CENTER.lat, 300, 300), {
+    aglM: 457.2,
+    batteryMin: 60,
+  });
+  assert.equal(plan.error, undefined);
+  assert.equal(plan.options.aglM, 457.2);
+  assert.equal(plan.notes.find((n) => n.code === 'agl-capped'), undefined);
+  const waypoints = plan.legs.flatMap((l) => l.waypoints);
+  assert.ok(waypoints.length > 0);
+  assert.ok(waypoints.every((w) => w.aglM === 457.2));
+  const done = assembleMissions(plan, flatGround(plan, 100));
+  const rel = done.missions.flatMap((mi) => mi.waypoints.map((w) => w.relHeightM));
+  assert.ok(rel.every((h) => h === 457.2), 'heights relative to takeoff on flat ground');
+  const notice = done.warnings.find((w) => w.code === 'agl-above-400ft');
+  assert.ok(notice, 'the planning-maximum notice is raised');
+  assert.deepEqual(notice.params, { maxAglM: 457.2, capM: 457.2 });
+  // The aircraft app starts at 120 m above takeoff: that warning stays too.
+  const dji = done.warnings.find((w) => w.code === 'rel-height-over-limit');
+  assert.ok(dji);
+  assert.equal(dji.params.limitM, 120);
+  assert.equal(dji.params.maxRelM, 457);
+  assert.equal(done.warnings.find((w) => w.code === 'agl-capped'), undefined);
+});
+
+test('the 400 ft notice starts above 400 ft and never on the default heights', () => {
+  const noticeFor = (aglM) => {
+    const plan = planFlight(boxAround(CENTER.lon, CENTER.lat, 300, 300), {
+      aglM,
+      batteryMin: 60,
+    });
+    return assembleMissions(plan, flatGround(plan, 0)).warnings.some(
+      (w) => w.code === 'agl-above-400ft',
+    );
+  };
+  assert.equal(noticeFor(DEFAULT_OPTIONS.aglM), false, 'default 80 m');
+  assert.equal(noticeFor(120), false, '120 m');
+  assert.equal(noticeFor(121.92), false, 'exactly 400 ft');
+  assert.equal(noticeFor(122), true, 'just over 400 ft');
+  assert.equal(noticeFor(250), true);
+});
+
+test('a 1500 ft orbit keeps its rings under the planning maximum, not 400 ft', () => {
+  const { options } = normalizeOptions({
+    pattern: 'orbit',
+    orbitRingMode: 'heights',
+    orbitHeightsM: [200, 457.2, 900],
+    obstacleHeightM: 15,
+  });
+  assert.deepEqual(options.orbitHeightsM, [200, 457.2, 457.2]);
+  const plan = planFlight(boxAround(CENTER.lon, CENTER.lat, 200, 200), {
+    pattern: 'orbit',
+    orbitRingMode: 'heights',
+    orbitHeightsM: [300, 457.2],
+    batteryMin: 60,
+  });
+  assert.equal(plan.error, undefined);
+  const heights = [
+    ...new Set(plan.legs.flatMap((l) => l.waypoints.map((w) => w.aglM))),
+  ].sort((a, b) => a - b);
+  assert.deepEqual(heights, [300, 457.2]);
 });
 
 test('nadir grid: 400 x 200 m at 100 m gives 5 lines of 21 photos', () => {

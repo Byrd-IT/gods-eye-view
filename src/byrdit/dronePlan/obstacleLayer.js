@@ -96,19 +96,30 @@ export function createObstacleLayer({
   // Ground height from the plan's terrain read, for when the globe is hidden
   // (Photorealistic tiles on) and cannot answer. Never taken from the tiles.
   let groundHintM = 0;
+  // Ground under each obstacle from the plan's terrain read: { id: metres }.
+  let sampledGrounds = {};
 
   const color = (css, alpha) =>
     cesium.Color.fromCssColorString(css).withAlpha(alpha);
 
+  /**
+   * The surface the column stands on: the globe's terrain under it when the
+   * globe can say, else the plan's own terrain read for THIS obstacle, else
+   * the plan's takeoff ground. A column is anchored at the obstruction, never
+   * at the flight height.
+   */
   function groundAt(o) {
+    let h = null;
     try {
-      const h = viewer.scene?.globe?.getHeight?.(
+      h = viewer.scene?.globe?.getHeight?.(
         cesium.Cartographic.fromDegrees(o.lon, o.lat),
       );
-      return Number.isFinite(h) ? h : groundHintM;
     } catch {
-      return groundHintM;
+      h = null;
     }
+    if (Number.isFinite(h)) return h;
+    const own = sampledGrounds[o.id];
+    return Number.isFinite(own) ? own : groundHintM;
   }
 
   function drop() {
@@ -283,6 +294,11 @@ export function createObstacleLayer({
       current = Array.isArray(list) ? list : [];
       if (current.length) bind();
       draw();
+    },
+    /** Terrain height under each obstacle, { id: m }, from the plan's read. */
+    setSampledGrounds(map) {
+      sampledGrounds = map && typeof map === 'object' ? { ...map } : {};
+      if (current.length && !destroyed) draw();
     },
     /** Ground elevation (m) to use where the globe has no height. */
     setGroundHint(m) {

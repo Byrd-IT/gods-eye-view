@@ -9,6 +9,8 @@
  * the height from it keeps the picture useful at any radius; the old fixed
  * 40 m and 80 m rings looked almost straight down at a small building.
  */
+import { PLANNING_MAX_AGL_M } from './heightLimits.js';
+
 export const DEFAULT_RING_ANGLES_DEG = Object.freeze([25, 40, 55]);
 export const MIN_RING_ANGLE_DEG = 10;
 export const MAX_RING_ANGLE_DEG = 80;
@@ -21,8 +23,8 @@ export const MAX_OUTWARD_PITCH_DEG = 0;
 export const OUTWARD_STOP_S = 4;
 /** Time a stop-and-turn orbit waypoint costs even without an outward photo. */
 export const ORBIT_STOP_S = 1.5;
-/** The tallest ring may not be higher than this: 400 ft, metres. */
-export const RING_MAX_AGL_M = 121.9;
+/** The tallest ring may not be higher than the planning maximum (1500 ft). */
+export const RING_MAX_AGL_M = PLANNING_MAX_AGL_M;
 
 const DEG = Math.PI / 180;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));

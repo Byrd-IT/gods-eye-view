@@ -94,6 +94,7 @@ import { renderThumb } from './missionThumb.js';
 import { buildSuiteZip, suiteOptions } from './suite.js';
 import { readPlan, serializePlan } from './planDoc.js';
 import { importCheckMission } from './importShots.js';
+import { globeHeightM } from './globeHeight.js';
 import { mountLibrary } from './libraryPanel.js';
 import { mountPhotoCheck } from './photoCheckPanel.js';
 import {
@@ -1339,8 +1340,13 @@ export function initDronePlan({
     planNonce += 1;
     panel.dataset.planNonce = String(planNonce);
     pushCheck();
-    groundHintM = ground.known ? ground.takeoffM : 0;
+    // Takeoff ground, else the globe's own surface there (terrain model
+    // only), else 0: the stand-in for an obstacle with no height of its own.
+    groundHintM = ground.known
+      ? ground.takeoffM
+      : (globeHeightM(viewer, cesium, plan.takeoff.lon, plan.takeoff.lat) ?? 0);
     preview.setObstacleGround(groundHintM);
+    preview.setObstacleGrounds(obstacleM);
     preview.showPlan(state.result);
     render();
   }
@@ -1968,6 +1974,13 @@ export function initDronePlan({
         'Visual check only: nothing here detects a collision. Look at it over Google Photorealistic 3D, which shows trees. OpenStreetMap buildings have no trees or power lines.',
       ),
     });
+    el(doc, 'p', host, {
+      cls: 'gev-dp-note gev-dp-check-legend',
+      attrs: { 'data-role': 'check-legend' },
+      text: t(
+        'The safety zone is the corridor the aircraft flies, in the air along the route; it is not an obstacle. Orange columns are obstacles, standing on the ground. Footprints lie on the surface.',
+      ),
+    });
     const checkBox = (label, key) => {
       const row = el(doc, 'label', host, { cls: 'gev-dp-row' });
       const box = el(doc, 'input', null, {
@@ -2559,8 +2572,12 @@ export function initDronePlan({
         .filter((i) => i.shots && !i.shots.stations.length)
         .map((i) => i.name ?? i.id),
       unavailable: imports.filter((i) => !i.shots).map((i) => i.name ?? i.id),
+      unplaceable: [],
     };
-    if (!withPhotos.length) {
+    // Every import with a path is placed on the globe (its waypoints are the
+    // aircraft); only those with photo actions also feed the camera views.
+    const placed = imports.filter((i) => i.shots?.path?.length);
+    if (!placed.length) {
       preview.setImportCheck?.(null);
       pushCheck();
       syncCheckUi();
@@ -2573,7 +2590,7 @@ export function initDronePlan({
     }
     cachedProvider = provider;
     const passes = [];
-    for (const item of withPhotos) {
+    for (const item of placed) {
       const points = item.shots.path;
       const ground = await sampleGround({
         viewer,
@@ -2583,10 +2600,23 @@ export function initDronePlan({
         cache: terrainCache,
       });
       if (destroyed || token !== importCheckToken) return;
+      // Terrain not read: the globe's own surface at the start point (terrain
+      // model only) stands in, so the aircraft is not drawn under the map.
+      const displayGroundM = ground.known
+        ? null
+        : globeHeightM(viewer, cesium, points[0].lon, points[0].lat);
+      const mission = importCheckMission(item.shots, ground, {
+        displayGroundM,
+        groundAt: (lon, lat) => globeHeightM(viewer, cesium, lon, lat),
+      });
+      if (mission.unsupportedHeightMode) {
+        importCheckInfo.unplaceable.push(item.name ?? item.id);
+      }
       passes.push({
         id: item.id,
         color: item.color,
-        missions: [importCheckMission(item.shots, ground)],
+        checkable: Boolean(item.shots.stations?.length),
+        missions: [mission],
       });
     }
     preview.setImportCheck?.(passes);
@@ -2597,7 +2627,13 @@ export function initDronePlan({
   /** Why the 3D check has no imported photos to show, if it is that. */
   function importCheckNote() {
     if (state.result || state.suite) return null;
-    const { noPhoto, unavailable } = importCheckInfo;
+    const { noPhoto, unavailable, unplaceable } = importCheckInfo;
+    if (unplaceable?.length) {
+      return t(
+        'Heights in {names} are measured from sea level, which GEV cannot place on the globe: only the ground track is drawn.',
+        { names: unplaceable.join(', ') },
+      );
+    }
     if (noPhoto.length) {
       return t(
         'No photo actions in {names}: there are no camera views to show.',

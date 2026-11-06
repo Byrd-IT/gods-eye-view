@@ -13,6 +13,12 @@
 import * as Cesium from 'cesium';
 import { createCheckLayer } from './checkLayer.js';
 import { createObstacleLayer } from './obstacleLayer.js';
+import {
+  displayOffset,
+  flightHeightM,
+  shiftMission,
+} from './displayHeights.js';
+import { globeHeightM } from './globeHeight.js';
 
 export const PREVIEW_DATA_SOURCE = 'gev-drone-plan';
 export const MISSION_COLORS = Object.freeze([
@@ -114,12 +120,156 @@ export function createDronePlanPreview({
   // Imported files (setImportCheck): shown only when no panel plan is.
   let importCheck = null;
   let importSource = null;
+  // The last imported items drawn, so the airborne waypoint markers can be
+  // redrawn when the terrain heights for them arrive (setImportCheck).
+  let lastImports = null;
+  // False when the terrain could not be read for the plan on show and the
+  // globe could not say either: the aircraft is then drawn on assumed flat
+  // ground at height 0 and the panel says so.
+  let displayVerified = true;
+  /**
+   * The vertical shift that puts a plan's drawings on the globe's real
+   * surface (displayHeights.js). 0 whenever the terrain was read.
+   */
+  const offsetFor = (result) => {
+    const takeoff = result?.plan?.takeoff;
+    const d = displayOffset(
+      result?.ground,
+      result?.ground?.known === true || !takeoff
+        ? null
+        : globeHeightM(viewer, cesium, takeoff.lon, takeoff.lat),
+    );
+    if (!d.verified) displayVerified = false;
+    return d;
+  };
+  // Where the globe's own surface is, for a plan whose terrain was not read.
+  const surfaceAt = (lon, lat) => globeHeightM(viewer, cesium, lon, lat);
+  const placed = (mission, d) =>
+    shiftMission(mission, d.offsetM, d.verified ? surfaceAt : null);
   const refreshCheck = () => {
     const next = suiteCheck ? suiteSource : (planSource ?? importSource);
     if (next === checkSource) return;
     checkSource = next;
-    check.setData(suiteCheck ?? planCheck ?? importCheck);
+    // Imported files with no photo action are on the globe (their aircraft
+    // markers) but give the 3D check nothing to draw: `checkable` is false.
+    check.setData(
+      suiteCheck ??
+        planCheck ??
+        importCheck?.filter((p) => p.checkable !== false),
+    );
   };
+
+  function drawImports(items, hiddenIds = []) {
+    importEntities = drop(importEntities);
+    if (destroyed) return;
+    const hidden = new Set(hiddenIds);
+    const total = (items ?? []).reduce(
+      (n, i) => n + (i.lines ?? []).reduce((k, l) => k + l.length, 0),
+      0,
+    );
+    const step = Math.max(1, Math.ceil(total / MAX_MARKERS));
+    for (const item of items ?? []) {
+      if (hidden.has(item.id)) continue;
+      const flight = importCheck?.find((p) => p.id === item.id);
+      const airborne = (flight?.missions?.[0]?.waypoints ?? []).filter(
+        (w) => w.waypoint === true,
+      );
+      for (const line of item.lines ?? []) {
+        if (line.length >= 2) {
+          importEntities.push(
+            dataSource.entities.add({
+              name: item.id,
+              polyline: {
+                positions: cesium.Cartesian3.fromDegreesArray(
+                  line.flatMap((w) => [w.lon, w.lat]),
+                ),
+                width: 3,
+                ...ground,
+                material: color(item.color, 0.95),
+              },
+            }),
+          );
+        }
+        // With terrain heights for the file the waypoints are drawn in the
+        // air at the aircraft position (below); otherwise they stay on the
+        // ground track, the only place the file itself gives.
+        if (!airborne.length) {
+          line.forEach((w, i) => {
+            if (i % step && i !== line.length - 1) return;
+            importEntities.push(
+              dataSource.entities.add({
+                position: cesium.Cartesian3.fromDegrees(w.lon, w.lat),
+                point: {
+                  pixelSize: 5,
+                  color: color(item.color),
+                  outlineColor: color('#000000', 0.6),
+                  outlineWidth: 1,
+                  heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
+                  disableDepthTestDistance: 1500,
+                },
+              }),
+            );
+          });
+        }
+      }
+      const airStep = Math.max(1, Math.ceil(airborne.length / MAX_MARKERS));
+      airborne.forEach((w, i) => {
+        if (i % airStep && i !== airborne.length - 1) return;
+        importEntities.push(
+          dataSource.entities.add({
+            name: `${item.id} waypoint`,
+            position: cesium.Cartesian3.fromDegrees(
+              w.lon,
+              w.lat,
+              flightHeightM(w),
+            ),
+            point: {
+              pixelSize: 5,
+              color: color(item.color),
+              outlineColor: color('#000000', 0.6),
+              outlineWidth: 1,
+              disableDepthTestDistance: 1500,
+            },
+          }),
+        );
+      });
+      for (const ring of item.rings ?? []) {
+        if (ring.length < 3) continue;
+        importEntities.push(
+          dataSource.entities.add({
+            name: item.id,
+            polyline: {
+              positions: cesium.Cartesian3.fromDegreesArray(
+                [...ring, ring[0]].flatMap((p) => [p.lon, p.lat]),
+              ),
+              width: 2,
+              ...ground,
+              material: new cesium.PolylineDashMaterialProperty({
+                color: color(item.color, 0.95),
+                dashLength: 10,
+              }),
+            },
+          }),
+        );
+      }
+      for (const p of item.poi ?? []) {
+        importEntities.push(
+          dataSource.entities.add({
+            position: cesium.Cartesian3.fromDegrees(p.lon, p.lat),
+            point: {
+              pixelSize: 9,
+              color: color('#ffffff'),
+              outlineColor: color(item.color),
+              outlineWidth: 3,
+              heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: 1500,
+            },
+          }),
+        );
+      }
+    }
+    requestRender();
+  }
 
   return {
     showBox(box) {
@@ -189,11 +339,15 @@ export function createDronePlanPreview({
     showPlan(result) {
       planEntities = drop(planEntities);
       planSource = result && !destroyed ? result : null;
+      displayVerified = true;
+      const planOff = planSource
+        ? offsetFor(result)
+        : { offsetM: 0, verified: true };
       planCheck = planSource
         ? result.missions.map((mission, mi) => ({
             id: `mission-${mi + 1}`,
             color: MISSION_COLORS[mi % MISSION_COLORS.length],
-            missions: [mission],
+            missions: [placed(mission, planOff)],
           }))
         : null;
       refreshCheck();
@@ -253,17 +407,23 @@ export function createDronePlanPreview({
               }),
             );
           }
+          // A waypoint marker is the AIRCRAFT position: drawn at the ground
+          // height under it plus its height above ground, never clamped to
+          // the surface. The ground track above stays on the ground.
           mission.waypoints.forEach((w, i) => {
             if (i % step && i !== mission.waypoints.length - 1) return;
             planEntities.push(
               dataSource.entities.add({
-                position: cesium.Cartesian3.fromDegrees(w.lon, w.lat),
+                position: cesium.Cartesian3.fromDegrees(
+                  w.lon,
+                  w.lat,
+                  flightHeightM(w, planOff.offsetM),
+                ),
                 point: {
                   pixelSize: 4,
                   color: color(css),
                   outlineColor: color('#000000', 0.6),
                   outlineWidth: 1,
-                  heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
                   disableDepthTestDistance: 1500,
                 },
               }),
@@ -317,11 +477,15 @@ export function createDronePlanPreview({
         suiteSource.passes !== suitePasses
       ) {
         suiteSource = { key: sourceKey, passes: suitePasses };
-        suiteCheck = shown.map((p) => ({
-          id: p.id,
-          color: passStyle(p.id, suitePasses.indexOf(p)).color,
-          missions: p.result.missions,
-        }));
+        displayVerified = true;
+        suiteCheck = shown.map((p) => {
+          const d = offsetFor(p.result);
+          return {
+            id: p.id,
+            color: passStyle(p.id, suitePasses.indexOf(p)).color,
+            missions: p.result.missions.map((m) => placed(m, d)),
+          };
+        });
       }
       refreshCheck();
       if (suitePasses && !destroyed) {
@@ -335,7 +499,8 @@ export function createDronePlanPreview({
         suitePasses.forEach((pass, pi) => {
           if (!pass.result || hidden.has(pass.id)) return;
           const style = passStyle(pass.id, pi);
-          const heightOf = (w) => (w.groundM ?? 0) + (w.aglM ?? 0);
+          const suiteOff = offsetFor(pass.result);
+          const heightOf = (w) => flightHeightM(w, suiteOff.offsetM);
           pass.result.missions.forEach((mission, mi) => {
             const wps = mission.waypoints;
             if (wps.length >= 2) {
@@ -367,20 +532,17 @@ export function createDronePlanPreview({
               if (i % step && i !== wps.length - 1) return;
               suiteEntities.push(
                 dataSource.entities.add({
-                  position: style.floating
-                    ? cesium.Cartesian3.fromDegrees(w.lon, w.lat, heightOf(w))
-                    : cesium.Cartesian3.fromDegrees(w.lon, w.lat),
+                  // The aircraft position for every pass, floating or not.
+                  position: cesium.Cartesian3.fromDegrees(
+                    w.lon,
+                    w.lat,
+                    heightOf(w),
+                  ),
                   point: {
                     pixelSize: 4,
                     color: color(style.color),
                     outlineColor: color('#000000', 0.6),
                     outlineWidth: 1,
-                    ...(style.floating
-                      ? {}
-                      : {
-                          heightReference:
-                            cesium.HeightReference.CLAMP_TO_GROUND,
-                        }),
                     disableDepthTestDistance: 1500,
                   },
                 }),
@@ -415,85 +577,8 @@ export function createDronePlanPreview({
      * being edited, so it never disturbs it.
      */
     showImports(items, hiddenIds = []) {
-      importEntities = drop(importEntities);
-      if (destroyed) return;
-      const hidden = new Set(hiddenIds);
-      const total = (items ?? []).reduce(
-        (n, i) => n + (i.lines ?? []).reduce((k, l) => k + l.length, 0),
-        0,
-      );
-      const step = Math.max(1, Math.ceil(total / MAX_MARKERS));
-      for (const item of items ?? []) {
-        if (hidden.has(item.id)) continue;
-        for (const line of item.lines ?? []) {
-          if (line.length >= 2) {
-            importEntities.push(
-              dataSource.entities.add({
-                name: item.id,
-                polyline: {
-                  positions: cesium.Cartesian3.fromDegreesArray(
-                    line.flatMap((w) => [w.lon, w.lat]),
-                  ),
-                  width: 3,
-                  ...ground,
-                  material: color(item.color, 0.95),
-                },
-              }),
-            );
-          }
-          line.forEach((w, i) => {
-            if (i % step && i !== line.length - 1) return;
-            importEntities.push(
-              dataSource.entities.add({
-                position: cesium.Cartesian3.fromDegrees(w.lon, w.lat),
-                point: {
-                  pixelSize: 5,
-                  color: color(item.color),
-                  outlineColor: color('#000000', 0.6),
-                  outlineWidth: 1,
-                  heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
-                  disableDepthTestDistance: 1500,
-                },
-              }),
-            );
-          });
-        }
-        for (const ring of item.rings ?? []) {
-          if (ring.length < 3) continue;
-          importEntities.push(
-            dataSource.entities.add({
-              name: item.id,
-              polyline: {
-                positions: cesium.Cartesian3.fromDegreesArray(
-                  [...ring, ring[0]].flatMap((p) => [p.lon, p.lat]),
-                ),
-                width: 2,
-                ...ground,
-                material: new cesium.PolylineDashMaterialProperty({
-                  color: color(item.color, 0.95),
-                  dashLength: 10,
-                }),
-              },
-            }),
-          );
-        }
-        for (const p of item.poi ?? []) {
-          importEntities.push(
-            dataSource.entities.add({
-              position: cesium.Cartesian3.fromDegrees(p.lon, p.lat),
-              point: {
-                pixelSize: 9,
-                color: color('#ffffff'),
-                outlineColor: color(item.color),
-                outlineWidth: 3,
-                heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
-                disableDepthTestDistance: 1500,
-              },
-            }),
-          );
-        }
-      }
-      requestRender();
+      lastImports = { items, hiddenIds };
+      drawImports(items, hiddenIds);
     },
     /**
      * Photo check: planned photo points (green when a photo is near, red when
@@ -637,6 +722,19 @@ export function createDronePlanPreview({
       importCheck = passes?.length && !destroyed ? passes : null;
       importSource = importCheck ? { passes: importCheck } : null;
       refreshCheck();
+      // The aircraft markers come from the same heights: redraw them.
+      if (lastImports && !destroyed) {
+        drawImports(lastImports.items, lastImports.hiddenIds);
+        requestRender();
+      }
+    },
+    /**
+     * False when the plan on show had no terrain read and the globe could
+     * not give the takeoff surface either: the aircraft is then drawn on
+     * assumed flat ground at height 0 (unverified, not an invented height).
+     */
+    displayVerified() {
+      return displayVerified;
     },
     setCheck(patch) {
       check.setOptions(patch);
@@ -647,6 +745,10 @@ export function createDronePlanPreview({
     },
     setObstacleGround(m) {
       obstacles.setGroundHint(m);
+    },
+    /** Terrain height under each obstacle, { id: m }, from the plan's read. */
+    setObstacleGrounds(map) {
+      obstacles.setSampledGrounds(map);
     },
     /**
      * Flag the stretches that come too close to the surface model: a red line
@@ -717,6 +819,7 @@ export function createDronePlanPreview({
       suiteSource = null;
       importCheck = null;
       importSource = null;
+      lastImports = null;
       refreshCheck();
       boxEntities = drop(boxEntities);
       areaEntities = drop(areaEntities);

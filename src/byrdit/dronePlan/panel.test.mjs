@@ -2227,7 +2227,7 @@ test('units: feet by default, the ft/m switch changes every shown length and spe
     w.control(label).parentNode.children.find((n) => n.tagName === 'OUTPUT').textContent;
   assert.equal(out('Height above ground'), '262 ft');
   assert.equal(out('Speed'), `${(w.handle.getState().options.speedMs * 3.28084).toFixed(1)} ft/s`);
-  assert.equal(w.control('Height above ground').max, '390');
+  assert.equal(w.control('Height above ground').max, '1500');
   assert.equal(w.control('Height above ground').step, '10');
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
@@ -2237,7 +2237,7 @@ test('units: feet by default, the ft/m switch changes every shown length and spe
   assert.equal(unitBtn(w, 'm').getAttribute('aria-pressed'), 'true');
   assert.equal(out('Height above ground'), '80 m');
   assert.match(w.stats().Speed, / m\/s$/);
-  assert.equal(w.control('Height above ground').max, '120');
+  assert.equal(w.control('Height above ground').max, '457.2');
   assert.equal(w.storage.getItem('gev.dronePlan.units'), 'm');
   unitBtn(w, 'ft').click();
   assert.equal(out('Height above ground'), '262 ft');
@@ -3229,4 +3229,27 @@ test('mission labels: trashing the open plan clears the labels at once; a pictur
   } finally {
     await srv.close();
   }
+});
+test('1500 ft: the slider reaches the planning maximum, plans at 457.2 m and says what the maximum is not', async () => {
+  const w = setup({ storage: memoryStorage() });
+  const o = () => w.handle.getState().options;
+  const agl = w.control('Height above ground');
+  assert.equal(agl.max, '1500');
+  agl.value = '1500';
+  agl.dispatch('input');
+  assert.equal(o().aglM, 457.2, 'the top feet stop is exactly 457.2 m');
+  const out = agl.parentNode.children.find((n) => n.tagName === 'OUTPUT').textContent;
+  assert.equal(out, '1,500 ft');
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const result = w.handle.getResult();
+  assert.equal(result.plan.options.aglM, 457.2);
+  assert.ok(result.warnings.some((x) => x.code === 'agl-above-400ft'));
+  assert.ok(!result.warnings.some((x) => x.code === 'agl-capped'));
+  const shown = w.find((n) => n.getAttribute?.('data-code') === 'agl-above-400ft');
+  assert.equal(shown.length, 1);
+  assert.match(shown[0].textContent, /1,500 ft is only the most GEV will plan/);
+  assert.match(shown[0].textContent, /does not approve a flight/);
+  assert.match(shown[0].textContent, /airspace authorization/);
+  w.handle.destroy();
 });

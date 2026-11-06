@@ -111,9 +111,13 @@ test('rings: max(requested, roof + 15, obstacle + 5) within AGL min/cap', () => 
   assert.deepEqual(tallObstacle.heights, [35, 40], 'obstacle floor 35 beats roof + 15 = 21');
   const none = targetRingHeights({ roofHeightM: null }, rings, 15);
   assert.deepEqual(none.heights, rings, 'no roof: live behaviour');
-  const over = targetRingHeights({ roofHeightM: 200 }, rings, 15);
+  const over = targetRingHeights({ roofHeightM: 500 }, rings, 15);
   assert.deepEqual(over.heights, [AGL_CAP_M]);
   assert.equal(over.belowRoofClearance, true);
+  // A 200 m roof now fits under the 1500 ft maximum with its 15 m clearance.
+  const fits = targetRingHeights({ roofHeightM: 200 }, rings, 15);
+  assert.deepEqual(fits.heights, [215]);
+  assert.equal(fits.belowRoofClearance, false);
   assert.equal(ROOF_CLEARANCE_M, 15);
 });
 
