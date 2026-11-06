@@ -144,8 +144,14 @@ export function createDronePlanPreview({
   };
   // Where the globe's own surface is, for a plan whose terrain was not read.
   const surfaceAt = (lon, lat) => globeHeightM(viewer, cesium, lon, lat);
-  const placed = (mission, d) =>
-    shiftMission(mission, d.offsetM, d.verified ? surfaceAt : null);
+  // The globe is asked for the surface only when the terrain was NOT read: a
+  // read plan already carries the ground under every waypoint.
+  const placed = (mission, d, result) =>
+    shiftMission(
+      mission,
+      d.offsetM,
+      result?.ground?.known !== true && d.verified ? surfaceAt : null,
+    );
   const refreshCheck = () => {
     const next = suiteCheck ? suiteSource : (planSource ?? importSource);
     if (next === checkSource) return;
@@ -347,7 +353,7 @@ export function createDronePlanPreview({
         ? result.missions.map((mission, mi) => ({
             id: `mission-${mi + 1}`,
             color: MISSION_COLORS[mi % MISSION_COLORS.length],
-            missions: [placed(mission, planOff)],
+            missions: [placed(mission, planOff, result)],
           }))
         : null;
       refreshCheck();
@@ -483,7 +489,7 @@ export function createDronePlanPreview({
           return {
             id: p.id,
             color: passStyle(p.id, suitePasses.indexOf(p)).color,
-            missions: p.result.missions.map((m) => placed(m, d)),
+            missions: p.result.missions.map((m) => placed(m, d, p.result)),
           };
         });
       }

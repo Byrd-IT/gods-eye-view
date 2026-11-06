@@ -1600,7 +1600,9 @@ export function initDronePlan({
     ui.agl = lslider(t('Height above ground'), {
       minM: MIN_AGL_M,
       maxM: AGL_CAP_M,
-      stepM: 5,
+      // 0.2 m: 457.2 is on the 10 + 0.2n grid (a browser range input stops at
+      // the last grid value below max), and every multiple of 5 m still is.
+      stepM: 0.2,
       stepFt: 10,
     });
     ({ row: ui.aglRow, out: ui.aglOut } = field(
@@ -2610,7 +2612,10 @@ export function initDronePlan({
         groundAt: (lon, lat) => globeHeightM(viewer, cesium, lon, lat),
       });
       if (mission.unsupportedHeightMode) {
-        importCheckInfo.unplaceable.push(item.name ?? item.id);
+        importCheckInfo.unplaceable.push({
+          name: item.name ?? item.id,
+          mode: mission.unsupportedHeightMode,
+        });
       }
       passes.push({
         id: item.id,
@@ -2629,9 +2634,17 @@ export function initDronePlan({
     if (state.result || state.suite) return null;
     const { noPhoto, unavailable, unplaceable } = importCheckInfo;
     if (unplaceable?.length) {
+      const names = (list) => list.map((u) => u.name).join(', ');
+      const sea = unplaceable.filter((u) => u.mode === 'EGM96');
+      if (sea.length === unplaceable.length) {
+        return t(
+          'Heights in {names} are measured from sea level, which GEV cannot place on the globe: only the ground track is drawn.',
+          { names: names(sea) },
+        );
+      }
       return t(
-        'Heights in {names} are measured from sea level, which GEV cannot place on the globe: only the ground track is drawn.',
-        { names: unplaceable.join(', ') },
+        'The height mode of {names} is not one GEV can place on the globe: only the ground track is drawn.',
+        { names: names(unplaceable) },
       );
     }
     if (noPhoto.length) {

@@ -50,7 +50,8 @@ export function flightHeightM(w, offsetM = 0) {
  *   the takeoff point, when it has one
  * @returns {{ offsetM: number, verified: boolean }} `verified` is false when
  *   the terrain was not read and the globe could not say either: the drawing
- *   then assumes flat ground at height 0 and must be shown as unverified.
+ *   then assumes flat ground at height 0. The plan's own `terrain-unknown`
+ *   warning is what tells the user; `preview.displayVerified()` reports it.
  */
 export function displayOffset(ground, displayGroundM) {
   if (ground?.known === true) return { offsetM: 0, verified: true };

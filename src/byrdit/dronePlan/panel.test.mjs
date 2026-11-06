@@ -2238,6 +2238,17 @@ test('units: feet by default, the ft/m switch changes every shown length and spe
   assert.equal(out('Height above ground'), '80 m');
   assert.match(w.stats().Speed, / m\/s$/);
   assert.equal(w.control('Height above ground').max, '457.2');
+  {
+    // A range input stops at the last min + n*step at or below max: the
+    // planning maximum must be on that grid, and so must a typical 5 m value.
+    const c = w.control('Height above ground');
+    const onGrid = (v) => {
+      const n = (Number(v) - Number(c.min)) / Number(c.step);
+      return Math.abs(n - Math.round(n)) < 1e-6;
+    };
+    assert.ok(onGrid(c.max), 'the slider can reach 457.2 m');
+    for (const v of [80, 120, 400, 455]) assert.ok(onGrid(v), `${v} m`);
+  }
   assert.equal(w.storage.getItem('gev.dronePlan.units'), 'm');
   unitBtn(w, 'ft').click();
   assert.equal(out('Height above ground'), '262 ft');

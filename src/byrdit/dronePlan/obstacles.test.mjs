@@ -255,6 +255,9 @@ test('clearance: where the cap cannot clear, the leg is marked blocked and cappe
   assert.equal(out.blocked[0].obstacleId, 'faa-48-1');
 });
 
+// With the terrain unread the column stands on the route's own ground and the
+// planner takes columns only up to 400 m, so 400 + 5 m always fits under the
+// 457.2 m maximum: a blocked leg needs the column on higher ground (above).
 test('clearance: the tallest column the planner takes (400 m) is cleared under the 1500 ft maximum', () => {
   const out = applyObstacleClearance(
     [legOf([CENTER.lon, east(CENTER.lon, 2)], 100)],

@@ -3581,5 +3581,6 @@
   "The provider account is out of credit. Check its billing, or choose another AI Provider in Settings.": "提供商账户余额不足。请检查账单，或在设置中选择其他 AI 提供商。",
   "This plan flies up to {max} above ground, higher than 400 ft. {cap} is only the most GEV will plan: it does not approve a flight and changes no limit in the aircraft. The aircraft height limit, airspace authorization, local rules and your duties as pilot still apply": "此计划最高飞至地面以上 {max}，超过 400 ft。{cap} 只是 GEV 能规划的上限：它不代表批准飞行，也不会改变飞行器的任何限制。飞行器的限高、空域授权、当地规定以及你作为飞行员的责任仍然适用",
   "The safety zone is the corridor the aircraft flies, in the air along the route; it is not an obstacle. Orange columns are obstacles, standing on the ground. Footprints lie on the surface.": "安全区是飞行器飞行的通道，位于沿航线的空中，不是障碍物。橙色柱体是障碍物，立在地面上。拍摄范围位于地表。",
-  "Heights in {names} are measured from sea level, which GEV cannot place on the globe: only the ground track is drawn.": "{names} 的高度从海平面起算，GEV 无法将其放置到地球上：只绘制地面轨迹。"
+  "Heights in {names} are measured from sea level, which GEV cannot place on the globe: only the ground track is drawn.": "{names} 的高度从海平面起算，GEV 无法将其放置到地球上：只绘制地面轨迹。",
+  "The height mode of {names} is not one GEV can place on the globe: only the ground track is drawn.": "GEV 无法将 {names} 的高度模式放置到地球上：只绘制地面轨迹。"
 }

@@ -628,3 +628,17 @@ test('imported file without a terrain read: aircraft at start surface + height, 
   assert.deepEqual(out.waypoints.map((w) => w.aglM), [40, 20]);
   assert.equal(out.verified, true);
 });
+
+test('terrain read: the globe is never asked, a read plan is drawn from its own ground even if the globe disagrees', () => {
+  const { preview, source } = rig(999);
+  const r = slopedPlan(80);
+  preview.showPlan(r);
+  const wps = r.missions.flatMap((m) => m.waypoints);
+  markersOf(source).forEach((e, i) =>
+    assert.equal(e.position[2], wps[i].groundM + wps[i].aglM),
+  );
+  const edges = named(source, '3D check view').find((e) => e.polyline);
+  for (const base of edges.polyline.positions.slice(0, 4)) {
+    assert.equal(base[2], wps[0].groundM, 'base on the plan ground, not the globe');
+  }
+});
