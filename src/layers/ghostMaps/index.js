@@ -902,6 +902,12 @@ export function createGhostMapsLayer({
                 message: _catalog.message || '—',
               })
           : t('Connecting to the S2 GhostMaps repository…');
+      const ageInfo =
+        _ageDays === null
+          ? t('All markers')
+          : t('Event age: {days}d · undated kept', {
+              days: formatNumber(_ageDays),
+            });
       return {
         segmented: {
           id: 'age',
@@ -952,7 +958,9 @@ export function createGhostMapsLayer({
           };
         }),
         legend: [],
-        info: `${_ageDays === null ? t('All markers') : t('Event age: {days}d · undated kept', { days: formatNumber(_ageDays) })} · ${info}`,
+        // Byrd-IT: in history the row text is the HISTORY banner alone; the
+        // Event age chips still show the active window.
+        info: _historyT !== null ? info : `${ageInfo} · ${info}`,
         infoTitle: t(
           'S2 Underground publishes these KMZ products to GitHub. New uploads are detected within seconds and replace the previous edition automatically. Click a marker for its report.',
         ),

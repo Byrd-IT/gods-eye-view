@@ -786,6 +786,8 @@ function firmsHarness(t, { altitude }) {
     ...stack,
     layer,
     viewer,
+    /** whether the glow-sprite collection is visible (the hand-off fade) */
+    markersShown: () => billboards()?.show,
     /** what the layer draws right now, beyond its count */
     drawn: () => ({
       count: layer.getStats().count,
@@ -800,8 +802,9 @@ function firmsHarness(t, { altitude }) {
 for (const [band, altitude, drawnAt] of [
   // close band: glow sprites + ambient cards (the review R1 screenshot)
   ['detections', 20_000, (n) => ({ sprites: n, cells: 0 })],
-  // regional band: heat-cell rectangles + cell cards
-  ['cells', 4_000_000, () => ({ sprites: 0 })],
+  // regional band: the heat map is draped imagery (no cell entities) and the
+  // glow sprites stay built but hidden by the hand-off fade (upstream de87aaf8)
+  ['cells', 6_000_000, (n) => ({ sprites: n, cells: 0 })],
 ]) {
   test(`FIRMS frames (${band} band): a recorded gap clears the drawn sprites, cells, cards and context, not only the count; LIVE draws the live fires again`, async (t) => {
     const app = firmsHarness(t, { altitude });
@@ -818,7 +821,12 @@ for (const [band, altitude, drawnAt] of [
     assert.ok(d.context > 0, 'context registrations at t');
     for (const [k, v] of Object.entries(drawnAt(RECORDED_FIRES[T1])))
       assert.equal(d[k], v);
-    if (band === 'cells') assert.ok(d.cells > 0, 'heat cells at t');
+    if (band === 'cells')
+      assert.equal(
+        app.markersShown(),
+        false,
+        'the far band hides the built markers behind the heat map',
+      );
 
     // the recorded gap (D3): NOTHING drawn, not the sprites/cards of T1
     app.driver.onHistory({ active: true, timeMs: T0, playing: false });

@@ -96,6 +96,8 @@ function fleetFixture() {
   const parts = {
     tracking: { _refreshCockpitNearContacts() {} },
     motion: {
+      // Byrd-IT: the fleet tick reads the history-aware motion clock.
+      _motionNow: (result) => Cesium.JulianDate.now(result),
       _deadReckon() {
         reckonings++;
         return billboard.position;
