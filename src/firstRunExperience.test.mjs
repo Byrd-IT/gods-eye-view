@@ -1025,6 +1025,14 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
     'noir',
   ]);
   visualStyle.enum = [...visualStyle.enum, 'snow'];
+  // Tilt to an angle adds pitchDeg and rewords direction; restore
+  // the legacy camera fields to keep the pin.
+  const camera = legacyTools.find((tool) => tool.name === 'move_camera')
+    .parameters.properties;
+  assert.equal(camera.pitchDeg.type, 'number');
+  delete camera.pitchDeg;
+  camera.direction.description =
+    'Required for pan/tilt/rotate; orbit/rotate_globe default right.';
   const block = JSON.stringify(legacyTools);
   // Re-derived for the voice layer manifest (generated layer enums, alias and
   // field hints), point-and-ask's pointer/referent arguments and the prompt
@@ -1046,17 +1054,18 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // The Utilities panel adds one set_panel_open target; Sea Marks and Ski
   // Pistes extend the generated layer enums and alias hint; voice geometry
   // adds the analyst area scopes and the osm-places layer.
-  // Byrd-IT fork: re-pinned at the 73c14ac7 upstream merge (31318 -> 40601,
-  // +9283). Upstream's pin (31318 / f5b42f41...ddc) is the baseline; the drift
-  // is fork-only: set_map_stack byrdit-open and basemap-auto, the four USGS
-  // water layers in the layer enums and alias hint, and the control_sky,
-  // control_history, control_imagery and control_droneplan tools.
-  // Byrd-IT fork: control_droneplan aglM / orbitHeightsM maximum 120 -> 457.2
-  // (the 1500 ft planning maximum, dronePlan/heightLimits.js): +4 characters.
-  assert.equal(block.length, 40605, 'serialized tool schema length drifted');
+  // control_cockpit states the own-layer entry rule (Contacts not required).
+  // Byrd-IT fork: re-pinned at the 6e4da23c upstream merge (31372 -> 40659,
+  // +9287). Upstream's pin (31372 / 7f593e78...035508) reproduces from
+  // origin/main; the drift is fork-only: set_map_stack byrdit-open and
+  // basemap-auto, the four USGS water layers in the layer enums and alias
+  // hint, and the control_sky, control_history, control_imagery and
+  // control_droneplan tools (aglM / orbitHeightsM maximum 457.2, the 1500 ft
+  // planning maximum, dronePlan/heightLimits.js).
+  assert.equal(block.length, 40659, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '3145331b4e729502ba3c7090ac8d1d1356e3efb0c568025eb75e6556eba0deb5',
+    'e47b8b4864048326945bd15a211a029220422f08a4091a9c1ff9d46d36a085d0',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

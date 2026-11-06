@@ -68,12 +68,15 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Voice geometry adds resolve_area, find_imagery, osm_query, the analyst
     // area scopes and the osm-places layer; natural-region candidates and the
     // tightened area tool wording follow review.
-    // Byrd-IT fork: re-pinned at the 73c14ac7 upstream merge. Upstream's pin
-    // d0c5ad73...2c3 reproduces from origin/main; the only drift is fork-only
+    // control_cockpit states the own-layer entry rule (Contacts not required).
+    // move_camera tilt takes an optional pitchDeg angle, described as
+    // absolute with its -45 default, with steps sent as a direction.
+    // Byrd-IT fork: re-pinned at the 6e4da23c upstream merge. Upstream's pin
+    // 6a0d154e...c3c reproduces from origin/main; the only drift is fork-only
     // (control_history/sky/imagery/droneplan, byrdit-open and basemap-auto in
     // set_map_stack, the four USGS water layers in the layer enums and the
-    // water alias hint).
-    'a5ed4b782a428b80844cb5641684b79684f894d66c7acc28dd6d241dd9d28003',
+    // water alias hint, and control_droneplan aglM/orbitHeightsM maximum 457.2).
+    '8a4545b127bbc5768e0c24c465f4822333a5fca6a07f694d526b927cd7b1948f',
   );
 });
 
@@ -200,6 +203,8 @@ test('all legacy action arguments are byte-identical after removing the delibera
   const stackEnum = property('set_map_stack').stack.enum;
   assert.deepEqual(stackEnum.slice(-2), ['byrdit-open', 'basemap-auto']);
   property('set_map_stack').stack.enum = stackEnum.slice(0, -2);
+  // Tilt to an angle is additive.
+  delete property('move_camera').pitchDeg;
   const panels = property('set_panel_open').panelId;
   panels.enum = panels.enum.filter(
     (id) =>
@@ -356,4 +361,16 @@ test('the control_droneplan height limits are the planner planning maximum (1500
   assert.equal(props.orbitHeightsM.items.maximum, AGL_CAP_M);
   assert.equal(props.orbitHeightsM.items.minimum, MIN_AGL_M);
   assert.equal(AGL_CAP_M, 457.2);
+});
+
+test('tilt accepts an angle with no direction', () => {
+  const schema = GEV_ACTION_SCHEMAS.find(
+    (tool) => tool.name === 'move_camera',
+  ).parameters;
+  assert.deepEqual(validateArgs(schema, { motion: 'tilt', pitchDeg: -45 }), []);
+  assert.deepEqual(validateArgs(schema, { motion: 'tilt' }), []);
+  // No range in the schema (prompt budget): the runner clamps to -89..-5.
+  assert.ok(
+    validateArgs(schema, { motion: 'tilt', pitchDeg: 'steep' }).length > 0,
+  );
 });

@@ -33,7 +33,12 @@
     "{source} HTTP {status}",
     "▲ {frp} MW",
     "KMZ",
-    "GhostMaps"
+    "GhostMaps",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist",
+    "iNaturalist ↗"
   ],
   "de": [
     "1090 MHz",
@@ -207,7 +212,13 @@
     "Ⅱ PAUSE",
     "▲ {frp} MW",
     "SOLUNAR",
-    "Solunar"
+    "Solunar",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist",
+    "iNaturalist ↗",
+    "≥ {value} MW"
   ],
   "es": [
     "1090 MHz",
@@ -344,7 +355,16 @@
     "SOLUNAR",
     "Solunar",
     "12 h",
-    "24 h"
+    "24 h",
+    "fire confidence filter|Nominal+",
+    "≥ {value} MW",
+    "ANIMAL · {name}",
+    "Acartia",
+    "CC BY 4.0",
+    "Reptiles",
+    "acartia.io ↗",
+    "iNaturalist ↗",
+    "iNaturalist"
   ],
   "fr": [
     "1090 MHz",
@@ -532,7 +552,18 @@
     "Ⅱ PAUSE",
     "▲ {frp} MW",
     "12 h",
-    "24 h"
+    "24 h",
+    "ANIMAL · {name}",
+    "Acartia",
+    "CC BY 4.0",
+    "CHAT",
+    "Obs. {licence}",
+    "REPTILE · {name}",
+    "Reptiles",
+    "acartia.io ↗",
+    "iNaturalist",
+    "iNaturalist ↗",
+    "≥ {value} MW"
   ],
   "it": [
     "1090 MHz",
@@ -710,7 +741,13 @@
     "ΔN",
     "▲ {frp} MW",
     "12 h",
-    "24 h"
+    "24 h",
+    "≥ {value} MW",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist ↗",
+    "iNaturalist"
   ],
   "ja": [
     "1090 MHz",
@@ -761,7 +798,13 @@
     "{type}  SPD: {speed}  HDG: {heading}",
     "ΔE",
     "ΔN",
-    "▲ {frp} MW"
+    "▲ {frp} MW",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist",
+    "iNaturalist ↗",
+    "≥ {value} MW"
   ],
   "pt": [
     "1090 MHz",
@@ -898,7 +941,15 @@
     "SOLUNAR",
     "Solunar",
     "12 h",
-    "24 h"
+    "24 h",
+    "fire confidence filter|Nominal+",
+    "≥ {value} MW",
+    "ANIMAL · {name}",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist ↗",
+    "iNaturalist"
   ],
   "ru": [
     "AIS: --",
@@ -919,7 +970,12 @@
     "S2 · {name}",
     "VS",
     "WHOT/BHOT",
-    "{label} (V)"
+    "{label} (V)",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist",
+    "iNaturalist ↗"
   ],
   "uk": [
     "AIS: --",
@@ -934,7 +990,12 @@
     "NVG",
     "REC",
     "S2 GhostMaps",
-    "WHOT/BHOT"
+    "WHOT/BHOT",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist",
+    "iNaturalist ↗"
   ],
   "zh-CN": [
     "1090 MHz",
@@ -993,7 +1054,13 @@
     "{value} KM/S",
     "ΔE",
     "ΔN",
-    "▲ {frp} MW"
+    "▲ {frp} MW",
+    "≥ {value} MW",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist ↗",
+    "iNaturalist"
   ],
   "zh-Hant": [
     "1090 MHz",
@@ -1052,6 +1119,12 @@
     "{value} KM/S",
     "ΔE",
     "ΔN",
-    "▲ {frp} MW"
+    "▲ {frp} MW",
+    "≥ {value} MW",
+    "Acartia",
+    "CC BY 4.0",
+    "acartia.io ↗",
+    "iNaturalist ↗",
+    "iNaturalist"
   ]
 }
