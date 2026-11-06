@@ -252,6 +252,7 @@
       "src/byrdit/history/historySlicesAirGnss.js",
       "src/byrdit/history/historySlicesWater.js",
       "src/data/transitFeeds.js",
+      "src/data/rioRouteNames.js",
       "src/data/gbfsSource.js",
       "src/layers/bikeshare/registry.js",
       "src/sources/transitHistoryStore.js",
@@ -1332,7 +1333,8 @@
       "src/ui/views/panels/WildlifeSightingCard.vue",
       "src/ui/wildlifeSightingPlacement.js",
       "src/overlays/worldOverlayChrome.js",
-      "src/layers/wildlifeSightings/photoText.js"
+      "src/layers/wildlifeSightings/photoText.js",
+      "src/data/placeNames.js"
     ],
     "external": [
       "cesium",
