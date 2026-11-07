@@ -23,6 +23,7 @@ import { realtimeInstructions } from '../../server/providers/openai/instructions
 import {
   GEV_REALTIME_TOOLS,
   offeredTools,
+  openAiPortableTools,
   realtimeTools,
 } from '../../server/providers/openai/tools.js';
 import { createDebugLogHandler } from '../../server/providers/openai/debug-log.js';
@@ -199,7 +200,10 @@ test('Realtime handler preserves tools and default instructions, isolates suppli
       sent.at(-1).session.instructions,
       realtimeInstructions(guidance),
     );
-    assert.deepEqual(sent.at(-1).session.tools, realtimeTools());
+    assert.deepEqual(
+      sent.at(-1).session.tools,
+      openAiPortableTools(realtimeTools()),
+    );
   }
   assert.notEqual(sent[0].session.instructions, sent[1].session.instructions);
   assert.equal(sent[0].session.instructions, sent[2].session.instructions);
@@ -607,7 +611,7 @@ test('osm_query is offered only when an operator configured Overpass', async (t)
   assert.doesNotMatch(plain.instructions, /osm_query/);
   assert.ok(names(plain).includes('resolve_area'));
   assert.ok(names(plain).includes('find_imagery'));
-  assert.deepEqual(configured.tools, GEV_REALTIME_TOOLS);
+  assert.deepEqual(configured.tools, openAiPortableTools(GEV_REALTIME_TOOLS));
   assert.match(configured.instructions, /osm_query/);
   assert.equal(
     configured.instructions,
@@ -656,7 +660,10 @@ test('Realtime sessions carry supplied tools, and the standalone voice adds the 
   );
   assert.equal(response.status, 200);
   // Without an operator Overpass, osm_query is left out of the session.
-  assert.deepEqual(sent.at(-1).session.tools, offeredTools(tools));
+  assert.deepEqual(
+    sent.at(-1).session.tools,
+    openAiPortableTools(offeredTools(tools)),
+  );
   assert.ok(
     !sent.at(-1).session.tools.some(({ name }) => name === 'osm_query'),
   );
@@ -757,7 +764,7 @@ test('Realtime service configuration selects compatible endpoint/model without f
           assert.equal(payload.session.model, 'configured-model');
           assert.deepEqual(
             payload.session.tools,
-            realtimeTools({ overpass: false }),
+            openAiPortableTools(realtimeTools({ overpass: false })),
           );
           return Response.json({ value: 'short-lived-fixture' });
         },
