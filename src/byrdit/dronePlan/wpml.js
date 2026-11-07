@@ -331,7 +331,11 @@ function placemarks(mission, speedMs) {
           start: wp.index,
           end: lastIndex,
           trigger: 'multipleDistance',
-          triggerParam: writtenSpacingM(leg.photoSpacingM),
+          // The legacy interval mode (stop capture) keeps its 1 m floor.
+          triggerParam:
+            leg.captureMode === 'distance'
+              ? writtenSpacingM(leg.photoSpacingM)
+              : Math.max(1, leg.photoSpacingM),
           actions: [photoAction(actionId++)],
         });
       }
