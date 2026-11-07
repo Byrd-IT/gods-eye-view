@@ -4853,7 +4853,7 @@ test('timing: Stop mode rounding to 0.01 m/s is not called a lowered speed', asy
   const w = setup();
   w.handle.setBox(boxM(300, 200));
   const o = w.handle.getState().options;
-  o.speedMs = (10 * 0.3048); // 10 ft/s = 3.048 m/s, under the camera limit
+  o.speedMs = 10 * 0.3048; // 10 ft/s = 3.048 m/s, under the camera limit
   await w.handle.replan();
   const plan = w.handle.getResult().plan;
   assert.equal(plan.speedLimitedBy, null, 'nothing limits this speed');
@@ -4910,6 +4910,25 @@ test('timing: Plan all rows still show when the single plan has incomplete terra
   const known = rows.filter((r) => r.getAttribute('data-unknown') !== 'true');
   assert.ok(known.length >= 1, 'a complete pass keeps its own overlap row');
   for (const r of known) assert.match(r.textContent, /% front/);
+  w.handle.destroy();
+});
+
+test('timing: Plan all rows still show when the single plan figures cannot be worked out', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.captureMode = 'timed';
+  o.timedIntervalS = 7;
+  await w.handle.replan();
+  await w.handle.planSuite();
+  // A wanted overlap of 100% leaves no spacing, so the single plan has no figure.
+  o.frontOverlap = 100;
+  const input = w.control(INTERVAL);
+  input.value = '7.5';
+  input.dispatch('input');
+  assert.match(captureRole(w, 'timing-recommended-note').textContent, /Cannot be calculated/);
+  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  assert.ok(rows.length >= 3, 'each pass keeps its own row');
   w.handle.destroy();
 });
 

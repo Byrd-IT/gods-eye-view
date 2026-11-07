@@ -3912,6 +3912,7 @@ export function initDronePlan({
         'Cannot be calculated for these settings: check the camera tilt and height.',
       );
       tone(ui.timingRecNote, 'warn');
+      renderSuiteRows();
       return;
     }
     ui.timingRec.setAttribute(
