@@ -3218,7 +3218,7 @@ export function initDronePlan({
       ? t(
           'Estimated station {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}. Not a photo the camera will take.',
           readout,
-        )
+      : theoretical
       : cur.captureMode === 'distance' && underMin
         ? t(
             'Theoretical station {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}. Not a photo the camera will take.',
