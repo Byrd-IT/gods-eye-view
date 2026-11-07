@@ -1166,7 +1166,7 @@ const schemas = [
           items: { type: 'number', minimum: 10, maximum: 457.2 },
         },
         speedMs: { type: 'number', minimum: 0.1, maximum: 15 },
-        timedIntervalS: { type: 'number', minimum: 0.1, maximum: 3600 },
+        timedIntervalS: { type: 'number', maximum: 3600 },
         shutterDenominator: {
           type: 'integer',
           enum: [250, 500, 1000, 2000, 4000],

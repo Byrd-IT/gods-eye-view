@@ -77,8 +77,10 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // set_map_stack, the four USGS water layers in the layer enums and the
     // water alias hint, and control_droneplan aglM/orbitHeightsM maximum 457.2).
     // Drone Flight Plan voice: options accepts timedIntervalS (seconds, the
-    // Timed-shot interval); status reports speedMph, captureMode and the same.
-    'e1c34163de708f57d944aa8bae4ce884dc756faf2f47a606d53ea202095ce27b',
+    // Timed-shot interval, any number above 0 up to 3600, no floor in the
+    // schema beyond the handler's rule); status reports speedMph, captureMode
+    // and the same.
+    '194f99660091562fedcd3dd1cb5b5391dc7dc644040016c240aef0aaba7e6963',
   );
 });
 
@@ -375,4 +377,14 @@ test('tilt accepts an angle with no direction', () => {
   assert.ok(
     validateArgs(schema, { motion: 'tilt', pitchDeg: 'steep' }).length > 0,
   );
+});
+
+test('control_droneplan timedIntervalS has the same rule as the panel field and the voice handler', () => {
+  const schema = GEV_ACTION_SCHEMAS.find((s) => s.name === 'control_droneplan');
+  const prop = schema.parameters.properties.timedIntervalS;
+  assert.equal(prop.type, 'number');
+  assert.equal(prop.maximum, 3600);
+  // Any positive number is usable (0.05 is accepted by the handler and the panel),
+  // so the schema must not add a higher floor of its own.
+  assert.equal(prop.minimum, undefined);
 });

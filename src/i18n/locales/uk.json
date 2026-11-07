@@ -4016,5 +4016,6 @@
   "Photos in the plan: {photos}.": "Фото в плані: {photos}.",
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Шляхових точок у кожному файлі: {waypoints}. Найбільший файл: {max} шляхових точок.",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Також задано фіксований інтервал між фото. Інтервал визначає крок; фіксована відстань не використовується.",
-  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Дані про висоти рельєфу неповні, тому висота над землею, охоплення знімка та інтервал невідомі."
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Дані про висоти рельєфу неповні, тому висота над землею, охоплення знімка та інтервал невідомі.",
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: висоти рельєфу неповні, перекриття невідоме."
 }

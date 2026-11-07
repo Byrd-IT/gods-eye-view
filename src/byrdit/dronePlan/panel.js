@@ -3955,12 +3955,16 @@ export function initDronePlan({
             attrs: {
               'data-role': 'timing-suite-row',
               'data-pass': row.id,
+              ...(row.unknown ? { 'data-unknown': 'true' } : {}),
               ...(row.frontPct == null
                 ? {}
                 : { 'data-front': String(row.frontPct) }),
             },
-            text:
-              row.frontPct == null
+            text: row.unknown
+              ? t('{pass}: terrain heights incomplete, overlap not known.', {
+                  pass: row.label,
+                })
+              : row.frontPct == null
                 ? t(
                     '{pass}: {speed}, about {s} s between pictures for {want}% front.',
                     {

@@ -3764,5 +3764,6 @@
   "Photos in the plan: {photos}.": "プラン内の写真：{photos}枚。",
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "各ファイルのウェイポイント：{waypoints}。最大のファイル：{max}ウェイポイント。",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "固定の写真間隔も設定されています。写真の間隔はインターバルで決まり、固定距離は使用されません。",
-  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地表高が不完全なため、対地高度、撮影範囲、インターバルは不明です。"
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地表高が不完全なため、対地高度、撮影範囲、インターバルは不明です。",
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: 地形の高さが不完全なため、オーバーラップは不明です。"
 }

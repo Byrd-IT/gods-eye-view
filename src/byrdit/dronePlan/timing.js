@@ -42,6 +42,32 @@ export function effectiveSpeedMs(speedMs, preset) {
 }
 
 /**
+ * The fastest speed, in 0.1 m/s steps, whose WRITTEN station spacing (the
+ * 0.1 m rounding the file uses) is no larger than the wanted spacing, so the
+ * overlap really is met after rounding. Null when no plan speed can do it.
+ */
+function fitSpeedFor(desiredSpacingM, intervalS) {
+  // writtenSpacingM never goes below 0.1 m, so a smaller wanted spacing
+  // cannot be reached at any speed.
+  if (!(desiredSpacingM >= 0.1) || !(intervalS > 0)) return null;
+  // Rounding to the nearest 0.1 m can add up to 0.05 m: aim below that edge.
+  const target = Math.min(
+    desiredSpacingM,
+    floorTo(desiredSpacingM, 0.1) + 0.049,
+  );
+  let fit = Number(floorTo(target / intervalS, 0.1).toFixed(1));
+  // Guard against float edges: step down until the written spacing fits.
+  for (let i = 0; i < 20 && fit >= MIN_PLAN_SPEED_MS; i++) {
+    if (writtenSpacingM(fit * intervalS) <= desiredSpacingM + 1e-9) break;
+    fit = Number((fit - 0.1).toFixed(1));
+  }
+  return fit >= MIN_PLAN_SPEED_MS &&
+    writtenSpacingM(fit * intervalS) <= desiredSpacingM + 1e-9
+    ? fit
+    : null;
+}
+
+/**
  * @param {{ alongM:number, speedMs:number, frontOverlapPct:number,
  *   timedIntervalS?:number|null, minIntervalS?:number }} input
  *   alongM is the along-track ground footprint of one photo.
@@ -77,7 +103,7 @@ export function timingFigures({
   const spacingM = writtenSpacingM(speed * interval);
   const frontPct = (1 - spacingM / along) * 100;
   const shortfallPct = front - frontPct;
-  const fit = floorTo(desiredSpacingM / interval, 0.1);
+  const fit = fitSpeedFor(desiredSpacingM, interval);
   out.chosen = {
     intervalS: interval,
     spacingM,
@@ -92,7 +118,7 @@ export function timingFigures({
     underCameraMin:
       Number(minIntervalS) > 0 && interval + 1e-9 < Number(minIntervalS),
     // Null when even the slowest plan speed cannot reach the wanted overlap.
-    fitSpeedMs: fit >= MIN_PLAN_SPEED_MS ? Number(fit.toFixed(1)) : null,
+    fitSpeedMs: fit,
   };
   return out;
 }
@@ -103,10 +129,12 @@ export function timingFigures({
  * Orbits keep their own ring spacing and failed passes have no plan, so
  * neither gets a row. Read from the planned result, not re-derived. With no
  * interval chosen, `frontPct` and `state` are null and the row still gives
- * the interval that pass would need.
+ * the interval that pass would need. A pass whose own ground heights are
+ * incomplete has an unknown footprint: its row is `unknown`, with no overlap
+ * and no interval, not a figure worked out from a made-up height.
  * @returns {{id:string,label:string,speedMs:number,frontPct:number|null,
- *   desiredFrontPct:number,recommendedIntervalS:number,
- *   state:'meets'|'short'|'gap'|null}[]}
+ *   desiredFrontPct:number,recommendedIntervalS:number|null,
+ *   state:'meets'|'short'|'gap'|null, unknown:boolean}[]}
  */
 export function suiteTimingRows(passes, timedIntervalS) {
   const interval = cleanTimedIntervalS(timedIntervalS);
@@ -115,6 +143,19 @@ export function suiteTimingRows(passes, timedIntervalS) {
   for (const pass of passes) {
     const plan = pass?.result?.plan;
     if (!plan || plan.options?.pattern === 'orbit') continue;
+    if (pass.result.terrainComplete === false) {
+      rows.push({
+        id: String(pass.id),
+        label: String(pass.label ?? pass.id),
+        speedMs: Number(plan.speedMs),
+        frontPct: null,
+        desiredFrontPct: Number(plan.options?.frontOverlap),
+        recommendedIntervalS: null,
+        state: null,
+        unknown: true,
+      });
+      continue;
+    }
     const figs = timingFigures({
       alongM: plan.footprint?.alongM,
       speedMs: plan.speedMs,
@@ -130,6 +171,7 @@ export function suiteTimingRows(passes, timedIntervalS) {
       desiredFrontPct: Number(plan.options.frontOverlap),
       recommendedIntervalS: figs.recommendedIntervalS,
       state: figs.chosen ? figs.chosen.state : null,
+      unknown: false,
     });
   }
   return rows;

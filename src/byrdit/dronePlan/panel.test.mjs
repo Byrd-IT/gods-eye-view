@@ -5001,6 +5001,38 @@ test('timing: Plan all passes gives each pass its own overlap for the one interv
   w.handle.destroy();
 });
 
+test('timing: Plan all passes shows unknown, not an overlap, for a pass with incomplete terrain', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.captureMode = 'timed';
+  o.timedIntervalS = 7;
+  await w.handle.replan();
+  await w.handle.planSuite();
+  const passes = w.handle.getState().suite.passes.filter((p) => p.result?.plan);
+  assert.ok(passes.length >= 3);
+  const victim = passes.find((p) => p.result.plan.options.pattern !== 'orbit');
+  victim.result.terrainComplete = false;
+  // Any control change re-renders the timing section.
+  const input = w.control(INTERVAL);
+  input.value = '7.5';
+  input.dispatch('input');
+  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  const bad = rows.find((r) => r.getAttribute('data-pass') === String(victim.id));
+  assert.ok(bad, 'the incomplete pass still has a row');
+  assert.equal(bad.getAttribute('data-unknown'), 'true');
+  assert.equal(bad.getAttribute('data-front'), null, 'no overlap figure');
+  assert.match(bad.textContent, /terrain heights incomplete, overlap not known/);
+  assert.doesNotMatch(bad.textContent, /% front/);
+  const others = rows.filter((r) => r !== bad);
+  assert.ok(others.length >= 2);
+  for (const r of others) {
+    assert.equal(r.getAttribute('data-unknown'), null);
+    assert.match(r.textContent, /% front/);
+  }
+  w.handle.destroy();
+});
+
 test('timing: the chosen interval saves with the plan, an old plan has none, a bad one is dropped', async () => {
   const w = await timedWorld({ timedIntervalS: 7 });
   const doc = serializePlan(w.handle.getState(), {});

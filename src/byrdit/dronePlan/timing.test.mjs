@@ -258,3 +258,104 @@ test('suite rows: one interval, a different overlap on each pass', () => {
   assert.equal(bare[0].state, null);
   assert.ok(Math.abs(bare[0].recommendedIntervalS - (nadir * 0.2) / 3) < 1e-9);
 });
+
+test('fit speed: after the 0.1 m rounding the written spacing never exceeds the wanted spacing', () => {
+  let checked = 0;
+  for (const alongM of [8, 11.3, 15.7, 24.9, 40.2, 80, 133.3])
+    for (const frontOverlapPct of [60, 70, 75, 80, 85, 90])
+      for (const timedIntervalS of [0.5, 1, 2, 2.5, 3, 5, 7, 10, 13.7]) {
+        const speedMs = 15;
+        const f = timingFigures({ alongM, speedMs, frontOverlapPct, timedIntervalS });
+        const fit = f.chosen.fitSpeedMs;
+        if (fit == null) {
+          // Only when even 0.1 m/s writes more than the wanted spacing.
+          assert.ok(
+            writtenSpacingM(0.1 * timedIntervalS) > f.desiredSpacingM + 1e-9 ||
+              f.desiredSpacingM < 0.1,
+            `no fit but one exists: ${alongM} ${frontOverlapPct} ${timedIntervalS}`,
+          );
+          continue;
+        }
+        const label = `${alongM} ${frontOverlapPct} ${timedIntervalS} -> ${fit}`;
+        assert.ok(writtenSpacingM(fit * timedIntervalS) <= f.desiredSpacingM + 1e-9, label);
+        const after = timingFigures({ alongM, speedMs: fit, frontOverlapPct, timedIntervalS });
+        assert.equal(after.chosen.state, 'meets', label);
+        // And it is the fastest step: 0.1 m/s faster would be short.
+        const fasterMs = Number((fit + 0.1).toFixed(1));
+        const faster = timingFigures({
+          alongM,
+          speedMs: fasterMs,
+          frontOverlapPct,
+          timedIntervalS,
+        });
+        assert.ok(
+          writtenSpacingM(fasterMs * timedIntervalS) > f.desiredSpacingM + 1e-9 ||
+            faster.chosen.state === 'meets',
+          label,
+        );
+        checked++;
+      }
+  assert.ok(checked > 200);
+});
+
+test('fit speed: a small footprint where rounding up used to leave the plan short', () => {
+  // Wanted spacing 10.07 m at a 1.017 s interval. The old fit, 9.9 m/s, is 10.068 m, which the
+  // file writes as 10.1 m: short by 0.03 m, so the same offer would have come back.
+  const f = timingFigures({
+    alongM: 50.35,
+    speedMs: 15,
+    frontOverlapPct: 80,
+    timedIntervalS: 1.017,
+  });
+  assert.ok(Math.abs(f.desiredSpacingM - 10.07) < 1e-9);
+  assert.ok(writtenSpacingM(9.9 * 1.017) > f.desiredSpacingM, 'the old fit of 9.9 m/s wrote 10.1 m');
+  assert.ok(f.chosen.fitSpeedMs < 9.9, String(f.chosen.fitSpeedMs));
+  const after = timingFigures({
+    alongM: 50.35,
+    speedMs: f.chosen.fitSpeedMs,
+    frontOverlapPct: 80,
+    timedIntervalS: 1.017,
+  });
+  assert.equal(after.chosen.state, 'meets');
+});
+
+test('fit speed: null when even the slowest plan speed writes more than the wanted spacing', () => {
+  // Wanted 0.8 m, interval 10 s: 0.1 m/s still writes 1.0 m.
+  const f = timingFigures({
+    alongM: 4,
+    speedMs: 3,
+    frontOverlapPct: 80,
+    timedIntervalS: 10,
+  });
+  assert.equal(f.chosen.fitSpeedMs, null);
+});
+
+test('suite rows: a pass with incomplete terrain heights is unknown, not a made-up overlap', () => {
+  const nadir = footprint(preset, 80, 0).alongM;
+  const pass = (id, terrainComplete) => ({
+    id,
+    label: id,
+    result: {
+      terrainComplete,
+      plan: {
+        speedMs: 3,
+        footprint: { alongM: nadir },
+        options: { frontOverlap: 80, pattern: 'grid' },
+      },
+    },
+  });
+  for (const interval of [7, null]) {
+    const rows = suiteTimingRows(
+      [pass('good', true), pass('bad', false), pass('legacy', undefined)],
+      interval,
+    );
+    const by = Object.fromEntries(rows.map((r) => [r.id, r]));
+    assert.equal(by.bad.unknown, true);
+    assert.equal(by.bad.frontPct, null);
+    assert.equal(by.bad.recommendedIntervalS, null);
+    assert.equal(by.bad.state, null);
+    assert.equal(by.good.unknown, false);
+    assert.ok(by.good.recommendedIntervalS > 0);
+    assert.equal(by.legacy.unknown, false, 'only an explicit false is unknown');
+  }
+});

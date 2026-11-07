@@ -4184,5 +4184,6 @@
   "Photos in the plan: {photos}.": "الصور في الخطة: {photos}.",
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "نقاط المسار في كل ملف: {waypoints}. أكبر ملف: {max} نقطة مسار.",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "تم أيضًا تحديد مسافة ثابتة بين الصور. يحدد الفاصل المسافة بين الصور؛ ولا تُستخدم المسافة الثابتة.",
-  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "ارتفاعات التضاريس غير مكتملة، لذلك الارتفاع فوق الأرض والمساحة المغطاة والفاصل غير معروفة."
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "ارتفاعات التضاريس غير مكتملة، لذلك الارتفاع فوق الأرض والمساحة المغطاة والفاصل غير معروفة.",
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: ارتفاعات التضاريس غير مكتملة، التداخل غير معروف."
 }

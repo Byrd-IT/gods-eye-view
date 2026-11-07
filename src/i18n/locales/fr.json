@@ -3932,5 +3932,6 @@
   "Photos in the plan: {photos}.": "Photos dans le plan : {photos}.",
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Points de passage dans chaque fichier : {waypoints}. Plus grand fichier : {max} points de passage.",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Un espacement fixe des photos est aussi défini. L'intervalle fixe l'espacement ; la distance fixe n'est pas utilisée.",
-  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Les altitudes du sol sont incomplètes ; la hauteur au-dessus du sol, l'empreinte et l'intervalle ne sont donc pas connus."
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Les altitudes du sol sont incomplètes ; la hauteur au-dessus du sol, l'empreinte et l'intervalle ne sont donc pas connus.",
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass} : hauteurs du terrain incomplètes, recouvrement inconnu."
 }

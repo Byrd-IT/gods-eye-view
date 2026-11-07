@@ -3764,5 +3764,6 @@
   "Photos in the plan: {photos}.": "计划中的照片：{photos}。",
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "每个文件的航点数：{waypoints}。最大文件：{max} 个航点。",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "同时还设置了固定照片间距。由间隔决定间距，不使用固定距离。",
-  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地形高度数据不完整，因此离地高度、覆盖范围和间隔都不知道。"
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地形高度数据不完整，因此离地高度、覆盖范围和间隔都不知道。",
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}：地形高度不完整，重叠率未知。"
 }
