@@ -1819,7 +1819,6 @@ export function initDronePlan({
         cls: 'pp-text-input gev-dp-text',
         attrs: {
           type: 'number',
-          min: '0.1',
           max: String(MAX_TIMED_INTERVAL_S),
           step: 'any',
           inputmode: 'decimal',
@@ -3741,8 +3740,13 @@ export function initDronePlan({
 
     // Requested vs planned speed: the plan can lower the speed in Stop mode.
     const plan = !state.dirty && !state.busy ? state.result?.plan : null;
+    // Stop mode also floors every speed to 0.01 m/s (3.048 m/s plans as
+    // 3.04): that rounding is not a lowering, so only a recorded limit counts.
     const lowered =
-      plan && Number(plan.speedMs) > 0 && requestedMs - plan.speedMs > 1e-6;
+      plan &&
+      (plan.speedLimitedBy === 'camera' || plan.speedLimitedBy === 'blur') &&
+      Number(plan.speedMs) > 0 &&
+      requestedMs - plan.speedMs > 1e-6;
     let loweredFor = t('blur at this shutter');
     if (plan?.speedLimitedBy === 'camera')
       loweredFor = t('the camera interval');
@@ -3789,6 +3793,68 @@ export function initDronePlan({
     show(ui.timingResult, false);
     show(ui.timingUnder, false);
     show(ui.timingFit, false);
+    // Plan all passes: one interval, a different overlap on each pass. Each
+    // row reads its own pass, so it does not wait for the single plan above.
+    const renderSuiteRows = () => {
+      const passes = state.suite?.passes;
+      if (timed && passes?.length && !state.suiteBusy) {
+        const rows = suiteTimingRows(passes, o.timedIntervalS);
+        if (rows.length) {
+          show(ui.timingSuite, true);
+          el(doc, 'p', ui.timingSuite, {
+            cls: 'gev-dp-note',
+            text: t(
+              'Plan all passes: each pass has its own height, tilt and speed, so one interval gives each its own overlap.',
+            ),
+          });
+          const list = el(doc, 'ul', ui.timingSuite, {
+            cls: 'gev-dp-warnings',
+          });
+          for (const row of rows) {
+            const li = el(doc, 'li', list, {
+              attrs: {
+                'data-role': 'timing-suite-row',
+                'data-pass': row.id,
+                ...(row.unknown ? { 'data-unknown': 'true' } : {}),
+                ...(row.frontPct == null
+                  ? {}
+                  : { 'data-front': String(row.frontPct) }),
+              },
+              text: row.unknown
+                ? t('{pass}: terrain heights incomplete, overlap not known.', {
+                    pass: row.label,
+                  })
+                : row.frontPct == null
+                  ? t(
+                      '{pass}: {speed}, about {s} s between pictures for {want}% front.',
+                      {
+                        pass: row.label,
+                        speed: speedText(row.speedMs),
+                        s: num(row.recommendedIntervalS, 1),
+                        want: pct(row.desiredFrontPct),
+                      },
+                    )
+                  : t('{pass}: {speed}, {front}% front (wanted {want}%).', {
+                      pass: row.label,
+                      speed: speedText(row.speedMs),
+                      front: pct(row.frontPct),
+                      want: pct(row.desiredFrontPct),
+                    }),
+            });
+            const toneName =
+              row.state === 'gap'
+                ? 'bad'
+                : row.state === 'short'
+                  ? 'warn'
+                  : null;
+            if (toneName) {
+              li.setAttribute('data-tone', toneName);
+              li.style.color = WARNING_TONE_COLOR[toneName];
+            }
+          }
+        }
+      }
+    };
     show(ui.timingIntervalNote, state.timedReject === true);
     ui.timingIntervalNote.textContent =
       state.timedReject === true
@@ -3812,6 +3878,7 @@ export function initDronePlan({
       ui.timingRecValue.textContent = '–';
       ui.timingRecNote.textContent = '';
       tone(ui.timingRecNote, null);
+      renderSuiteRows();
       return;
     }
 
@@ -3937,59 +4004,7 @@ export function initDronePlan({
       }
     }
 
-    // Plan all passes: one interval, a different overlap on each pass.
-    const passes = state.suite?.passes;
-    if (timed && passes?.length && !state.suiteBusy) {
-      const rows = suiteTimingRows(passes, o.timedIntervalS);
-      if (rows.length) {
-        show(ui.timingSuite, true);
-        el(doc, 'p', ui.timingSuite, {
-          cls: 'gev-dp-note',
-          text: t(
-            'Plan all passes: each pass has its own height, tilt and speed, so one interval gives each its own overlap.',
-          ),
-        });
-        const list = el(doc, 'ul', ui.timingSuite, { cls: 'gev-dp-warnings' });
-        for (const row of rows) {
-          const li = el(doc, 'li', list, {
-            attrs: {
-              'data-role': 'timing-suite-row',
-              'data-pass': row.id,
-              ...(row.unknown ? { 'data-unknown': 'true' } : {}),
-              ...(row.frontPct == null
-                ? {}
-                : { 'data-front': String(row.frontPct) }),
-            },
-            text: row.unknown
-              ? t('{pass}: terrain heights incomplete, overlap not known.', {
-                  pass: row.label,
-                })
-              : row.frontPct == null
-                ? t(
-                    '{pass}: {speed}, about {s} s between pictures for {want}% front.',
-                    {
-                      pass: row.label,
-                      speed: speedText(row.speedMs),
-                      s: num(row.recommendedIntervalS, 1),
-                      want: pct(row.desiredFrontPct),
-                    },
-                  )
-                : t('{pass}: {speed}, {front}% front (wanted {want}%).', {
-                    pass: row.label,
-                    speed: speedText(row.speedMs),
-                    front: pct(row.frontPct),
-                    want: pct(row.desiredFrontPct),
-                  }),
-          });
-          const toneName =
-            row.state === 'gap' ? 'bad' : row.state === 'short' ? 'warn' : null;
-          if (toneName) {
-            li.setAttribute('data-tone', toneName);
-            li.style.color = WARNING_TONE_COLOR[toneName];
-          }
-        }
-      }
-    }
+    renderSuiteRows();
   }
 
   function renderCaptureReadout() {

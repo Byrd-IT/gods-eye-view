@@ -4849,6 +4849,70 @@ test('timing: a speed the plan lowers is shown as lowered, not as the requested 
   w.handle.destroy();
 });
 
+test('timing: Stop mode rounding to 0.01 m/s is not called a lowered speed', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.speedMs = (10 * 0.3048); // 10 ft/s = 3.048 m/s, under the camera limit
+  await w.handle.replan();
+  const plan = w.handle.getResult().plan;
+  assert.equal(plan.speedLimitedBy, null, 'nothing limits this speed');
+  assert.ok(plan.speedMs < o.speedMs, 'the planner floors it to 0.01 m/s');
+  const note = captureRole(w, 'timing-planned');
+  assert.equal(note.hidden, true);
+  assert.equal(note.textContent, '');
+  // The same plan with a speed the camera really limits still says so.
+  o.speedMs = mphForTest(16);
+  await w.handle.replan();
+  assert.ok(w.handle.getResult().plan.speedLimitedBy);
+  assert.equal(captureRole(w, 'timing-planned').hidden, false);
+  w.handle.destroy();
+});
+
+test('timing: the interval field has no floor above zero', async () => {
+  const w = await timedWorld({});
+  const input = w.control(INTERVAL);
+  assert.equal(input.getAttribute('min'), null);
+  assert.equal(input.getAttribute('max'), '3600');
+  input.value = '0.05';
+  input.dispatch('input');
+  assert.equal(w.handle.getState().options.timedIntervalS, 0.05);
+  w.handle.destroy();
+});
+
+test('timing: Plan all rows still show when the single plan has incomplete terrain', async () => {
+  let bad = null;
+  const w = setup({
+    sample: async (cartos) => {
+      // The one unreadable point is the single plan's; each PLAN ALL pass samples
+      // its own waypoints, so passes elsewhere can still read all of theirs.
+      bad ??= `${cartos[3].longitude},${cartos[3].latitude}`;
+      return cartos.map((c) => ({
+        ...c,
+        height: `${c.longitude},${c.latitude}` === bad ? undefined : 100,
+      }));
+    },
+  });
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.captureMode = 'timed';
+  o.timedIntervalS = 7;
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().terrainComplete, false, 'the fixture really is incomplete');
+  await w.handle.planSuite();
+  const passes = w.handle.getState().suite.passes.filter((p) => p.result?.plan);
+  const complete = passes.filter((p) => p.result.terrainComplete !== false);
+  assert.ok(complete.length >= 1, 'the fixture leaves a pass with complete terrain');
+  assert.equal(captureRole(w, 'timing-terrain').hidden, false, 'the single plan is unknown');
+  assert.equal(captureRole(w, 'timing-result').hidden, true);
+  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  assert.equal(rows.length, passes.filter((p) => p.result.plan.options.pattern !== 'orbit').length);
+  const known = rows.filter((r) => r.getAttribute('data-unknown') !== 'true');
+  assert.ok(known.length >= 1, 'a complete pass keeps its own overlap row');
+  for (const r of known) assert.match(r.textContent, /% front/);
+  w.handle.destroy();
+});
+
 const mphForTest = (mph) => (mph * 1609.344) / 3600;
 
 test('timing: 15 and 16 mph show as that in the speed readout, in feet and in metres', () => {
