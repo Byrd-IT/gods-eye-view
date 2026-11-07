@@ -3914,7 +3914,6 @@
   "The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.": "El plan vuela a {planned}, no a los {requested} que pediste: se redujo por {why}.",
   "blur at this shutter": "desenfoque con este obturador",
   "the camera interval": "el intervalo de la cámara",
-  "Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.": "Las alturas del terreno están incompletas. El intervalo supone la altura planificada sobre el suelo; la huella real puede variar.",
   "That interval was not used: enter a positive number of seconds, up to {max}.": "Ese intervalo no se usó: escribe un número positivo de segundos, hasta {max}.",
   "Cannot be calculated for these settings: check the camera tilt and height.": "No se puede calcular con estos ajustes: revisa la inclinación y la altura de la cámara.",
   "for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.": "para un solape frontal del {front}% a {speed}. Por debajo del mínimo de la cámara de {min} s: reduce a {limit} o baja el solape.",
@@ -3931,5 +3930,7 @@
   "Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.": "El número de estaciones {photos} es teórico, no son fotos que tomará la cámara. El intervalo está por debajo del mínimo de la cámara.",
   "Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.": "Estaciones estimadas en el plan: {photos}. No es un recuento de las fotos que tomará la cámara. Tú inicias el disparo temporizado a mano.",
   "Photos in the plan: {photos}.": "Fotos en el plan: {photos}.",
-  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Puntos de ruta en cada archivo: {waypoints}. Archivo más grande: {max} puntos de ruta."
+  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Puntos de ruta en cada archivo: {waypoints}. Archivo más grande: {max} puntos de ruta.",
+  "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "También se ha definido una separación fija entre fotos. El intervalo determina la separación; la distancia fija no se usa.",
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Las alturas del terreno están incompletas, por lo que no se conocen la altura sobre el suelo, la huella ni el intervalo."
 }

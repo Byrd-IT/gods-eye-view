@@ -3830,7 +3830,6 @@
   "The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.": "Der Plan fliegt mit {planned}, nicht mit den gewünschten {requested}: gesenkt (Grund: {why}).",
   "blur at this shutter": "Unschärfe bei dieser Verschlusszeit",
   "the camera interval": "Kameraintervall",
-  "Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.": "Geländehöhen sind unvollständig. Das Intervall setzt die geplante Höhe über Grund voraus; die tatsächliche Bildfläche kann abweichen.",
   "That interval was not used: enter a positive number of seconds, up to {max}.": "Dieses Intervall wurde nicht verwendet: eine positive Zahl in Sekunden eingeben, höchstens {max}.",
   "Cannot be calculated for these settings: check the camera tilt and height.": "Für diese Einstellungen nicht berechenbar: Kameraneigung und Höhe prüfen.",
   "for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.": "für {front}% Längsüberlappung bei {speed}. Unter dem Kamera-Minimum von {min} s: auf {limit} verlangsamen oder die Überlappung verringern.",
@@ -3847,5 +3846,7 @@
   "Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.": "Die Stationszahl {photos} ist theoretisch, nicht die Zahl der Fotos, die die Kamera aufnimmt. Das Intervall liegt unter dem Kamera-Minimum.",
   "Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.": "Geschätzte Stationen im Plan: {photos}. Das ist nicht die Zahl der Fotos, die die Kamera aufnimmt. Die Intervallaufnahme wird von Hand gestartet.",
   "Photos in the plan: {photos}.": "Fotos im Plan: {photos}.",
-  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Wegpunkte pro Datei: {waypoints}. Größte Datei: {max} Wegpunkte."
+  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Wegpunkte pro Datei: {waypoints}. Größte Datei: {max} Wegpunkte.",
+  "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Zusätzlich ist ein fester Fotoabstand eingestellt. Das Intervall legt den Abstand fest; der feste Abstand wird nicht verwendet.",
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Geländehöhen sind unvollständig, daher sind die Höhe über Grund, die Bildfläche und das Intervall nicht bekannt."
 }

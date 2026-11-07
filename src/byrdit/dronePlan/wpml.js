@@ -343,9 +343,13 @@ function placemarks(mission, speedMs, explicit = true) {
     // they are not the plain photo group, so the tilt is set before they run.
     const tiltFirst = missionStart && (distance || timed);
     if (tiltFirst) item.tilt.id = actionId++;
-    // The first waypoint's rotate is placed in pass 2; the others are added
-    // below when the waypoint has none of its own yet.
-    let ownRotate = missionStart;
+    // The first waypoint's rotate is placed in pass 2. A photo waypoint shares
+    // its group with the rotate (below). Every other waypoint gets a group of
+    // its own; its id is taken here, ahead of the groups it precedes in the
+    // file, so ids rise in file order.
+    const photoGroupRotates = explicit && !distance && !timed && wp.photo;
+    const ownRotateId =
+      explicit && !missionStart && !photoGroupRotates ? actionId++ : null;
     if (distance) {
       if (first) {
         item.groups.push({
@@ -378,7 +382,6 @@ function placemarks(mission, speedMs, explicit = true) {
         actions: [gimbalAction(tiltId, wp.pitchDeg), photoAction(actionId++)],
       });
       if (missionStart || outShot) item.tilt = null;
-      ownRotate = true;
     } else if (!timed && wp.photo) {
       item.groups.push({
         start: wp.index,
@@ -387,14 +390,14 @@ function placemarks(mission, speedMs, explicit = true) {
         actions: [photoAction(actionId++)],
       });
     }
-    if (explicit && !ownRotate) {
+    if (ownRotateId != null) {
       // No photo group to share: a group of its own, ahead of the others so
       // the pitch is set before a spanning photo group starts.
       item.groups.unshift({
         start: wp.index,
         end: wp.index,
         trigger: 'reachPoint',
-        actions: [gimbalAction(actionId++, wp.pitchDeg)],
+        actions: [gimbalAction(ownRotateId, wp.pitchDeg)],
       });
     }
     if (item.tilt && !tiltFirst) item.tilt.id = actionId++;

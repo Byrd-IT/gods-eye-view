@@ -77,6 +77,16 @@ const waitForPlan = (page) =>
     { timeout: 90_000 },
   );
 
+/** A plan that never becomes ready is a failure, not something to skip past. */
+async function planReady(page, label) {
+  try {
+    await waitForPlan(page);
+    check(`${label}: the plan is ready`, true);
+  } catch {
+    check(`${label}: the plan is ready`, false, 'timed out');
+  }
+}
+
 /** Everything checked about the section, read from the rendered page. */
 const readSection = (page) =>
   page.evaluate(() => {
@@ -146,7 +156,7 @@ async function exercise(page, label) {
     });
   }, VIEW);
   await wait(2000);
-  await waitForPlan(page).catch(() => {});
+  await planReady(page, `${label} box`);
   // Open the Shots step if it is collapsed, then pick Timed shot.
   await page.evaluate(() => {
     const t = document.querySelector('#drone-plan-panel [data-role="timing"]');
@@ -158,7 +168,7 @@ async function exercise(page, label) {
     window.__gevDronePlan.applyOptions({ captureMode: 'timed', speedMs: 6.7056 });
   });
   await wait(1500);
-  await waitForPlan(page).catch(() => {});
+  await planReady(page, `${label} timed`);
   await scrollTo(page, 'timing');
 
   const before = await readSection(page);
@@ -244,7 +254,7 @@ async function exercise(page, label) {
   // Back to a sensible interval for the export check.
   await replaceValue(page, input, '5');
   await wait(1500);
-  await waitForPlan(page).catch(() => {});
+  await planReady(page, `${label} 5 s`);
 }
 
 try {

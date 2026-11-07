@@ -238,6 +238,10 @@ test('action ids are unique across the file and group ids are unique inside a wa
       const ids = marks.flatMap((m) => m.groups.flatMap((g) => g.actions.map((a) => a.id)));
       assert.equal(new Set(ids).size, ids.length, `${name}: action ids`);
       for (const m of marks) {
+        // Ids rise in file order inside a waypoint, so the order the file
+        // lists the actions is the order they were numbered in.
+        const own = m.groups.flatMap((g) => g.actions.map((a) => Number(a.id)));
+        assert.deepEqual(own, [...own].sort((a, b) => a - b), `${name} wp ${m.index}: ids rise`);
         const gids = m.groups.map((g) => g.id);
         assert.equal(new Set(gids).size, gids.length, `${name} wp ${m.index}: group ids`);
         assert.ok(gids.every((g) => g >= 1));

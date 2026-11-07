@@ -3998,7 +3998,6 @@
   "The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.": "План летить зі швидкістю {planned}, а не {requested}, як ви просили: швидкість знижено, причина: {why}.",
   "blur at this shutter": "розмиття за такої витримки",
   "the camera interval": "інтервал камери",
-  "Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.": "Дані про висоти рельєфу неповні. Інтервал розраховано за плановою висотою над землею; реальне охоплення знімка може відрізнятися.",
   "That interval was not used: enter a positive number of seconds, up to {max}.": "Цей інтервал не використано: введіть додатне число секунд, не більше {max}.",
   "Cannot be calculated for these settings: check the camera tilt and height.": "Для цих налаштувань обчислити неможливо: перевірте нахил і висоту камери.",
   "for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.": "для поздовжнього перекриття {front}% за {speed}. Менше за мінімум камери {min} с: зменште швидкість до {limit} або зменште перекриття.",
@@ -4015,5 +4014,7 @@
   "Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.": "Кількість станцій {photos} теоретична, це не фото, які зробить камера. Інтервал менший за мінімум камери.",
   "Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.": "Орієнтовна кількість станцій у плані: {photos}. Це не кількість фото, які зробить камера. Зйомку за таймером ви запускаєте вручну.",
   "Photos in the plan: {photos}.": "Фото в плані: {photos}.",
-  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Шляхових точок у кожному файлі: {waypoints}. Найбільший файл: {max} шляхових точок."
+  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Шляхових точок у кожному файлі: {waypoints}. Найбільший файл: {max} шляхових точок.",
+  "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Також задано фіксований інтервал між фото. Інтервал визначає крок; фіксована відстань не використовується.",
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Дані про висоти рельєфу неповні, тому висота над землею, охоплення знімка та інтервал невідомі."
 }

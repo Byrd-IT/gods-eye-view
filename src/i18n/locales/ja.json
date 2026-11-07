@@ -3746,7 +3746,6 @@
   "The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.": "プランは、希望された{requested}ではなく{planned}で飛行します。{why}のため速度を下げています。",
   "blur at this shutter": "このシャッター速度でのブレ",
   "the camera interval": "カメラのインターバル",
-  "Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.": "地表高が不完全です。インターバルは計画された対地高度を前提としており、実際の撮影範囲とは異なる場合があります。",
   "That interval was not used: enter a positive number of seconds, up to {max}.": "そのインターバルは使用されませんでした。{max}までの正の秒数を入力してください。",
   "Cannot be calculated for these settings: check the camera tilt and height.": "この設定では計算できません。カメラの傾きと高さを確認してください。",
   "for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.": "{speed}で進行方向の重複{front}%にする場合。カメラの最小値{min}秒を下回っています。{limit}まで減速するか、重複を下げてください。",
@@ -3763,5 +3762,7 @@
   "Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.": "ステーション数{photos}は理論値で、カメラが実際に撮影する枚数ではありません。インターバルがカメラの最小値を下回っています。",
   "Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.": "プラン内の推定ステーション数：{photos}。カメラが実際に撮影する枚数ではありません。タイマー撮影は手動で開始します。",
   "Photos in the plan: {photos}.": "プラン内の写真：{photos}枚。",
-  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "各ファイルのウェイポイント：{waypoints}。最大のファイル：{max}ウェイポイント。"
+  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "各ファイルのウェイポイント：{waypoints}。最大のファイル：{max}ウェイポイント。",
+  "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "固定の写真間隔も設定されています。写真の間隔はインターバルで決まり、固定距離は使用されません。",
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地表高が不完全なため、対地高度、撮影範囲、インターバルは不明です。"
 }

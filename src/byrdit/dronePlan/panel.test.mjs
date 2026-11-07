@@ -4931,20 +4931,57 @@ test('timing: a tilt that reaches the horizon gives no interval instead of a mad
   w.handle.destroy();
 });
 
-test('timing: an incomplete terrain model is called out; the interval assumes the planned height above ground', async () => {
-  const w = await timedWorld();
-  assert.equal(captureRole(w, 'timing-terrain').hidden, w.handle.getResult().terrainComplete !== false);
+test('timing: with incomplete terrain the interval and the overlap are unknown, not made up', async () => {
+  let complete = false;
+  let bad = null;
+  const w = setup({
+    sample: async (cartos) => {
+      // One point stays unreadable until `complete` flips, however it is
+      // batched (the fixture of the terrain-lock test above).
+      bad ??= `${cartos[3].longitude},${cartos[3].latitude}`;
+      return cartos.map((c) => ({
+        ...c,
+        height:
+          !complete && `${c.longitude},${c.latitude}` === bad ? undefined : 100,
+      }));
+    },
+  });
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.aglM = 100;
+  o.speedMs = 3.2;
+  o.captureMode = 'timed';
+  o.timedIntervalS = 7;
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().terrainComplete, false, 'the fixture really is incomplete');
+  const note = captureRole(w, 'timing-terrain');
+  assert.equal(note.hidden, false);
+  assert.match(note.textContent, /not known/);
+  const rec = captureRole(w, 'timing-recommended');
+  assert.equal(rec.getAttribute('data-seconds'), null, 'no interval figure');
+  assert.equal(captureRole(w, 'timing-recommended-value').textContent, '–');
+  assert.equal(captureRole(w, 'timing-result').hidden, true, 'no overlap figure');
+  assert.equal(captureRole(w, 'timing-result').getAttribute('data-front'), null);
+  assert.equal(captureRole(w, 'timing-fit').hidden, true);
+  // Complete terrain brings the figures back.
+  complete = true;
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().terrainComplete, true);
+  assert.equal(captureRole(w, 'timing-terrain').hidden, true);
+  assert.ok(captureRole(w, 'timing-recommended').getAttribute('data-seconds'));
+  assert.equal(captureRole(w, 'timing-result').hidden, false);
   w.handle.destroy();
-  const gap = setup({ sample: async (cartos) => cartos.map((c) => ({ ...c, height: undefined })) });
-  gap.handle.setBox(boxM(300, 200));
-  gap.handle.getState().options.captureMode = 'timed';
-  await gap.handle.replan();
-  if (gap.handle.getResult()?.terrainComplete === false) {
-    const note = captureRole(gap, 'timing-terrain');
-    assert.equal(note.hidden, false);
-    assert.match(note.textContent, /terrain/i);
-  }
-  gap.handle.destroy();
+});
+
+test('timing: a fixed photo spacing that a chosen Timed-shot interval overrides says so', async () => {
+  const w = await timedWorld({ photoSpacingM: 25 });
+  assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, true, 'no interval yet: the fixed distance is used');
+  const input = w.control(INTERVAL);
+  input.value = '7';
+  input.dispatch('input');
+  assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, false);
+  assert.match(captureRole(w, 'timing-spacing-ignored').textContent, /not used/);
+  w.handle.destroy();
 });
 
 test('timing: Plan all passes gives each pass its own overlap for the one interval', async () => {

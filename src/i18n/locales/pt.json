@@ -3914,7 +3914,6 @@
   "The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.": "O plano voa a {planned}, e não a {requested} como pediu: velocidade reduzida; motivo: {why}.",
   "blur at this shutter": "desfoque com este obturador",
   "the camera interval": "intervalo da câmara",
-  "Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.": "As alturas do terreno estão incompletas. O intervalo pressupõe a altura planeada acima do solo; a área coberta real pode ser diferente.",
   "That interval was not used: enter a positive number of seconds, up to {max}.": "Esse intervalo não foi usado: introduza um número positivo de segundos, até {max}.",
   "Cannot be calculated for these settings: check the camera tilt and height.": "Não é possível calcular com estas definições: verifique a inclinação e a altura da câmara.",
   "for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.": "para {front}% de sobreposição frontal a {speed}. Abaixo do mínimo da câmara de {min} s: abrande para {limit} ou reduza a sobreposição.",
@@ -3931,5 +3930,7 @@
   "Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.": "A contagem de estações, {photos}, é teórica, não são fotos que a câmara vai tirar. O intervalo está abaixo do mínimo da câmara.",
   "Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.": "Estações estimadas no plano: {photos}. Não é uma contagem de fotos que a câmara vai tirar. Inicia o disparo temporizado manualmente.",
   "Photos in the plan: {photos}.": "Fotos no plano: {photos}.",
-  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Pontos de passagem em cada ficheiro: {waypoints}. Maior ficheiro: {max} pontos de passagem."
+  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Pontos de passagem em cada ficheiro: {waypoints}. Maior ficheiro: {max} pontos de passagem.",
+  "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Também está definido um espaçamento fixo das fotos. O intervalo define o espaçamento; a distância fixa não é usada.",
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "As alturas do terreno estão incompletas, por isso a altura acima do solo, a área coberta e o intervalo não são conhecidos."
 }

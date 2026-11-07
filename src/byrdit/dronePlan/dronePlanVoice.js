@@ -5,7 +5,7 @@
  * control and does not change the panel. It calls the handle methods the
  * buttons already call, and it never puts caller text into an error.
  */
-import { MIN_AGL_M, AGL_CAP_M, MAX_TIMED_INTERVAL_S } from './planner.js';
+import { MIN_AGL_M, AGL_CAP_M, cleanTimedIntervalS } from './planner.js';
 import { MPH_PER_MS } from './timing.js';
 import { getPreset, kmzStatus, listPresets } from './presets.js';
 import { MODES, modeFor } from './recommend.js';
@@ -458,8 +458,14 @@ function readOptions(patch = {}) {
       return { ok: false, error: OUT_OF_RANGE };
     next.speedMs = patch.speedMs;
   }
+  // The same rule as the panel field: any positive number up to the maximum.
+  // A null is ignored here (the tool schema takes a number only), so the
+  // interval is cleared from the panel, not by voice.
   if (patch.timedIntervalS != null) {
-    if (!finite(patch.timedIntervalS, 0.1, MAX_TIMED_INTERVAL_S))
+    if (
+      typeof patch.timedIntervalS !== 'number' ||
+      cleanTimedIntervalS(patch.timedIntervalS) == null
+    )
       return { ok: false, error: OUT_OF_RANGE };
     next.timedIntervalS = patch.timedIntervalS;
   }

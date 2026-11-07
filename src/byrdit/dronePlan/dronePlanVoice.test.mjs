@@ -249,7 +249,17 @@ test('options forwards a timed-shot interval in seconds and refuses an unusable 
   const ok = await voice.options({ timedIntervalS: 7 });
   assert.equal(ok.ok, true);
   assert.deepEqual(calls.find((c) => c[0] === 'applyOptions')[1], { timedIntervalS: 7 });
-  for (const bad of [0, -2, 'seven', 4000, NaN]) {
+  // The same rule as the panel field: a small positive number is usable.
+  const small = await voice.options({ timedIntervalS: 0.05 });
+  assert.equal(small.ok, true);
+  // A null is ignored: the tool schema takes a number, so voice cannot clear it.
+  const before = calls.length;
+  await voice.options({ timedIntervalS: null });
+  assert.equal(
+    calls.slice(before).filter((c) => c[0] === 'applyOptions' && 'timedIntervalS' in c[1]).length,
+    0,
+  );
+  for (const bad of [0, -2, 'seven', 4000, NaN, true]) {
     const before = calls.length;
     const refused = await voice.options({ timedIntervalS: bad });
     assert.equal(refused.ok, false, String(bad));

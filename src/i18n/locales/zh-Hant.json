@@ -3746,7 +3746,6 @@
   "The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.": "計畫以 {planned} 飛行，而不是你要求的 {requested}：已降低，原因：{why}。",
   "blur at this shutter": "此快門速度下的拖影",
   "the camera interval": "相機間隔",
-  "Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.": "地形高度資料不完整。該間隔按計畫的離地高度計算；實際覆蓋範圍可能不同。",
   "That interval was not used: enter a positive number of seconds, up to {max}.": "未使用該間隔：請輸入正數秒數，最大 {max}。",
   "Cannot be calculated for these settings: check the camera tilt and height.": "這些設定下無法計算：請檢查相機傾角和高度。",
   "for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.": "為在 {speed} 下達到 {front}% 航向重疊率。低於相機最短間隔 {min} 秒：請減速至 {limit}，或降低重疊率。",
@@ -3763,5 +3762,7 @@
   "Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.": "站點數 {photos} 是理論值，不是相機實際會拍的照片數。間隔低於相機最短間隔。",
   "Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.": "計畫中的預計站點數：{photos}。這不是相機實際會拍的照片數。定時拍攝需你手動開始。",
   "Photos in the plan: {photos}.": "計畫中的照片：{photos}。",
-  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "每個檔案的航點數：{waypoints}。最大檔案：{max} 個航點。"
+  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "每個檔案的航點數：{waypoints}。最大檔案：{max} 個航點。",
+  "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "同時還設定了固定照片間距。由間隔決定間距，不使用固定距離。",
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地形高度資料不完整，因此離地高度、覆蓋範圍和間隔都不知道。"
 }

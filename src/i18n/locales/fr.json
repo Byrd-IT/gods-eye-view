@@ -3914,7 +3914,6 @@
   "The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.": "Le plan vole à {planned}, et non à {requested} comme demandé : vitesse abaissée (motif : {why}).",
   "blur at this shutter": "flou à cette vitesse d'obturation",
   "the camera interval": "l'intervalle de la caméra",
-  "Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.": "Les altitudes du sol sont incomplètes. L'intervalle suppose la hauteur prévue au-dessus du sol ; l'empreinte réelle peut différer.",
   "That interval was not used: enter a positive number of seconds, up to {max}.": "Cet intervalle n'a pas été utilisé : saisissez un nombre de secondes positif, jusqu'à {max}.",
   "Cannot be calculated for these settings: check the camera tilt and height.": "Calcul impossible avec ces réglages : vérifiez l'inclinaison et la hauteur de la caméra.",
   "for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.": "pour {front}% de chevauchement avant à {speed}. Inférieur au minimum de la caméra de {min} s : ralentissez à {limit} ou réduisez le chevauchement.",
@@ -3931,5 +3930,7 @@
   "Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.": "Le nombre de stations ({photos}) est théorique, pas le nombre de photos que la caméra prendra. L'intervalle est inférieur au minimum de la caméra.",
   "Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.": "Stations estimées dans le plan : {photos}. Ce n'est pas le nombre de photos que la caméra prendra. Vous lancez la prise temporisée à la main.",
   "Photos in the plan: {photos}.": "Photos dans le plan : {photos}.",
-  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Points de passage dans chaque fichier : {waypoints}. Plus grand fichier : {max} points de passage."
+  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Points de passage dans chaque fichier : {waypoints}. Plus grand fichier : {max} points de passage.",
+  "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Un espacement fixe des photos est aussi défini. L'intervalle fixe l'espacement ; la distance fixe n'est pas utilisée.",
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Les altitudes du sol sont incomplètes ; la hauteur au-dessus du sol, l'empreinte et l'intervalle ne sont donc pas connus."
 }

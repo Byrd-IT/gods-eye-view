@@ -4166,7 +4166,6 @@
   "The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.": "تُنفَّذ الخطة بسرعة {planned} لا {requested} المطلوبة: خُفِّضت بسبب {why}.",
   "blur at this shutter": "التمويه عند هذا الغالق",
   "the camera interval": "الفاصل الزمني للكاميرا",
-  "Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.": "ارتفاعات التضاريس غير مكتملة. يفترض الفاصل الارتفاع المخطط فوق الأرض؛ وقد تختلف المساحة المغطاة الفعلية.",
   "That interval was not used: enter a positive number of seconds, up to {max}.": "لم يُستخدم ذلك الفاصل: أدخل عددًا موجبًا من الثواني، حتى {max}.",
   "Cannot be calculated for these settings: check the camera tilt and height.": "لا يمكن الحساب لهذه الإعدادات: تحقق من ميل الكاميرا والارتفاع.",
   "for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.": "لتداخل أمامي {front}% عند {speed}. أقل من الحد الأدنى للكاميرا البالغ {min} ث: أبطئ إلى {limit} أو قلّل التداخل.",
@@ -4183,5 +4182,7 @@
   "Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.": "عدد المحطات {photos} نظري، وليس عدد الصور التي ستلتقطها الكاميرا. الفاصل أقل من الحد الأدنى للكاميرا.",
   "Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.": "المحطات المقدّرة في الخطة: {photos}. هذا ليس عدد الصور التي ستلتقطها الكاميرا. أنت تبدأ اللقطة الموقوتة يدويًا.",
   "Photos in the plan: {photos}.": "الصور في الخطة: {photos}.",
-  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "نقاط المسار في كل ملف: {waypoints}. أكبر ملف: {max} نقطة مسار."
+  "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "نقاط المسار في كل ملف: {waypoints}. أكبر ملف: {max} نقطة مسار.",
+  "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "تم أيضًا تحديد مسافة ثابتة بين الصور. يحدد الفاصل المسافة بين الصور؛ ولا تُستخدم المسافة الثابتة.",
+  "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "ارتفاعات التضاريس غير مكتملة، لذلك الارتفاع فوق الأرض والمساحة المغطاة والفاصل غير معروفة."
 }

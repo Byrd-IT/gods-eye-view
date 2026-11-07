@@ -1867,6 +1867,13 @@ export function initDronePlan({
         cls: 'gev-dp-note gev-dp-timing-result',
         attrs: { 'data-role': 'timing-result' },
       });
+      ui.timingSpacingNote = el(doc, 'p', ui.timingTimed, {
+        cls: 'gev-dp-note',
+        text: t(
+          'A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.',
+        ),
+        attrs: { 'data-role': 'timing-spacing-ignored' },
+      });
       ui.timingUnder = el(doc, 'p', ui.timingTimed, {
         cls: 'gev-dp-warning',
         attrs: { 'data-role': 'timing-under-minimum', 'data-tone': 'bad' },
@@ -3763,7 +3770,7 @@ export function initDronePlan({
     show(ui.timingTerrain, Boolean(terrainOff));
     ui.timingTerrain.textContent = terrainOff
       ? t(
-          'Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.',
+          'Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.',
         )
       : '';
     for (const key of ['data-seconds', 'data-desired-m', 'data-speed-ms'])
@@ -3794,7 +3801,19 @@ export function initDronePlan({
       'aria-invalid',
       state.timedReject === true ? 'true' : 'false',
     );
+    show(
+      ui.timingSpacingNote,
+      !orbit && timed && o.timedIntervalS != null && o.photoSpacingM > 0,
+    );
     if (orbit) return;
+    if (terrainOff) {
+      // Without the ground heights the footprint is unknown, so no figure is
+      // given: not the interval, not the overlap an interval would give.
+      ui.timingRecValue.textContent = '–';
+      ui.timingRecNote.textContent = '';
+      tone(ui.timingRecNote, null);
+      return;
+    }
 
     let figs = null;
     try {
