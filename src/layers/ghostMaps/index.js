@@ -227,7 +227,11 @@ export function createGhostMapsLayer({
   // Byrd-IT: in history the event-age window counts back from the viewed
   // moment, not from today, or every archived edition would look expired.
   function ageClock() {
-    return _historyT !== null ? _historyT : now();
+    // An archive that cannot answer falls back to the live editions, so the
+    // window counts from today again (show live and say so).
+    return _historyT !== null && _historyState?.status !== 'unavailable'
+      ? _historyT
+      : now();
   }
 
   // Remove expired entities, rather than hiding them: horizon culling must

@@ -676,3 +676,31 @@ test('in history the age window counts back from the viewed moment, and a backwa
   await layer.update(viewer);
   assert.deepEqual(names(), ['Later']);
 });
+
+test('an unavailable history archive falls back to the live age window', async (t) => {
+  const live = Date.UTC(2026, 10, 20, 12);
+  const early = Date.UTC(2026, 10, 4, 12);
+  const { layer, viewer } = fixture(t, {
+    now: () => live,
+    reports: [dated('Early', '11/2/2026'), dated('Later', '11/18/2026')],
+    historySource: {
+      getCatalogAt: async () => {
+        throw new Error('archive down');
+      },
+    },
+  });
+  const names = () =>
+    layer
+      .getAnalystRecords()
+      .map((r) => r.name)
+      .sort();
+  await layer.update(viewer);
+  assert.deepEqual(names(), ['Later']);
+  await layer.setHistoryTime(early);
+  assert.equal(layer.getHistoryState().status, 'unavailable');
+  assert.deepEqual(
+    names(),
+    ['Later'],
+    'the live fallback is not filtered from the historical moment',
+  );
+});
