@@ -821,3 +821,57 @@ test('README camera minimum uses the plan override and keeps 5 s when unset', ()
   assert.match(readmeText(legacy), /Camera minimum: 5\.0 s/);
   assert.doesNotMatch(readmeText(legacy), /Camera minimum: 8/);
 });
+
+test('mode A (stop at every photo) writes the same WPML as before the capture modes existed', async () => {
+  const { createHash } = await import('node:crypto');
+  const m = metersPerDegree(30.27);
+  const area = {
+    west: -97.77 - 400 / m.lon,
+    east: -97.77 + 400 / m.lon,
+    south: 30.27 - 300 / m.lat,
+    north: 30.27 + 300 / m.lat,
+  };
+  const out = [];
+  for (const o of [
+    { aglM: 100 },
+    { aglM: 305, speedMs: 7.8 },
+    { aglM: 100, photoMode: 'interval' },
+  ]) {
+    const plan = planFlight(area, { batteryMin: 20, ...o });
+    const ids = plan.legs.flatMap((l) => l.waypoints.map((w) => w.id));
+    const r = assembleMissions(plan, {
+      known: true,
+      takeoffM: 100,
+      wpM: ids.map((id) => 100 + (id % 5)),
+    });
+    for (const mi of r.missions) {
+      const f = buildMissionFiles(mi, r.plan, { createdMs: 1793176000000 });
+      out.push(f.waylinesWpml, f.templateKml);
+    }
+  }
+  // Hash of the output of the code before this feature (main 90a3cd52).
+  assert.equal(
+    createHash('sha256').update(out.join('\n')).digest('hex'),
+    '7c7266acc4ca5bddf00321c0226b5806df1ee9f067f742247eacedec998e4d7f',
+  );
+  assert.equal(out.length, 18);
+});
+
+test('README worked numbers: 305 m height, 7.8 m/s, 60 m gives 7.7 s; 89 m gives 11.4 s', () => {
+  for (const [spacing, seconds] of [
+    [60, '7.7'],
+    [89, '11.4'],
+  ]) {
+    const result = build({
+      aglM: 305,
+      speedMs: 7.8,
+      captureMode: 'distance',
+      photoSpacingM: spacing,
+      batteryMin: 60,
+    });
+    assert.match(
+      readmeText(result),
+      new RegExp(`Interval: ${seconds} s between pictures`),
+    );
+  }
+});
