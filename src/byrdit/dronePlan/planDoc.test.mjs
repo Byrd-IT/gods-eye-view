@@ -132,3 +132,134 @@ test('the camera preset round-trips and an unknown one is dropped', () => {
   bad.options.cameraPresetId = 'nope';
   assert.equal(readPlan(JSON.parse(JSON.stringify(serializePlan(bad)))).options.cameraPresetId, undefined);
 });
+
+test('interval capture settings round-trip; legacy plans do not grow defaults', () => {
+  for (const captureMode of ['stop', 'distance', 'timed']) {
+    const s = state();
+    s.options.photoMode = 'interval';
+    s.options.captureMode = captureMode;
+    s.options.photoSpacingM = 12.5;
+    s.options.continuousRoute = false;
+    s.options.usableBatteryMin = 18;
+    s.options.maxWaypoints = 80.5;
+    const doc = serializePlan(s);
+    assert.equal(doc.schema, 'gevplan');
+    assert.equal(doc.version, 1);
+    const back = readPlan(JSON.parse(JSON.stringify(doc)));
+    assert.equal(back.options.photoMode, 'interval');
+    assert.equal(back.options.captureMode, captureMode);
+    assert.equal(back.options.photoSpacingM, 12.5);
+    assert.equal(back.options.continuousRoute, false);
+    assert.equal(back.options.usableBatteryMin, 18);
+    assert.equal(back.options.maxWaypoints, 80.5);
+    const filed = parseGevPlanFile(buildGevPlanFile({ name: 'Interval' }, doc));
+    assert.equal(filed.plan.options.captureMode, captureMode);
+    assert.equal(filed.plan.options.continuousRoute, false);
+  }
+
+  const zero = state();
+  zero.options.photoSpacingM = 0;
+  zero.options.continuousRoute = true;
+  const zeroBack = readPlan(JSON.parse(JSON.stringify(serializePlan(zero))));
+  assert.equal(zeroBack.options.photoSpacingM, 0);
+  assert.equal(zeroBack.options.continuousRoute, true);
+
+  const legacy = readPlan({
+    schema: 'gevplan',
+    version: 1,
+    areas: [],
+    options: { speedMs: 4, photoMode: 'waypoint', batteryMin: 25 },
+  });
+  assert.equal(legacy.options.speedMs, 4);
+  assert.equal(legacy.options.photoMode, 'waypoint');
+  assert.equal(legacy.options.batteryMin, 25);
+  for (const key of ['captureMode', 'photoSpacingM', 'continuousRoute', 'usableBatteryMin', 'maxWaypoints', 'intervalTriggerProven', 'minPhotoIntervalS']) {
+    assert.equal(Object.hasOwn(legacy.options, key), false, key);
+  }
+
+  const dirty = state();
+  dirty.options.captureMode = 'hover';
+  dirty.options.photoSpacingM = null;
+  dirty.options.continuousRoute = 'yes';
+  dirty.options.usableBatteryMin = Infinity;
+  dirty.options.maxWaypoints = '200';
+  dirty.options.intervalTriggerProven = 'yes';
+  const dropped = readPlan(JSON.parse(JSON.stringify(serializePlan(dirty))));
+  assert.equal(dropped.options.captureMode, undefined);
+  assert.equal(Object.hasOwn(dropped.options, 'photoSpacingM'), false);
+  assert.equal(Object.hasOwn(dropped.options, 'continuousRoute'), false);
+  assert.equal(Object.hasOwn(dropped.options, 'usableBatteryMin'), false);
+  assert.equal(Object.hasOwn(dropped.options, 'maxWaypoints'), false);
+  assert.equal(Object.hasOwn(dropped.options, 'intervalTriggerProven'), false);
+});
+
+test('a forged intervalTriggerProven true is dropped from a plan and a .gevplan file', () => {
+  const on = state();
+  on.options.intervalTriggerProven = true;
+  const saved = serializePlan(on);
+  assert.equal(Object.hasOwn(saved.options, 'intervalTriggerProven'), false);
+  const onBack = readPlan(JSON.parse(JSON.stringify(saved)));
+  assert.equal(Object.hasOwn(onBack.options, 'intervalTriggerProven'), false);
+
+  const forged = {
+    schema: 'gevplan',
+    version: 1,
+    areas: [],
+    options: { captureMode: 'distance', intervalTriggerProven: true },
+  };
+  const read = readPlan(forged);
+  assert.equal(read.options.captureMode, 'distance');
+  assert.equal(Object.hasOwn(read.options, 'intervalTriggerProven'), false);
+  assert.notEqual(read.options.intervalTriggerProven, true);
+
+  const filed = parseGevPlanFile(buildGevPlanFile({ name: 'forged' }, forged));
+  assert.equal(filed.plan.options.captureMode, 'distance');
+  assert.equal(Object.hasOwn(filed.plan.options, 'intervalTriggerProven'), false);
+
+  const rawFile = JSON.stringify({
+    schema: 'gevplan',
+    version: 1,
+    kind: 'file',
+    details: { name: 'forged-raw' },
+    plan: {
+      schema: 'gevplan',
+      version: 1,
+      areas: [],
+      options: { intervalTriggerProven: true, captureMode: 'distance' },
+    },
+  });
+  const parsed = parseGevPlanFile(rawFile);
+  assert.equal(parsed.plan.options.captureMode, 'distance');
+  assert.equal(Object.hasOwn(parsed.plan.options, 'intervalTriggerProven'), false);
+});
+
+test('a custom camera minimum round-trips; invalid values are dropped', () => {
+  const s = state();
+  s.options.minPhotoIntervalS = 7.5;
+  const doc = serializePlan(s);
+  assert.equal(doc.options.minPhotoIntervalS, 7.5);
+  const back = readPlan(JSON.parse(JSON.stringify(doc)));
+  assert.equal(back.options.minPhotoIntervalS, 7.5);
+  const filed = parseGevPlanFile(buildGevPlanFile({ name: 'interval' }, doc));
+  assert.equal(filed.plan.options.minPhotoIntervalS, 7.5);
+
+  for (const bad of [0, -2, 61, NaN, '7.5', true, null]) {
+    const dirty = state();
+    dirty.options.minPhotoIntervalS = bad;
+    const saved = serializePlan(dirty);
+    assert.equal(
+      Object.hasOwn(saved.options, 'minPhotoIntervalS'),
+      false,
+      `saved ${bad}`,
+    );
+    const forged = {
+      schema: 'gevplan',
+      version: 1,
+      areas: [],
+      options: { minPhotoIntervalS: bad, speedMs: 4 },
+    };
+    const read = readPlan(forged);
+    assert.equal(Object.hasOwn(read.options, 'minPhotoIntervalS'), false, `read ${bad}`);
+    assert.equal(read.options.speedMs, 4);
+  }
+});

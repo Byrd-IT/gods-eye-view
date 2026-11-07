@@ -239,13 +239,13 @@ test('the mission split still caps a multi-area plan at 200 waypoints', () => {
       { id: 'a', name: 'One', kind: 'rect', box: a },
       { id: 'b', name: 'Two', kind: 'rect', box: b },
     ],
-    { ...opts, maxWaypoints: 12, jobGrouping: 'whole' },
+    { ...opts, maxWaypoints: 20, jobGrouping: 'whole' },
   );
   assert.equal(plan.error, undefined, plan.message);
   const built = assembleAreaPlan(plan, flatGround(plan));
   assert.ok(built.missions.length > 1, 'a short waypoint cap must split the plan');
   for (const mission of built.missions) {
-    assert.ok(mission.waypointCount <= 12);
+    assert.ok(mission.waypointCount <= 20);
   }
 });
 
@@ -1016,6 +1016,48 @@ test('an area with no photos of its own is left out of the jobs', () => {
   );
 });
 
+test('a polygon distance capture keeps endpoints and interval photo counts', () => {
+  const frame = makeFrame(-94.5, 32.7);
+  const ring = [
+    { x: 0, y: 0 },
+    { x: 220, y: 0 },
+    { x: 220, y: 160 },
+    { x: 0, y: 160 },
+  ].map((p) => frame.toLonLat(p.x, p.y));
+  const plan = planAreas(
+    [{ id: 'p', name: 'Poly', kind: 'polygon', ring }],
+    {
+      ...opts,
+      captureMode: 'distance',
+      photoSpacingM: 15,
+      batteryMin: 5,
+      maxWaypoints: 20,
+    },
+  );
+  assert.equal(plan.error, undefined, plan.message);
+  assert.equal(plan.options.captureMode, 'distance');
+  assert.equal(plan.options.continuousRoute, false);
+  assert.ok(plan.legs.length >= 2);
+  for (const leg of plan.legs) {
+    assert.equal(leg.captureMode, 'distance');
+    assert.equal(leg.waypoints.length, 2);
+    assert.equal(leg.photoSpacingM, 15);
+    assert.equal(leg.photoCount, Math.floor(leg.lengthM / 15 + 1e-9) + 1);
+    assert.ok(leg.waypoints.every((w) => w.photo === false));
+  }
+  const built = assembleAreaPlan(plan, flatGround(plan));
+  assert.ok(built.missions.length >= 1);
+  for (const mission of built.missions) {
+    assert.ok(mission.waypointCount <= 20);
+    assert.ok(mission.legs.every((leg) => leg.waypoints.length === 2));
+    assert.ok(mission.legs.every((leg) => leg.continued !== true));
+  }
+  assert.equal(
+    built.totals.photoCount,
+    plan.legs.reduce((sum, leg) => sum + leg.photoCount, 0),
+  );
+});
+
 test('the zip README says the 3D check is a visual aid with no collision detection', async () => {
   const { readmeText } = await import('./wpml.js');
   const a = boxAround(-94.5, 32.7, 140, 100);
@@ -1030,4 +1072,34 @@ test('the zip README says the 3D check is a visual aid with no collision detecti
   assert.match(readme, /3D check on the globe is a VISUAL aid only/);
   assert.match(readme, /does not detect a\s+collision/);
   assert.match(readme, /no trees or power lines/);
+});
+
+test('area plans carry usableBatteryMin through to the generated plan', () => {
+  const box = boxAround(-94.5, 32.7, 140, 100);
+  const plain = planAreas(
+    [{ id: 'a', name: 'Field', kind: 'rect', box }],
+    opts,
+  );
+  assert.equal(plain.error, undefined, plain.message);
+  assert.equal(plain.options.usableBatteryMin, 20);
+  assert.equal(plain.options.captureMode, 'stop');
+  const set = planAreas(
+    [{ id: 'a', name: 'Field', kind: 'rect', box }],
+    { ...opts, usableBatteryMin: 16, captureMode: 'distance', continuousRoute: true },
+  );
+  assert.equal(set.options.usableBatteryMin, 16);
+  assert.equal(set.options.continuousRoute, true);
+  const frame = makeFrame(-94.5, 32.7);
+  const ring = [
+    { x: 0, y: 0 },
+    { x: 180, y: 0 },
+    { x: 180, y: 120 },
+    { x: 0, y: 120 },
+  ].map((p) => frame.toLonLat(p.x, p.y));
+  const polygon = planAreas(
+    [{ id: 'p', name: 'Poly', kind: 'polygon', ring }],
+    { ...opts, usableBatteryMin: 18 },
+  );
+  assert.equal(polygon.error, undefined, polygon.message);
+  assert.equal(polygon.options.usableBatteryMin, 18);
 });

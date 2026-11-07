@@ -14,10 +14,28 @@ import {
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
 import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
-import { initDronePlan, planSummary } from './panel.js';
+import {
+  initDronePlan,
+  planSummary,
+  captureFigures,
+  captureTiltDeg,
+  continuousBatteryLines,
+  WARNING_TONE_COLOR,
+} from './panel.js';
 import { createBuildingFootprintProvider } from './buildingFootprints.js';
 import { downtownPayload, okResponse } from './buildingFixtures.mjs';
 import { createDronePlanVoice } from './dronePlanVoice.js';
+import { readPlan, serializePlan } from './planDoc.js';
+import { getPreset } from './presets.js';
+import { assembleMissions, footprint, planFlight, spacing, writtenSpacingM } from './planner.js';
+import { BATTERY_PAUSE_SOURCE, batteryPauseEstimate } from './preview.js';
+import { batteryBreaks } from './batteryBreaks.js';
+import { readmeText } from './wpml.js';
+import {
+  clearOverlaySource,
+  getWorldOverlayDiagnostics,
+} from '../../overlays/worldOverlay.js';
+import { SHUTTER_DENOMINATORS, speedLimits } from './speed.js';
 import { metersPerDegree } from './geo.js';
 import { MAX_OBSTACLES } from './obstacles.js';
 import { readZip } from './zip.js';
@@ -106,7 +124,8 @@ class El {
     );
   }
   dispatch(type, ev = {}) {
-    for (const fn of this.listeners.get(type) ?? []) fn({ target: this, ...ev });
+    for (const fn of this.listeners.get(type) ?? [])
+      fn({ target: this, ...ev });
   }
   click() {
     if (!this.disabled) this.dispatch('click');
@@ -131,8 +150,7 @@ function makeDoc() {
   entry.addEventListener('click', () => {
     panel.classList.toggle('collapsed');
   });
-  panel.querySelector = (sel) =>
-    sel === '.panel-collapse-btn' ? entry : null;
+  panel.querySelector = (sel) => (sel === '.panel-collapse-btn' ? entry : null);
   const byId = new Map([
     ['drone-plan-panel', panel],
     ['drone-plan-panel-body', body],
@@ -151,15 +169,33 @@ function makeDoc() {
 }
 
 // ----------------------------------------------------------- Cesium fakes --
-function makeWorld({ sample }) {
+function makeWorld({ sample, wrapPositions = false }) {
   const fakes = boxToolFakes();
+  class ConstantPositionProperty {
+    constructor(value) {
+      this.value = value;
+    }
+    getValue() {
+      return this.value;
+    }
+  }
   class CustomDataSource {
     constructor(name) {
       this.name = name;
       const values = [];
       this.entities = {
         values,
-        add: (e) => (values.push(e), e),
+        add: (e) => {
+          if (
+            wrapPositions &&
+            e?.position &&
+            typeof e.position.getValue !== 'function'
+          ) {
+            e = { ...e, position: new ConstantPositionProperty(e.position) };
+          }
+          values.push(e);
+          return e;
+        },
         remove: (e) => {
           const i = values.indexOf(e);
           if (i >= 0) values.splice(i, 1);
@@ -189,7 +225,11 @@ function makeWorld({ sample }) {
       fromDegreesArray: (v) => v,
       fromDegreesArrayHeights: (v) => ({ heights: v }),
       fromDegrees: (lon, lat, h) =>
-        h === undefined ? [lon, lat] : [lon, lat, h],
+        wrapPositions
+          ? { x: lon, y: lat, z: h ?? 0 }
+          : h === undefined
+            ? [lon, lat]
+            : [lon, lat, h],
     },
     Cartographic: {
       fromDegrees: (lon, lat) => ({ longitude: lon, latitude: lat }),
@@ -238,10 +278,14 @@ function setup({
   surfaceClient,
   renderPreview,
   storage = memoryStorage({ 'gev.dronePlan.units': 'm' }),
+  wrapPositions = false,
 } = {}) {
   resetPointerOwnership();
   const dom = makeDoc();
-  const world = makeWorld({ sample: (cartos) => sample(cartos) });
+  const world = makeWorld({
+    sample: (cartos) => sample(cartos),
+    wrapPositions,
+  });
   const downloads = [];
   const handle = initDronePlan({
     viewer: world.viewer,
@@ -352,7 +396,11 @@ test('a drawn box becomes stats, a path on the globe and downloadable missions',
   const w = setup();
   assert.ok(w.handle);
   assert.equal(w.panel.hidden, false, 'the card is always on the rail');
-  assert.equal(w.panel.classList.contains('collapsed'), true, 'and starts collapsed');
+  assert.equal(
+    w.panel.classList.contains('collapsed'),
+    true,
+    'and starts collapsed',
+  );
   assert.equal(w.handle.setBox(boxM(400, 200)), true);
   await w.handle.replan();
   const stats = w.stats();
@@ -982,7 +1030,12 @@ test('orbit: building footprints from the provider become the recommended target
   const world = makeWorld({ sample: (c) => flat(c) });
   const m = metersPerDegree(30.27);
   const sq = (dx, dy, s) =>
-    [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => ({
+    [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ].map(([a, b]) => ({
       lon: -97.77 + (dx + (a * s) / 2) / m.lon,
       lat: 30.27 + (dy + (b * s) / 2) / m.lat,
     }));
@@ -1072,15 +1125,11 @@ test('orbit: obstacle height raises the orbit and shows the fly-over height', as
   await w.handle.replan();
   const plan = w.handle.getResult().plan;
   assert.equal(plan.orbit.minAglM, 50);
+  assert.ok(plan.legs.flatMap((l) => l.waypoints).every((wp) => wp.aglM >= 50));
   assert.ok(
-    plan.legs
-      .flatMap((l) => l.waypoints)
-      .every((wp) => wp.aglM >= 50),
-  );
-  assert.ok(
-    w.handle.getResult().warnings.some(
-      (x) => x.code === 'orbit-raised-for-obstacles',
-    ),
+    w.handle
+      .getResult()
+      .warnings.some((x) => x.code === 'orbit-raised-for-obstacles'),
   );
   assert.ok(w.stats()['Fly-over height']);
   w.handle.destroy();
@@ -1252,7 +1301,9 @@ test('orbit: the Overpass provider feeds the panel; targets get sized orbits and
   assert.equal(calls.length, 1, 'one lookup per area set');
   assert.equal(calls[0].url, '/api/overpass');
   const targets = handle.getState().options.orbitTargets;
-  assert.ok(targets.length >= 3 && targets.every((x) => x.source === 'building'));
+  assert.ok(
+    targets.length >= 3 && targets.every((x) => x.source === 'building'),
+  );
   assert.ok(targets.every((x) => x.radiusM >= 10 && x.radiusM <= 300));
   const orbit = handle.getResult().plan.orbit;
   const hall = orbit.targets.find((x) => x.label === 'Hall');
@@ -1276,7 +1327,10 @@ test('orbit: a failing or timed-out lookup falls back to the area centre', async
       cesium: world.cesium,
       document: dom.doc,
       downloadFile: () => {},
-      getBuildingFootprints: createBuildingFootprintProvider({ fetchImpl, timeoutMs: 15 }),
+      getBuildingFootprints: createBuildingFootprintProvider({
+        fetchImpl,
+        timeoutMs: 15,
+      }),
     });
     handle.setBox(boxM(300, 200));
     handle.applyOptions({ pattern: 'orbit' });
@@ -1284,8 +1338,14 @@ test('orbit: a failing or timed-out lookup falls back to the area centre', async
     await new Promise((r) => setTimeout(r, 50));
     await handle.replan();
     const targets = handle.getState().options.orbitTargets;
-    assert.deepEqual(targets.map((x) => x.source), ['area']);
-    assert.equal(handle.getResult().plan.orbit.targets[0].radiusM, handle.getResult().plan.options.orbitRadiusM);
+    assert.deepEqual(
+      targets.map((x) => x.source),
+      ['area'],
+    );
+    assert.equal(
+      handle.getResult().plan.orbit.targets[0].radiusM,
+      handle.getResult().plan.options.orbitRadiusM,
+    );
     handle.destroy();
   }
 });
@@ -1320,8 +1380,16 @@ test('3D check section: defaults are zone 10 m, curtain on, one pyramid, and it 
   await w.handle.replan();
   assert.ok(checkOf(w, 'zone').length >= 1);
   assert.ok(checkOf(w, 'curtain').length >= 1);
-  assert.equal(checkOf(w, 'footprint').length, 0, 'no bulk footprints by default');
-  assert.equal(checkOf(w, 'current').length, 2, 'the photo in view: fill and outline');
+  assert.equal(
+    checkOf(w, 'footprint').length,
+    0,
+    'no bulk footprints by default',
+  );
+  assert.equal(
+    checkOf(w, 'current').length,
+    2,
+    'the photo in view: fill and outline',
+  );
   assert.equal(checkOf(w, 'view').length, 5, 'one pyramid');
   assert.equal(checkOf(w, 'zone')[0].polylineVolume.shape[1].x, 10);
   w.handle.destroy();
@@ -1337,12 +1405,17 @@ test('3D check: the width slider rebuilds only the zone, after it settles', asyn
   slider.dispatch('input');
   slider.value = '20';
   slider.dispatch('input');
-  assert.equal(checkOf(w, 'zone')[0].polylineVolume.shape[1].x, 10, 'debounced');
+  assert.equal(
+    checkOf(w, 'zone')[0].polylineVolume.shape[1].x,
+    10,
+    'debounced',
+  );
   await wait(260);
   assert.equal(checkOf(w, 'zone')[0].polylineVolume.shape[1].x, 20);
   assert.ok(checkOf(w, 'curtain').every((e, i) => e === curtain[i]));
   assert.match(
-    w.find((n) => n.tagName === 'OUTPUT' && /20 m/.test(n.textContent))[0].textContent,
+    w.find((n) => n.tagName === 'OUTPUT' && /20 m/.test(n.textContent))[0]
+      .textContent,
     /20 m/,
   );
   w.handle.destroy();
@@ -1362,7 +1435,11 @@ test('3D check: toggles remove only their own layer; master switch removes all',
     select.value = value;
     select.dispatch('change');
   };
-  assert.equal(checkOf(w, 'footprint').length, 0, 'default: no bulk footprints');
+  assert.equal(
+    checkOf(w, 'footprint').length,
+    0,
+    'default: no bulk footprints',
+  );
   assert.equal(checkOf(w, 'current').length, 2, 'default: the photo in view');
   setFootprints('all');
   assert.ok(checkOf(w, 'footprint').length > 1);
@@ -1386,7 +1463,10 @@ test('3D check: toggles remove only their own layer; master switch removes all',
   flipTo('curtain', true);
   assert.ok(checkOf(w, 'curtain').length);
   flipTo('enabled', false);
-  assert.equal(globe(w).filter((e) => e.name?.startsWith('3D check')).length, 0);
+  assert.equal(
+    globe(w).filter((e) => e.name?.startsWith('3D check')).length,
+    0,
+  );
   assert.equal(checkBox(w, 'zone').disabled, true);
   w.handle.destroy();
 });
@@ -1400,7 +1480,8 @@ test('3D check: the photo slider steps one pyramid through the plan and the read
   assert.ok(photos > 10, `photos ${photos}`);
   assert.equal(slider.value, '1');
   const readout = () =>
-    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0].textContent;
+    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0]
+      .textContent;
   assert.match(readout(), /Photo 1 of/);
   const first = checkOf(w, 'view')[0].polygon.hierarchy.heights.slice(0, 3);
   slider.value = '9';
@@ -1415,7 +1496,11 @@ test('3D check: the photo slider steps one pyramid through the plan and the read
   view.value = 'thinned';
   view.dispatch('change');
   assert.ok(checkOf(w, 'view').length > 5);
-  assert.equal(checkSlider(w, 'photo').disabled, true, 'slider only in one-at-a-time mode');
+  assert.equal(
+    checkSlider(w, 'photo').disabled,
+    true,
+    'slider only in one-at-a-time mode',
+  );
   w.handle.destroy();
 });
 
@@ -1432,12 +1517,17 @@ test('3D check follows each pass checkbox and goes with replan and destroy', asy
   assert.equal(passesOf('curtain').has('oblique60'), false);
   assert.equal(passesOf('zone').has('nadir'), true);
   assert.match(
-    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0].textContent,
+    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0]
+      .textContent,
     /Photo 1 of/,
   );
   w.handle.setBox(boxM(200, 200));
   await w.handle.replan();
-  assert.equal(passesOf('zone').has('nadir'), false, 'replan drops the suite layers');
+  assert.equal(
+    passesOf('zone').has('nadir'),
+    false,
+    'replan drops the suite layers',
+  );
   assert.ok(checkOf(w, 'zone').length >= 1, 'single plan drawn instead');
   w.handle.destroy();
   assert.equal(globe(w).length, 0);
@@ -1445,8 +1535,26 @@ test('3D check follows each pass checkbox and goes with replan and destroy', asy
 
 // -------------------------------------------------- per-obstacle heights --
 const obstacleRows = () => [
-  { id: 'faa-48-1', kind: 'tower', source: 'faa', lon: -97.77, lat: 30.27, radiusM: 6, estimatedHeightM: 61, heightM: 61 },
-  { id: 'chm-1', kind: 'tree', source: 'canopy', lon: -97.7695, lat: 30.2703, radiusM: 20, estimatedHeightM: 18, heightM: 18 },
+  {
+    id: 'faa-48-1',
+    kind: 'tower',
+    source: 'faa',
+    lon: -97.77,
+    lat: 30.27,
+    radiusM: 6,
+    estimatedHeightM: 61,
+    heightM: 61,
+  },
+  {
+    id: 'chm-1',
+    kind: 'tree',
+    source: 'canopy',
+    lon: -97.7695,
+    lat: 30.2703,
+    radiusM: 20,
+    estimatedHeightM: 18,
+    heightM: 18,
+  },
 ];
 
 function obstacleWorld(fetchObstacles) {
@@ -1484,18 +1592,27 @@ test('obstacles: open-data estimates appear in the panel with their source', asy
   const list = w.handle.obstacles.list();
   assert.deepEqual(list.map((o) => o.id).sort(), ['chm-1', 'faa-48-1']);
   assert.equal(w.heightBox('faa-48-1').value, '61');
-  const text = w.find((n) => n.className.includes('gev-dp-obstacle-source')).map((n) => n.textContent);
-  assert.ok(text.some((x) => x.includes('FAA obstacle file: 61 m')), text.join('|'));
+  const text = w
+    .find((n) => n.className.includes('gev-dp-obstacle-source'))
+    .map((n) => n.textContent);
+  assert.ok(
+    text.some((x) => x.includes('FAA obstacle file: 61 m')),
+    text.join('|'),
+  );
   assert.ok(w.overlays.some((l) => l?.some((e) => e.title === 'tower 61 m')));
   assert.match(
-    w.find((n) => n.className.includes('gev-dp-obstacle-disclaimer'))[0].textContent,
+    w.find((n) => n.className.includes('gev-dp-obstacle-disclaimer'))[0]
+      .textContent,
     /not a survey.*Trees grow.*Power lines.*not flight-tested/s,
   );
   w.handle.destroy();
 });
 
 test('obstacles: typing a height changes the column and the plan, Reset goes back, x removes', async () => {
-  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  const w = obstacleWorld(async () => ({
+    obstacles: obstacleRows(),
+    status: {},
+  }));
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   await settle();
@@ -1505,16 +1622,26 @@ test('obstacles: typing a height changes the column and the plan, Reset goes bac
   const o = w.handle.obstacles.list().find((x) => x.id === 'faa-48-1');
   assert.equal(o.heightM, 90);
   assert.equal(o.userEdited, true);
-  assert.equal(w.handle.getState().options.obstacles.find((x) => x.id === 'faa-48-1').heightM, 90);
+  assert.equal(
+    w.handle.getState().options.obstacles.find((x) => x.id === 'faa-48-1')
+      .heightM,
+    90,
+  );
   w.overlays.length = 0;
   w.handle.obstacles.setHeight('chm-1', 25);
   assert.ok(w.overlays.at(-1).some((e) => e.title === 'tree 25 m'));
   const reset = w.button('data-reset-obstacle', 'faa-48-1');
   assert.equal(reset.disabled, false);
   reset.dispatch('click');
-  assert.equal(w.handle.obstacles.list().find((x) => x.id === 'faa-48-1').heightM, 61);
+  assert.equal(
+    w.handle.obstacles.list().find((x) => x.id === 'faa-48-1').heightM,
+    61,
+  );
   w.button('data-remove-obstacle', 'chm-1').dispatch('click');
-  assert.deepEqual(w.handle.obstacles.list().map((x) => x.id), ['faa-48-1']);
+  assert.deepEqual(
+    w.handle.obstacles.list().map((x) => x.id),
+    ['faa-48-1'],
+  );
   w.handle.destroy();
 });
 
@@ -1533,10 +1660,14 @@ test('obstacles: an edit survives a new look-up, and a failing look-up never blo
   fail = true;
   w.handle.obstacles.refresh();
   await settle();
-  assert.equal(w.handle.obstacles.list().find((x) => x.id === 'faa-48-1').heightM, 99);
+  assert.equal(
+    w.handle.obstacles.list().find((x) => x.id === 'faa-48-1').heightM,
+    99,
+  );
   assert.ok(w.handle.obstacles.list().some((x) => x.id === mine.id));
   assert.match(
-    w.find((n) => n.className.includes('gev-dp-obstacle-status'))[0].textContent,
+    w.find((n) => n.className.includes('gev-dp-obstacle-status'))[0]
+      .textContent,
     /unavailable/,
   );
   await w.handle.replan();
@@ -1549,19 +1680,27 @@ test('obstacles: a tall obstacle lifts the plan and warns; the plan keeps workin
   w.handle.setBox(boxM(160, 160));
   w.handle.getState().options.aglM = 40;
   await w.handle.replan();
-  const before = w.handle.getResult().missions.flatMap((m) => m.waypoints).map((p) => p.aglM);
+  const before = w.handle
+    .getResult()
+    .missions.flatMap((m) => m.waypoints)
+    .map((p) => p.aglM);
   assert.ok(before.every((h) => h === 40));
   w.handle.obstacles.add({ lon: -97.77, lat: 30.27, heightM: 80 });
   await settle();
   await w.handle.replan();
   const after = w.handle.getResult();
-  assert.ok(after.missions.flatMap((m) => m.waypoints).some((p) => p.aglM >= 85));
+  assert.ok(
+    after.missions.flatMap((m) => m.waypoints).some((p) => p.aglM >= 85),
+  );
   assert.ok(after.warnings.some((x) => x.code === 'obstacle-raised'));
   w.handle.destroy();
 });
 
 test('obstacles: closing the panel and starting over forgets the obstacles', async () => {
-  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  const w = obstacleWorld(async () => ({
+    obstacles: obstacleRows(),
+    status: {},
+  }));
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   await settle();
@@ -1571,31 +1710,49 @@ test('obstacles: closing the panel and starting over forgets the obstacles', asy
 });
 
 test('obstacles: Reset and x still redraw the list while that button has focus', async () => {
-  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  const w = obstacleWorld(async () => ({
+    obstacles: obstacleRows(),
+    status: {},
+  }));
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   await settle();
   w.handle.obstacles.setHeight('faa-48-1', 90);
   // Like a browser: the list contains whatever is inside it.
-  const listNode = w.find((n) => n.className.includes('gev-dp-obstacle-list'))[0];
+  const listNode = w.find((n) =>
+    n.className.includes('gev-dp-obstacle-list'),
+  )[0];
   listNode.contains = (n) => all(listNode, (x) => x === n).length > 0;
   const reset = w.button('data-reset-obstacle', 'faa-48-1');
   w.doc.activeElement = reset;
   reset.dispatch('click');
-  assert.equal(w.heightBox('faa-48-1').value, '61', 'the box shows the estimate again');
+  assert.equal(
+    w.heightBox('faa-48-1').value,
+    '61',
+    'the box shows the estimate again',
+  );
   const remove = w.button('data-remove-obstacle', 'chm-1');
   w.doc.activeElement = remove;
   remove.dispatch('click');
-  assert.equal(w.button('data-remove-obstacle', 'chm-1'), undefined, 'the row is gone');
+  assert.equal(
+    w.button('data-remove-obstacle', 'chm-1'),
+    undefined,
+    'the row is gone',
+  );
   w.handle.destroy();
 });
 
 test('obstacles: Enter in a height box (change, box still focused) enables Reset in place', async () => {
-  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  const w = obstacleWorld(async () => ({
+    obstacles: obstacleRows(),
+    status: {},
+  }));
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   await settle();
-  const listNode = w.find((n) => n.className.includes('gev-dp-obstacle-list'))[0];
+  const listNode = w.find((n) =>
+    n.className.includes('gev-dp-obstacle-list'),
+  )[0];
   listNode.contains = (n) => all(listNode, (x) => x === n).length > 0;
   const box = w.heightBox('faa-48-1');
   w.doc.activeElement = box;
@@ -1606,7 +1763,11 @@ test('obstacles: Enter in a height box (change, box still focused) enables Reset
   assert.equal(w.heightBox('faa-48-1'), box, 'same node while typing');
   box.dispatch('change'); // Enter or blur commits
   const reset = w.button('data-reset-obstacle', 'faa-48-1');
-  assert.equal(reset, resetBefore, 'the row is not rebuilt, so a click on Reset is not lost');
+  assert.equal(
+    reset,
+    resetBefore,
+    'the row is not rebuilt, so a click on Reset is not lost',
+  );
   assert.equal(w.heightBox('faa-48-1'), box, 'keyboard focus stays in the box');
   assert.equal(reset.disabled, false, 'Reset follows the committed edit');
   w.doc.activeElement = reset; // a click moves focus to the button first
@@ -1630,7 +1791,8 @@ test('obstacles: the status line shows THIS look-up\'s "not planned" count', asy
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   await settle();
-  const text = w.find((n) => n.className.includes('gev-dp-obstacle-status'))[0].textContent;
+  const text = w.find((n) => n.className.includes('gev-dp-obstacle-status'))[0]
+    .textContent;
   assert.ok(text.includes('7 more not planned'), text);
   w.handle.destroy();
 });
@@ -1654,21 +1816,31 @@ test('obstacles: a newer look-up aborts the older one', async () => {
 });
 
 test('obstacles: an obstacle the operator added can be set to a tower, and the credit line is shown', async () => {
-  const w = obstacleWorld(async () => ({ obstacles: obstacleRows(), status: {} }));
+  const w = obstacleWorld(async () => ({
+    obstacles: obstacleRows(),
+    status: {},
+  }));
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   await settle();
   const mine = w.handle.obstacles.add({ lon: -97.7701, lat: 30.2701 });
-  const sel = w.find((n) => n.getAttribute?.('data-obstacle-kind') === mine.id)[0];
+  const sel = w.find(
+    (n) => n.getAttribute?.('data-obstacle-kind') === mine.id,
+  )[0];
   assert.ok(sel, 'a kind selector for user obstacles');
-  assert.equal(w.find((n) => n.getAttribute?.('data-obstacle-kind') === 'faa-48-1').length, 0, 'not for open-data rows');
+  assert.equal(
+    w.find((n) => n.getAttribute?.('data-obstacle-kind') === 'faa-48-1').length,
+    0,
+    'not for open-data rows',
+  );
   sel.value = 'tower';
   sel.dispatch('change');
   const o = w.handle.obstacles.list().find((x) => x.id === mine.id);
   assert.equal(o.kind, 'tower');
   assert.equal(o.radiusM, 6);
   assert.match(
-    w.find((n) => n.className.includes('gev-dp-obstacle-credit'))[0].textContent,
+    w.find((n) => n.className.includes('gev-dp-obstacle-credit'))[0]
+      .textContent,
     /Meta and WRI \(CC BY 4\.0\).*FAA.*OpenStreetMap/,
   );
   w.handle.destroy();
@@ -1680,14 +1852,36 @@ const roleNode = (w, role) =>
 
 test('Steps: nine numbered collapsible steps hold every control in the planned order', () => {
   const w = setup();
-  const steps = w.find((n) => n.tagName === 'DETAILS' && n.getAttribute('data-step'));
+  const steps = w.find(
+    (n) => n.tagName === 'DETAILS' && n.getAttribute('data-step'),
+  );
   assert.deepEqual(
     steps.map((n) => n.getAttribute('data-step')),
-    ['area', 'aircraft', 'shots', 'orbits', 'obstacles', 'flight', 'plan', 'check', 'export'],
+    [
+      'area',
+      'aircraft',
+      'shots',
+      'orbits',
+      'obstacles',
+      'flight',
+      'plan',
+      'check',
+      'export',
+    ],
   );
   const title = (n) => n.children[0].children[1].textContent;
   const num = (n) => n.children[0].children[0].textContent;
-  assert.deepEqual(steps.map(num), ['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  assert.deepEqual(steps.map(num), [
+    '1',
+    '2',
+    '3',
+    '4',
+    '5',
+    '6',
+    '7',
+    '8',
+    '9',
+  ]);
   assert.deepEqual(steps.map(title), [
     'Area',
     'Aircraft & camera',
@@ -1705,7 +1899,9 @@ test('Steps: nine numbered collapsible steps hold every control in the planned o
   };
   const stepOf = (node) => steps.findIndex((s) => inside(s, node)) + 1;
   const action = (name) =>
-    w.buttons('data-action').find((b) => b.getAttribute('data-action') === name);
+    w
+      .buttons('data-action')
+      .find((b) => b.getAttribute('data-action') === name);
   assert.equal(stepOf(action('draw-box')), 1);
   assert.equal(stepOf(action('draw-polygon')), 1);
   assert.equal(stepOf(w.control('Aircraft')), 2);
@@ -1726,7 +1922,10 @@ test('Steps: nine numbered collapsible steps hold every control in the planned o
   assert.equal(stepOf(action('add-obstacle')), 5);
   assert.equal(stepOf(checkSlider(w, 'width')), 5);
   assert.equal(stepOf(w.control('Speed')), 6);
-  assert.equal(stepOf(w.control('Usable flight time per battery (minutes)')), 6);
+  assert.equal(
+    stepOf(w.control('Usable flight time per battery (minutes)')),
+    6,
+  );
   assert.equal(stepOf(w.control('Processing jobs')), 6);
   assert.equal(stepOf(action('plan-suite')), 7);
   assert.equal(stepOf(roleNode(w, 'suite')), 7);
@@ -1736,7 +1935,10 @@ test('Steps: nine numbered collapsible steps hold every control in the planned o
   assert.equal(stepOf(checkBox(w, 'footprints')), 8);
   assert.equal(stepOf(checkSlider(w, 'alpha-zone')), 8);
   assert.equal(stepOf(roleNode(w, 'check-readout')), 8);
-  assert.equal(stepOf(w.find((n) => n.className.includes('gev-dp-library-host'))[0]), 9);
+  assert.equal(
+    stepOf(w.find((n) => n.className.includes('gev-dp-library-host'))[0]),
+    9,
+  );
   assert.equal(stepOf(w.find((n) => n.className === 'gev-dp-missions')[0]), 9);
   w.handle.destroy();
 });
@@ -1782,7 +1984,8 @@ test('Steps: open or closed is remembered per browser', () => {
   assert.equal(saved.flight, true);
   assert.equal(saved.area, false);
   const again = setup({ storage });
-  const step2 = (key) => again.find((n) => n.getAttribute('data-step') === key)[0];
+  const step2 = (key) =>
+    again.find((n) => n.getAttribute('data-step') === key)[0];
   assert.equal(step2('flight').getAttribute('open'), '');
   assert.equal(step2('area').getAttribute('open'), null);
   again.handle.destroy();
@@ -1801,7 +2004,8 @@ test('Adjust: Orbit targets show for the Orbit pattern, and after PLAN ALL with 
   assert.equal(targetsHidden(), false, 'after PLAN ALL: shown');
   assert.equal(w.buttons('data-remove-target').length, 1, 'a target is listed');
   assert.equal(
-    w.handle.getState().suite.passes.find((p) => p.id === 'orbit').result.plan.orbit.targets.length,
+    w.handle.getState().suite.passes.find((p) => p.id === 'orbit').result.plan
+      .orbit.targets.length,
     1,
   );
   // Removing a target replans (the suite goes stale) but the list stays.
@@ -1830,7 +2034,11 @@ const fakeResult = (durationS, missionCount) => ({
 
 test('summary: a single plan shows time in the air, flights and batteries from its totals', async () => {
   const w = setup();
-  assert.equal(roleNode(w, 'plan-summary').hidden, true, 'nothing without a plan');
+  assert.equal(
+    roleNode(w, 'plan-summary').hidden,
+    true,
+    'nothing without a plan',
+  );
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   const { totals } = w.handle.getResult();
@@ -1851,29 +2059,49 @@ test('summary: PLAN ALL shows the grand total over all passes, hidden ones inclu
   await w.handle.replan();
   await w.handle.planSuite();
   const st = w.handle.getState();
-  const flights = st.suite.passes.reduce((n, p) => n + p.result.totals.missionCount, 0);
-  const seconds = st.suite.passes.reduce((n, p) => n + p.result.totals.durationS, 0);
-  const expected = planSummary({ suite: st.suite, result: null, batteryMin: st.options.batteryMin });
+  const flights = st.suite.passes.reduce(
+    (n, p) => n + p.result.totals.missionCount,
+    0,
+  );
+  const seconds = st.suite.passes.reduce(
+    (n, p) => n + p.result.totals.durationS,
+    0,
+  );
+  const expected = planSummary({
+    suite: st.suite,
+    result: null,
+    batteryMin: st.options.batteryMin,
+  });
   assert.equal(expected.flights, flights);
   assert.equal(expected.durationS, seconds);
   const hidden = summaryText(w);
   w.handle.getState().suiteHidden.add('oblique45');
   w.handle.getState().suiteHidden.add('orbit');
-  assert.equal(summaryText(w), hidden, 'hiding passes does not change the total');
+  assert.equal(
+    summaryText(w),
+    hidden,
+    'hiding passes does not change the total',
+  );
   assert.ok(hidden.includes(` · ${flights} flights · `), hidden);
   w.handle.destroy();
 });
 
 test('summary math: ceil of air time over battery time, at least one battery', () => {
-  const r2 = (m) => planSummary({ suite: null, result: fakeResult(600, 1), batteryMin: m });
-  const r = (s, n) => planSummary({ suite: null, result: fakeResult(s, n), batteryMin: 25 });
+  const r2 = (m) =>
+    planSummary({ suite: null, result: fakeResult(600, 1), batteryMin: m });
+  const r = (s, n) =>
+    planSummary({ suite: null, result: fakeResult(s, n), batteryMin: 25 });
   assert.equal(r(26 * 60, 2).batteries, 2, '26 min on 25 min batteries');
   assert.equal(r(25 * 60, 1).batteries, 1);
   assert.equal(r(60, 1).batteries, 1);
   assert.equal(r(0, 1).batteries, 1, 'at least one with a plan');
-  assert.equal(planSummary({ suite: null, result: null, batteryMin: 25 }), null);
   assert.equal(
-    planSummary({ suite: null, result: fakeResult(600, 1), batteryMin: 0 }).minutes,
+    planSummary({ suite: null, result: null, batteryMin: 25 }),
+    null,
+  );
+  assert.equal(
+    planSummary({ suite: null, result: fakeResult(600, 1), batteryMin: 0 })
+      .minutes,
     25,
     'bad battery time falls back to 25',
   );
@@ -1882,10 +2110,18 @@ test('summary math: ceil of air time over battery time, at least one battery', (
 
 test('summary: more flights than batteries adds the shared-battery note', async () => {
   const w = setup();
-  const sum = planSummary({ suite: null, result: fakeResult(20 * 60, 3), batteryMin: 25 });
+  const sum = planSummary({
+    suite: null,
+    result: fakeResult(20 * 60, 3),
+    batteryMin: 25,
+  });
   assert.equal(sum.batteries, 1);
   assert.equal(sum.sharedBatteries, true);
-  assert.equal(planSummary({ suite: null, result: fakeResult(40 * 60, 2), batteryMin: 25 }).sharedBatteries, false);
+  assert.equal(
+    planSummary({ suite: null, result: fakeResult(40 * 60, 2), batteryMin: 25 })
+      .sharedBatteries,
+    false,
+  );
   // A real plan with more flights than batteries: a low waypoint cap splits the plan into flights while the
   // air time still fits one 60 min battery.
   w.handle.applyOptions({ batteryMin: 60 });
@@ -1893,7 +2129,10 @@ test('summary: more flights than batteries adds the shared-battery note', async 
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   const { totals } = w.handle.getResult();
-  assert.ok(totals.missionCount >= 2, `needs 2+ flights, got ${totals.missionCount}`);
+  assert.ok(
+    totals.missionCount >= 2,
+    `needs 2+ flights, got ${totals.missionCount}`,
+  );
   assert.ok(totals.durationS <= 60 * 60, 'fits one battery');
   assert.match(summaryText(w), /about 1 battery \(60 min each\)/);
   assert.match(summaryText(w), /200-waypoint limit/);
@@ -1912,7 +2151,14 @@ test('summary: a pass that did not plan is left out of the total and named', () 
   assert.equal(s.durationS, 1500);
   assert.equal(s.flights, 3);
   assert.deepEqual(s.failed, ['Orbits']);
-  assert.equal(planSummary({ suite: { passes: [{ id: 'a', label: 'A', result: null }] }, result: null, batteryMin: 25 }), null);
+  assert.equal(
+    planSummary({
+      suite: { passes: [{ id: 'a', label: 'A', result: null }] },
+      result: null,
+      batteryMin: 25,
+    }),
+    null,
+  );
 });
 
 test('PLAN ALL: a late building-footprint reply does not wipe the suite, and the orbit pass uses the buildings', async () => {
@@ -1940,13 +2186,24 @@ test('PLAN ALL: a late building-footprint reply does not wipe the suite, and the
       lat: 30.27 + (b * 20) / c.lat,
     });
     late.resolve([
-      { ring: [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)], label: 'Hall' },
+      {
+        ring: [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)],
+        label: 'Hall',
+      },
     ]);
     await planned;
     await wait(400);
-    assert.ok(handle.getState().suite, `${pattern}: the suite survives the late reply`);
-    const targets = handle.getState().suite.passes.find((p) => p.id === 'orbit').result.plan.orbit.targets;
-    assert.deepEqual(targets.map((x) => x.label), ['Hall'], `${pattern}: orbit pass uses the building`);
+    assert.ok(
+      handle.getState().suite,
+      `${pattern}: the suite survives the late reply`,
+    );
+    const targets = handle.getState().suite.passes.find((p) => p.id === 'orbit')
+      .result.plan.orbit.targets;
+    assert.deepEqual(
+      targets.map((x) => x.label),
+      ['Hall'],
+      `${pattern}: orbit pass uses the building`,
+    );
     handle.destroy();
   }
 });
@@ -1966,7 +2223,10 @@ test('a saved plan reopens editable: areas, settings, takeoff, targets and missi
   const w = setup();
   w.handle.setBox(boxM(400, 200));
   await w.handle.replan();
-  w.handle.applyOptions({ aglM: 65, speedMs: 4, pattern: 'double' }, { planNow: true });
+  w.handle.applyOptions(
+    { aglM: 65, speedMs: 4, pattern: 'double' },
+    { planNow: true },
+  );
   await w.handle.replan();
   const state = w.handle.getState();
   state.controllerIds = ['9560F7B3-DAA9-481A-B2F5-37CCF3B8B996'];
@@ -1986,7 +2246,10 @@ test('a saved plan reopens editable: areas, settings, takeoff, targets and missi
   assert.deepEqual(s2.areas[0].box, state.areas[0].box);
   assert.deepEqual(s2.controllerIds, ['9560F7B3-DAA9-481A-B2F5-37CCF3B8B996']);
   assert.equal(w2.panel.dataset.state, 'ready', 're-planned after opening');
-  assert.equal(w2.handle.getResult().totals.photoCount, w.handle.getResult().totals.photoCount);
+  assert.equal(
+    w2.handle.getResult().totals.photoCount,
+    w.handle.getResult().totals.photoCount,
+  );
   w.handle.destroy();
   w2.handle.destroy();
 });
@@ -1994,7 +2257,10 @@ test('a saved plan reopens editable: areas, settings, takeoff, targets and missi
 async function snapshotOf(w) {
   const { serializePlan } = await import('./planDoc.js');
   const s = w.handle.getState();
-  return serializePlan(s, { controllerIds: s.controllerIds, imports: s.imports });
+  return serializePlan(s, {
+    controllerIds: s.controllerIds,
+    imports: s.imports,
+  });
 }
 
 test('a controller mission id names the exported KMZ <UUID>.kmz, in the zip too', async () => {
@@ -2008,7 +2274,9 @@ test('a controller mission id names the exported KMZ <UUID>.kmz, in the zip too'
   w.buttons('data-download')[0].click();
   const names = [...readZip(w.downloads[1].bytes).keys()];
   assert.ok(names.includes(`${id}.kmz`), names.join(','));
-  const readme = new TextDecoder().decode(readZip(w.downloads[1].bytes).get('README.txt'));
+  const readme = new TextDecoder().decode(
+    readZip(w.downloads[1].bytes).get('README.txt'),
+  );
   assert.match(readme, /waypoint\/<UUID>\/<UUID>\.kmz/);
   assert.match(readme, /NOT verified by a real file/);
   w.handle.destroy();
@@ -2019,12 +2287,26 @@ test('controller ids keep their flight positions through open, import and edit',
   const w = setup();
   const X = '9560F7B3-DAA9-481A-B2F5-37CCF3B8B996';
   const Y = '8A05BD5F-A9CE-4867-923F-7AACC02AF9A9';
-  const area = { kind: 'rect', name: 'A', box: { west: -97.1, east: -97.09, south: 30.1, north: 30.11 } };
-  await w.handle.loadPlan({ schema: 'gevplan', version: 1, areas: [area], controllerIds: [null, X] });
+  const area = {
+    kind: 'rect',
+    name: 'A',
+    box: { west: -97.1, east: -97.09, south: 30.1, north: 30.11 },
+  };
+  await w.handle.loadPlan({
+    schema: 'gevplan',
+    version: 1,
+    areas: [area],
+    controllerIds: [null, X],
+  });
   assert.deepEqual(w.handle.getState().controllerIds, [null, X]);
-  const box = () => w.find((n) => n.getAttribute?.('data-field') === 'controller-ids')[0];
+  const box = () =>
+    w.find((n) => n.getAttribute?.('data-field') === 'controller-ids')[0];
   // Importing Y fills the empty first slot; X stays second.
-  const bytes = new Uint8Array(readFileSync(new URL(`./fixtures/djifly-mini5pro/${Y}.kmz`, import.meta.url)));
+  const bytes = new Uint8Array(
+    readFileSync(
+      new URL(`./fixtures/djifly-mini5pro/${Y}.kmz`, import.meta.url),
+    ),
+  );
   await w.handle.library().importBytes(bytes, `${Y}.kmz`);
   assert.deepEqual(w.handle.getState().controllerIds, [Y, X]);
   // A text edit that blanks the first line keeps X second.
@@ -2039,7 +2321,10 @@ test('opening a plan with a bad document is refused and changes nothing', async 
   const w = setup();
   w.handle.setBox(boxM(400, 200));
   await w.handle.replan();
-  await assert.rejects(() => w.handle.loadPlan({ schema: 'nope' }), /not-a-plan/);
+  await assert.rejects(
+    () => w.handle.loadPlan({ schema: 'nope' }),
+    /not-a-plan/,
+  );
   assert.equal(w.handle.getState().areas.length, 1);
   w.handle.destroy();
 });
@@ -2049,7 +2334,9 @@ test('importing a DJI Fly KMZ draws it, remembers the mission id and lists compa
   const w = setup();
   const id = '8A05BD5F-A9CE-4867-923F-7AACC02AF9A9';
   const bytes = new Uint8Array(
-    readFileSync(new URL(`./fixtures/djifly-mini5pro/${id}.kmz`, import.meta.url)),
+    readFileSync(
+      new URL(`./fixtures/djifly-mini5pro/${id}.kmz`, import.meta.url),
+    ),
   );
   const out = await w.handle.library().importBytes(bytes, `${id} (1).kmz`);
   assert.equal(out.kind, 'mission');
@@ -2057,12 +2344,22 @@ test('importing a DJI Fly KMZ draws it, remembers the mission id and lists compa
   assert.equal(s.imports.length, 1);
   assert.equal(s.imports[0].waypoints.length, 2);
   assert.deepEqual(s.controllerIds, [id]);
-  const source = w.viewer.dataSources.sources.find((x) => x.name === 'gev-drone-plan');
-  assert.ok(source.entities.values.some((e) => e.polyline), 'a line is on the map');
+  const source = w.viewer.dataSources.sources.find(
+    (x) => x.name === 'gev-drone-plan',
+  );
+  assert.ok(
+    source.entities.values.some((e) => e.polyline),
+    'a line is on the map',
+  );
   const findings = w.find((n) => n.attributes?.has?.('data-code'));
-  assert.deepEqual(findings.map((n) => n.getAttribute('data-code')), ['far-apart']);
+  assert.deepEqual(
+    findings.map((n) => n.getAttribute('data-code')),
+    ['far-apart'],
+  );
   // A bad file is reported, not thrown.
-  const bad = await w.handle.library().importBytes(new Uint8Array([1, 2, 3]), 'x.kmz');
+  const bad = await w.handle
+    .library()
+    .importBytes(new Uint8Array([1, 2, 3]), 'x.kmz');
   assert.equal(bad.kind, 'error');
   w.handle.destroy();
 });
@@ -2070,7 +2367,9 @@ test('importing a DJI Fly KMZ draws it, remembers the mission id and lists compa
 test('with no library (not signed in) the panel says so and import still works', async () => {
   const w = setup();
   await new Promise((r) => setTimeout(r, 10));
-  const note = w.find((n) => n.getAttribute?.('data-role') === 'library-note')[0];
+  const note = w.find(
+    (n) => n.getAttribute?.('data-role') === 'library-note',
+  )[0];
   assert.match(note.textContent, /Sign in through byrd-it\.com/);
   w.handle.destroy();
 });
@@ -2078,22 +2377,47 @@ test('with no library (not signed in) the panel says so and import still works',
 // ------------------------------------------- library UI end to end --
 async function server() {
   const root = mkdtempSync(path.join(process.env.TMPDIR ?? tmpdir(), 'gevui-'));
-  const handler = createPlanLibraryHandler({ store: createStore({ root }), env: { GEV_TRUSTED_PROXIES: '127.0.0.1' } });
-  const srv = http.createServer((req, res) => handler(req, res, () => { res.statusCode = 404; res.end(); }));
+  const handler = createPlanLibraryHandler({
+    store: createStore({ root }),
+    env: { GEV_TRUSTED_PROXIES: '127.0.0.1' },
+  });
+  const srv = http.createServer((req, res) =>
+    handler(req, res, () => {
+      res.statusCode = 404;
+      res.end();
+    }),
+  );
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const port = srv.address().port;
   const clientFor = (user) =>
     createLibraryClient({
       base: `http://127.0.0.1:${port}/api/byrdit/plans`,
       fetchImpl: (url, init) =>
-        fetch(url, { ...init, headers: { ...init.headers, ...(user ? { 'x-gev-user': user } : {}), host: `127.0.0.1:${port}` } }),
+        fetch(url, {
+          ...init,
+          headers: {
+            ...init.headers,
+            ...(user ? { 'x-gev-user': user } : {}),
+            host: `127.0.0.1:${port}`,
+          },
+        }),
     });
-  return { clientFor, close: async () => { await new Promise((r) => srv.close(r)); rmSync(root, { recursive: true, force: true }); } };
+  return {
+    clientFor,
+    close: async () => {
+      await new Promise((r) => srv.close(r));
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
 }
 
 const settleUi = () => new Promise((r) => setTimeout(r, 250));
-const btn = (w, action) => w.find((n) => n.tagName === 'BUTTON' && n.getAttribute('data-action') === action);
-const field = (w, name) => w.find((n) => n.getAttribute?.('data-field') === name)[0];
+const btn = (w, action) =>
+  w.find(
+    (n) => n.tagName === 'BUTTON' && n.getAttribute('data-action') === action,
+  );
+const field = (w, name) =>
+  w.find((n) => n.getAttribute?.('data-field') === name)[0];
 const rows = (w) => w.find((n) => n.getAttribute?.('data-plan'));
 
 test('save, list, reopen, rename, version restore, trash and restore through the panel', async () => {
@@ -2102,7 +2426,11 @@ test('save, list, reopen, rename, version restore, trash and restore through the
     const w = setup({ libraryClient: srv.clientFor('alice') });
     w.doc.defaultView = { prompt: () => 'Renamed', confirm: () => true };
     await settleUi();
-    assert.match(w.find((n) => n.getAttribute?.('data-role') === 'library-note')[0].textContent, /Signed in as alice/);
+    assert.match(
+      w.find((n) => n.getAttribute?.('data-role') === 'library-note')[0]
+        .textContent,
+      /Signed in as alice/,
+    );
     w.handle.setBox(boxM(400, 200));
     await w.handle.replan();
     field(w, 'name').value = 'Barn';
@@ -2173,24 +2501,46 @@ test('another user sees nothing; the admin sees all users read-only', async () =
     assert.equal(rows(b).length, 0);
     const admin = setup({ libraryClient: srv.clientFor('byrdit') });
     await settleUi();
-    assert.equal(rows(admin).length, 0, 'own plans only until the filter is switched');
-    const scope = admin.find((n) => n.getAttribute?.('data-role') === 'library-scope')[0];
+    assert.equal(
+      rows(admin).length,
+      0,
+      'own plans only until the filter is switched',
+    );
+    const scope = admin.find(
+      (n) => n.getAttribute?.('data-role') === 'library-scope',
+    )[0];
     assert.equal(scope.hidden, false);
     scope.value = 'all';
     scope.dispatch('change');
     await settleUi();
     assert.equal(rows(admin).length, 1);
     assert.equal(rows(admin)[0].getAttribute('data-owner'), 'alice');
-    assert.equal(btn(admin, 'plan-delete').length, 0, 'no delete on others plans');
+    assert.equal(
+      btn(admin, 'plan-delete').length,
+      0,
+      'no delete on others plans',
+    );
     assert.equal(btn(admin, 'plan-rename').length, 0);
     assert.equal(btn(admin, 'plan-open').length, 1);
     btn(admin, 'plan-open')[0].click();
     await settleUi();
     assert.equal(admin.handle.getState().areas.length, 1);
-    assert.match(admin.find((n) => n.getAttribute?.('data-role') === 'library-note')[0].textContent, /read-only/);
-    assert.equal(btn(admin, 'library-save')[0].disabled, true, 'cannot save over it');
+    assert.match(
+      admin.find((n) => n.getAttribute?.('data-role') === 'library-note')[0]
+        .textContent,
+      /read-only/,
+    );
+    assert.equal(
+      btn(admin, 'library-save')[0].disabled,
+      true,
+      'cannot save over it',
+    );
     // non-admins never get the filter
-    assert.equal(b.find((n) => n.getAttribute?.('data-role') === 'library-scope')[0].hidden, true);
+    assert.equal(
+      b.find((n) => n.getAttribute?.('data-role') === 'library-scope')[0]
+        .hidden,
+      true,
+    );
     for (const w of [a, b, admin]) w.handle.destroy();
   } finally {
     await srv.close();
@@ -2202,7 +2552,11 @@ test('a request with no trusted identity gives the sign-in note and no list', as
   try {
     const w = setup({ libraryClient: srv.clientFor(null) });
     await settleUi();
-    assert.match(w.find((n) => n.getAttribute?.('data-role') === 'library-note')[0].textContent, /Sign in through byrd-it\.com/);
+    assert.match(
+      w.find((n) => n.getAttribute?.('data-role') === 'library-note')[0]
+        .textContent,
+      /Sign in through byrd-it\.com/,
+    );
     assert.equal(btn(w, 'library-save')[0].disabled, true);
     w.handle.destroy();
   } finally {
@@ -2211,22 +2565,53 @@ test('a request with no trusted identity gives the sign-in note and no list', as
 });
 
 test('every compatibility code has a sentence', () => {
-  const codes = ['read-empty', 'read-not-a-kmz', 'namespace', 'no-waylines', 'template-fallback', 'template-shape', 'no-template', 'no-config', 'no-drone', 'drone-mismatch', 'no-waypoints', 'too-many', 'index-gap', 'bad-coordinates', 'height-mode', 'no-height', 'height-range', 'speed-range', 'poi-missing', 'group-mode', 'group-ids', 'action-ids', 'far-apart'];
-  for (const code of codes) assert.notEqual(warningText({ code, args: {} }), code, code);
+  const codes = [
+    'read-empty',
+    'read-not-a-kmz',
+    'namespace',
+    'no-waylines',
+    'template-fallback',
+    'template-shape',
+    'no-template',
+    'no-config',
+    'no-drone',
+    'drone-mismatch',
+    'no-waypoints',
+    'too-many',
+    'index-gap',
+    'bad-coordinates',
+    'height-mode',
+    'no-height',
+    'height-range',
+    'speed-range',
+    'poi-missing',
+    'group-mode',
+    'group-ids',
+    'action-ids',
+    'far-apart',
+  ];
+  for (const code of codes)
+    assert.notEqual(warningText({ code, args: {} }), code, code);
 });
 
 // -------------------------------------------------------------------- units --
 const unitBtn = (w, system) =>
-  w.buttons('data-action').find((b) => b.getAttribute('data-action') === `units-${system}`);
+  w
+    .buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === `units-${system}`);
 
 test('units: feet by default, the ft/m switch changes every shown length and speed', async () => {
   const w = setup({ storage: memoryStorage() });
   assert.equal(unitBtn(w, 'ft').getAttribute('aria-pressed'), 'true');
   assert.equal(unitBtn(w, 'm').getAttribute('aria-pressed'), 'false');
   const out = (label) =>
-    w.control(label).parentNode.children.find((n) => n.tagName === 'OUTPUT').textContent;
+    w.control(label).parentNode.children.find((n) => n.tagName === 'OUTPUT')
+      .textContent;
   assert.equal(out('Height above ground'), '262 ft');
-  assert.equal(out('Speed'), `${(w.handle.getState().options.speedMs * 3.28084).toFixed(1)} ft/s`);
+  assert.equal(
+    out('Speed'),
+    `${(w.handle.getState().options.speedMs * 3.28084).toFixed(1)} ft/s`,
+  );
   assert.equal(w.control('Height above ground').max, '1500');
   assert.equal(w.control('Height above ground').step, '10');
   w.handle.setBox(boxM(300, 200));
@@ -2263,7 +2648,9 @@ test('units: the choice is remembered per browser', () => {
   first.handle.destroy();
   const second = setup({ storage });
   assert.equal(unitBtn(second, 'm').getAttribute('aria-pressed'), 'true');
-  const label = second.control('Height above ground').parentNode.children.find((n) => n.tagName === 'OUTPUT');
+  const label = second
+    .control('Height above ground')
+    .parentNode.children.find((n) => n.tagName === 'OUTPUT');
   assert.equal(label.textContent, '80 m');
   second.handle.destroy();
 });
@@ -2307,7 +2694,11 @@ test('units: an obstacle height box takes feet and the plan gets metres', async 
   w.handle.obstacles.add({ lon: -97.77, lat: 30.27, heightM: 20 });
   const [added] = w.handle.obstacles.list();
   assert.ok(added, 'the obstacle row exists');
-  const box = w.find((n) => n.getAttribute('data-obstacle-height') !== null && n.getAttribute('data-obstacle-height') !== undefined)[0];
+  const box = w.find(
+    (n) =>
+      n.getAttribute('data-obstacle-height') !== null &&
+      n.getAttribute('data-obstacle-height') !== undefined,
+  )[0];
   assert.ok(box, 'its height box is on screen');
   assert.equal(box.value, '65.6', '20 m shows as feet');
   box.value = '100';
@@ -2331,7 +2722,9 @@ const frozenClock = async (fn) => {
 test('units: the exported KMZ is byte-identical whichever unit is shown', async () => {
   const when = new Date('2026-10-30T12:00:00Z');
   const kmzFor = async (system, via) => {
-    const w = setup({ storage: memoryStorage({ 'gev.dronePlan.units': system }) });
+    const w = setup({
+      storage: memoryStorage({ 'gev.dronePlan.units': system }),
+    });
     w.handle.setBox(boxM(300, 200));
     await w.handle.replan();
     if (via) via(w);
@@ -2359,7 +2752,9 @@ test('units: the exported KMZ is byte-identical whichever unit is shown', async 
 test('units: a height typed in feet gives a KMZ in metres (DJI needs metres)', async () => {
   const when = new Date('2026-10-30T12:00:00Z');
   const run = async (system, value) => {
-    const w = setup({ storage: memoryStorage({ 'gev.dronePlan.units': system }) });
+    const w = setup({
+      storage: memoryStorage({ 'gev.dronePlan.units': system }),
+    });
     w.handle.setBox(boxM(300, 200));
     const agl = w.control('Height above ground');
     agl.value = value;
@@ -2378,18 +2773,24 @@ test('units: a height typed in feet gives a KMZ in metres (DJI needs metres)', a
 });
 
 // -------------------------------------------------------- transparency UI --
-test('transparency: four sliders, defaults are today\'s values, remembered per browser', async () => {
+test("transparency: four sliders, defaults are today's values, remembered per browser", async () => {
   const storage = memoryStorage({ 'gev.dronePlan.units': 'm' });
   const w = setup({ storage });
   // The shared fake colour has no alpha: give this test one that reports it.
   w.cesium.Color = {
-    fromCssColorString: (css) => ({ css, a: 1, withAlpha: (a) => ({ css, a }) }),
+    fromCssColorString: (css) => ({
+      css,
+      a: 1,
+      withAlpha: (a) => ({ css, a }),
+    }),
   };
   const val = (layer) => checkSlider(w, `alpha-${layer}`).value;
-  assert.deepEqual(
-    ['zone', 'curtain', 'footprint', 'view'].map(val),
-    ['16', '10', '5', '20'],
-  );
+  assert.deepEqual(['zone', 'curtain', 'footprint', 'view'].map(val), [
+    '16',
+    '10',
+    '5',
+    '20',
+  ]);
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
   const mode = checkBox(w, 'footprints');
@@ -2403,15 +2804,22 @@ test('transparency: four sliders, defaults are today\'s values, remembered per b
   assert.equal(checkOf(w, 'footprint')[0].polygon.material.a, 0.25);
   assert.equal(checkOf(w, 'zone')[0].polylineVolume.material.a, 0.16);
   w.handle.destroy();
-  assert.equal(JSON.parse(storage.getItem('gev.dronePlan.alpha')).footprint, 0.25);
+  assert.equal(
+    JSON.parse(storage.getItem('gev.dronePlan.alpha')).footprint,
+    0.25,
+  );
   const again = setup({ storage });
   assert.equal(checkSlider(again, 'alpha-footprint').value, '25');
   assert.equal(checkSlider(again, 'alpha-zone').value, '16');
-  again.buttons('data-action')
+  again
+    .buttons('data-action')
     .find((b) => b.getAttribute('data-action') === 'reset-transparency')
     .click();
   assert.equal(checkSlider(again, 'alpha-footprint').value, '5');
-  assert.equal(JSON.parse(storage.getItem('gev.dronePlan.alpha')).footprint, 0.05);
+  assert.equal(
+    JSON.parse(storage.getItem('gev.dronePlan.alpha')).footprint,
+    0.05,
+  );
   again.handle.destroy();
 });
 
@@ -2432,14 +2840,15 @@ test('units: editing one orbit height in feet leaves the others at their exact m
 });
 
 // ----------------------------------------- orbit angles, sizes, paths, conflicts --
-const planTilts = (w) => [
-  ...new Set(
-    w.handle
-      .getResult()
-      .plan.legs.filter((l) => l.kind === 'orbit')
-      .flatMap((l) => l.waypoints.map((x) => Math.round(-x.pitchDeg))),
-  ),
-].sort((a, b) => a - b);
+const planTilts = (w) =>
+  [
+    ...new Set(
+      w.handle
+        .getResult()
+        .plan.legs.filter((l) => l.kind === 'orbit')
+        .flatMap((l) => l.waypoints.map((x) => Math.round(-x.pitchDeg))),
+    ),
+  ].sort((a, b) => a - b);
 
 test('orbit: rings follow the viewing angles field (25, 40, 55 by default)', async () => {
   const w = setup();
@@ -2491,7 +2900,9 @@ test('orbit: a blocked sector is typed per target and the orbit stays out of it'
   await w.handle.replan();
   const id = w.handle.getState().options.orbitTargets[0].id;
   const arc = (key) =>
-    w.find((n) => n.attributes.get('data-target-blocked') === `${id}:${key}`)[0];
+    w.find(
+      (n) => n.attributes.get('data-target-blocked') === `${id}:${key}`,
+    )[0];
   arc('fromDeg').value = '20';
   arc('fromDeg').dispatch('change');
   arc('toDeg').value = '140';
@@ -2515,7 +2926,11 @@ test('look-at path: added, listed with its target and height, edited and removed
   pick(w, 'Mode', 'splat-orbit');
   await w.handle.replan();
   assert.equal(w.handle.toggleDrawPath(), true, 'drawing starts with a target');
-  assert.equal(w.handle.toggleDrawPath(), false, 'finishing with no points adds nothing');
+  assert.equal(
+    w.handle.toggleDrawPath(),
+    false,
+    'finishing with no points adds nothing',
+  );
   const m = metersPerDegree(30.27);
   const p1 = { lon: -97.77 - 60 / m.lon, lat: 30.27 - 50 / m.lat };
   const p2 = { lon: -97.77 + 60 / m.lon, lat: 30.27 - 50 / m.lat };
@@ -2525,8 +2940,13 @@ test('look-at path: added, listed with its target and height, edited and removed
   const path = w.handle.getState().options.lookAtPaths[0];
   assert.equal(path.targetId, w.handle.getState().options.orbitTargets[0].id);
   assert.ok(w.handle.getResult().plan.legs.some((l) => l.kind === 'lookat'));
-  assert.equal(w.find((n) => n.attributes.get('data-lookat-path') === path.id).length, 1);
-  const height = w.find((n) => n.attributes.get('data-path-height') === path.id)[0];
+  assert.equal(
+    w.find((n) => n.attributes.get('data-lookat-path') === path.id).length,
+    1,
+  );
+  const height = w.find(
+    (n) => n.attributes.get('data-path-height') === path.id,
+  )[0];
   height.value = '60';
   height.dispatch('change');
   assert.equal(w.handle.getState().options.lookAtPaths[0].aglM, 60);
@@ -2541,7 +2961,12 @@ test('conflicts: the panel says what the check cannot see, and warns about a tal
   const dom = makeDoc();
   const world = makeWorld({ sample: (c) => flat(c) });
   const m = metersPerDegree(30.27);
-  const tall = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => ({
+  const tall = [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ].map(([a, b]) => ({
     lon: -97.77 + (a * 60) / m.lon,
     lat: 30.27 + (b * 60) / m.lat,
   }));
@@ -2551,7 +2976,9 @@ test('conflicts: the panel says what the check cannot see, and warns about a tal
     cesium: world.cesium,
     document: dom.doc,
     downloadFile: () => {},
-    getBuildingFootprints: async () => [{ ring: tall, label: 'Tower', heightM: 90 }],
+    getBuildingFootprints: async () => [
+      { ring: tall, label: 'Tower', heightM: 90 },
+    ],
   });
   handle.setBox(boxM(300, 200));
   handle.applyOptions({ pattern: 'orbit' });
@@ -2560,8 +2987,14 @@ test('conflicts: the panel says what the check cannot see, and warns about a tal
   await handle.replan();
   const roles = (role) =>
     all(dom.body, (n) => n.attributes.get('data-role') === role);
-  assert.match(roles('conflict-disclaimer')[0].textContent, /does NOT see trees, power lines or towers/);
-  assert.match(roles('conflict-disclaimer')[0].textContent, /never changes your route/);
+  assert.match(
+    roles('conflict-disclaimer')[0].textContent,
+    /does NOT see trees, power lines or towers/,
+  );
+  assert.match(
+    roles('conflict-disclaimer')[0].textContent,
+    /never changes your route/,
+  );
   handle.destroy();
 });
 
@@ -2599,18 +3032,41 @@ test('surface model: a route too close to the canopy is flagged, with the discla
   const s = w.handle.getState();
   assert.equal(s.surface.status, 'ready');
   assert.deepEqual(s.surface.ids, ['ranch']);
-  assert.ok(s.clearance.spanCount > 0, 'the grid at 30 m is within reach of 35 m trees');
+  assert.ok(
+    s.clearance.spanCount > 0,
+    'the grid at 30 m is within reach of 35 m trees',
+  );
   assert.equal(s.clearance.requiredM, 9.144);
-  assert.match(textOf(w, 'clearance-summary'), /Too close to the surface model/);
-  assert.ok(w.find((n) => n.getAttribute?.('data-role') === 'clearance-span').length > 0);
-  assert.match(textOf(w, 'surface-disclaimer'), /bare branches, single limbs, power lines or guy wires/);
+  assert.match(
+    textOf(w, 'clearance-summary'),
+    /Too close to the surface model/,
+  );
+  assert.ok(
+    w.find((n) => n.getAttribute?.('data-role') === 'clearance-span').length >
+      0,
+  );
+  assert.match(
+    textOf(w, 'surface-disclaimer'),
+    /bare branches, single limbs, power lines or guy wires/,
+  );
   assert.match(textOf(w, 'surface-disclaimer'), /trees change with the season/);
   assert.match(textOf(w, 'surface-disclaimer'), /never changed/);
   // The heights flown are the ones asked for: a warning never moves the route.
-  const flown = w.handle.getResult().plan.legs.flatMap((l) => l.waypoints.map((x) => x.aglM));
-  assert.ok(flown.every((a) => Math.abs(a - 30) < 0.06), 'no automatic reroute');
+  const flown = w.handle
+    .getResult()
+    .plan.legs.flatMap((l) => l.waypoints.map((x) => x.aglM));
+  assert.ok(
+    flown.every((a) => Math.abs(a - 30) < 0.06),
+    'no automatic reroute',
+  );
   // The globe got red flags.
-  assert.ok(w.viewer.dataSources.sources[0].entities.values.some((e) => e.name === 'Too close to the surface model' || e.name === 'Closest point to the surface model'));
+  assert.ok(
+    w.viewer.dataSources.sources[0].entities.values.some(
+      (e) =>
+        e.name === 'Too close to the surface model' ||
+        e.name === 'Closest point to the surface model',
+    ),
+  );
   // Higher and it passes.
   s.options.aglM = 60;
   await w.handle.replan();
@@ -2632,7 +3088,11 @@ test('surface model: the settings are remembered and clamped, defaults are 20 ft
   assert.equal(s.marginM, 3.048);
   w.handle.destroy();
   const store2 = memoryStorage({
-    'gev.dronePlan.clearance': JSON.stringify({ enabled: false, minM: 9999, marginM: -5 }),
+    'gev.dronePlan.clearance': JSON.stringify({
+      enabled: false,
+      minM: 9999,
+      marginM: -5,
+    }),
   });
   const w2 = setup({ surfaceClient: surfaceStub(), storage: store2 });
   const s2 = w2.handle.getState().surface;
@@ -2656,7 +3116,10 @@ test('surface model: no model, no sign-in or a failed read falls back to the tre
     assert.equal(s.clearance, null);
     assert.ok(['none', 'signin'].includes(s.surface.status));
     assert.ok(s.result.plan.legs.length > 0, 'the plan is made without it');
-    assert.match(textOf(w, 'surface-status'), /tree \/ obstacle height setting|Sign in/);
+    assert.match(
+      textOf(w, 'surface-status'),
+      /tree \/ obstacle height setting|Sign in/,
+    );
     w.handle.destroy();
   }
 });
@@ -2672,9 +3135,18 @@ test('surface model: an orbit plan inside the model takes its ring heights from 
   await w.handle.replan();
   const p = w.handle.getResult().plan;
   assert.ok(p.orbit.surface && p.orbit.surface.fromSurface > 0);
-  assert.ok(Math.min(...p.legs.filter((l) => l.kind === 'orbit').flatMap((l) => l.waypoints.map((x) => x.aglM))) >= 40);
+  assert.ok(
+    Math.min(
+      ...p.legs
+        .filter((l) => l.kind === 'orbit')
+        .flatMap((l) => l.waypoints.map((x) => x.aglM)),
+    ) >= 40,
+  );
   // The probe is a live object and never reaches the saved options.
-  assert.equal(JSON.stringify(w.handle.getState().options).includes('ringFloor'), false);
+  assert.equal(
+    JSON.stringify(w.handle.getState().options).includes('ringFloor'),
+    false,
+  );
   w.handle.destroy();
 });
 
@@ -2690,7 +3162,10 @@ test('photo check: reads photos in the browser, plots them against the plan, fla
   const shot = (p, i) => ({
     name: `DJI_${i}.jpg`,
     bytes: jpeg({
-      exif: tiff({ gps: { lat: p.lat, lon: p.lon, alt: 200 }, time: `2026:10:30 13:${String(10 + (i >> 6)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}` }),
+      exif: tiff({
+        gps: { lat: p.lat, lon: p.lon, alt: 200 },
+        time: `2026:10:30 13:${String(10 + (i >> 6)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`,
+      }),
       xmp: xmpText({ lat: p.lat, lon: p.lon, abs: 200, rel: p.aglM ?? 50 }),
     }),
   });
@@ -2701,22 +3176,33 @@ test('photo check: reads photos in the browser, plots them against the plan, fla
   const a = await pc.addFiles(files);
   assert.equal(a.summary.plannedCount, planned.length);
   assert.equal(a.summary.missingCount, 1);
-  assert.equal(a.planned.findIndex((p) => !p.covered), 3);
+  assert.equal(
+    a.planned.findIndex((p) => !p.covered),
+    3,
+  );
   assert.ok(a.summary.gsdMedianCm > 0);
-  const shown = w.find((n) => n.getAttribute?.('data-level'))
-    .map((n) => n.textContent).join('\n');
+  const shown = w
+    .find((n) => n.getAttribute?.('data-level'))
+    .map((n) => n.textContent)
+    .join('\n');
   assert.match(shown, /1 planned photo point has no photo/);
   assert.match(shown, /1 file is not a JPEG/);
   // the globe got the layer
-  const src = w.viewer.dataSources.sources.find((x) => x.name === 'gev-drone-plan');
+  const src = w.viewer.dataSources.sources.find(
+    (x) => x.name === 'gev-drone-plan',
+  );
   assert.ok(src.entities.values.length > planned.length);
   // report
-  w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'photos-report').click();
+  w.buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'photos-report')
+    .click();
   const csv = new TextDecoder().decode(w.downloads.at(-1).bytes);
   assert.equal(w.downloads.at(-1).name, 'photo-check.csv');
   assert.equal(csv.split('\n').length, 1 + a.photos.length + planned.length);
   // clear drops everything, photos and map layer
-  w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'photos-clear').click();
+  w.buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'photos-clear')
+    .click();
   assert.equal(pc.analysis(), null);
   w.handle.destroy();
 });
@@ -2728,19 +3214,28 @@ test('photo check: with no plan it still checks spacing and ground detail; copie
   const mk = (i, lat) => ({
     name: `p${i}.jpg`,
     bytes: jpeg({
-      exif: tiff({ gps: { lat, lon: -97.5, alt: 200 }, time: `2026:10:30 13:00:${String(i).padStart(2, '0')}` }),
+      exif: tiff({
+        gps: { lat, lon: -97.5, alt: 200 },
+        time: `2026:10:30 13:00:${String(i).padStart(2, '0')}`,
+      }),
       xmp: xmpText({ lat, lon: -97.5, abs: 200, rel: 60 }),
     }),
   });
   const files = [0, 1, 2, 3].map((i) => mk(i, 30.1 + i * 0.0001));
   files.push({ ...files[0], name: 'p0 (1).jpg' });
-  files.push({ name: 'nopos.jpg', bytes: jpeg({ exif: tiff({ gps: 'empty' }) }) });
+  files.push({
+    name: 'nopos.jpg',
+    bytes: jpeg({ exif: tiff({ gps: 'empty' }) }),
+  });
   const a = await pc.addFiles(files);
   assert.equal(a.summary.photoCount, 4);
   assert.equal(a.duplicates, 1);
   assert.equal(a.summary.plannedCount, 0);
   assert.ok(Math.abs(a.summary.gsdMedianCm - (60 / 2730.6667) * 100) < 0.01);
-  const shown = w.find((n) => n.getAttribute?.('data-level')).map((n) => n.textContent).join('\n');
+  const shown = w
+    .find((n) => n.getAttribute?.('data-level'))
+    .map((n) => n.textContent)
+    .join('\n');
   assert.match(shown, /1 file has no position/);
   assert.match(shown, /No plan on the panel/);
   w.handle.destroy();
@@ -2751,12 +3246,23 @@ test('photo check: nothing is stored or sent anywhere', async () => {
   const storage = memoryStorage({ 'gev.dronePlan.units': 'm' });
   const calls = [];
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (...args) => { calls.push(args); return Promise.reject(new Error('no network')); };
+  globalThis.fetch = (...args) => {
+    calls.push(args);
+    return Promise.reject(new Error('no network'));
+  };
   try {
     const w = setup({ storage });
     const before = JSON.stringify([...storage.map]);
     const calls0 = calls.length; // the panel's own plan library asks for its list on open
-    await w.handle.photoCheck().addFiles([{ name: 'a.jpg', bytes: jpeg({ exif: tiff({ gps: { lat: 30.1, lon: -97.5, alt: 1 } }), xmp: xmpText({ lat: 30.1, lon: -97.5, abs: 1, rel: 50 }) }) }]);
+    await w.handle.photoCheck().addFiles([
+      {
+        name: 'a.jpg',
+        bytes: jpeg({
+          exif: tiff({ gps: { lat: 30.1, lon: -97.5, alt: 1 } }),
+          xmp: xmpText({ lat: 30.1, lon: -97.5, abs: 1, rel: 50 }),
+        }),
+      },
+    ]);
     assert.equal(JSON.stringify([...storage.map]), before);
     assert.equal(calls.length, calls0);
     w.handle.destroy();
@@ -2772,7 +3278,10 @@ test('photo check: files chosen while others are still being read wait their tur
   const mk = (i) => ({
     name: `p${i}.jpg`,
     bytes: jpeg({
-      exif: tiff({ gps: { lat: 30.1 + i * 0.0003, lon: -97.5, alt: 1 }, time: `2026:10:30 13:00:${String(i).padStart(2, '0')}` }),
+      exif: tiff({
+        gps: { lat: 30.1 + i * 0.0003, lon: -97.5, alt: 1 },
+        time: `2026:10:30 13:00:${String(i).padStart(2, '0')}`,
+      }),
       xmp: xmpText({ lat: 30.1 + i * 0.0003, lon: -97.5, abs: 1, rel: 50 }),
     }),
   });
@@ -2788,7 +3297,9 @@ test('photo check: files dropped anywhere on the panel are caught, also during a
   const { jpeg, tiff, xmpText } = await import('./fixtures/photoFixtures.mjs');
   const w = setup();
   const pc = w.handle.photoCheck();
-  const section = w.find((n) => n.getAttribute?.('data-role') === 'photo-check')[0];
+  const section = w.find(
+    (n) => n.getAttribute?.('data-role') === 'photo-check',
+  )[0];
   const top = w.panel;
   // nothing above the drone-plan panel (the rail with the other panels) listens
   for (let n = w.panel.parentNode; n; n = n.parentNode) {
@@ -2799,19 +3310,29 @@ test('photo check: files dropped anywhere on the panel are caught, also during a
   const mk = (i) => ({
     name: `g${i}.jpg`,
     bytes: jpeg({
-      exif: tiff({ gps: { lat: 30.1 + i * 0.0001, lon: -97.5, alt: 200 }, time: `2026:10:30 13:00:0${i}` }),
+      exif: tiff({
+        gps: { lat: 30.1 + i * 0.0001, lon: -97.5, alt: 200 },
+        time: `2026:10:30 13:00:0${i}`,
+      }),
       xmp: xmpText({ lat: 30.1 + i * 0.0001, lon: -97.5, abs: 200, rel: 60 }),
     }),
   });
   let prevented = 0;
   let stopped = 0;
-  const ev = (files) => ({ preventDefault: () => (prevented += 1), stopPropagation: () => (stopped += 1), dataTransfer: { files } });
+  const ev = (files) => ({
+    preventDefault: () => (prevented += 1),
+    stopPropagation: () => (stopped += 1),
+    dataTransfer: { files },
+  });
   const first = pc.addFiles([mk(0)]);
   top.dispatch('drop', ev([mk(1)])); // while the first read runs
   top.dispatch('dragover', ev([]));
   // text dragged over the panel is left alone
   const before = prevented;
-  top.dispatch('drop', { preventDefault: () => (prevented += 1), dataTransfer: { types: ['text/plain'], files: [] } });
+  top.dispatch('drop', {
+    preventDefault: () => (prevented += 1),
+    dataTransfer: { types: ['text/plain'], files: [] },
+  });
   assert.equal(prevented, before);
   await first;
   await new Promise((r) => setTimeout(r, 20));
@@ -2825,7 +3346,9 @@ test('photo check: a drop of only non-JPEG files says not-a-JPEG; JPEGs without 
   const { jpeg, tiff } = await import('./fixtures/photoFixtures.mjs');
   const w = setup();
   const pc = w.handle.photoCheck();
-  const progress = () => w.find((n) => n.getAttribute?.('data-role') === 'photo-progress')[0].textContent;
+  const progress = () =>
+    w.find((n) => n.getAttribute?.('data-role') === 'photo-progress')[0]
+      .textContent;
   await pc.addFiles([{ name: 'a.txt', bytes: new TextEncoder().encode('x') }]);
   assert.match(progress(), /not a JPEG/);
   assert.doesNotMatch(progress(), /position/);
@@ -2839,10 +3362,12 @@ test('photo check: a drop of only non-JPEG files says not-a-JPEG; JPEGs without 
 });
 
 test('an imported file feeds the 3D check: one footprint and pyramid per photo; a file with no photos says so', async () => {
-  const { east, group, kmz, mark, LAT } = await import('./importKmzFixture.mjs');
+  const { east, group, kmz, mark, LAT } =
+    await import('./importKmzFixture.mjs');
   const w = setup();
   const readout = () =>
-    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0].textContent;
+    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0]
+      .textContent;
   const withPhotos = kmz([
     mark(0, east(0), LAT, { groups: group(1, 0, 0, 'reachPoint') }),
     mark(1, east(10), LAT, { groups: group(2, 1, 1, 'reachPoint') }),
@@ -2862,13 +3387,20 @@ test('an imported file feeds the 3D check: one footprint and pyramid per photo; 
   assert.equal(checkOf(w, 'view').length, 6 * 5);
   assert.match(readout(), /Photo 1 of 6: Import|Photo 1 of 6: photos/);
   // Hiding the import takes the check away again.
-  const shown = w.find((n) => n.getAttribute?.('aria-label') === 'Show on map')[0];
+  const shown = w.find(
+    (n) => n.getAttribute?.('aria-label') === 'Show on map',
+  )[0];
   shown.checked = false;
   shown.dispatch('change');
   await wait(20);
   assert.equal(checkOf(w, 'footprint').length, 0);
   // A file with no photo action: no cones, and the readout says why.
-  await w.handle.library().importBytes(kmz([mark(0, east(0), LAT), mark(1, east(30), LAT)]), 'nophoto.kmz');
+  await w.handle
+    .library()
+    .importBytes(
+      kmz([mark(0, east(0), LAT), mark(1, east(30), LAT)]),
+      'nophoto.kmz',
+    );
   await wait(20);
   assert.equal(checkOf(w, 'footprint').length, 0);
   assert.match(readout(), /No photo actions in nophoto/);
@@ -2891,9 +3423,17 @@ test('the camera settings checklist shows in the panel, follows its preset and f
     'Before launch: take a test photo and check it is 8192 x 6144',
   ]);
   pick(w, 'Shutter speed', '250');
-  assert.equal(list()[1], 'Shutter: 1/250 s or faster', 'the checklist shows the shutter the plan assumes');
+  assert.equal(
+    list()[1],
+    'Shutter: 1/250 s or faster',
+    'the checklist shows the shutter the plan assumes',
+  );
   pick(w, 'Camera settings preset', 'test-12mp');
-  assert.equal(w.control('Shutter speed').value, '500', 'the preset feeds the blur shutter');
+  assert.equal(
+    w.control('Shutter speed').value,
+    '500',
+    'the preset feeds the blur shutter',
+  );
   assert.equal(list()[0], 'Photo size: 12 MP, 4:3 (4096 x 3072)');
   assert.match(list()[4], /4096 x 3072/);
   await w.handle.replan();
@@ -2904,7 +3444,7 @@ test('the camera settings checklist shows in the panel, follows its preset and f
   );
   assert.match(readme, /Camera settings \(set in DJI Fly/);
   assert.match(readme, /Photo size: 12 MP, 4:3 \(4096 x 3072\)/);
-  assert.match(readme, /Shutter: 1\/500 s or faster/);
+  assert.match(readme, /Shutter required: 1\/500 s or faster/);
   assert.match(readme, /White balance: fixed \(not auto\)/);
   assert.match(readme, /\(EV\): -0\.7/);
   w.handle.destroy();
@@ -2933,11 +3473,17 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
     w.handle.setBox(boxM(400, 200));
     await w.handle.replan();
     // Not saved yet: no number, the old file name, and the note says how to get one.
-    const note = () => w.find((n) => n.getAttribute?.('data-role') === 'mission-label-note')[0].textContent;
+    const note = () =>
+      w.find((n) => n.getAttribute?.('data-role') === 'mission-label-note')[0]
+        .textContent;
     assert.match(note(), /Save this plan in the Plan library/);
     w.handle.downloadMission(0);
     assert.match(w.downloads.at(-1).name, /^gev-drone-plan-/);
-    assert.equal(btnPreview(w).every((b) => b.disabled), true, 'no picture without a number');
+    assert.equal(
+      btnPreview(w).every((b) => b.disabled),
+      true,
+      'no picture without a number',
+    );
 
     field(w, 'name').value = 'Byrd Ranch ring A';
     btn(w, 'library-save')[0].click();
@@ -2951,17 +3497,25 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
     const total = w.handle.getResult().missions.length;
     w.handle.downloadMission(0);
     const one = w.downloads.at(-1);
-    assert.equal(one.name, total > 1 ? 'M01-1_Byrd-Ranch-ring-A.kmz' : 'M01_Byrd-Ranch-ring-A.kmz');
+    assert.equal(
+      one.name,
+      total > 1 ? 'M01-1_Byrd-Ranch-ring-A.kmz' : 'M01_Byrd-Ranch-ring-A.kmz',
+    );
     const parsed = await parseDjiKmz(one.bytes, { fileName: one.name });
     assert.match(parsed.meta.author, /^M01(-1)? Byrd Ranch ring A/);
     assert.deepEqual(
-      checkMission(parsed, { droneEnumValue: 68 }).filter((f) => f.code === 'template-shape'),
+      checkMission(parsed, { droneEnumValue: 68 }).filter(
+        (f) => f.code === 'template-shape',
+      ),
       [],
     );
 
     // The picture button gives a JPG named like the file.
     assert.equal(await w.handle.downloadPreview(0), true);
-    assert.equal(w.downloads.at(-1).name, one.name.replace(/\.kmz$/, '_preview.jpg'));
+    assert.equal(
+      w.downloads.at(-1).name,
+      one.name.replace(/\.kmz$/, '_preview.jpg'),
+    );
     assert.equal(w.downloads.at(-1).type, 'image/jpeg');
     assert.equal(rendered.at(-1).code, total > 1 ? 'M1-1' : 'M1');
     assert.ok(rendered.at(-1).points.length > 2, 'the route is what is drawn');
@@ -2973,7 +3527,10 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
     assert.match(zip.name, /^M01_Byrd-Ranch-ring-A-all\.zip$/);
     const files = readZip(zip.bytes);
     assert.ok([...files.keys()].some((n) => n.endsWith('_preview.jpg')));
-    assert.match(new TextDecoder().decode(files.get('README.txt')), /MISSION LABELS/);
+    assert.match(
+      new TextDecoder().decode(files.get('README.txt')),
+      /MISSION LABELS/,
+    );
 
     // A second plan is M2; the first keeps M1 after a rename.
     w.handle.applyOptions({ aglM: 55 }, { planNow: true });
@@ -2982,13 +3539,21 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
     btn(w, 'library-save-new')[0].click();
     await settleUi();
     const lines = rows(w).map((r) => r.textContent);
-    assert.ok(lines.some((l) => /^M1 · Byrd Ranch ring A/.test(l)), lines.join('|'));
-    assert.ok(lines.some((l) => /^M2 · Shop/.test(l)), lines.join('|'));
+    assert.ok(
+      lines.some((l) => /^M1 · Byrd Ranch ring A/.test(l)),
+      lines.join('|'),
+    );
+    assert.ok(
+      lines.some((l) => /^M2 · Shop/.test(l)),
+      lines.join('|'),
+    );
 
     // Flown: one click, the row shows it, the cheat sheet copies with it.
     const shopRow = () => rows(w).find((r) => /^M2 /.test(r.textContent));
     assert.match(shopRow().textContent, /Planned/);
-    const flown = shopRow().children.find((c) => c.getAttribute?.('data-action') === 'plan-flown');
+    const flown = shopRow().children.find(
+      (c) => c.getAttribute?.('data-action') === 'plan-flown',
+    );
     assert.equal(flown.textContent, 'MARK FLOWN');
     flown.click();
     await settleUi();
@@ -3001,7 +3566,9 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
     await settleUi();
     assert.equal(w.downloads.at(-1).name, 'GEV-mission-cheat-sheet.html');
     // Taking it back.
-    shopRow().children.find((c) => c.getAttribute?.('data-action') === 'plan-flown').click();
+    shopRow()
+      .children.find((c) => c.getAttribute?.('data-action') === 'plan-flown')
+      .click();
     await settleUi();
     assert.match(shopRow().textContent, /Planned/);
     w.handle.destroy();
@@ -3010,7 +3577,8 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
   }
 });
 
-const btnPreview = (w) => w.find((n) => n.tagName === 'BUTTON' && n.attributes.has('data-preview'));
+const btnPreview = (w) =>
+  w.find((n) => n.tagName === 'BUTTON' && n.attributes.has('data-preview'));
 
 test('mission labels: the ZIP waits for a slow picture instead of shipping without it', async () => {
   const srv = await server();
@@ -3037,12 +3605,22 @@ test('mission labels: the ZIP waits for a slow picture instead of shipping witho
     await w.handle.replan();
     const before = w.downloads.length;
     const pending = w.handle.downloadAll();
-    assert.equal(w.downloads.length, before, 'nothing is shipped before the picture exists');
+    assert.equal(
+      w.downloads.length,
+      before,
+      'nothing is shipped before the picture exists',
+    );
     assert.equal(typeof pending.then, 'function');
     assert.equal(await pending, true);
     const files = readZip(w.downloads.at(-1).bytes);
-    assert.ok([...files.keys()].some((n) => n.endsWith('_preview.jpg')), 'the picture is in the zip');
-    assert.match(new TextDecoder().decode(files.get('README.txt')), /picture: M01(-1)?_Slow/);
+    assert.ok(
+      [...files.keys()].some((n) => n.endsWith('_preview.jpg')),
+      'the picture is in the zip',
+    );
+    assert.match(
+      new TextDecoder().decode(files.get('README.txt')),
+      /picture: M01(-1)?_Slow/,
+    );
     assert.ok(calls >= 1);
     // The picture is cached: a second download is immediate (a plain true).
     assert.equal(w.handle.downloadAll(), true);
@@ -3071,7 +3649,11 @@ test('mission labels: a processed plan has no one-click flown toggle', async () 
     btn(w, 'library-save')[0].click();
     await settleUi();
     assert.match(rows(w)[0].textContent, /Processed/);
-    assert.equal(btn(w, 'plan-flown').length, 0, 'processed is not dropped by one click');
+    assert.equal(
+      btn(w, 'plan-flown').length,
+      0,
+      'processed is not dropped by one click',
+    );
     w.handle.destroy();
   } finally {
     await srv.close();
@@ -3205,7 +3787,10 @@ test('mission labels: a rename while the picture loads does not strip the pictur
     assert.equal(await pending, true);
     const zip = w.downloads.find((d) => d.name.endsWith('-all.zip'));
     const names = [...readZip(zip.bytes).keys()];
-    assert.ok(names.some((n) => n.endsWith('_preview.jpg')), names.join());
+    assert.ok(
+      names.some((n) => n.endsWith('_preview.jpg')),
+      names.join(),
+    );
     w.handle.destroy();
   } finally {
     await srv.close();
@@ -3226,7 +3811,9 @@ test('mission labels: trashing the open plan clears the labels at once; a pictur
     field(w, 'name').value = 'Warn';
     btn(w, 'library-save')[0].click();
     await settleUi();
-    const note = () => w.find((n) => n.getAttribute?.('data-role') === 'mission-label-note')[0].textContent;
+    const note = () =>
+      w.find((n) => n.getAttribute?.('data-role') === 'mission-label-note')[0]
+        .textContent;
     assert.match(note(), /labelled M1/);
     assert.equal(await w.handle.downloadAll(), true);
     assert.match(
@@ -3249,7 +3836,9 @@ test('1500 ft: the slider reaches the planning maximum, plans at 457.2 m and say
   agl.value = '1500';
   agl.dispatch('input');
   assert.equal(o().aglM, 457.2, 'the top feet stop is exactly 457.2 m');
-  const out = agl.parentNode.children.find((n) => n.tagName === 'OUTPUT').textContent;
+  const out = agl.parentNode.children.find(
+    (n) => n.tagName === 'OUTPUT',
+  ).textContent;
   assert.equal(out, '1,500 ft');
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
@@ -3257,10 +3846,788 @@ test('1500 ft: the slider reaches the planning maximum, plans at 457.2 m and say
   assert.equal(result.plan.options.aglM, 457.2);
   assert.ok(result.warnings.some((x) => x.code === 'agl-above-400ft'));
   assert.ok(!result.warnings.some((x) => x.code === 'agl-capped'));
-  const shown = w.find((n) => n.getAttribute?.('data-code') === 'agl-above-400ft');
+  const shown = w.find(
+    (n) => n.getAttribute?.('data-code') === 'agl-above-400ft',
+  );
   assert.equal(shown.length, 1);
   assert.match(shown[0].textContent, /1,500 ft is only the most GEV will plan/);
   assert.match(shown[0].textContent, /does not approve a flight/);
   assert.match(shown[0].textContent, /airspace authorization/);
+  w.handle.destroy();
+});
+
+const captureRole = (w, role) =>
+  w.find((n) => n.getAttribute('data-role') === role)[0];
+
+function liveFigures(w) {
+  const o = w.handle.getState().options;
+  return captureFigures({
+    preset: getPreset(o.presetId),
+    aglM: o.aglM,
+    tiltDeg: captureTiltDeg(o),
+    frontOverlap: o.frontOverlap,
+    sideOverlap: o.sideOverlap,
+    photoSpacingM: o.photoSpacingM,
+    speedMs: o.speedMs,
+    shutterDenominator: o.shutterDenominator,
+  });
+}
+
+test('capture controls default to stop, continuous off, 200 waypoints and 20 usable minutes', () => {
+  const w = setup();
+  const o = w.handle.getState().options;
+  assert.equal(o.captureMode, 'stop');
+  assert.equal(o.continuousRoute, false);
+  assert.equal(o.maxWaypoints, 200);
+  assert.equal(o.usableBatteryMin, 20);
+  assert.equal(o.photoSpacingM, null);
+  assert.equal(w.control('Capture mode').value, 'stop');
+  assert.equal(w.control('Maximum waypoints per file').value, '200');
+  assert.equal(w.control('Usable minutes per battery').value, '20');
+  assert.equal(w.control('One continuous route').checked, false);
+  assert.equal(captureRole(w, 'capture-readout').hidden, true);
+  const snap = serializePlan(w.handle.getState(), {});
+  assert.equal(snap.options.captureMode, 'stop');
+  assert.equal(snap.options.continuousRoute, false);
+  assert.equal(snap.options.maxWaypoints, 200);
+  assert.equal(snap.options.usableBatteryMin, 20);
+  assert.equal(Object.hasOwn(snap.options, 'photoSpacingM'), false);
+  const back = readPlan(snap);
+  assert.equal(back.options.continuousRoute, false);
+  assert.equal(back.options.maxWaypoints, 200);
+  assert.equal(back.options.usableBatteryMin, 20);
+  w.handle.destroy();
+});
+
+test('waypoint cap accepts 20 to 200; usable minutes clamp to 5..60 and empty returns 20', () => {
+  const w = setup();
+  const cap = w.control('Maximum waypoints per file');
+  cap.value = '19';
+  cap.dispatch('change');
+  assert.equal(w.handle.getState().options.maxWaypoints, 20);
+  assert.equal(cap.value, '20');
+  cap.value = '100';
+  cap.dispatch('change');
+  assert.equal(w.handle.getState().options.maxWaypoints, 100);
+  cap.value = '5000';
+  cap.dispatch('change');
+  assert.equal(w.handle.getState().options.maxWaypoints, 200);
+  const bat = w.control('Usable minutes per battery');
+  bat.value = '18';
+  bat.dispatch('change');
+  assert.equal(w.handle.getState().options.usableBatteryMin, 18);
+  bat.value = '';
+  bat.dispatch('change');
+  assert.equal(w.handle.getState().options.usableBatteryMin, 20);
+  bat.value = '90';
+  bat.dispatch('change');
+  assert.equal(w.handle.getState().options.usableBatteryMin, 60);
+  bat.value = '3';
+  bat.dispatch('change');
+  assert.equal(w.handle.getState().options.usableBatteryMin, 5);
+  w.handle.destroy();
+});
+
+test('distance mode shows unproven, wind, resume and clearance warnings and exported figures', () => {
+  const w = setup();
+  pick(w, 'Capture mode', 'distance');
+  const readout = captureRole(w, 'capture-readout');
+  assert.equal(readout.hidden, false);
+  assert.match(readout.textContent, /NOT proven on the Mini 5 Pro/);
+  assert.match(
+    readout.textContent,
+    /Each extra survey line in a battery adds 3 seconds/,
+  );
+  assert.match(
+    readout.textContent,
+    /clearance check is for the planned route only/,
+  );
+  assert.match(readout.textContent, /not proven to continue after a resume/);
+  assert.match(readout.textContent, /Check the first resume/);
+  assert.match(readout.textContent, /off by one photo spacing/);
+  assert.equal(captureRole(w, 'capture-resume-timed'), undefined);
+  const figs = liveFigures(w);
+  assert.ok(figs.seconds < figs.minPhotoIntervalS);
+  assert.equal(Number(readout.getAttribute('data-seconds')), figs.seconds);
+  assert.equal(Number(readout.getAttribute('data-photo-m')), figs.photoM);
+  assert.equal(Number(readout.getAttribute('data-front')), figs.frontPct);
+  assert.equal(Number(readout.getAttribute('data-gsd')), figs.footprint.gsdCm);
+  assert.equal(readout.getAttribute('data-limited-by'), figs.limits.limitedBy);
+  assert.equal(
+    captureRole(w, 'capture-interval-warn').getAttribute('data-tone'),
+    'bad',
+  );
+  assert.match(
+    captureRole(w, 'capture-footprint').textContent,
+    /along the track/,
+  );
+  assert.match(captureRole(w, 'capture-overlap').textContent, /% front/);
+  const table = captureRole(w, 'capture-shutter-table');
+  assert.equal(table.children.length, SHUTTER_DENOMINATORS.length);
+  const preset = getPreset(w.handle.getState().options.presetId);
+  const row = table.children[2];
+  const capSpeed = speedLimits({
+    preset,
+    photoSpacingM: 0,
+    gsdCm: figs.footprint.gsdCm,
+    shutterDenominator: SHUTTER_DENOMINATORS[2],
+  });
+  assert.equal(row.getAttribute('data-shutter'), '1000');
+  assert.match(row.textContent, new RegExp(capSpeed.limitMs.toFixed(1)));
+  w.handle.destroy();
+});
+
+test('timed mode says the shot is started by hand and warns that it may stop on resume', () => {
+  const w = setup();
+  pick(w, 'Capture mode', 'timed');
+  const readout = captureRole(w, 'capture-readout');
+  assert.match(readout.textContent, /start the timed shot by hand/);
+  assert.match(readout.textContent, /Timed shot may stop/);
+  assert.match(readout.textContent, /The tool cannot know the light/);
+  assert.equal(captureRole(w, 'capture-unproven'), undefined);
+  assert.equal(captureRole(w, 'capture-resume-distance'), undefined);
+  assert.ok(captureRole(w, 'capture-resume-timed'));
+  w.handle.destroy();
+});
+
+test('a forged imported plan cannot hide the Mini 5 Pro unproven notice', async () => {
+  const w = setup();
+  const area = {
+    kind: 'rect',
+    name: 'A',
+    box: { west: -97.1, east: -97.09, south: 30.1, north: 30.11 },
+  };
+  await w.handle.loadPlan({
+    schema: 'gevplan',
+    version: 1,
+    areas: [area],
+    options: { captureMode: 'distance', intervalTriggerProven: true },
+  });
+  assert.equal(w.handle.getState().options.intervalTriggerProven, false);
+  assert.ok(captureRole(w, 'capture-unproven'));
+  assert.match(
+    captureRole(w, 'capture-readout').textContent,
+    /NOT proven on the Mini 5 Pro/,
+  );
+  assert.match(
+    captureRole(w, 'capture-readout').textContent,
+    /not proven to continue after a resume/,
+  );
+  assert.doesNotMatch(
+    captureRole(w, 'capture-readout').textContent,
+    /real-world proven/i,
+  );
+  assert.equal(
+    Object.hasOwn(serializePlan(w.handle.getState(), {}).options, 'intervalTriggerProven'),
+    false,
+  );
+  const result = w.handle.getState().result;
+  assert.ok(result, 'forged plan still plans');
+  const readme = readmeText(result);
+  assert.match(readme, /NOT proven on the Mini 5 Pro/);
+  assert.match(readme, /unproven distance trigger/);
+  assert.doesNotMatch(readme, /real-world proven/i);
+  assert.doesNotMatch(readme, /trigger is proven/i);
+  w.handle.destroy();
+});
+
+test('voice and applyOptions cannot hide the Mini 5 Pro unproven notice', async () => {
+  const w = setup();
+  pick(w, 'Capture mode', 'distance');
+  assert.equal(w.handle.getState().options.intervalTriggerProven, false);
+  assert.ok(captureRole(w, 'capture-unproven'));
+  assert.equal(w.handle.applyOptions({ intervalTriggerProven: 'yes' }), true);
+  assert.equal(w.handle.getState().options.intervalTriggerProven, false);
+  assert.ok(captureRole(w, 'capture-unproven'));
+  assert.equal(w.handle.applyOptions({ intervalTriggerProven: true, speedMs: 6 }), true);
+  assert.equal(w.handle.getState().options.speedMs, 6);
+  assert.equal(w.handle.getState().options.intervalTriggerProven, false);
+  assert.ok(captureRole(w, 'capture-unproven'));
+  assert.match(
+    captureRole(w, 'capture-readout').textContent,
+    /NOT proven on the Mini 5 Pro/,
+  );
+  const voice = createDronePlanVoice(w.handle);
+  const onlyFlag = await voice.options({ intervalTriggerProven: true });
+  assert.equal(onlyFlag.ok, false);
+  assert.equal(w.handle.getState().options.intervalTriggerProven, false);
+  assert.ok(captureRole(w, 'capture-unproven'));
+  const spoken = await voice.options({ intervalTriggerProven: true, speedMs: 7 });
+  assert.equal(spoken.ok, true);
+  assert.equal(w.handle.getState().options.speedMs, 7);
+  assert.equal(w.handle.getState().options.intervalTriggerProven, false);
+  assert.ok(captureRole(w, 'capture-unproven'));
+  assert.match(
+    captureRole(w, 'capture-readout').textContent,
+    /NOT proven on the Mini 5 Pro/,
+  );
+  assert.equal(
+    Object.hasOwn(serializePlan(w.handle.getState(), {}).options, 'intervalTriggerProven'),
+    false,
+  );
+  w.handle.destroy();
+});
+
+test('fixed photo spacing follows feet and is saved in metres; overlap clears it', () => {
+  const w = setup({ storage: memoryStorage({ 'gev.dronePlan.units': 'ft' }) });
+  pick(w, 'Capture mode', 'distance');
+  pick(w, 'Photo spacing', 'distance');
+  assert.ok(w.handle.getState().options.photoSpacingM > 0);
+  assert.match(
+    w.find((n) => n.textContent.startsWith('Photo spacing ('))[0].textContent,
+    /ft/,
+  );
+  const input = w.control('Fixed photo spacing');
+  input.value = '100';
+  input.dispatch('change');
+  const metres = w.handle.getState().options.photoSpacingM;
+  assert.ok(Math.abs(metres - 30.48) < 0.02, `got ${metres}`);
+  const snap = serializePlan(w.handle.getState(), {});
+  assert.equal(snap.options.photoSpacingM, metres);
+  assert.equal(snap.options.captureMode, 'distance');
+  pick(w, 'Photo spacing', 'overlap');
+  assert.equal(w.handle.getState().options.photoSpacingM, null);
+  assert.equal(
+    Object.hasOwn(
+      serializePlan(w.handle.getState(), {}).options,
+      'photoSpacingM',
+    ),
+    false,
+  );
+  w.handle.destroy();
+});
+
+test('continuousRoute false is saved and stays off; checking it turns the plan continuous', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(200, 120));
+  pick(w, 'Capture mode', 'distance');
+  assert.equal(w.handle.getState().options.continuousRoute, false);
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.options.captureMode, 'distance');
+  assert.equal(w.handle.getResult().plan.options.continuousRoute, false);
+  const box = w.control('One continuous route');
+  box.checked = true;
+  box.dispatch('change');
+  assert.equal(w.handle.getState().options.continuousRoute, true);
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.options.continuousRoute, true);
+  assert.match(
+    captureRole(w, 'capture-readout').textContent,
+    /Each extra survey line in a battery adds 3 seconds/,
+  );
+  w.handle.destroy();
+});
+
+test('the waypoint field is the cap the plan splits on', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 300));
+  const cap = w.control('Maximum waypoints per file');
+  cap.value = '20';
+  cap.dispatch('change');
+  await w.handle.replan();
+  const result = w.handle.getResult();
+  assert.ok(
+    result.missions.length > 1,
+    'a wide grid should exceed 20 waypoints',
+  );
+  assert.ok(result.missions.every((m) => m.waypointCount <= 20));
+  assert.equal(result.plan.options.maxWaypoints, 20);
+  w.handle.destroy();
+});
+
+test('continuous battery lines name globe markers and an unreachable round trip', () => {
+  const far = { lon: -95, lat: 30, relHeightM: 80 };
+  const result = {
+    plan: {
+      options: { continuousRoute: true },
+      speedMs: 5,
+      takeoff: { lon: -97, lat: 30 },
+    },
+    missions: [
+      {
+        waypoints: [far, { lon: far.lon + 0.01, lat: 30, relHeightM: 80 }],
+      },
+    ],
+    totals: { speedMs: 5, durationS: 4000 },
+  };
+  const shown = continuousBatteryLines(result, 1);
+  assert.equal(shown.estimate.breaks.length, 0);
+  assert.equal(
+    shown.estimate.unreachable[0].reason,
+    'round-trip-exceeds-usable-minutes',
+  );
+  assert.equal(
+    shown.lines.some((line) => /not a marker/i.test(line.text)),
+    false,
+  );
+  const gap = shown.lines.find((line) => line.role === 'capture-unreachable');
+  assert.equal(gap.tone, 'bad');
+  assert.match(gap.text, /round trip already exceeds/);
+  assert.match(gap.text, /not covered/);
+  const stuck = {
+    ...result,
+    missions: [
+      {
+        waypoints: [
+          { lon: -97.01, lat: 30, relHeightM: 80 },
+          { lon: -96.5, lat: 30, relHeightM: 80 },
+        ],
+      },
+    ],
+  };
+  const partial = continuousBatteryLines(stuck, 1);
+  if (
+    partial?.estimate.unreachable.some((gap) => gap.reason === 'no-progress')
+  ) {
+    assert.match(
+      partial.lines.find((line) => line.role === 'capture-unreachable').text,
+      /would not move forward/,
+    );
+  }
+});
+
+function realContinuousPlan() {
+  const m = metersPerDegree(30.27);
+  const box = {
+    west: -97.77 - 1000 / m.lon,
+    east: -97.77 + 1000 / m.lon,
+    south: 30.27 - 600 / m.lat,
+    north: 30.27 + 600 / m.lat,
+  };
+  const plan = planFlight(box, {
+    aglM: 80,
+    captureMode: 'distance',
+    continuousRoute: true,
+    speedMs: 8,
+    usableBatteryMin: 12,
+    batteryMin: 25,
+    photoSpacingM: 25,
+  });
+  assert.equal(plan.error, undefined);
+  assert.ok(plan.legs.length > 1, 'the fixture has survey lines to turn between');
+  const ids = plan.legs.flatMap((leg) => leg.waypoints.map((w) => w.id));
+  const built = assembleMissions(plan, {
+    known: true,
+    takeoffM: 40,
+    wpM: ids.map(() => 40),
+  });
+  built.plan.options.usableBatteryMin = 12;
+  return built;
+}
+
+test('panel, preview and readme agree on pause count, turns and distance for a real plan', () => {
+  const built = realContinuousPlan();
+  const mission = built.missions[0];
+  const home = {
+    lon: built.plan.takeoff.lon,
+    lat: built.plan.takeoff.lat,
+  };
+  const oracle = batteryBreaks(mission.waypoints, {
+    takeoff: home,
+    speedMs: built.plan.speedMs,
+    usableMin: 12,
+    legs: mission.legs,
+  });
+  const bare = batteryBreaks(mission.waypoints, {
+    takeoff: home,
+    speedMs: built.plan.speedMs,
+    usableMin: 12,
+    photoSpacingM: 25,
+  });
+  assert.equal(oracle.legsUsed, true);
+  assert.ok(
+    oracle.breaks.some((mark) => mark.turnS >= 3),
+    'a 3 second turn is on the pause',
+  );
+  assert.notDeepEqual(
+    oracle.breaks.map((mark) => Math.round(mark.groundM)),
+    bare.breaks.map((mark) => Math.round(mark.groundM)),
+    'leg relationships move the pause; a bare polyline does not count turns',
+  );
+  assert.notEqual(
+    oracle.breaks[0].photoCount,
+    bare.breaks[0].photoCount,
+    'station counts restart on each survey line',
+  );
+
+  const preview = batteryPauseEstimate(built, 12);
+  assert.equal(preview.errors.length, 0);
+  assert.equal(preview.breaks.length, oracle.breaks.length);
+  preview.breaks.forEach((item, i) => {
+    assert.equal(item.mark.groundM, oracle.breaks[i].groundM);
+    assert.equal(item.mark.routeM, oracle.breaks[i].routeM);
+    assert.equal(item.mark.turnS, oracle.breaks[i].turnS);
+    assert.equal(item.mark.photoCount, oracle.breaks[i].photoCount);
+  });
+
+  const panel = continuousBatteryLines(built, 12);
+  const pauses = panel.lines.filter((line) => line.role === 'capture-pause');
+  assert.equal(pauses.length, oracle.breaks.length);
+  pauses.forEach((line, i) => {
+    assert.equal(line.groundM, oracle.breaks[i].groundM);
+    assert.equal(line.turnS, oracle.breaks[i].turnS);
+    assert.equal(line.photoCount, oracle.breaks[i].photoCount);
+    assert.match(line.text, /Turn time in that battery/);
+  });
+  assert.equal(
+    panel.lines.some((line) => line.role === 'capture-read-error'),
+    false,
+  );
+
+  const readme = readmeText(built);
+  const rows = [
+    ...readme.matchAll(
+      /distance (\d+) m from the file start, photo count (\d+) from the file start, about [\d.]+ min, turn time (\d+) s/g,
+    ),
+  ];
+  assert.equal(rows.length, oracle.breaks.length);
+  rows.forEach((row, i) => {
+    assert.equal(Number(row[1]), Math.round(oracle.breaks[i].groundM));
+    assert.equal(Number(row[2]), oracle.breaks[i].photoCount);
+    assert.equal(Number(row[3]), oracle.breaks[i].turnS);
+  });
+  assert.match(readme, /Each extra survey line in a battery adds 3 seconds/);
+  assert.doesNotMatch(readme, /turns are not in the model/);
+});
+
+test('an unreachable round trip is warned and is not called a fitting pause', () => {
+  const far = { lon: -95, lat: 30, relHeightM: 80 };
+  const route = [far, { lon: far.lon + 0.01, lat: 30, relHeightM: 80 }];
+  const result = {
+    plan: {
+      options: {
+        continuousRoute: true,
+        usableBatteryMin: 1,
+        captureMode: 'distance',
+      },
+      speedMs: 5,
+      takeoff: { lon: -97, lat: 30 },
+      preset: { name: 'Test', minPhotoIntervalS: 2 },
+      footprint: { alongM: 20, acrossM: 30 },
+      spacing: { photoM: 20, lineM: 30 },
+    },
+    missions: [
+      {
+        waypoints: route,
+        legs: [
+          {
+            waypoints: route,
+            captureMode: 'distance',
+            photoSpacingM: 20,
+            continued: false,
+          },
+        ],
+        waypointCount: 2,
+        photoCount: 1,
+        distanceM: 900,
+        durationS: 4000,
+      },
+    ],
+    totals: { speedMs: 5, durationS: 4000, gsdCm: 1, photoCount: 1 },
+    warnings: [],
+  };
+  const shown = continuousBatteryLines(result, 1);
+  assert.equal(shown.estimate.breaks.length, 0);
+  assert.equal(shown.estimate.covered, false);
+  assert.equal(
+    shown.estimate.unreachable[0].reason,
+    'round-trip-exceeds-usable-minutes',
+  );
+  assert.ok(shown.estimate.unreachable[0].remainingGroundM > 0);
+  const gap = shown.lines.find((line) => line.role === 'capture-unreachable');
+  assert.equal(gap.tone, 'bad');
+  assert.match(gap.text, /not covered/);
+  assert.equal(
+    shown.lines.some((line) => /No pause marker is needed/.test(line.text)),
+    false,
+  );
+  const readme = readmeText(result);
+  assert.match(readme, /UNREACHABLE:/);
+  assert.match(readme, /not a pause plan/);
+  assert.match(readme, /Remaining distance about \d+ m/);
+  assert.doesNotMatch(readme, /fits in 1 usable minutes/);
+  assert.doesNotMatch(readme, /No pause was guessed/);
+  assert.equal(batteryPauseEstimate(result, 1).breaks.length, 0);
+});
+
+test('a valid route whose legs do not match is a read error, not a guessed pause', () => {
+  const built = realContinuousPlan();
+  const mission = built.missions[0];
+  mission.legs = [
+    {
+      waypoints: [
+        mission.waypoints[0],
+        { lon: 0, lat: 0, relHeightM: mission.waypoints[0].relHeightM },
+      ],
+      captureMode: 'distance',
+      photoSpacingM: 25,
+    },
+  ];
+  const shown = continuousBatteryLines(built, 12);
+  assert.equal(shown.estimate.breaks.length, 0);
+  assert.equal(shown.estimate.covered, false);
+  assert.match(shown.estimate.errors[0].message, /match|flatten/);
+  const err = shown.lines.find((line) => line.role === 'capture-read-error');
+  assert.equal(err.tone, 'bad');
+  assert.match(err.text, /could not be read/);
+  assert.match(err.text, /No pause was guessed/);
+  assert.equal(
+    shown.lines.some((line) => line.role === 'capture-pause'),
+    false,
+  );
+  const readme = readmeText(built);
+  assert.match(readme, /read error/);
+  assert.match(readme, /No pause was guessed/);
+  assert.doesNotMatch(readme, /fits in 12 usable minutes/);
+  assert.doesNotMatch(readme, /not calculated \(no route or takeoff\)/);
+});
+
+test('a continuous plan restores usable minutes and does not say markers are missing', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(600, 300));
+  const o = w.handle.getState().options;
+  o.captureMode = 'distance';
+  o.continuousRoute = true;
+  o.usableBatteryMin = 8;
+  o.speedMs = 8;
+  await w.handle.replan();
+  const result = w.handle.getResult();
+  assert.equal(result.plan.options.continuousRoute, true);
+  assert.equal(result.plan.options.usableBatteryMin, 8);
+  const readout = captureRole(w, 'capture-readout');
+  assert.doesNotMatch(readout.textContent, /not a marker/i);
+  assert.match(readout.textContent, /Each extra survey line in a battery adds 3 seconds/);
+  assert.match(
+    readout.textContent,
+    /clearance check is for the planned route only/,
+  );
+  assert.match(readout.textContent, /Check the first resume/);
+  assert.match(readout.textContent, /off by one photo spacing/);
+  const pause = captureRole(w, 'capture-pause');
+  assert.ok(pause);
+  assert.equal(pause.getAttribute('data-tone'), 'warn');
+  assert.equal(pause.style.color, WARNING_TONE_COLOR.warn);
+  assert.match(
+    pause.textContent,
+    /marked on the globe|No pause marker is needed/,
+  );
+  w.handle.destroy();
+});
+
+test('speed above the camera limit is red and a line-end split is amber', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 200));
+  const o = w.handle.getState().options;
+  o.captureMode = 'distance';
+  o.photoSpacingM = 8;
+  o.speedMs = 15;
+  await w.handle.replan();
+  const speed = w.find(
+    (n) => n.getAttribute('data-code') === 'speed-exceeds-camera-limit',
+  );
+  assert.equal(speed.length, 1);
+  assert.equal(speed[0].getAttribute('data-tone'), 'bad');
+  assert.equal(speed[0].style.color, WARNING_TONE_COLOR.bad);
+  assert.match(speed[0].textContent, /does not slow down/);
+  assert.match(speed[0].textContent, /photos can be missed/);
+  w.handle.destroy();
+
+  const wide = setup();
+  wide.handle.setBox(boxM(200, 800));
+  const wideOptions = wide.handle.getState().options;
+  wideOptions.captureMode = 'distance';
+  wideOptions.continuousRoute = true;
+  wideOptions.maxWaypoints = 20;
+  wideOptions.speedMs = 8;
+  wideOptions.direction = 'ew';
+  wideOptions.batteryMin = 5;
+  await wide.handle.replan();
+  const codes = wide.handle.getResult().warnings.map((item) => item.code);
+  const split = wide.find(
+    (n) => n.getAttribute('data-code') === 'line-end-split',
+  );
+  assert.equal(split.length, 1, codes.join(','));
+  assert.equal(split[0].getAttribute('data-tone'), 'warn');
+  assert.equal(split[0].style.color, WARNING_TONE_COLOR.warn);
+  assert.match(split[0].textContent, /end of a line/);
+  assert.match(split[0].textContent, /Battery time does not cut it/);
+  const kept = wide.find((n) => n.getAttribute('data-code') === 'vlos');
+  if (kept.length) assert.equal(kept[0].getAttribute('data-tone'), null);
+  wide.handle.destroy();
+});
+
+test('distance interval uses the rounded KMZ spacing, not the raw overlap metres', () => {
+  const w = setup();
+  pick(w, 'Capture mode', 'distance');
+  const o = w.handle.getState().options;
+  const raw = spacing(
+    footprint(getPreset(o.presetId), o.aglM, 0),
+    o.frontOverlap,
+    o.sideOverlap,
+  ).photoM;
+  const written = writtenSpacingM(raw);
+  assert.notEqual(raw, written);
+  assert.equal(
+    Number(captureRole(w, 'capture-readout').getAttribute('data-photo-m')),
+    written,
+  );
+  assert.equal(o.speedMs, getPreset(o.presetId).defaultSpeedMs);
+  w.handle.destroy();
+});
+
+test('an interval under the camera minimum stays red and the count is theoretical', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  const requested = o.speedMs;
+  o.captureMode = 'distance';
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.speedMs, requested);
+  assert.equal(w.handle.getResult().plan.speedMs, requested);
+  const count = captureRole(w, 'capture-counts');
+  assert.equal(count.getAttribute('data-tone'), 'bad');
+  assert.equal(count.style.color, WARNING_TONE_COLOR.bad);
+  assert.match(count.textContent, /theoretical/i);
+  assert.match(count.textContent, /not photos the camera will take/i);
+  assert.doesNotMatch(count.textContent, /Photos in the plan/);
+  assert.equal(
+    captureRole(w, 'capture-interval-warn').getAttribute('data-tone'),
+    'bad',
+  );
+  w.handle.destroy();
+});
+
+test('timed mode labels stations as estimated, not photos the camera will take', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(200, 120));
+  const o = w.handle.getState().options;
+  o.captureMode = 'timed';
+  o.speedMs = 2;
+  o.photoSpacingM = 20;
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.speedMs, 2);
+  assert.equal(w.handle.getResult().plan.speedMs, 2);
+  const count = captureRole(w, 'capture-counts');
+  assert.match(count.textContent, /Estimated stations/);
+  assert.match(count.textContent, /not a count of photos the camera will take/);
+  assert.equal(count.getAttribute('data-tone'), null);
+  const readout = w.find(
+    (n) => n.getAttribute('data-role') === 'check-readout',
+  )[0];
+  assert.match(readout.textContent, /Estimated station 1 of/);
+  assert.match(readout.textContent, /Not a photo the camera will take/);
+  w.handle.destroy();
+});
+
+test('production panel supplies pause labels a ConstantPositionProperty can feed', async () => {
+  clearOverlaySource(BATTERY_PAUSE_SOURCE);
+  const w = setup({ wrapPositions: true });
+  w.handle.setBox(boxM(1000, 600));
+  const o = w.handle.getState().options;
+  o.captureMode = 'distance';
+  o.continuousRoute = true;
+  o.speedMs = 8;
+  o.usableBatteryMin = 12;
+  await w.handle.replan();
+  const pauses = w.cesium ? w.viewer : null;
+  assert.ok(pauses);
+  const drawn = w.viewer.dataSources.sources
+    .flatMap((source) => source.entities.values)
+    .filter((entity) => entity.name === 'Battery pause');
+  assert.ok(drawn.length > 0);
+  assert.equal(typeof drawn[0].position.getValue, 'function');
+  const registered =
+    getWorldOverlayDiagnostics().entriesBySource[BATTERY_PAUSE_SOURCE] ?? 0;
+  assert.equal(registered, drawn.length);
+  clearOverlaySource(BATTERY_PAUSE_SOURCE);
+  w.handle.destroy();
+  assert.equal(
+    getWorldOverlayDiagnostics().entriesBySource[BATTERY_PAUSE_SOURCE] ?? 0,
+    0,
+  );
+});
+
+test('a custom camera minimum drives warnings, save/load and the planned speed limit', async () => {
+  const w = setup();
+  const note = () => captureRole(w, 'camera-interval-note').textContent;
+  assert.match(note(), /derived\/unverified/);
+  assert.equal(w.control('Camera minimum interval (s)').value, '');
+  assert.equal(
+    Object.hasOwn(serializePlan(w.handle.getState(), {}).options, 'minPhotoIntervalS'),
+    false,
+  );
+  pick(w, 'Capture mode', 'distance');
+  assert.equal(
+    captureRole(w, 'capture-interval-warn').getAttribute('data-tone'),
+    'bad',
+  );
+
+  const input = w.control('Camera minimum interval (s)');
+  input.value = '0.5';
+  input.dispatch('change');
+  assert.equal(w.handle.getState().options.minPhotoIntervalS, 0.5);
+  assert.equal(captureRole(w, 'capture-interval-warn'), undefined);
+  assert.match(note(), /0\.5 s instead of the preset 5/);
+  const open = captureRole(w, 'capture-readout');
+  const secs = Number(open.getAttribute('data-seconds'));
+  assert.ok(secs >= 0.5);
+  assert.equal(
+    Number(open.getAttribute('data-interval-ms')),
+    Number(open.getAttribute('data-photo-m')) / 0.5,
+  );
+
+  input.value = '30';
+  input.dispatch('change');
+  assert.equal(
+    captureRole(w, 'capture-interval-warn').getAttribute('data-tone'),
+    'bad',
+  );
+  assert.match(captureRole(w, 'capture-interval-warn').textContent, /30/);
+  assert.match(
+    captureRole(w, 'capture-interval-derived').textContent,
+    /30\.0 s instead of the preset 5/,
+  );
+
+  w.handle.setBox(boxM(300, 200));
+  const snap = serializePlan(w.handle.getState(), {});
+  assert.equal(snap.options.minPhotoIntervalS, 30);
+  const fresh = setup();
+  await fresh.handle.loadPlan(snap);
+  assert.equal(fresh.handle.getState().options.minPhotoIntervalS, 30);
+  assert.equal(fresh.control('Camera minimum interval (s)').value, '30');
+  assert.match(captureRole(fresh, 'capture-interval-warn').textContent, /30/);
+  const loaded = fresh.handle.getResult();
+  assert.equal(loaded.plan.preset.minPhotoIntervalS, 30);
+  assert.ok(
+    Math.abs(
+      loaded.plan.speedLimits.intervalMs -
+        writtenSpacingM(loaded.plan.spacing.photoM) / 30,
+    ) < 1e-6,
+  );
+  fresh.handle.destroy();
+
+  input.value = '0';
+  input.dispatch('change');
+  assert.equal(w.handle.getState().options.minPhotoIntervalS, 30);
+  assert.equal(input.value, '30');
+  assert.equal(input.getAttribute('aria-invalid'), 'true');
+  assert.match(note(), /was not used/);
+  input.value = '';
+  input.dispatch('change');
+  assert.equal(w.handle.getState().options.minPhotoIntervalS, null);
+  assert.equal(input.getAttribute('aria-invalid'), 'false');
+
+  input.value = '12.5';
+  input.dispatch('change');
+  const agl = w.control('Height above ground');
+  const metres = agl.value;
+  w.find((n) => n.getAttribute('data-action') === 'units-ft')[0].click();
+  assert.notEqual(agl.value, metres);
+  assert.equal(w.control('Camera minimum interval (s)').value, '12.5');
+  assert.equal(w.handle.getState().options.minPhotoIntervalS, 12.5);
+
+  pick(w, 'Aircraft', 'dji-mavic-3');
+  assert.equal(w.handle.getState().options.minPhotoIntervalS, null);
+  assert.equal(w.control('Camera minimum interval (s)').value, '');
   w.handle.destroy();
 });

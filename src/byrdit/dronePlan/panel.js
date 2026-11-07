@@ -44,11 +44,16 @@ import {
   MAX_ZONE_HALF_WIDTH_M,
   MIN_ZONE_HALF_WIDTH_M,
 } from './checkGeometry.js';
-import { createDronePlanPreview, passStyle } from './preview.js';
 import {
   clearOverlaySource,
   setOverlayEntries,
 } from '../../overlays/worldOverlay.js';
+import {
+  createDronePlanPreview,
+  passStyle,
+  batteryPauseEstimate,
+  BATTERY_PAUSE_SOURCE,
+} from './preview.js';
 import { areasBox } from './buildingFootprints.js';
 import { OBSTACLE_OVERLAY_SOURCE, pickTerrainLonLat } from './obstacleLayer.js';
 import { buildingObstacles, SOURCE_NAMES } from './obstacleData.js';
@@ -65,9 +70,18 @@ import {
   DEFAULT_OBSTACLE_HEIGHT_M,
   MAX_ORBIT_TARGETS,
   MAX_TAKEOFF_FROM_BOX_M,
+  MAX_WAYPOINTS_PER_MISSION,
   MIN_AGL_M,
+  MIN_WAYPOINTS_PER_MISSION,
   OBSTACLE_MARGIN_M,
+  footprint,
+  INTERVAL_TRIGGER_PROVEN,
+  isContinuousCapture,
+  cleanMinPhotoIntervalS,
+  presetWithPhotoInterval,
+  spacing,
   takeoffDistanceFromBoxM,
+  writtenSpacingM,
 } from './planner.js';
 import {
   DEFAULT_PRESET_ID,
@@ -80,6 +94,8 @@ import {
   DEFAULT_SHUTTER_DENOMINATOR,
   MIN_PLAN_SPEED_MS,
   SHUTTER_DENOMINATORS,
+  minShutterDenominator,
+  speedLimits,
 } from './speed.js';
 import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
 import {
@@ -105,6 +121,7 @@ import {
   planErrorText,
   speedText,
   warningText,
+  warningTone,
 } from './format.js';
 import {
   browserStorage,
@@ -196,8 +213,238 @@ export function planSummary({ suite, result, batteryMin }) {
   };
 }
 
+/** Saved usable-minutes default. The planner does not read this field. */
+export const DEFAULT_USABLE_BATTERY_MIN = 20;
+const CAPTURE_MODE_VALUES = new Set(['stop', 'distance', 'timed']);
+
+export function cleanCaptureMode(value) {
+  return CAPTURE_MODE_VALUES.has(value) ? value : 'stop';
+}
+
+/** Integer waypoint cap the field accepts: 20 to 200, default 200. */
+export function cleanMaxWaypoints(value) {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n)) return MAX_WAYPOINTS_PER_MISSION;
+  return Math.min(
+    MAX_WAYPOINTS_PER_MISSION,
+    Math.max(MIN_WAYPOINTS_PER_MISSION, n),
+  );
+}
+
+/**
+ * Usable minutes for the pause estimate. Empty, zero and non-numbers return
+ * 20. A positive number is clamped to 5..60, the same window as battery time.
+ */
+export function cleanUsableBatteryMin(value) {
+  if (value == null || value === '') return DEFAULT_USABLE_BATTERY_MIN;
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_USABLE_BATTERY_MIN;
+  return Math.min(60, Math.max(5, n));
+}
+
+/** Positive metres, or null when spacing comes from front overlap. */
+export function cleanPhotoSpacingM(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Degrees from nadir, matching planFlight's pass tilt. Grid and orbit are 0. */
+export function captureTiltDeg(options) {
+  if (options?.pattern !== 'double') return 0;
+  const tilt = 90 + Number(options.tiltPitchDeg);
+  return Number.isFinite(tilt) ? tilt : 0;
+}
+
+export function captureStepLabel(mode) {
+  if (mode === 'distance') return t('Distance trigger');
+  if (mode === 'timed') return t('Timed shot');
+  return t('Stop photos');
+}
+
+/**
+ * Footprint, overlap, interval and shutter limits for the panel readout.
+ * Uses planner.footprint / spacing and speed.speedLimits /
+ * minShutterDenominator. The photo spacing is the one-decimal value written
+ * to the KMZ, not the raw overlap metres. Returns null when the spacing
+ * would not be positive. A tilt that reaches the horizon throws, as
+ * footprint does. Does not change the requested speed.
+ */
+export function captureFigures({
+  preset,
+  aglM,
+  tiltDeg = 0,
+  frontOverlap,
+  sideOverlap,
+  photoSpacingM = null,
+  speedMs,
+  shutterDenominator,
+}) {
+  if (!preset || !(aglM > 0) || !(speedMs > 0)) return null;
+  const fp = footprint(preset, aglM, tiltDeg);
+  if (!(fp.alongM > 0) || !(fp.acrossM > 0)) return null;
+  const fromOverlap = spacing(fp, frontOverlap, sideOverlap);
+  const rawPhotoM = photoSpacingM > 0 ? photoSpacingM : fromOverlap.photoM;
+  const photoM = writtenSpacingM(rawPhotoM);
+  if (!(photoM > 0) || !(fromOverlap.lineM > 0)) return null;
+  const limits = speedLimits({
+    preset,
+    photoSpacingM: photoM,
+    gsdCm: fp.gsdCm,
+    shutterDenominator,
+  });
+  const rawShutter = minShutterDenominator(preset, fp.gsdCm, speedMs);
+  const standardShutter =
+    SHUTTER_DENOMINATORS.find((d) => d >= rawShutter) ?? null;
+  const table = SHUTTER_DENOMINATORS.map((denominator) => {
+    const cap = speedLimits({
+      preset,
+      photoSpacingM: 0,
+      gsdCm: fp.gsdCm,
+      shutterDenominator: denominator,
+    });
+    return { denominator, maxSpeedMs: cap.limitMs, limitedBy: cap.limitedBy };
+  });
+  return {
+    footprint: fp,
+    photoM,
+    lineM: fromOverlap.lineM,
+    frontPct: (1 - photoM / fp.alongM) * 100,
+    sidePct: (1 - fromOverlap.lineM / fp.acrossM) * 100,
+    seconds: photoM / speedMs,
+    limits,
+    rawShutter,
+    standardShutter,
+    fasterThanTable: standardShutter == null || rawShutter > 4000,
+    table,
+    minPhotoIntervalS: preset.minPhotoIntervalS,
+  };
+}
+
+/** Batteries at the usable-minutes setting. Null when the inputs are unusable. */
+export function usableBatteryCount(durationS, usableBatteryMin) {
+  const minutes = Number(usableBatteryMin);
+  if (!(minutes > 0) || !(Number(durationS) >= 0)) return null;
+  return Math.max(1, Math.ceil(Number(durationS) / (minutes * 60)));
+}
+
+/** Inline colours: the warning list's CSS is amber for every row. */
+export const WARNING_TONE_COLOR = Object.freeze({
+  bad: '#ff4d4f',
+  warn: '#ffb547',
+});
+
 const num = (v, d = 0) =>
   formatNumber(v, { minimumFractionDigits: d, maximumFractionDigits: d });
+
+const PAUSE_MODEL_NOTE =
+  'Each extra survey line in a battery adds 3 seconds. Wind and extra climb time are not in the model, so the real pause point moves.';
+
+/**
+ * Pause lines for a continuous route, from batteryBreaks. Null when the
+ * plan is not continuous. Replaces the old "not a marker" guess.
+ * Turns and station resets come from mission.legs. An unreadable result
+ * is a warning, not a guessed pause. An unreachable stretch is warned.
+ */
+export function continuousBatteryLines(result, usableBatteryMin) {
+  const estimate = batteryPauseEstimate(result, usableBatteryMin);
+  if (!estimate) return null;
+  const lines = [];
+  const unreadable = (estimate.errors ?? []).length > 0;
+  if (estimate.covered && !unreadable && estimate.batteries > 0) {
+    lines.push({
+      role: 'capture-batteries',
+      tone: 'warn',
+      text: t(
+        'Estimated flight time {time} at the plan speed. At {minutes} usable minutes per battery that is about {count} batteries. Each extra survey line in a battery adds 3 seconds. Wind and extra climb time are not in the model, so the real pause point moves.',
+        {
+          time: durationText(result.totals?.durationS ?? 0),
+          minutes: num(estimate.usableMin),
+          count: num(estimate.batteries),
+        },
+      ),
+    });
+  }
+  if (estimate.breaks.length) {
+    for (const item of estimate.breaks) {
+      const mark = item.mark;
+      lines.push({
+        role: 'capture-pause',
+        tone: 'warn',
+        lat: mark.lat,
+        lon: mark.lon,
+        groundM: mark.groundM,
+        routeM: mark.routeM,
+        turnS: mark.turnS,
+        photoCount: mark.photoCount,
+        text: t(
+          'Pause {n} is marked on the globe at {distance} along the route, about {time} into that battery, near {lat}, {lon}. Turn time in that battery: {turns} s.',
+          {
+            n: num(mark.index),
+            distance: distanceText(mark.groundM),
+            time: durationText(mark.durationS),
+            lat: num(mark.lat, 5),
+            lon: num(mark.lon, 5),
+            turns: num(mark.turnS),
+          },
+        ),
+      });
+    }
+  } else if (estimate.covered && !unreadable) {
+    lines.push({
+      role: 'capture-pause',
+      tone: 'warn',
+      text: t(
+        'This route fits in the usable minutes. No pause marker is needed.',
+      ),
+    });
+  }
+  for (const gap of estimate.unreachable) {
+    if (
+      !Number.isFinite(gap.fromGroundM) ||
+      !Number.isFinite(gap.remainingGroundM)
+    ) {
+      lines.push({
+        role: 'capture-unreachable',
+        tone: 'bad',
+        text: t(
+          'Part of this route is not covered. The uncovered distance could not be read. No further pause marker is placed.',
+        ),
+      });
+      continue;
+    }
+    const distance = distanceText(gap.fromGroundM ?? 0);
+    const remaining = distanceText(gap.remainingGroundM ?? 0);
+    lines.push({
+      role: 'capture-unreachable',
+      tone: 'bad',
+      text:
+        gap.reason === 'no-progress'
+          ? t(
+              'From {distance} along the route, a further pause would not move forward. {remaining} is not covered.',
+              { distance, remaining },
+            )
+          : t(
+              'From {distance} along the route, the round trip already exceeds {minutes} usable minutes. No further pause marker is placed. {remaining} is not covered.',
+              {
+                distance,
+                remaining,
+                minutes: num(estimate.usableMin),
+              },
+            ),
+    });
+  }
+  for (const err of estimate.errors ?? []) {
+    lines.push({
+      role: 'capture-read-error',
+      tone: 'bad',
+      text: t(
+        'Pause estimate could not be read: {message}. No pause was guessed for that file.',
+        { message: err.message },
+      ),
+    });
+  }
+  return { estimate, lines };
+}
 
 /**
  * Wire the Drone Flight Plan tool. Returns null when the page has no card.
@@ -218,6 +465,10 @@ export function initDronePlan({
   overlay = {
     set: (entries) => setOverlayEntries(OBSTACLE_OVERLAY_SOURCE, entries),
     clear: () => clearOverlaySource(OBSTACLE_OVERLAY_SOURCE),
+  },
+  labelOverlay = {
+    set: (entries) => setOverlayEntries(BATTERY_PAUSE_SOURCE, entries),
+    clear: () => clearOverlaySource(BATTERY_PAUSE_SOURCE),
   },
 } = {}) {
   const panel = doc?.getElementById?.(PANEL_ID);
@@ -245,9 +496,17 @@ export function initDronePlan({
       tiltPitchDeg: -60,
       speedMs: getPreset(DEFAULT_PRESET_ID).defaultSpeedMs,
       photoMode: 'waypoint',
+      captureMode: 'stop',
+      photoSpacingM: null,
+      continuousRoute: false,
+      intervalTriggerProven: INTERVAL_TRIGGER_PROVEN,
       shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
       cameraPresetId: DEFAULT_CAMERA_PRESET_ID,
+      // Null uses the aircraft preset interval. A number is this plan only.
+      minPhotoIntervalS: null,
       batteryMin: 25,
+      maxWaypoints: MAX_WAYPOINTS_PER_MISSION,
+      usableBatteryMin: DEFAULT_USABLE_BATTERY_MIN,
       orbitRadiusM: null,
       orbitHeightsM: null,
       orbitRingMode: 'angles',
@@ -263,6 +522,8 @@ export function initDronePlan({
     // True once the person adds, removes or switches a target: from then on
     // the list is theirs and is no longer rebuilt from the areas.
     orbitTargetsTouched: false,
+    // A rejected camera-interval entry. Not saved.
+    intervalReject: false,
     // True once PLAN ALL ran: its orbit pass uses the orbit targets, so the
     // list stays in view (and in step with the areas) even for a grid pattern.
     orbitsPlanned: false,
@@ -353,6 +614,7 @@ export function initDronePlan({
     viewer,
     cesium,
     overlay,
+    labelOverlay,
     kindText: kindName,
     onObstacleHeight: (id, h) => obstacleStore.setHeight(id, h),
   });
@@ -1254,6 +1516,23 @@ export function initDronePlan({
     }
   }
 
+  /**
+   * Put the panel's usable minutes back on a continuous result when the
+   * planner dropped the option. An already-normalized positive value wins.
+   */
+  function carryUsableBattery(result) {
+    if (!result || result.plan?.options?.continuousRoute !== true)
+      return result;
+    const normalized = Number(result.plan?.options?.usableBatteryMin);
+    const carried = Number(result.usableBatteryMin);
+    if (!(normalized > 0) && !(carried > 0)) {
+      result.usableBatteryMin = cleanUsableBatteryMin(
+        state.options.usableBatteryMin,
+      );
+    }
+    return result;
+  }
+
   async function replan() {
     if (destroyed) return;
     // A voice call waits for this plan. Drop the pending timer so it cannot
@@ -1334,7 +1613,9 @@ export function initDronePlan({
     points.forEach((w, i) => {
       byId[w.id] = ground.wpM[i];
     });
-    state.result = assembleAreaPlan(plan, { ...ground, wpM: byId, obstacleM });
+    state.result = carryUsableBattery(
+      assembleAreaPlan(plan, { ...ground, wpM: byId, obstacleM }),
+    );
     state.error = null;
     state.busy = false;
     planNonce += 1;
@@ -1547,6 +1828,25 @@ export function initDronePlan({
     const outerHost = host;
     host = ui.cameraBlock;
     field(t('Camera settings preset'), ui.cameraPreset, { value: false });
+    ui.minPhotoInterval = el(doc, 'input', null, {
+      cls: 'pp-text-input gev-dp-text',
+      attrs: {
+        type: 'number',
+        min: '0.1',
+        max: '60',
+        step: '0.1',
+        inputmode: 'decimal',
+        'aria-label': t('Camera minimum interval (s)'),
+        'data-role': 'camera-min-interval',
+      },
+    });
+    field(t('Camera minimum interval (s)'), ui.minPhotoInterval, {
+      value: false,
+    });
+    ui.minPhotoIntervalNote = el(doc, 'p', ui.cameraBlock, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'camera-interval-note' },
+    });
     host = outerHost;
     ui.cameraList = el(doc, 'ul', ui.cameraBlock, {
       cls: 'gev-dp-camera-list',
@@ -1908,6 +2208,48 @@ export function initDronePlan({
       t('Photos'),
     );
     ({ row: ui.photoRow } = field(t('Photos'), ui.photoMode, { value: false }));
+    ui.captureMode = select(
+      [
+        ['stop', t('Stop at every photo')],
+        ['distance', t('Photo every N metres (KMZ distance trigger)')],
+        ['timed', t('Camera timed shot (path-only KMZ)')],
+      ],
+      t('Capture mode'),
+    );
+    ({ row: ui.captureRow } = field(t('Capture mode'), ui.captureMode, {
+      value: false,
+    }));
+    ui.spacingSource = select(
+      [
+        ['overlap', t('From front overlap')],
+        ['distance', t('Fixed distance')],
+      ],
+      t('Photo spacing'),
+    );
+    ({ row: ui.spacingSourceRow } = field(
+      t('Photo spacing'),
+      ui.spacingSource,
+      {
+        value: false,
+      },
+    ));
+    ui.photoSpacing = el(doc, 'input', null, {
+      cls: 'pp-text-input gev-dp-text',
+      attrs: {
+        type: 'number',
+        min: '0.1',
+        step: 'any',
+        'aria-label': t('Fixed photo spacing'),
+      },
+    });
+    ({ row: ui.spacingRow, labelEl: ui.spacingLabel } = field(
+      t('Photo spacing ({unit})', { unit: lengthUnit() }),
+      ui.photoSpacing,
+      { value: false },
+    ));
+    ui.captureReadout = el(doc, 'div', host, {
+      attrs: { 'data-role': 'capture-readout' },
+    });
     into('flight');
     ui.speed = lslider(t('Speed'), {
       minM: MIN_PLAN_SPEED_MS,
@@ -1928,6 +2270,51 @@ export function initDronePlan({
       },
     });
     field(t('Battery (min)'), ui.battery, { value: false });
+    ui.maxWaypoints = el(doc, 'input', null, {
+      cls: 'pp-text-input gev-dp-text',
+      attrs: {
+        type: 'number',
+        min: String(MIN_WAYPOINTS_PER_MISSION),
+        max: String(MAX_WAYPOINTS_PER_MISSION),
+        step: '1',
+        'aria-label': t('Maximum waypoints per file'),
+      },
+    });
+    field(t('Maximum waypoints per file'), ui.maxWaypoints, { value: false });
+    ui.usableBattery = el(doc, 'input', null, {
+      cls: 'pp-text-input gev-dp-text',
+      attrs: {
+        type: 'number',
+        min: '5',
+        max: '60',
+        step: '1',
+        'aria-label': t('Usable minutes per battery'),
+        title: t(
+          'Pause estimate only, 5 to 60 minutes. File splits still use Battery (min). A continuous route is not split by battery.',
+        ),
+      },
+    });
+    field(t('Usable minutes per battery'), ui.usableBattery, { value: false });
+    ui.continuous = el(doc, 'input', null, {
+      attrs: {
+        type: 'checkbox',
+        'aria-label': t('One continuous route'),
+      },
+    });
+    ({ row: ui.continuousRow } = field(
+      t('One continuous route'),
+      ui.continuous,
+      {
+        value: false,
+      },
+    ));
+    ui.continuousNote = el(doc, 'p', host, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'continuous-note' },
+      text: t(
+        'Do not split this route into battery-sized files. Waypoints are turning points. You pause, swap the battery and resume by hand.',
+      ),
+    });
     ui.jobs = select(
       [
         ['per-area', t('One job per area')],
@@ -2209,6 +2596,9 @@ export function initDronePlan({
     ui.preset.addEventListener('change', () => {
       o.presetId = ui.preset.value;
       o.speedMs = getPreset(o.presetId).defaultSpeedMs;
+      // The interval belongs to the aircraft preset. A new aircraft starts unset.
+      o.minPhotoIntervalS = null;
+      state.intervalReject = false;
       state.wpml = { droneEnumValue: null, droneSubEnumValue: null };
       syncControls();
       schedule();
@@ -2239,6 +2629,22 @@ export function initDronePlan({
       o.shutterDenominator = allowedShutter(
         Math.max(cam.minShutterDenominator, o.shutterDenominator),
       );
+      syncControls();
+      schedule();
+    });
+    ui.minPhotoInterval.addEventListener('change', () => {
+      const raw = ui.minPhotoInterval.value.trim();
+      if (raw === '') {
+        o.minPhotoIntervalS = null;
+        state.intervalReject = false;
+      } else {
+        const cleaned = cleanMinPhotoIntervalS(raw);
+        if (cleaned == null) state.intervalReject = true;
+        else {
+          o.minPhotoIntervalS = cleaned;
+          state.intervalReject = false;
+        }
+      }
       syncControls();
       schedule();
     });
@@ -2345,6 +2751,58 @@ export function initDronePlan({
       o.photoMode = ui.photoMode.value;
       schedule();
     });
+    ui.captureMode.addEventListener('change', () => {
+      o.captureMode = cleanCaptureMode(ui.captureMode.value);
+      syncControls();
+      schedule();
+    });
+    ui.spacingSource.addEventListener('change', () => {
+      if (ui.spacingSource.value === 'distance') {
+        if (!(o.photoSpacingM > 0)) {
+          const seeded = (() => {
+            try {
+              return captureFigures({
+                preset: getPreset(o.presetId),
+                aglM: Math.min(Math.max(o.aglM, MIN_AGL_M), AGL_CAP_M),
+                tiltDeg: captureTiltDeg(o),
+                frontOverlap: o.frontOverlap,
+                sideOverlap: o.sideOverlap,
+                photoSpacingM: null,
+                speedMs: o.speedMs,
+                shutterDenominator: o.shutterDenominator,
+              });
+            } catch {
+              return null;
+            }
+          })();
+          o.photoSpacingM = seeded?.photoM > 0 ? seeded.photoM : 20;
+        }
+      } else {
+        o.photoSpacingM = null;
+      }
+      syncControls();
+      schedule();
+    });
+    ui.photoSpacing.addEventListener('change', () => {
+      o.photoSpacingM = cleanPhotoSpacingM(lengthToM(ui.photoSpacing.value));
+      syncControls();
+      schedule();
+    });
+    ui.continuous.addEventListener('change', () => {
+      o.continuousRoute = ui.continuous.checked === true;
+      syncControls();
+      schedule();
+    });
+    ui.maxWaypoints.addEventListener('change', () => {
+      o.maxWaypoints = cleanMaxWaypoints(ui.maxWaypoints.value);
+      syncControls();
+      schedule();
+    });
+    ui.usableBattery.addEventListener('change', () => {
+      o.usableBatteryMin = cleanUsableBatteryMin(ui.usableBattery.value);
+      syncControls();
+      schedule();
+    });
     onInput(ui.speed, () => (o.speedMs = speedToMs(ui.speed.value)));
     ui.battery.addEventListener('change', () => {
       o.batteryMin = Number(ui.battery.value) || 25;
@@ -2398,6 +2856,7 @@ export function initDronePlan({
         patternName,
         orbit ? '' : heightText(Math.min(o.aglM, AGL_CAP_M)),
         orbit ? '' : `${num(o.frontOverlap)}% / ${num(o.sideOverlap)}%`,
+        captureStepLabel(o.captureMode),
       ],
       orbits: [
         lengthText(o.orbitRadiusM ?? result?.plan?.options?.orbitRadiusM ?? 40),
@@ -2470,6 +2929,34 @@ export function initDronePlan({
       default:
         return t('Mapping grid');
     }
+  }
+
+  function cameraIntervalNote(preset, override) {
+    if (state.intervalReject) {
+      return t(
+        'That interval was not used. Enter 0.1 to 60, or leave the field blank.',
+      );
+    }
+    const presetS = num(preset.minPhotoIntervalS, 1);
+    if (override == null) {
+      if (
+        preset.minPhotoIntervalStatus === 'derived' &&
+        preset.verified === 'unverified'
+      ) {
+        return t(
+          'Preset default {seconds} s, derived/unverified. Blank keeps it. A number replaces it for this plan only and is still not verified.',
+          { seconds: presetS },
+        );
+      }
+      return t(
+        'Preset default {seconds} s. Blank keeps it. A number replaces it for this plan only.',
+        { seconds: presetS },
+      );
+    }
+    return t(
+      'This plan uses {seconds} s instead of the preset {preset} s. Not verified here.',
+      { seconds: num(override, 1), preset: presetS },
+    );
   }
 
   function presetSummary(preset) {
@@ -2707,18 +3194,39 @@ export function initDronePlan({
         state.imports.find((i) => i.id === cur.passId)?.name ??
         cur.passId);
     const fp = cur.footprint;
-    ui.checkReadout.textContent = t(
-      'Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}',
-      {
-        n: num(info.index + 1),
-        total: num(info.count),
-        pass,
-        pitch: num(cur.pitchDeg ?? -90),
-        h: heightText(cur.aglM ?? 0),
-        w: fp ? heightText(fp.widthM) : '-',
-        d: fp ? heightText(fp.depthM) : '-',
-      },
-    );
+    const speed = Number(state.options.speedMs);
+    const minInterval = presetWithPhotoInterval(
+      getPreset(state.options.presetId),
+      state.options.minPhotoIntervalS,
+    )?.minPhotoIntervalS;
+    const underMin =
+      cur.photoSpacingM > 0 &&
+      speed > 0 &&
+      minInterval > 0 &&
+      cur.photoSpacingM / speed < minInterval;
+    const readout = {
+      n: num(info.index + 1),
+      total: num(info.count),
+      pass,
+      pitch: num(cur.pitchDeg ?? -90),
+      h: heightText(cur.aglM ?? 0),
+      w: fp ? heightText(fp.widthM) : '-',
+      d: fp ? heightText(fp.depthM) : '-',
+    };
+    ui.checkReadout.textContent = cur.estimated
+      ? t(
+          'Estimated station {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}. Not a photo the camera will take.',
+          readout,
+        )
+      : cur.captureMode === 'distance' && underMin
+        ? t(
+            'Theoretical station {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}. Not a photo the camera will take.',
+            readout,
+          )
+        : t(
+            'Photo {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}',
+            readout,
+          );
     if (fp?.clipped) {
       ui.checkReadout.textContent += ` ${t('Part of the view is above the horizon, so the far edge is cut short.')}`;
     }
@@ -2760,8 +3268,20 @@ export function initDronePlan({
     ui.mode.value = modeFor(o);
     ui.shutter.value = String(o.shutterDenominator);
     ui.cameraPreset.value = cameraPresetOrDefault(o.cameraPresetId).id;
+    o.minPhotoIntervalS = cleanMinPhotoIntervalS(o.minPhotoIntervalS);
+    const intervalPreset = presetWithPhotoInterval(preset, o.minPhotoIntervalS);
+    ui.minPhotoInterval.value =
+      o.minPhotoIntervalS == null ? '' : String(o.minPhotoIntervalS);
+    ui.minPhotoInterval.setAttribute(
+      'aria-invalid',
+      state.intervalReject ? 'true' : 'false',
+    );
+    ui.minPhotoIntervalNote.textContent = cameraIntervalNote(
+      preset,
+      o.minPhotoIntervalS,
+    );
     renderCameraChecklist(o);
-    ui.presetInfo.textContent = presetSummary(preset);
+    ui.presetInfo.textContent = presetSummary(intervalPreset);
     renderRecommended(preset, modeFor(o));
     for (const system of ['ft', 'm']) {
       ui.unitButtons[system].setAttribute(
@@ -2849,6 +3369,28 @@ export function initDronePlan({
       );
     }
     ui.photoMode.value = o.photoMode;
+    o.captureMode = cleanCaptureMode(o.captureMode);
+    o.continuousRoute = o.continuousRoute === true;
+    o.intervalTriggerProven = INTERVAL_TRIGGER_PROVEN;
+    o.maxWaypoints = cleanMaxWaypoints(o.maxWaypoints);
+    o.usableBatteryMin = cleanUsableBatteryMin(o.usableBatteryMin);
+    o.photoSpacingM = cleanPhotoSpacingM(o.photoSpacingM);
+    ui.captureMode.value = o.captureMode;
+    ui.spacingSource.value = o.photoSpacingM > 0 ? 'distance' : 'overlap';
+    ui.spacingLabel.textContent = t('Photo spacing ({unit})', {
+      unit: lengthUnit(),
+    });
+    if (o.photoSpacingM > 0)
+      ui.photoSpacing.value = lengthField(o.photoSpacingM);
+    ui.maxWaypoints.value = String(o.maxWaypoints);
+    ui.usableBattery.value = String(o.usableBatteryMin);
+    ui.continuous.checked = o.continuousRoute;
+    const intervalCapture = isContinuousCapture(o.captureMode);
+    const surveyCapture = intervalCapture && o.pattern !== 'orbit';
+    ui.spacingSourceRow.hidden = !surveyCapture;
+    ui.spacingRow.hidden = !surveyCapture || !(o.photoSpacingM > 0);
+    ui.continuousRow.hidden = !surveyCapture;
+    ui.continuousNote.hidden = !surveyCapture;
     ui.speed.value = String(Math.round(speedFromMs(o.speedMs) * 10) / 10);
     ui.speedOut.textContent = speedText(o.speedMs);
     ui.battery.value = String(o.batteryMin);
@@ -2908,7 +3450,393 @@ export function initDronePlan({
     renderPaths();
     renderObstacleStatus();
     renderObstacles();
+    renderCaptureReadout();
     renderStepLines();
+  }
+
+  function renderCaptureReadout() {
+    const box = ui.captureReadout;
+    if (!box) return;
+    box.replaceChildren();
+    for (const key of [
+      'data-seconds',
+      'data-photo-m',
+      'data-front',
+      'data-side',
+      'data-gsd',
+      'data-shutter',
+      'data-interval-ms',
+      'data-limited-by',
+      'data-pause-lat',
+      'data-pause-lon',
+    ])
+      box.removeAttribute(key);
+    const o = state.options;
+    const interval = isContinuousCapture(o.captureMode);
+    box.hidden = !interval;
+    if (!interval) return;
+    const say = (text, role, tone) => {
+      const node = el(doc, 'p', box, {
+        cls: tone ? 'gev-dp-warning' : 'gev-dp-note',
+        text,
+        attrs: {
+          'data-role': role,
+          ...(tone ? { 'data-tone': tone } : {}),
+        },
+      });
+      if (tone && WARNING_TONE_COLOR[tone])
+        node.style.color = WARNING_TONE_COLOR[tone];
+      return node;
+    };
+    if (o.captureMode === 'distance' && INTERVAL_TRIGGER_PROVEN !== true) {
+      say(
+        t(
+          'NOT proven on the Mini 5 Pro: test a short flight first. A wrong guess flies the lines and takes no photos.',
+        ),
+        'capture-unproven',
+        'warn',
+      );
+    }
+    if (o.captureMode === 'timed') {
+      say(
+        t(
+          'Set DJI Fly to Timed shot at the interval shown and at the plan speed. The file has no photo action. You start the timed shot by hand.',
+        ),
+        'capture-timed',
+        'warn',
+      );
+    }
+    const preset = presetWithPhotoInterval(
+      getPreset(o.presetId),
+      o.minPhotoIntervalS,
+    );
+    const agl = Math.min(Math.max(Number(o.aglM) || 0, MIN_AGL_M), AGL_CAP_M);
+    let figs = null;
+    let figureError = null;
+    try {
+      figs = captureFigures({
+        preset,
+        aglM: agl,
+        tiltDeg: captureTiltDeg(o),
+        frontOverlap: o.frontOverlap,
+        sideOverlap: o.sideOverlap,
+        photoSpacingM: o.photoSpacingM,
+        speedMs: o.speedMs,
+        shutterDenominator: o.shutterDenominator,
+      });
+    } catch (err) {
+      figureError = err;
+      figs = null;
+    }
+    const saySafety = () => {
+      say(
+        t(PAUSE_MODEL_NOTE),
+        'capture-wind',
+        'warn',
+      );
+      say(
+        t(
+          'Pausing and resuming is your procedure in DJI Fly. This tool has not verified that DJI Fly resumes after a landing. Check the first resume.',
+        ),
+        'capture-resume',
+        'warn',
+      );
+      if (o.captureMode === 'timed') {
+        say(
+          t(
+            'Timed shot may stop while the aircraft is paused or returning. After you resume, check in DJI Fly that Timed shot is running before the route continues.',
+          ),
+          'capture-resume-timed',
+          'warn',
+        );
+      }
+      if (o.captureMode === 'distance') {
+        say(
+          t(
+            'The distance trigger is not proven to continue after a resume. Check that photos are still being taken after you resume.',
+          ),
+          'capture-resume-distance',
+          'warn',
+        );
+      }
+      say(
+        t(
+          'A pause and resume may fly a straight line from the landing point back to the break. That leg crosses open ground. Check it for trees. The clearance check is for the planned route only, not that resume leg.',
+        ),
+        'capture-clearance',
+        'warn',
+      );
+      say(
+        t(
+          'The first photo after a resume may not be the right distance from the previous one. Overlap at the break can be off by one photo spacing.',
+        ),
+        'capture-overlap-break',
+        'warn',
+      );
+    };
+    if (o.pattern === 'orbit') {
+      say(
+        t(
+          'Capture mode applies to survey lines. An orbit keeps its own photo spacing.',
+        ),
+        'capture-orbit',
+      );
+      saySafety();
+      return;
+    }
+    if (!figs) {
+      say(
+        figureError?.message === 'Camera tilt reaches the horizon'
+          ? t(
+              'Camera tilt reaches the horizon, so the footprint cannot be calculated.',
+            )
+          : t('The footprint cannot be calculated for these settings.'),
+        'capture-footprint-error',
+        'bad',
+      );
+      saySafety();
+      return;
+    }
+    box.setAttribute('data-seconds', String(figs.seconds));
+    box.setAttribute('data-photo-m', String(figs.photoM));
+    box.setAttribute('data-front', String(figs.frontPct));
+    box.setAttribute('data-side', String(figs.sidePct));
+    box.setAttribute('data-gsd', String(figs.footprint.gsdCm));
+    box.setAttribute('data-shutter', String(figs.standardShutter ?? ''));
+    box.setAttribute('data-interval-ms', String(figs.limits.intervalMs));
+    box.setAttribute('data-limited-by', figs.limits.limitedBy);
+    if (state.dirty) {
+      say(
+        t(
+          'Plan is updating. The numbers below are from the current settings, not the last file.',
+        ),
+        'capture-dirty',
+      );
+    } else if (!state.result) {
+      say(
+        t(
+          'No plan yet. Footprint, overlap, interval and shutter limits are from the current settings.',
+        ),
+        'capture-unplanned',
+      );
+    }
+    say(
+      t(
+        'Footprint at this height: {along} along the track, {across} across the track, ground sample {gsd}.',
+        {
+          along: lengthText(figs.footprint.alongM),
+          across: lengthText(figs.footprint.acrossM),
+          gsd: `${num(figs.footprint.gsdCm, 2)} cm/px`,
+        },
+      ),
+      'capture-footprint',
+    );
+    say(
+      t('Overlap at this spacing: {front}% front, {side}% side.', {
+        front: num(figs.frontPct, 1),
+        side: num(figs.sidePct, 1),
+      }),
+      'capture-overlap',
+    );
+    const intervalTone =
+      figs.seconds < figs.minPhotoIntervalS
+        ? 'bad'
+        : figs.seconds < figs.minPhotoIntervalS * 1.2
+          ? 'warn'
+          : undefined;
+    say(
+      t(
+        'Seconds between pictures at the plan speed: {seconds}. Maximum speed that still keeps that spacing: {speed}.',
+        {
+          seconds: num(figs.seconds, 1),
+          speed: speedText(figs.limits.intervalMs),
+        },
+      ),
+      'capture-interval',
+      intervalTone,
+    );
+    if (figs.seconds < figs.minPhotoIntervalS) {
+      say(
+        t(
+          'Too fast for the camera: {seconds} s between pictures is under the {min} s minimum. Slow down or widen the spacing.',
+          {
+            seconds: num(figs.seconds, 1),
+            min: num(figs.minPhotoIntervalS, 1),
+          },
+        ),
+        'capture-interval-warn',
+        'bad',
+      );
+    } else if (figs.seconds < figs.minPhotoIntervalS * 1.2) {
+      say(
+        t(
+          'Close to the camera limit: {seconds} s between pictures is within 20% of the {min} s minimum.',
+          {
+            seconds: num(figs.seconds, 1),
+            min: num(figs.minPhotoIntervalS, 1),
+          },
+        ),
+        'capture-interval-warn',
+        'warn',
+      );
+    }
+    say(
+      o.minPhotoIntervalS == null
+        ? t(
+            'The shortest full-resolution interval on this aircraft is {seconds} s in the preset. That figure is derived from other planners, not verified here.',
+            { seconds: num(figs.minPhotoIntervalS, 1) },
+          )
+        : t(
+            'This plan uses {seconds} s instead of the preset {preset} s. Not verified here.',
+            {
+              seconds: num(figs.minPhotoIntervalS, 1),
+              preset: num(getPreset(o.presetId).minPhotoIntervalS, 1),
+            },
+          ),
+      'capture-interval-derived',
+    );
+    const limitSpeed = speedText(figs.limits.limitMs);
+    say(
+      figs.limits.limitedBy === 'interval'
+        ? t('The tightest speed limit is the camera interval: {speed}.', {
+            speed: limitSpeed,
+          })
+        : figs.limits.limitedBy === 'blur'
+          ? t(
+              'The tightest speed limit is blur at the chosen shutter: {speed}.',
+              {
+                speed: limitSpeed,
+              },
+            )
+          : t('The tightest speed limit is the aircraft: {speed}.', {
+              speed: limitSpeed,
+            }),
+      'capture-speed-limit',
+    );
+    const cam = cameraPresetOrDefault(o.cameraPresetId);
+    if (figs.fasterThanTable) {
+      say(
+        t(
+          'The plan speed needs a shutter faster than 1/4000 s. Slow down. The tool cannot keep the blur limit.',
+        ),
+        'capture-shutter',
+        'bad',
+      );
+    } else {
+      say(
+        t(
+          'Do not use a shutter slower than 1/{n} s at this height and speed.',
+          { n: num(figs.standardShutter) },
+        ),
+        'capture-shutter',
+        figs.rawShutter > cam.minShutterDenominator ? 'warn' : undefined,
+      );
+      if (figs.rawShutter > cam.minShutterDenominator) {
+        say(
+          t(
+            'The plan speed needs a faster shutter than the camera preset minimum of 1/{n} s.',
+            { n: num(cam.minShutterDenominator) },
+          ),
+          'capture-shutter-warn',
+          'warn',
+        );
+      }
+    }
+    say(
+      t(
+        'The tool cannot know the light. Read the shutter shown in DJI Fly. If you must leave the shutter open longer, slow down to the speed in the table.',
+      ),
+      'capture-light',
+    );
+    const table = el(doc, 'ul', box, {
+      cls: 'gev-dp-warnings',
+      attrs: { 'data-role': 'capture-shutter-table' },
+    });
+    for (const row of figs.table) {
+      el(doc, 'li', table, {
+        text: t(
+          'Shutter 1/{n}: maximum speed {speed} at this height (blur and aircraft limits, not the photo interval).',
+          { n: num(row.denominator), speed: speedText(row.maxSpeedMs) },
+        ),
+        attrs: { 'data-shutter': String(row.denominator) },
+      });
+    }
+    if (!state.dirty && state.result?.totals) {
+      const missions = state.result.missions ?? [];
+      const maxWp = missions.reduce(
+        (max, item) => Math.max(max, item.waypointCount || 0),
+        0,
+      );
+      say(
+        figs.seconds < figs.minPhotoIntervalS
+          ? t(
+              'Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum. Waypoints in each file: {waypoints}. Largest file: {max} waypoints.',
+              {
+                photos: num(state.result.totals.photoCount),
+                waypoints:
+                  missions.map((item) => num(item.waypointCount)).join(' / ') ||
+                  num(0),
+                max: num(maxWp),
+              },
+            )
+          : o.captureMode === 'timed'
+            ? t(
+                'Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand. Waypoints in each file: {waypoints}. Largest file: {max} waypoints.',
+                {
+                  photos: num(state.result.totals.photoCount),
+                  waypoints:
+                    missions
+                      .map((item) => num(item.waypointCount))
+                      .join(' / ') || num(0),
+                  max: num(maxWp),
+                },
+              )
+            : t(
+                'Photos in the plan: {photos}. Waypoints in each file: {waypoints}. Largest file: {max} waypoints.',
+                {
+                  photos: num(state.result.totals.photoCount),
+                  waypoints:
+                    missions
+                      .map((item) => num(item.waypointCount))
+                      .join(' / ') || num(0),
+                  max: num(maxWp),
+                },
+              ),
+        'capture-counts',
+        figs.seconds < figs.minPhotoIntervalS ? 'bad' : undefined,
+      );
+      const minutes = o.usableBatteryMin;
+      const battery = continuousBatteryLines(state.result, minutes);
+      if (battery) {
+        for (const line of battery.lines) {
+          if (Number.isFinite(line.lat) && Number.isFinite(line.lon)) {
+            box.setAttribute('data-pause-lat', String(line.lat));
+            box.setAttribute('data-pause-lon', String(line.lon));
+          }
+          say(line.text, line.role, line.tone);
+        }
+      } else {
+        const count = usableBatteryCount(
+          state.result.totals.durationS,
+          minutes,
+        );
+        if (count != null) {
+          say(
+            t(
+              'Estimated flight time {time} at the plan speed. At {minutes} usable minutes per battery that is about {count} batteries. Each extra survey line in a battery adds 3 seconds. Wind and extra climb time are not in the model, so the real pause point moves.',
+              {
+                time: durationText(state.result.totals.durationS),
+                minutes: num(minutes),
+                count: num(count),
+              },
+            ),
+            'capture-batteries',
+            'warn',
+          );
+        }
+      }
+    }
+    saySafety();
   }
 
   function renderTargets() {
@@ -3400,8 +4328,17 @@ export function initDronePlan({
     );
     for (const w of warnings) {
       const text = warningText(w);
-      if (text)
-        el(doc, 'li', ui.warnings, { text, attrs: { 'data-code': w.code } });
+      if (!text) continue;
+      const tone = warningTone(w.code);
+      const node = el(doc, 'li', ui.warnings, {
+        text,
+        attrs: {
+          'data-code': w.code,
+          ...(tone ? { 'data-tone': tone } : {}),
+        },
+      });
+      if (tone && WARNING_TONE_COLOR[tone])
+        node.style.color = WARNING_TONE_COLOR[tone];
     }
     const kmz = kmzOk();
     if (!kmz.ok) {
@@ -3587,7 +4524,9 @@ export function initDronePlan({
         passes.push({
           id: pass.id,
           label: pass.label,
-          result: assembleAreaPlan(plan, { ...ground, wpM: byId, obstacleM }),
+          result: carryUsableBattery(
+            assembleAreaPlan(plan, { ...ground, wpM: byId, obstacleM }),
+          ),
           error: null,
         });
       }
@@ -4214,6 +5153,24 @@ export function initDronePlan({
     // A plan saved before the camera preset existed gets the default one.
     state.options.cameraPresetId = DEFAULT_CAMERA_PRESET_ID;
     Object.assign(state.options, plan.options);
+    state.options.captureMode = cleanCaptureMode(state.options.captureMode);
+    state.options.continuousRoute = state.options.continuousRoute === true;
+    // A saved plan cannot suppress the Mini 5 Pro unproven notice.
+    state.options.intervalTriggerProven = INTERVAL_TRIGGER_PROVEN;
+    state.options.maxWaypoints = cleanMaxWaypoints(
+      state.options.maxWaypoints ?? MAX_WAYPOINTS_PER_MISSION,
+    );
+    state.options.usableBatteryMin = cleanUsableBatteryMin(
+      state.options.usableBatteryMin ?? DEFAULT_USABLE_BATTERY_MIN,
+    );
+    state.options.photoSpacingM = cleanPhotoSpacingM(
+      state.options.photoSpacingM,
+    );
+    // Absence in the file is unset. Do not keep a previous plan's override.
+    state.options.minPhotoIntervalS = cleanMinPhotoIntervalS(
+      plan.options.minPhotoIntervalS,
+    );
+    state.intervalReject = false;
     state.options.orbitTargets = plan.orbitTargets;
     state.options.lookAtPaths = plan.lookAtPaths ?? [];
     state.orbitTargetsTouched = plan.orbitTargetsTouched;
@@ -4401,6 +5358,27 @@ export function initDronePlan({
     }
     if (Object.hasOwn(patch, 'batteryMin')) {
       o.batteryMin = patch.batteryMin;
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'captureMode')) {
+      o.captureMode = cleanCaptureMode(patch.captureMode);
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'photoSpacingM')) {
+      o.photoSpacingM = cleanPhotoSpacingM(patch.photoSpacingM);
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'continuousRoute')) {
+      o.continuousRoute = patch.continuousRoute === true;
+      plan = true;
+    }
+    // intervalTriggerProven is not a voice or options control.
+    if (Object.hasOwn(patch, 'maxWaypoints')) {
+      o.maxWaypoints = cleanMaxWaypoints(patch.maxWaypoints);
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'usableBatteryMin')) {
+      o.usableBatteryMin = cleanUsableBatteryMin(patch.usableBatteryMin);
       plan = true;
     }
     if (Object.hasOwn(patch, 'jobs')) {

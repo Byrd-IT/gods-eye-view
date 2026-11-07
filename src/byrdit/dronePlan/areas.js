@@ -21,6 +21,8 @@ import {
   MAX_MISSIONS,
   MAX_TAKEOFF_FROM_BOX_M,
   MAX_WAYPOINTS_TOTAL,
+  isContinuousCapture,
+  linePhotoCount,
   normalizeOptions,
   planFlight,
   takeoffDistanceFromBoxM,
@@ -265,8 +267,13 @@ function clipLegPieces(
   const shift = travelShift(a, b, lookAhead);
   const aimA = { x: a.x + shift.x, y: a.y + shift.y };
   const aimB = { x: b.x + shift.x, y: b.y + shift.y };
-  const interval = leg.photoMode === 'interval';
-  const step = interval ? INTERVAL_WAYPOINT_STEP_M : leg.photoSpacingM;
+  const continuous = isContinuousCapture(leg.captureMode);
+  const interval = !continuous && leg.photoMode === 'interval';
+  const step = continuous
+    ? Number.POSITIVE_INFINITY
+    : interval
+      ? INTERVAL_WAYPOINT_STEP_M
+      : leg.photoSpacingM;
   const built = [];
   for (const piece of pieces(aimA, aimB)) {
     const start = { x: piece.start.x - shift.x, y: piece.start.y - shift.y };
@@ -282,7 +289,7 @@ function clipLegPieces(
         aglM: leg.waypoints[0].aglM,
         pitchDeg: leg.pitchDeg,
         headingDeg: leg.waypoints[0].headingDeg,
-        photo: !interval,
+        photo: !(interval || continuous),
       };
       return withIds ? { id, ...fields } : fields;
     });
@@ -292,9 +299,10 @@ function clipLegPieces(
         ...leg,
         waypoints,
         lengthM: length,
-        photoCount: interval
-          ? Math.floor(length / leg.photoSpacingM + 1e-9) + 1
-          : waypoints.length,
+        photoCount:
+          interval || continuous
+            ? linePhotoCount(length, leg.photoSpacingM)
+            : waypoints.length,
       },
     });
   }

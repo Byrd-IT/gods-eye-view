@@ -12,7 +12,7 @@
  * Pure: no DOM, no Cesium. Everything read back is re-validated here, because
  * a `.gevplan` file is untrusted input.
  */
-import { normalizeLookAtPaths, normalizeOrbitTargets } from './planner.js';
+import { cleanMinPhotoIntervalS, normalizeLookAtPaths, normalizeOrbitTargets } from './planner.js';
 import { normalizeObstacles } from './obstacles.js';
 import { getPreset } from './presets.js';
 import { isCameraPresetId } from './cameraSettings.js';
@@ -24,6 +24,11 @@ export const MAX_RING_POINTS = 500;
 export const MAX_IMPORTS = 20;
 export const MAX_IMPORT_WAYPOINTS = 2000;
 export const MAX_GEVPLAN_BYTES = 25 * 1024 * 1024;
+/**
+ * Photo trigger. Optional on a saved plan: a plan written before this setting
+ * has no captureMode, and that absence is not a stored choice.
+ */
+export const CAPTURE_MODES = Object.freeze(['stop', 'distance', 'timed']);
 
 /** Setting name -> check. Unknown names are dropped. */
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -37,9 +42,20 @@ const OPTION_TYPES = Object.freeze({
   tiltPitchDeg: finite,
   speedMs: finite,
   photoMode: (v) => ['waypoint', 'interval'].includes(v),
+  captureMode: (v) => CAPTURE_MODES.includes(v),
+  // Metres between photos. Optional: only a finite number is stored. No default.
+  photoSpacingM: finite,
+  // Seconds. Only a usable number is stored. Absent means the aircraft preset.
+  minPhotoIntervalS: (v) =>
+    typeof v === 'number' && cleanMinPhotoIntervalS(v) === v,
+  continuousRoute: (v) => typeof v === 'boolean',
+  // intervalTriggerProven is not a plan field. A .gevplan file cannot set it.
   shutterDenominator: finite,
   cameraPresetId: (v) => typeof v === 'string' && isCameraPresetId(v),
   batteryMin: finite,
+  // Finite only. Absent means unset; the default is applied outside this file.
+  usableBatteryMin: finite,
+  maxWaypoints: finite,
   orbitRadiusM: (v) => v === null || finite(v),
   orbitHeightsM: (v) =>
     v === null || (Array.isArray(v) && v.length <= 20 && v.every(finite)),

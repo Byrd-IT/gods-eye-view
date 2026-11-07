@@ -34,13 +34,20 @@
  *    are one SEQUENCE group (tilt first), not two parallel actions, because
  *    the first photo was taken at the leftover pitch.
  *
- * Still NOT verified by a real DJI Fly file: multipleDistance interval photos,
- * the heading of the outward waypoint, and whether the aircraft honours
- * the smoothTransition angle when the flag is 0 (needs a flight). The
- * namespace and drone enum are constants so a mismatch is a one-line change.
+ * Still NOT verified by a real DJI Fly file: multipleDistance interval photos
+ * (legacy photoMode "interval" and captureMode "distance" write that same
+ * group; this is not a claim that DJI Fly will fly it), timed capture (the
+ * gimbal is written and takePhoto is not — multipleTiming is not written,
+ * because that trigger is only read from imported files), the heading of the
+ * outward waypoint, and whether the aircraft honours the smoothTransition
+ * angle when the flag is 0 (needs a flight). The namespace and drone enum
+ * are constants so a mismatch is a one-line change.
  */
 import { jobFolder, jobSlug } from './areas.js';
-import { TRANSIT_SPEED_MS } from './planner.js';
+import { batteryBreaks, DISCLAIMER } from './batteryBreaks.js';
+import { TRANSIT_SPEED_MS, writtenSpacingM, INTERVAL_TRIGGER_PROVEN } from './planner.js';
+import { minShutterDenominator, SHUTTER_DENOMINATORS } from './speed.js';
+import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
 import { makeZip } from './zip.js';
 import { cameraChecklistLines } from './cameraSettings.js';
 import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
@@ -193,20 +200,53 @@ const STOP_TURN = 'toPointAndStopWithContinuityCurvature';
 const PASS_TURN = 'toPointAndPassWithContinuityCurvature';
 
 /**
+ * Continuous survey lines only. DJI's documented fly-through that sticks to
+ * the straight line is toPointAndPassWithContinuityCurvature plus
+ * useStraightLine 1, and then waypointTurnDampingDist must be in
+ * (0, segment length]. The segment must be longer than the sum of the two
+ * turn intercepts. Legacy stop and interval keep useStraightLine 0, which is
+ * what DJI Fly re-saves. Not verified in DJI Fly.
+ */
+function segmentMetres(a, b) {
+  return groundDistanceM(a, b);
+}
+
+function passDampingM(flat, index) {
+  const incoming =
+    index > 0 ? segmentMetres(flat[index - 1].wp, flat[index].wp) : Infinity;
+  const outgoing =
+    index < flat.length - 1
+      ? segmentMetres(flat[index].wp, flat[index + 1].wp)
+      : Infinity;
+  const room = Math.min(incoming, outgoing);
+  if (!(room > 0.4)) return 0;
+  const d = Math.min(0.5, room / 2 - 0.05);
+  return Math.max(0.1, Number(d.toFixed(1)));
+}
+
+function isLineCapture(leg) {
+  return leg?.captureMode === 'distance' || leg?.captureMode === 'timed';
+}
+
+/**
  * One Placemark.
  * `ends` is true for the first and the last waypoint of the mission: DJI Fly
  * writes both as stops with waypointHeadingAngleEnable 1 and every other
  * waypoint with 0, whatever the heading mode (followWayline or
  * smoothTransition with a stored angle). The heading angle and mode are kept.
  */
-function placemark(wp, speedMs, groups, ends) {
+function placemark(wp, speedMs, groups, ends, path = {}) {
   const orbit = wp.headingDeg != null;
   // DJI Fly rewrites every orbit photo stop into a pass-through when it
   // re-saves (172 of 174 waypoints of the Oct 30 orbit), so GEV writes the
   // pass-through. The two shots of one stop keep the stop, since the turn and
   // the tilt between them need the aircraft standing still (no DJI Fly file
   // has one), and they carry the heading flag so the stored angle is used.
-  const stop = ends || Boolean(wp.shot);
+  // A continuous line that cannot fit a legal pass damping stops instead:
+  // a pass with useStraightLine 1 and damping 0 is not a valid DJI pair.
+  const stop = ends || Boolean(wp.shot) || path.forceStop === true;
+  const straight = path.straight === true;
+  const damping = straight && !stop ? path.dampingM || 0 : 0;
   return `      <Placemark>
         <Point>
           <coordinates>
@@ -226,9 +266,9 @@ function placemark(wp, speedMs, groups, ends) {
         </wpml:waypointHeadingParam>
         <wpml:waypointTurnParam>
           <wpml:waypointTurnMode>${stop ? STOP_TURN : PASS_TURN}</wpml:waypointTurnMode>
-          <wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>
+          <wpml:waypointTurnDampingDist>${one(damping)}</wpml:waypointTurnDampingDist>
         </wpml:waypointTurnParam>
-        <wpml:useStraightLine>0</wpml:useStraightLine>
+        <wpml:useStraightLine>${straight ? 1 : 0}</wpml:useStraightLine>
 ${groups}        <wpml:waypointGimbalHeadingParam>
           <wpml:waypointGimbalPitchAngle>${pitchText(wp.pitchDeg)}</wpml:waypointGimbalPitchAngle>
           <wpml:waypointGimbalYawAngle>0</wpml:waypointGimbalYawAngle>
@@ -271,22 +311,27 @@ function placemarks(mission, speedMs) {
     // A tilt where the leg starts, at the outward shot of a stop, and back
     // again on the waypoint after it.
     if (first || outShot || afterOut) item.tilt = { id: 0, pitch: wp.pitchDeg };
-    const interval = leg.photoMode === 'interval';
+    const timed = leg.captureMode === 'timed';
+    // Legacy interval and distance share one unverified distance group.
+    // Timed writes no photo action at all.
+    const distance =
+      !timed &&
+      (leg.captureMode === 'distance' || leg.photoMode === 'interval');
     // Where the first-waypoint rotate goes: in front of GEV's own groups when
     // they are not the plain photo group, so the tilt is set before they run.
-    const tiltFirst = missionStart && interval;
+    const tiltFirst = missionStart && (distance || timed);
     if (tiltFirst) item.tilt.id = actionId++;
-    if (interval) {
+    if (distance) {
       if (first) {
         item.groups.push({
           start: wp.index,
           end: lastIndex,
           trigger: 'multipleDistance',
-          triggerParam: Math.max(1, leg.photoSpacingM),
+          triggerParam: writtenSpacingM(leg.photoSpacingM),
           actions: [photoAction(actionId++)],
         });
       }
-    } else if (wp.photo && item.tilt && (missionStart || outShot)) {
+    } else if (!timed && wp.photo && item.tilt && (missionStart || outShot)) {
       // The camera must be at its pitch BEFORE the photo: one ordered group,
       // tilt then photo. In a parallel group both fire at once and the first
       // photo of the mission was taken at the leftover pitch.
@@ -299,7 +344,7 @@ function placemarks(mission, speedMs) {
         actions: [gimbalAction(tiltId, wp.pitchDeg), photoAction(actionId++)],
       });
       item.tilt = null;
-    } else if (wp.photo) {
+    } else if (!timed && wp.photo) {
       item.groups.push({
         start: wp.index,
         end: wp.index,
@@ -350,23 +395,77 @@ function placemarks(mission, speedMs) {
     }
   });
 
+  const paths = flat.map(({ wp, leg }, k) => {
+    const ends = k === 0 || k === total - 1;
+    // Straight on every continuous-line waypoint, including the last stop,
+    // so an action group that starts or ends there is on a waypoint the
+    // aircraft reaches. Legacy lines stay curved, matching DJI Fly re-saves.
+    const straight = isLineCapture(leg);
+    const dampingM = straight && !ends && !wp.shot ? passDampingM(flat, k) : 0;
+    const forceStop = straight && !ends && !wp.shot && !(dampingM > 0);
+    return {
+      index: wp.index,
+      straight,
+      dampingM,
+      forceStop,
+      stop: ends || Boolean(wp.shot) || forceStop,
+      line: straight,
+    };
+  });
+
   return flat
     .map(({ wp }, k) => {
       const groups = placed[k].groups;
+      const path = paths[k];
       const owned = groups.filter((group) => !group.evenly).length;
       // DJI Fly numbers a waypoint's groups from 1, but the tilt group is
       // always at least 2, even on a waypoint that has no photo group.
       const text = groups
-        .map((group, g) =>
-          actionGroup({
-            ...group,
+        .map((group, g) => {
+          const bounded = path.line ? actionBounds(group, paths) : group;
+          if (!bounded) return '';
+          return actionGroup({
+            ...bounded,
             id: group.evenly ? Math.max(2, owned + 1) : g + 1,
-          }),
-        )
+            triggerParam:
+              bounded.triggerParam == null
+                ? null
+                : writtenSpacingM(bounded.triggerParam),
+          });
+        })
         .join('');
-      return placemark(wp, speedMs, text, k === 0 || k === total - 1);
+      return placemark(wp, speedMs, text, k === 0 || k === total - 1, path);
     })
     .join('\n');
+}
+
+/**
+ * A spanning action may start and end only on a waypoint that supports it:
+ * a stop, or a pass-through written to fly straight. Legacy groups are not
+ * passed here. An unsupported bound is pulled inward rather than written,
+ * because DJI rejects a group whose end the aircraft does not reach.
+ */
+function pathForIndex(paths, index) {
+  return paths.find((path) => path.index === index) ?? null;
+}
+
+function supportsAction(paths, index) {
+  const path = pathForIndex(paths, index);
+  if (!path) return false;
+  return path.stop || path.straight === true;
+}
+
+function actionBounds(group, paths) {
+  if (group.start == null || group.end == null) return group;
+  if (group.start === group.end) return group;
+  let start = group.start;
+  let end = group.end;
+  while (end > start && !supportsAction(paths, end)) end -= 1;
+  while (start < end && !supportsAction(paths, start)) start += 1;
+  if (!supportsAction(paths, start) || !supportsAction(paths, end)) return null;
+  return start === group.start && end === group.end
+    ? group
+    : { ...group, start, end };
 }
 
 /**
@@ -447,6 +546,418 @@ export function buildKmz(mission, plan, opts = {}) {
 
 const pad = (n) => String(n).padStart(2, '0');
 
+const fmt1 = (n) => (Number.isFinite(Number(n)) ? Number(n).toFixed(1) : '?');
+
+/** lat, lon — the same order as the takeoff line. */
+const latLonText = (lat, lon) =>
+  `${Number(lat).toFixed(6)}, ${Number(lon).toFixed(6)}`;
+
+function captureOf(plan) {
+  const mode = plan?.options?.captureMode;
+  return mode === 'distance' || mode === 'timed' ? mode : 'stop';
+}
+
+/** Trusted static setting only. A plan cannot mark the distance trigger proven. */
+function distanceTriggerMarked() {
+  return INTERVAL_TRIGGER_PROVEN === true;
+}
+
+function requestedModeText(capture, marked = false) {
+  if (capture === 'distance') {
+    if (marked) return 'Requested mode: B distance.';
+    return 'Requested mode: B distance. NOT proven on the Mini 5 Pro. A wrong guess flies the lines and takes no photos.';
+  }
+  if (capture === 'timed') {
+    return 'Requested mode: C timed shot. Set DJI Fly to Timed shot at the interval shown and at the plan speed. The file has no photo action. You start the timed shot by hand.';
+  }
+  return 'Requested mode: A stop.';
+}
+
+function missionSummaryLine(mission, index, capture, marked = false) {
+  const count =
+    capture === 'timed'
+      ? `${mission.photoCount} estimated stations (not camera photos)`
+      : capture === 'distance'
+        ? marked
+          ? `${mission.photoCount} estimated photos if the distance trigger fires`
+          : `${mission.photoCount} estimated photos if the unproven distance trigger fires`
+        : `${mission.photoCount} photos`;
+  return `  ${index + 1}. ${mission.waypointCount} waypoints, ${count}, ${Math.round(mission.distanceM)} m, about ${Math.round(mission.durationS / 60)} min`;
+}
+
+function photoTotalsLine(totals, capture, marked = false) {
+  const gsd = `ground sample distance ${totals.gsdCm.toFixed(2)} cm/px.`;
+  if (capture === 'timed') {
+    return `Estimated stations: ${totals.photoCount} (not a count of photos the camera will take), ${gsd}`;
+  }
+  if (capture === 'distance') {
+    return marked
+      ? `Photo count: ${totals.photoCount} estimated if the distance trigger fires, ${gsd}`
+      : `Photo count: ${totals.photoCount} estimated if the unproven distance trigger fires, ${gsd}`;
+  }
+  return `Photos: ${totals.photoCount}, ${gsd}`;
+}
+
+function spacingOf(mission, plan) {
+  const leg = mission.legs?.find((item) => item.photoSpacingM > 0);
+  if (leg) return leg.photoSpacingM;
+  if (plan.spacing?.photoM > 0) return plan.spacing.photoM;
+  if (plan.options?.photoSpacingM > 0) return plan.options.photoSpacingM;
+  return null;
+}
+
+function overlapLine(plan, spacingM) {
+  const along = plan.footprint?.alongM;
+  const across = plan.footprint?.acrossM;
+  const lineM = plan.spacing?.lineM;
+  const front =
+    along > 0 && spacingM > 0
+      ? (1 - spacingM / along) * 100
+      : plan.options?.frontOverlap;
+  const side =
+    across > 0 && lineM > 0
+      ? (1 - lineM / across) * 100
+      : plan.options?.sideOverlap;
+  let text = `Overlap: ${fmt1(front)}% front, ${fmt1(side)}% side`;
+  const requested = plan.options?.frontOverlap;
+  if (Number.isFinite(requested) && Number.isFinite(front) && Math.abs(front - requested) > 0.15) {
+    text += ` (requested ${fmt1(requested)}% front, ${fmt1(plan.options?.sideOverlap)}% side)`;
+  }
+  return text;
+}
+
+function speedLine(plan, capture) {
+  const flown = Number(plan.speedMs);
+  const requested = Number(plan.options?.speedMs);
+  const text = `Speed: ${fmt1(flown)} m/s`;
+  if (!(flown > 0)) return 'Speed: unknown';
+  if (capture !== 'stop' && Math.abs(requested - flown) < 1e-6) {
+    return `${text} (requested; not slowed to the camera or blur limit)`;
+  }
+  if (requested - flown > 1e-6) {
+    return `${text} (requested ${fmt1(requested)} m/s; lowered so the camera can keep up)`;
+  }
+  return text;
+}
+
+function photoCountLine(count, capture, marked = false) {
+  if (capture === 'timed') {
+    return `Photo count: ${count} estimated stations along the line. This is not a count of photos the camera will take. You start the timed shot by hand.`;
+  }
+  if (capture === 'distance') {
+    return marked
+      ? `Photo count: ${count} estimated if the distance trigger fires.`
+      : `Photo count: ${count} estimated if the distance trigger fires. NOT proven.`;
+  }
+  return `Photo count: ${count}`;
+}
+
+function resumeLines(capture) {
+  const lines = [
+    'Resume: Pausing and resuming is your procedure in DJI Fly. This tool has not verified that DJI Fly resumes after a landing. Check the first resume.',
+  ];
+  if (capture === 'distance') {
+    lines.push(
+      'Resume: The distance trigger is not proven to continue after a resume. Check that photos are still being taken after you resume.',
+    );
+  }
+  if (capture === 'timed') {
+    lines.push(
+      'Resume: Timed shot may stop while the aircraft is paused or returning. After you resume, check in DJI Fly that Timed shot is running before the route continues.',
+    );
+  }
+  if (capture !== 'stop') {
+    lines.push(
+      'Resume: A pause and resume may fly a straight line from the landing point back to the break. That leg crosses open ground. Check it for trees. The clearance check is for the planned route only, not that resume leg.',
+    );
+    lines.push(
+      'Resume: Each extra survey line in a battery adds 3 seconds. Wind and extra climb time are not in the model, so the real pause point moves.',
+    );
+    lines.push(
+      capture === 'timed'
+        ? 'Resume: The first timed shot after a resume may not be the right distance from the previous one. Overlap at the break can be off by one spacing.'
+        : 'Resume: The first photo after a resume may not be the right distance from the previous one. Overlap at the break can be off by one photo spacing.',
+    );
+  }
+  return lines;
+}
+
+function routePoints(mission) {
+  return (mission.waypoints ?? [])
+    .filter((w) => Number.isFinite(w.lon) && Number.isFinite(w.lat))
+    .map((w) => ({
+      lon: w.lon,
+      lat: w.lat,
+      relHeightM: Number.isFinite(Number(w.relHeightM)) ? Number(w.relHeightM) : 0,
+      ...(Number.isFinite(Number(w.dwellS)) ? { dwellS: Number(w.dwellS) } : {}),
+    }));
+}
+
+/** Same local-frame fraction batteryBreaks uses, so the warning sits on the route. */
+function pointAtRouteM(points, routeM) {
+  if (!points.length) return null;
+  if (!(routeM > 0)) return points[0];
+  let walked = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    const ground = groundDistanceM(a, b);
+    const len = Math.hypot(ground, (b.relHeightM ?? 0) - (a.relHeightM ?? 0));
+    if (walked + len + 1e-6 >= routeM || i === points.length - 1) {
+      const t = len <= 1e-9 ? 1 : Math.min(1, Math.max(0, (routeM - walked) / len));
+      if (t <= 0) return a;
+      if (t >= 1) return b;
+      const frame = makeFrame(
+        wrapLon(a.lon + deltaLon(a.lon, b.lon) / 2),
+        (a.lat + b.lat) / 2,
+      );
+      const p = frame.toXY(a.lon, a.lat);
+      const q = frame.toXY(b.lon, b.lat);
+      const ll = frame.toLonLat(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t);
+      return {
+        lon: ll.lon,
+        lat: ll.lat,
+        relHeightM: (a.relHeightM ?? 0) + ((b.relHeightM ?? 0) - (a.relHeightM ?? 0)) * t,
+      };
+    }
+    walked += len;
+  }
+  return points[points.length - 1];
+}
+
+function usableMinOf(plan) {
+  const n = Number(plan.options?.usableBatteryMin);
+  return Number.isFinite(n) && n > 0 ? n : 20;
+}
+
+function waypointsCallable(waypoints) {
+  return (
+    Array.isArray(waypoints) &&
+    waypoints.length >= 2 &&
+    waypoints.every(
+      (w) =>
+        w &&
+        Number.isFinite(w.lon) &&
+        Number.isFinite(w.lat) &&
+        Math.abs(w.lon) <= 180 &&
+        Math.abs(w.lat) <= 90,
+    )
+  );
+}
+
+/**
+ * Pause markers for one continuous file. Null when the route was already
+ * split into battery-sized files (mode A, or distance/timed with the
+ * continuous route off), or when the waypoints or takeoff are not a valid
+ * call. Does not add waypoints. legs, not legCount: legCount changes only
+ * the headline and does not put the 3 s turn or the station reset on the pause.
+ */
+function estimateFileBreaks(mission, plan) {
+  if (plan.options?.continuousRoute !== true) return null;
+  const capture = captureOf(plan);
+  if (capture === 'stop') return null;
+  const takeoff = plan.takeoff;
+  if (
+    !waypointsCallable(mission?.waypoints) ||
+    !Number.isFinite(takeoff?.lon) ||
+    !Number.isFinite(takeoff?.lat)
+  ) {
+    return null;
+  }
+  const speedMs = Number(plan.speedMs);
+  if (!(speedMs > 0)) return null;
+  const spacing = spacingOf(mission, plan);
+  return batteryBreaks(mission.waypoints, {
+    takeoff: { lon: takeoff.lon, lat: takeoff.lat },
+    speedMs,
+    usableMin: usableMinOf(plan),
+    ...(spacing > 0 ? { photoSpacingM: spacing } : {}),
+    legs: mission.legs,
+  });
+}
+
+function breakMarkerReadable(marker) {
+  return (
+    marker &&
+    marker.addedWaypoint !== true &&
+    Number.isFinite(marker.lat) &&
+    Number.isFinite(marker.lon) &&
+    Number.isFinite(marker.groundM) &&
+    Number.isFinite(marker.minutes) &&
+    Number.isFinite(marker.turnS)
+  );
+}
+
+function breakCountText(marker, capture) {
+  if (marker.photoCount == null) return 'photo count unavailable';
+  if (capture === 'timed') {
+    return `photo count ${marker.photoCount} estimated stations from the file start (not camera photos)`;
+  }
+  return `photo count ${marker.photoCount} from the file start`;
+}
+
+function breakLines(mission, plan, capture) {
+  const budget = plan.options?.batteryMin ?? 25;
+  if (plan.options?.continuousRoute !== true || capture === 'stop') {
+    return [
+      `Estimated battery breaks: none. This route is split into battery-sized files (${budget} min). Pause markers are not estimated.`,
+    ];
+  }
+  let estimate;
+  try {
+    estimate = estimateFileBreaks(mission, plan);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return [
+      `Estimated battery breaks: read error (${message}). No pause was guessed.`,
+    ];
+  }
+  if (!estimate) {
+    return ['Estimated battery breaks: not calculated (no route or takeoff).'];
+  }
+  const lines = [
+    `Usable battery: ${estimate.usableMin} min (estimate only)`,
+  ];
+  if (!estimate.breaks.length && !estimate.unreachable) {
+    lines.push(
+      `Estimated battery breaks: none. This file fits in ${estimate.usableMin} usable minutes.`,
+    );
+    lines.push(DISCLAIMER);
+    return lines;
+  }
+  if (estimate.breaks.length) {
+    lines.push(
+      'Estimated battery breaks (not waypoints; this file is not split at these points):',
+    );
+    for (const marker of estimate.breaks) {
+      if (!breakMarkerReadable(marker)) {
+        lines.push(
+          `  Read error: pause ${marker?.index ?? '?'} could not be read. No pause was guessed for it.`,
+        );
+        continue;
+      }
+      lines.push(
+        `  ${marker.index}. ${latLonText(marker.lat, marker.lon)}  distance ${Math.round(marker.groundM)} m from the file start, ${breakCountText(marker, capture)}, about ${marker.minutes.toFixed(1)} min, turn time ${marker.turnS} s`,
+      );
+    }
+  }
+  if (estimate.unreachable) {
+    const gap = estimate.unreachable;
+    if (
+      !Number.isFinite(gap.fromRouteM) ||
+      !Number.isFinite(gap.remainingGroundM) ||
+      !gap.reason
+    ) {
+      lines.push(
+        'UNREACHABLE: the uncovered stretch could not be read. This stretch is not a pause plan.',
+      );
+    } else {
+      const at = pointAtRouteM(routePoints(mission), gap.fromRouteM);
+      const where = at ? latLonText(at.lat, at.lon) : 'unknown position';
+      lines.push(
+        `UNREACHABLE: from ${where} the rest of this file cannot be paused inside ${estimate.usableMin} usable minutes (reason: ${gap.reason}). Remaining distance about ${Math.round(gap.remainingGroundM)} m. This stretch is not a pause plan.`,
+      );
+    }
+  }
+  lines.push(DISCLAIMER);
+  return lines;
+}
+
+/**
+ * Blur minimum at the speed the plan will fly, rounded UP to the planner's
+ * standard shutter stops (250, 500, 1000, 2000, 4000). Faster than 1/4000 is
+ * not in that table. The chosen shutter is what the plan assumed; it is not
+ * the required minimum.
+ */
+function shutterSafetyLines(plan, indent = '  ') {
+  const chosenN = Number(plan.options?.shutterDenominator);
+  const chosen = Number.isFinite(chosenN) && chosenN > 0 ? `1/${chosenN} s` : 'unknown';
+  const gsdCm = Number(plan.gsdCm);
+  const speedMs = Number(plan.speedMs);
+  const raw =
+    plan.preset && gsdCm > 0 && speedMs > 0
+      ? minShutterDenominator(plan.preset, gsdCm, speedMs)
+      : null;
+  if (raw == null) {
+    return [
+      `${indent}Shutter required: unknown.`,
+      `${indent}Shutter chosen: ${chosen}.`,
+    ];
+  }
+  const standard = SHUTTER_DENOMINATORS.find((d) => d >= raw) ?? null;
+  const unsafe = standard == null || raw > 4000;
+  if (unsafe) {
+    return [
+      `${indent}Shutter required: faster than 1/4000 s. Not safe in available table. Slow down. The tool cannot keep the blur limit.`,
+      `${indent}Shutter chosen: ${chosen}. The chosen shutter is not the required minimum.`,
+    ];
+  }
+  const slower = Number.isFinite(chosenN) && chosenN < standard;
+  return [
+    `${indent}Shutter required: 1/${standard} s or faster.`,
+    slower
+      ? `${indent}Shutter chosen: ${chosen}. The chosen shutter is not the required minimum.`
+      : `${indent}Shutter chosen: ${chosen}.`,
+  ];
+}
+
+/** Checklist with the blur minimum, not the preset's 1/500, as the shutter to set. */
+function readmeChecklist(plan) {
+  const lines = cameraChecklistLines(
+    plan.options?.cameraPresetId,
+    plan.options?.shutterDenominator,
+  );
+  const safety = shutterSafetyLines(plan, '  - ');
+  const out = [];
+  let replaced = false;
+  for (const line of lines) {
+    if (!replaced && /^\s*- Shutter:/.test(line)) {
+      out.push(...safety);
+      replaced = true;
+      continue;
+    }
+    out.push(line);
+  }
+  if (!replaced) out.push(...safety);
+  return out;
+}
+
+/** One block per mission file: the settings the pilot has to see before flying. */
+function fileReadmeLines(result) {
+  const { plan, missions } = result;
+  const capture = captureOf(plan);
+  const marked = distanceTriggerMarked(plan);
+  const lines = [];
+  missions.forEach((mission, index) => {
+    const spacingM = spacingOf(mission, plan);
+    const speed = Number(plan.speedMs);
+    const seconds = spacingM > 0 && speed > 0 ? spacingM / speed : null;
+    const minS = plan.preset?.minPhotoIntervalS;
+    if (index) lines.push('');
+    lines.push(`File ${index + 1}:`);
+    lines.push(`  ${requestedModeText(capture, marked)}`);
+    lines.push(`  Waypoint cap: ${plan.options?.maxWaypoints ?? 200}`);
+    lines.push(`  Height: ${fmt1(plan.options?.aglM)} m above ground (requested)`);
+    lines.push(`  ${speedLine(plan, capture)}`);
+    lines.push(`  Spacing: ${spacingM > 0 ? `${fmt1(spacingM)} m` : 'unknown'}`);
+    lines.push(
+      `  Interval: ${seconds == null ? 'unknown' : `${fmt1(seconds)} s`} between pictures at the plan speed`,
+    );
+    lines.push(`  Camera minimum: ${minS > 0 ? `${fmt1(minS)} s` : 'unknown'}`);
+    if (seconds != null && minS > 0 && seconds + 1e-9 < minS) {
+      lines.push(
+        `  Interval warning: ${fmt1(seconds)} s between pictures is under the ${fmt1(minS)} s camera minimum. Slow down or widen the spacing.`,
+      );
+    }
+    lines.push(...shutterSafetyLines(plan));
+    lines.push(`  ${overlapLine(plan, spacingM)}`);
+    lines.push(`  ${photoCountLine(mission.photoCount, capture, marked)}`);
+    for (const line of resumeLines(capture)) lines.push(`  ${line}`);
+    for (const line of breakLines(mission, plan, capture)) lines.push(`  ${line}`);
+  });
+  return lines;
+}
+
 /** `gev-drone-plan-20261028-1530-m2of3.kmz`, or with a job name in the middle. */
 export function kmzFileName(index, total, when = new Date(), jobName = '') {
   const stamp = `${when.getFullYear()}${pad(when.getMonth() + 1)}${pad(when.getDate())}-${pad(when.getHours())}${pad(when.getMinutes())}`;
@@ -458,6 +969,8 @@ export function kmzFileName(index, total, when = new Date(), jobName = '') {
 export function readmeText(result, when = new Date(), opts = {}) {
   const { plan, missions, totals, warnings } = result;
   const t = plan.takeoff;
+  const capture = captureOf(plan);
+  const marked = distanceTriggerMarked(plan);
   const lines = [
     'GEV Drone Flight Plan',
     `Created ${when.toISOString()}`,
@@ -465,17 +978,18 @@ export function readmeText(result, when = new Date(), opts = {}) {
     `Aircraft: ${plan.preset.name}`,
     `Takeoff point: ${t.lat.toFixed(6)}, ${t.lon.toFixed(6)}  (launch the drone from HERE:`,
     'heights in the missions are measured from the takeoff point).',
-    `Missions: ${missions.length}, one battery each.`,
-    ...missions.map(
-      (m, i) =>
-        `  ${i + 1}. ${m.waypointCount} waypoints, ${m.photoCount} photos, ${Math.round(m.distanceM)} m, about ${Math.round(m.durationS / 60)} min`,
-    ),
-    `Photos: ${totals.photoCount}, ground sample distance ${totals.gsdCm.toFixed(2)} cm/px.`,
+    `Missions: ${missions.length}. One file is one flight, not one battery.`,
+    'A file can be shorter than the battery when the waypoint cap split it.',
+    'A continuous route is not split when the planned time passes the battery,',
+    'so one file can be longer than one battery. Land, swap the battery and',
+    'resume yourself. This tool has not verified that DJI Fly resumes a route',
+    'after a landing.',
+    ...missions.map((m, i) => missionSummaryLine(m, i, capture, marked)),
+    photoTotalsLine(totals, capture, marked),
     '',
-    ...cameraChecklistLines(
-      plan.options?.cameraPresetId,
-      plan.options?.shutterDenominator,
-    ),
+    ...fileReadmeLines(result),
+    '',
+    ...readmeChecklist(plan),
     '',
     'NOT FLIGHT-TESTED. These files have not been validated on a real aircraft.',
     'Load one at a time: in DJI Fly make a dummy waypoint mission, save it, then',
@@ -493,13 +1007,25 @@ export function readmeText(result, when = new Date(), opts = {}) {
     'Written in the form DJI Fly itself saves (checked against five real DJI Fly',
     'files): file layout, namespace, aircraft code, photo and gimbal actions,',
     'gradual tilt, stops at the first and last waypoint.',
-    'NOT verified by a real file: distance-interval photos, orbit headings in',
-    'flight, and the rotateYaw and sequence-mode actions of the outward orbit photo.',
+    'NOT verified by a real file: distance-interval photos, timed capture',
+    '(gimbal only; multipleTiming is not written), the straight-line corner',
+    'path, orbit headings in flight, and the rotateYaw and sequence-mode',
+    'actions of the outward orbit photo.',
+    'Distance and timed capture keep the speed you asked for. The file is not',
+    'slowed to the camera or blur limit. If that speed is faster than the',
+    'camera can shoot, pictures will be late, missed or blurred. Slow down',
+    'before you fly.',
+    'Continuous survey lines are written to fly straight between waypoints,',
+    'including the corner that joins two lines. That straight-line setting is',
+    'not verified in DJI Fly. Open the file in DJI Fly and check the path',
+    'before flying. A curved corner can cut inside the planned line.',
     'Check airspace and local rules, keep the aircraft in sight, and fly the',
     'first mission short and supervised.',
     'The 3D check on the globe is a VISUAL aid only: it does not detect a',
     'collision, and OpenStreetMap has no trees or power lines. Look at the path',
     'over the Google 3D view and check clearance yourself.',
+    'These files do not approve a flight. Aircraft limits, airspace',
+    'authorization, local rules and your duties as pilot still apply.',
     ...(plan.orbit
       ? [
           'Building orbits use OpenStreetMap footprints. Trees, towers and power lines',
@@ -531,11 +1057,19 @@ export function readmeText(result, when = new Date(), opts = {}) {
     for (const job of jobs) {
       const mine = missions.filter((mission) => mission.jobId === job.id);
       const photos = mine.reduce((sum, mission) => sum + mission.photoCount, 0);
+      const photoLine =
+        capture === 'timed'
+          ? `  Estimated stations: ${photos} (not a count of photos the camera will take)`
+          : capture === 'distance'
+            ? marked
+              ? `  Photo count: ${photos} estimated if the distance trigger fires`
+              : `  Photo count: ${photos} estimated if the unproven distance trigger fires`
+            : `  Photos: ${photos}`;
       lines.push(
         `Job: ${job.name} (${job.id})`,
         `  Areas: ${(job.areaNames ?? [job.name]).join(', ')}`,
         `  Missions: ${mine.length}`,
-        `  Photos: ${photos}`,
+        photoLine,
         '  Images from this job should be processed together (ODM).',
       );
     }

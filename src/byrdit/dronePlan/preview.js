@@ -9,10 +9,19 @@
  * The 3D check (checkLayer.js) rides on whatever plan is shown: a shaded
  * safety corridor, a height curtain and camera view pyramids. A visual aid
  * only; it detects nothing.
+ *
+ * A continuous route is not cut into battery files. Pause marks for that
+ * route come from batteryBreaks.js and are drawn here only. They are not
+ * waypoints, they are not added to a KMZ, and the disclaimer stays in the
+ * panel. usableBatteryMin comes from the normalized result when the planner
+ * has written it. If that option was dropped, marks still use 20 minutes,
+ * the planner default, so a real plan is not left unmarked.
  */
 import * as Cesium from 'cesium';
 import { createCheckLayer } from './checkLayer.js';
 import { createObstacleLayer } from './obstacleLayer.js';
+import { batteryBreaks, DEFAULT_USABLE_MIN } from './batteryBreaks.js';
+import { batteryPauseLabel } from './format.js';
 import {
   displayOffset,
   flightHeightM,
@@ -53,6 +62,182 @@ export function passStyle(id, index = 0) {
 }
 /** Waypoint markers beyond this are thinned so the globe stays fast. */
 export const MAX_MARKERS = 1500;
+/** Pause marks are not thinned: every interpolated break the helper returns is shown. */
+export const BATTERY_PAUSE_NAME = 'Battery pause';
+/** World-overlay source for pause text. Not the obstacle-label source. */
+export const BATTERY_PAUSE_SOURCE = 'gev-drone-battery-pauses';
+
+function finitePositive(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Usable minutes for pause marks. The normalized result wins. A dropped
+ * option falls back to 20, the planner default, so a real continuous plan
+ * is not left unmarked.
+ */
+export function resolveUsableBatteryMin(result, override) {
+  return (
+    finitePositive(override) ??
+    finitePositive(result?.plan?.options?.usableBatteryMin) ??
+    finitePositive(result?.usableBatteryMin) ??
+    finitePositive(result?.plan?.usableBatteryMin) ??
+    finitePositive(result?.totals?.usableBatteryMin) ??
+    DEFAULT_USABLE_MIN
+  );
+}
+
+function pointCallable(point) {
+  return (
+    !!point &&
+    Number.isFinite(point.lon) &&
+    Number.isFinite(point.lat) &&
+    Math.abs(point.lon) <= 180 &&
+    Math.abs(point.lat) <= 90
+  );
+}
+
+/** A route batteryBreaks can be asked about. A bad point is not a valid call. */
+function missionCallable(mission) {
+  const waypoints = mission?.waypoints;
+  return (
+    Array.isArray(waypoints) &&
+    waypoints.length >= 2 &&
+    waypoints.every(pointCallable)
+  );
+}
+
+function markReadable(mark) {
+  return (
+    mark?.addedWaypoint === false &&
+    Number.isFinite(mark.lon) &&
+    Number.isFinite(mark.lat) &&
+    Number.isFinite(mark.groundM) &&
+    Number.isFinite(mark.routeM) &&
+    Number.isFinite(mark.minutes) &&
+    Number.isFinite(mark.turnS)
+  );
+}
+
+/**
+ * batteryBreaks for each file of a continuous route. Null when the plan is
+ * not continuous, or when the flown speed or takeoff is missing. Does not
+ * read the requested speed (options.speedMs). Does not mutate the route or
+ * add waypoints. One call per mission: a waypoint-cap split is a separate
+ * file that returns home, not one joined route.
+ *
+ * Passes mission.legs so a 3 s turn and a station reset land on the pause.
+ * A valid route that batteryBreaks cannot read is an error on the result,
+ * not a skipped file. An invalid point is not a call.
+ * @returns {null | { usableMin: number, speedMs: number, batteries: number,
+ *   breaks: { missionIndex: number, mark: object }[],
+ *   unreachable: object[], errors: object[], covered: boolean }}
+ */
+export function batteryPauseEstimate(result, usableMinOverride) {
+  if (result?.plan?.options?.continuousRoute !== true) return null;
+  const speedMs =
+    finitePositive(result.plan?.speedMs) ??
+    finitePositive(result.totals?.speedMs);
+  const takeoff = result.plan?.takeoff;
+  if (
+    speedMs == null ||
+    !Number.isFinite(takeoff?.lon) ||
+    !Number.isFinite(takeoff?.lat)
+  ) {
+    return null;
+  }
+  const usableMin = resolveUsableBatteryMin(result, usableMinOverride);
+  const home = { lon: takeoff.lon, lat: takeoff.lat };
+  const breaks = [];
+  const unreachable = [];
+  const errors = [];
+  let batteries = 0;
+  let routes = 0;
+  const missions = result.missions ?? [];
+  for (
+    let missionIndex = 0;
+    missionIndex < missions.length;
+    missionIndex += 1
+  ) {
+    const mission = missions[missionIndex];
+    if (!missionCallable(mission)) continue;
+    let computed;
+    try {
+      computed = batteryBreaks(mission.waypoints, {
+        takeoff: home,
+        speedMs,
+        usableMin,
+        legs: mission.legs,
+      });
+    } catch (err) {
+      errors.push({
+        missionIndex,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    if (computed?.addsWaypoints !== false || !Array.isArray(computed.breaks)) {
+      errors.push({
+        missionIndex,
+        message: 'batteryBreaks pause estimate could not be read',
+      });
+      continue;
+    }
+    let dropped = 0;
+    for (const mark of computed.breaks) {
+      if (!markReadable(mark)) {
+        dropped += 1;
+        continue;
+      }
+      breaks.push({ missionIndex, mark });
+    }
+    if (dropped) {
+      errors.push({
+        missionIndex,
+        message: `${dropped} pause marker${dropped === 1 ? '' : 's'} could not be read`,
+      });
+    }
+    const gap = computed.unreachable;
+    if (gap) {
+      if (
+        !Number.isFinite(gap.fromGroundM) ||
+        !Number.isFinite(gap.remainingGroundM) ||
+        (gap.reason !== 'no-progress' &&
+          gap.reason !== 'round-trip-exceeds-usable-minutes')
+      ) {
+        errors.push({
+          missionIndex,
+          message: 'unreachable stretch could not be read',
+        });
+      } else {
+        unreachable.push({ missionIndex, ...gap });
+      }
+    }
+    routes += 1;
+    batteries += Number(computed.batteryCount) || 0;
+  }
+  if (!routes && !errors.length) return null;
+  return {
+    usableMin,
+    speedMs,
+    batteries,
+    breaks,
+    unreachable,
+    errors,
+    covered: unreachable.length === 0 && errors.length === 0,
+  };
+}
+
+/**
+ * Pause marks along a continuous route. Empty when the plan is not
+ * continuous, or when the flown speed or takeoff is missing. A missing
+ * usableBatteryMin uses 20 minutes. Does not mutate the route.
+ * @returns {{ missionIndex: number, mark: object }[]}
+ */
+export function batteryPauseMarks(result) {
+  return batteryPauseEstimate(result)?.breaks ?? [];
+}
 
 /**
  * @param {{ viewer: object, cesium?: object }} deps
@@ -70,6 +255,7 @@ export function createDronePlanPreview({
   viewer,
   cesium = Cesium,
   overlay = null,
+  labelOverlay = null,
   onObstacleHeight,
   kindText,
 }) {
@@ -164,6 +350,114 @@ export function createDronePlanPreview({
         importCheck?.filter((p) => p.checkable !== false),
     );
   };
+
+  /**
+   * Draw batteryBreaks marks for a continuous route. Not added to the
+   * mission waypoint list, not thinned, and not labelled with the disclaimer.
+   * Distance and minutes are a world-overlay label, never a Cesium label.
+   */
+  function drawBatteryPauses(
+    result,
+    bucket,
+    offsetM,
+    passId = null,
+    layer = 'plan',
+  ) {
+    if (!result || destroyed) return;
+    const takeoffM =
+      result.ground?.known === true && Number.isFinite(result.ground.takeoffM)
+        ? result.ground.takeoffM
+        : 0;
+    const off = Number.isFinite(offsetM) ? offsetM : 0;
+    for (const item of batteryPauseMarks(result)) {
+      const mark = item.mark;
+      const rel = Number.isFinite(mark.relHeightM) ? mark.relHeightM : 0;
+      const text = batteryPauseLabel(mark);
+      const position = cesium.Cartesian3.fromDegrees(
+        mark.lon,
+        mark.lat,
+        takeoffM + rel + off,
+      );
+      bucket.push(
+        dataSource.entities.add({
+          name: BATTERY_PAUSE_NAME,
+          pauseLabel: text,
+          batteryBreak: {
+            passId,
+            layer,
+            missionIndex: item.missionIndex,
+            index: mark.index,
+            lon: mark.lon,
+            lat: mark.lat,
+            relHeightM: rel,
+            groundM: mark.groundM,
+            routeM: mark.routeM,
+            minutes: mark.minutes,
+            durationS: mark.durationS,
+            turnS: mark.turnS,
+            photoCount: mark.photoCount,
+            legIndex: mark.legIndex,
+            legCount: mark.legCount,
+            segmentIndex: mark.segmentIndex,
+            fraction: mark.fraction,
+            addedWaypoint: false,
+            label: text,
+          },
+          position,
+          point: {
+            pixelSize: 12,
+            color: color('#ff7a18'),
+            outlineColor: color('#1a1200', 0.85),
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        }),
+      );
+    }
+  }
+
+  /** Distance/minutes text for the pauses currently drawn. Not Cesium labels. */
+  function pauseOverlayPosition(entity) {
+    const raw = entity?.position;
+    // Production Cesium stores entity.position as a ConstantPositionProperty.
+    // The world overlay accepts a Cartesian3 or a getter, not the property.
+    if (raw && typeof raw.getValue === 'function') {
+      return () => raw.getValue(cesium.JulianDate?.now?.());
+    }
+    return raw;
+  }
+
+  function syncPauseLabels() {
+    const entries = [];
+    for (const entity of [...planEntities, ...suiteEntities]) {
+      if (entity?.name !== BATTERY_PAUSE_NAME || !entity.pauseLabel) continue;
+      const info = entity.batteryBreak ?? {};
+      const id = [
+        'pause',
+        info.layer ?? 'plan',
+        info.passId ?? 'route',
+        info.missionIndex ?? 0,
+        info.index ?? entries.length + 1,
+      ].join('-');
+      entries.push({
+        id,
+        position: pauseOverlayPosition(entity),
+        variant: 'label',
+        title: entity.pauseLabel,
+        accessibilityLabel: entity.pauseLabel,
+        accent: '#ff7a18',
+        horizonCull: false,
+        priority: 4,
+      });
+    }
+    try {
+      if (!labelOverlay) return;
+      if (entries.length) labelOverlay.set(entries);
+      else labelOverlay.clear?.();
+    } catch {
+      /* a host that is not running must not stop the markers */
+    }
+  }
 
   function drawImports(items, hiddenIds = []) {
     importEntities = drop(importEntities);
@@ -453,7 +747,9 @@ export function createDronePlanPreview({
             },
           }),
         );
+        drawBatteryPauses(result, planEntities, planOff.offsetM, null, 'plan');
       }
+      syncPauseLabels();
       requestRender();
     },
     /**
@@ -555,6 +851,13 @@ export function createDronePlanPreview({
               );
             });
           });
+          drawBatteryPauses(
+            pass.result,
+            suiteEntities,
+            suiteOff.offsetM,
+            pass.id,
+            'suite',
+          );
         });
         const home = planned[0]?.result.plan.takeoff;
         if (home) {
@@ -574,6 +877,7 @@ export function createDronePlanPreview({
           );
         }
       }
+      syncPauseLabels();
       requestRender();
     },
     /**
@@ -834,12 +1138,16 @@ export function createDronePlanPreview({
       importEntities = drop(importEntities);
       clearanceEntities = drop(clearanceEntities);
       suitePasses = null;
+      syncPauseLabels();
       requestRender();
     },
     destroy() {
       if (destroyed) return attaching;
       destroyed = true;
       obstacles.destroy();
+      planEntities = [];
+      suiteEntities = [];
+      syncPauseLabels();
       dataSource.entities.removeAll();
       attaching = attaching.then(() => {
         try {

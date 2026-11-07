@@ -20,6 +20,7 @@
  * buildings have no trees or power lines. Look at it over the Google 3D mesh.
  */
 import { makeFrame } from './geo.js';
+import { writtenSpacingM } from './planner.js';
 import {
   MAX_FOOTPRINTS,
   MAX_FRUSTUMS,
@@ -149,15 +150,32 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
   };
 
   /**
+   * Distance and timed survey lines are two endpoints with photo false.
+   * Stations are derived along the line. Timed stations are estimates:
+   * the file does not command the camera.
+   */
+  function lineStations(leg) {
+    return (
+      (leg?.captureMode === 'distance' || leg?.captureMode === 'timed') &&
+      leg.kind !== 'orbit' &&
+      (leg.waypoints?.length ?? 0) >= 2
+    );
+  }
+
+  /**
    * Where the camera fires along an interval-photo leg: its waypoints are not
    * photo spots (the shutter runs on a timer), so walk the leg and drop a
    * photo every photoSpacingM, facing along the leg unless it fixes a heading.
+   * Distance and timed use the same walk at the spacing written to the KMZ,
+   * not the raw overlap metres.
    */
   function intervalPhotos(leg) {
     const wps = leg.waypoints ?? [];
     const out = [];
     if (wps.length < 2) return wps.map((wp) => ({ wp }));
-    const spacing = Math.max(1, Number(leg.photoSpacingM) || 1);
+    const spacing = lineStations(leg)
+      ? writtenSpacingM(leg.photoSpacingM)
+      : Math.max(1, Number(leg.photoSpacingM) || 1);
     const frame = makeFrame(wps[0].lon, wps[0].lat);
     const xy = wps.map((w) => frame.toXY(w.lon, w.lat));
     // A leg continued from a cut starts at the point the last mission ended on.
@@ -208,9 +226,26 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     for (const pass of passes ?? []) {
       pass.missions.forEach((mission, mi) => {
         const legs = mission.legs;
-        if (legs?.some((leg) => leg.photoMode === 'interval')) {
+        if (
+          legs?.some((leg) => leg.photoMode === 'interval' || lineStations(leg))
+        ) {
           for (const leg of legs) {
-            if (leg.photoMode === 'interval' && leg.kind === 'grid') {
+            if (lineStations(leg)) {
+              const spacing = writtenSpacingM(leg.photoSpacingM);
+              for (const p of intervalPhotos(leg)) {
+                items.push({
+                  pass,
+                  mission,
+                  mi,
+                  wp: p.wp,
+                  i: 0,
+                  headingDeg: p.headingDeg,
+                  estimated: leg.captureMode === 'timed',
+                  captureMode: leg.captureMode,
+                  photoSpacingM: spacing,
+                });
+              }
+            } else if (leg.photoMode === 'interval' && leg.kind === 'grid') {
               for (const p of intervalPhotos(leg)) {
                 items.push({
                   pass,
@@ -510,6 +545,11 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
             : photoHeadingDeg(item.mission.waypoints, item.i),
           aglM: item.wp.aglM ?? null,
           heightM: flightHeightM(item.wp),
+          estimated: item.estimated === true,
+          captureMode: item.captureMode ?? null,
+          photoSpacingM: Number.isFinite(item.photoSpacingM)
+            ? item.photoSpacingM
+            : null,
           footprint: fp
             ? {
                 widthM: (fp.widthNearM + fp.widthFarM) / 2,

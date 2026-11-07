@@ -203,6 +203,19 @@ test('options sets a catalog aircraft and a height inside the slider range', asy
   ]);
 });
 
+test('voice options cannot forward intervalTriggerProven', async () => {
+  const { handle, calls } = fakeHandle();
+  const voice = createDronePlanVoice(handle);
+  const onlyFlag = await voice.options({ intervalTriggerProven: true });
+  assert.equal(onlyFlag.ok, false);
+  assert.equal(calls.some((call) => call[0] === 'applyOptions'), false);
+  const spoken = await voice.options({ intervalTriggerProven: true, aglM: 80 });
+  assert.equal(spoken.ok, true);
+  const patch = calls.find((call) => call[0] === 'applyOptions')[1];
+  assert.equal(Object.hasOwn(patch, 'intervalTriggerProven'), false);
+  assert.equal(patch.aglM, 80);
+});
+
 test('an out-of-range height is refused without the bad value', async () => {
   const { handle, calls } = fakeHandle();
   const voice = createDronePlanVoice(handle);

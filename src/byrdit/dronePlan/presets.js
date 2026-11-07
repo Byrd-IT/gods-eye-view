@@ -18,6 +18,9 @@
  *                      stills with an ELECTRONIC shutter (rolling readout), so
  *                      the blur limit is the strict one (see speed.js).
  *   minPhotoIntervalS - shortest Timed interval at full resolution, seconds.
+ *   minPhotoIntervalStatus - 'derived' when that interval is not from a DJI
+ *                      document. Absent when the preset does not say. A plan
+ *                      may replace the seconds; blank keeps this default.
  *   maxSpeedMs       - fastest waypoint speed this tool will plan for.
  *   wpml             - DJI Fly mission aircraft code, or null when there is
  *                      none known.
@@ -89,7 +92,9 @@ const KMZ_NEEDS_CODE = { supported: true, reason: 'no-code' };
  * the 4:3 still would overstate the footprint by about 8 %.
  * Max speed is a CONFLICT in the sources (15 vs 19 m/s): 15 is used.
  * UNVERIFIED: derived from the sensor size, not read from an EXIF dump, so
- * verify against a real photo.
+ * verify against a real photo. The 5 s full-resolution interval is also
+ * derived from other planners, not a DJI document, and is unverified. A plan
+ * may replace those seconds; blank keeps this default.
  */
 const MINI_5_PRO = {
   id: 'dji-mini-5-pro',
@@ -104,14 +109,16 @@ const MINI_5_PRO = {
   sensorText: '1-inch type, 50 MP',
   fovDeg: 84,
   shutterType: 'electronic',
+  // 50 MP stills: 5 s from other planners, not a DJI document.
   minPhotoIntervalS: 5,
+  minPhotoIntervalStatus: 'derived',
   maxSpeedMs: WAYPOINT_SPEED_CAP_MS,
   defaultSpeedMs: 5,
   wpml: { droneEnumValue: 68, droneSubEnumValue: 0 },
   kmz: KMZ_OK,
   verified: 'unverified',
   sources: [SRC.mini5, SRC.mini5Grid, SRC.wpmlCommunity],
-  flags: ['dji-page-geoblocked', 'max-speed-conflict', 'wpml-community'],
+  flags: ['dji-page-geoblocked', 'max-speed-conflict', 'wpml-community', 'interval-derived'],
 };
 
 const MINI_4_PRO = {

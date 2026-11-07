@@ -46,6 +46,38 @@ export function durationText(seconds) {
   return `${fixed(h)} h ${String(minutes % 60).padStart(2, '0')} min`;
 }
 
+/**
+ * Visible text for one battery-pause marker: distance along the route and
+ * minutes into that battery. Not a Cesium label. The world-overlay host
+ * draws it.
+ */
+export function batteryPauseLabel(mark) {
+  const seconds = Number.isFinite(Number(mark?.durationS))
+    ? Number(mark.durationS)
+    : Number(mark?.minutes) * 60;
+  return t('Pause {n}: {distance} · {time}', {
+    n: fixed(mark?.index),
+    distance: distanceText(Number(mark?.groundM) || 0),
+    time: durationText(Number.isFinite(seconds) ? seconds : 0),
+  });
+}
+
+/**
+ * Red for a speed the plan kept past the camera or blur limit. Amber for a
+ * continuous route cut at a line end by the waypoint cap. Other codes keep
+ * the existing warning colour.
+ */
+export function warningTone(code) {
+  if (
+    code === 'speed-exceeds-camera-limit' ||
+    code === 'speed-exceeds-blur-limit'
+  ) {
+    return 'bad';
+  }
+  if (code === 'line-end-split') return 'warn';
+  return '';
+}
+
 /** The sentence for one warning object `{ code, params }`. */
 export function warningText(warning) {
   const p = warning.params ?? {};
@@ -71,6 +103,25 @@ export function warningText(warning) {
           limited: speedText(p.limited),
           shutter: fixed(p.shutter),
         },
+      );
+    case 'speed-exceeds-camera-limit':
+      return t(
+        'Speed stays at {requested}, above the camera limit of {limited}. The plan does not slow down, so photos can be missed. Slow down or widen the spacing',
+        { requested: speedText(p.requested), limited: speedText(p.limited) },
+      );
+    case 'speed-exceeds-blur-limit':
+      return t(
+        'Speed stays at {requested}, above the blur limit of {limited} at a 1/{shutter} s shutter. The plan does not slow down, so photos can blur. Slow down or use a faster shutter',
+        {
+          requested: speedText(p.requested),
+          limited: speedText(p.limited),
+          shutter: fixed(p.shutter),
+        },
+      );
+    case 'line-end-split':
+      return t(
+        'This continuous route is split {count} times at the end of a line so no file exceeds {max} waypoints. Battery time does not cut it',
+        { count: fixed(p.count), max: fixed(p.maxWaypoints) },
       );
     case 'speed-below-minimum':
       return t(

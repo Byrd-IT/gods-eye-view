@@ -4,9 +4,12 @@ import {
   MAX_MARKERS,
   MISSION_COLORS,
   PASS_STYLES,
+  batteryPauseEstimate,
   createDronePlanPreview,
   passStyle,
 } from './preview.js';
+import { batteryBreaks } from './batteryBreaks.js';
+import { batteryPauseLabel } from './format.js';
 import { assembleMissions, planFlight } from './planner.js';
 import { metersPerDegree } from './geo.js';
 import { suiteOptions } from './suite.js';
@@ -529,7 +532,10 @@ test('3D check: one pyramid by default; the index steps it; thinned shows many w
 
 test('3D check: entity caps hold on a plan of about 600 photos or more', () => {
   const big = result(1500, 1200, { aglM: 60, batteryMin: 60 });
-  const { preview, source } = checkRig({ frustum: 'thinned', footprints: 'all' }, big);
+  const { preview, source } = checkRig(
+    { frustum: 'thinned', footprints: 'all' },
+    big,
+  );
   assert.ok(preview.checkInfo().count > MAX_FOOTPRINTS);
   assert.ok(footprints(source).length <= MAX_FOOTPRINTS);
   assert.ok(views(source).length <= MAX_FRUSTUMS * 5);
@@ -613,7 +619,10 @@ test('3D check: no footprints or pyramids without a camera', () => {
 
 test('3D check: an interval-photo plan still shows footprints and pyramids at the photo spots', () => {
   const planned = result(300, 200, { aglM: 80, photoMode: 'interval' });
-  const { preview, source } = checkRig({ frustum: 'one', footprints: 'all' }, planned);
+  const { preview, source } = checkRig(
+    { frustum: 'one', footprints: 'all' },
+    planned,
+  );
   const info = preview.checkInfo();
   const expected = planned.totals.photoCount;
   assert.ok(info.count > 0, 'photos found');
@@ -655,16 +664,22 @@ test('obstacles: columns are drawn with the plan, and a leg the cap cannot lift 
     { obstacleM: { 'faa-1': 100 } },
   );
   preview.showPlan(planned);
-  const red = source.entities.values.filter((e) => e.name === 'Blocked by obstacle');
+  const red = source.entities.values.filter(
+    (e) => e.name === 'Blocked by obstacle',
+  );
   assert.ok(red.length >= 1, 'a blocked leg is drawn red');
   assert.equal(red[0].polyline.material.css, '#ff2d2d');
   preview.setObstacles([tallTower()]);
   assert.equal(preview.obstacleCount(), 1);
   assert.equal(source.entities.values.filter((e) => e.cylinder).length, 1);
-  const clear = result(200, 200, { aglM: 60, obstacles: [tallTower({ heightM: 20 })] });
+  const clear = result(200, 200, {
+    aglM: 60,
+    obstacles: [tallTower({ heightM: 20 })],
+  });
   preview.showPlan(clear);
   assert.equal(
-    source.entities.values.filter((e) => e.name === 'Blocked by obstacle').length,
+    source.entities.values.filter((e) => e.name === 'Blocked by obstacle')
+      .length,
     0,
     'a liftable obstacle leaves no red leg',
   );
@@ -716,7 +731,10 @@ test('footprints: every corner and edge point of a tilted or orbit shot lies ins
             label,
           );
           for (const p of pts) {
-            assert.ok(Math.hypot(p.x, p.y) <= fp.reachM + 0.5, `${label}: reach`);
+            assert.ok(
+              Math.hypot(p.x, p.y) <= fp.reachM + 0.5,
+              `${label}: reach`,
+            );
           }
         }
       }
@@ -767,7 +785,7 @@ test('footprints: a shot whose whole frame is beyond the reach draws nothing', (
 const alphaOf = (e) =>
   (e.polygon ?? e.polylineVolume ?? e.polyline ?? e.wall)?.material?.a;
 
-test('transparency: the defaults are today\'s values on every layer', () => {
+test("transparency: the defaults are today's values on every layer", () => {
   const { source } = checkRig({ frustum: 'one', footprints: 'all' });
   assert.equal(zones(source).length > 0, true);
   assert.equal(alphaOf(zones(source)[0]), 0.16);
@@ -787,7 +805,9 @@ test('transparency: each layer follows its own level and the others stay put', (
   assert.equal(alphaOf(footprints(source)[0]), 0.3);
   assert.equal(alphaOf(zones(source)[0]), 0.16);
   assert.equal(alphaOf(curtains(source)[0]), 0.1);
-  preview.setCheck({ alpha: { ...DEFAULT_ALPHA, zone: 0.5, curtain: 0, view: 0.4 } });
+  preview.setCheck({
+    alpha: { ...DEFAULT_ALPHA, zone: 0.5, curtain: 0, view: 0.4 },
+  });
   assert.equal(alphaOf(zones(source)[0]), 0.5);
   assert.equal(alphaOf(curtains(source)[0]), 0);
   assert.equal(alphaOf(views(source).find((e) => e.polygon)), 0.4);
@@ -809,12 +829,19 @@ test('transparency: levels are clamped to the slider range', () => {
 const currents = (source) => layerOf(source, '3D check current photo');
 
 test('current photo: its footprint is drawn stronger with an outline, and follows the stepper', () => {
-  const { preview, source } = checkRig({ frustum: 'one', index: 0, footprints: 'all' });
+  const { preview, source } = checkRig({
+    frustum: 'one',
+    index: 0,
+    footprints: 'all',
+  });
   const fillOf = () => currents(source).find((e) => e.polygon);
   const lineOf = () => currents(source).find((e) => e.polyline);
   assert.ok(fillOf(), 'a highlighted footprint');
   assert.ok(lineOf(), 'and its outline');
-  assert.ok(fillOf().polygon.material.a >= 0.3, 'stronger than the faint stack');
+  assert.ok(
+    fillOf().polygon.material.a >= 0.3,
+    'stronger than the faint stack',
+  );
   assert.ok(fillOf().polygon.material.a > alphaOf(footprints(source)[0]));
   assert.ok(lineOf().polyline.material.a > 0.9);
   const first = fillOf().polygon.hierarchy.join(',');
@@ -852,7 +879,12 @@ test('imported files: setImportCheck feeds the 3D check with one footprint and p
   const viewer = fakeViewer();
   const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
   const source = viewer.dataSources.sources[0];
-  preview.setCheck({ enabled: true, frame: FRAME, frustum: 'thinned', footprints: 'all' });
+  preview.setCheck({
+    enabled: true,
+    frame: FRAME,
+    frustum: 'thinned',
+    footprints: 'all',
+  });
   assert.equal(checkEntities(source).length, 0);
   preview.setImportCheck(importPasses(12));
   assert.equal(preview.checkInfo().count, 12);
@@ -873,9 +905,17 @@ test('imported files: a plan built in the panel wins, and the import returns whe
   const planned = result(300, 200, { aglM: 80 });
   preview.showPlan(planned);
   const total = planned.missions.reduce((n, mi) => n + mi.waypoints.length, 0);
-  assert.equal(preview.checkInfo().count, total, 'the panel plan is checked, not the import');
+  assert.equal(
+    preview.checkInfo().count,
+    total,
+    'the panel plan is checked, not the import',
+  );
   preview.showPlan(null);
-  assert.equal(preview.checkInfo().count, 6, 'import back once there is no plan');
+  assert.equal(
+    preview.checkInfo().count,
+    6,
+    'import back once there is no plan',
+  );
   preview.clear();
   assert.equal(preview.checkInfo().count, 0, 'clear removes it');
 });
@@ -910,7 +950,11 @@ test('footprints: the photo in view shows with Camera view one, thinned and off'
   for (const frustum of ['one', 'thinned', 'off']) {
     for (const mode of ['selected', 'all']) {
       const { source } = checkRig({ frustum, footprints: mode });
-      assert.equal(polygonsOf(currentLayer(source)).length, 1, `${frustum}/${mode}`);
+      assert.equal(
+        polygonsOf(currentLayer(source)).length,
+        1,
+        `${frustum}/${mode}`,
+      );
     }
     const { source } = checkRig({ frustum, footprints: 'off' });
     assert.equal(currentLayer(source).length, 0, `${frustum}/off`);
@@ -936,7 +980,10 @@ test('footprints: switching between the settings adds and removes only the footp
   assert.equal(polygonsOf(currentLayer(source)).length, 1);
   preview.setCheck({ footprints: 'off' });
   assert.equal(currentLayer(source).length, 0);
-  assert.ok(zones(source).every((e, i) => e === zone[i]), 'zone untouched');
+  assert.ok(
+    zones(source).every((e, i) => e === zone[i]),
+    'zone untouched',
+  );
 });
 
 test('footprints: the old tick box values migrate - true to selected, false to off, unknown to selected', () => {
@@ -951,11 +998,523 @@ test('footprints: the old tick box values migrate - true to selected, false to o
   assert.equal(polygonsOf(currentLayer(old.source)).length, 1);
   assert.ok(old.preview.checkInfo().count > 0);
   old.preview.setCheck({ footprints: false });
-  assert.equal(currentLayer(old.source).length, 0, 'a later boolean false is off');
+  assert.equal(
+    currentLayer(old.source).length,
+    0,
+    'a later boolean false is off',
+  );
   old.preview.setCheck({ footprints: true });
-  assert.equal(polygonsOf(currentLayer(old.source)).length, 1, 'a later true is selected');
+  assert.equal(
+    polygonsOf(currentLayer(old.source)).length,
+    1,
+    'a later true is selected',
+  );
   assert.equal(footprints(old.source).length, 0);
   const off = checkRig({ footprints: false });
   assert.equal(currentLayer(off.source).length, 0);
   assert.equal(DEFAULT_CHECK_OPTIONS.footprints, 'selected');
+});
+
+// ------------------------------------------------------- battery pauses --
+const PAUSE_NAME = 'Battery pause';
+const pauseMarks = (source) =>
+  source.entities.values.filter((e) => e.name === PAUSE_NAME);
+
+function surveyBox(width, height) {
+  const m = metersPerDegree(30.27);
+  return {
+    west: -97.77 - width / 2 / m.lon,
+    east: -97.77 + width / 2 / m.lon,
+    south: 30.27 - height / 2 / m.lat,
+    north: 30.27 + height / 2 / m.lat,
+  };
+}
+
+/** A real planFlight result. The planner keeps usableBatteryMin on the
+ * normalized options (default 20). `stamp` can still force the field onto
+ * the assemble result, or `none` leaves only what planFlight wrote. */
+function continuousPlan({
+  width = 600,
+  height = 300,
+  usableBatteryMin = 12,
+  stamp = 'options',
+  captureMode = 'distance',
+  continuousRoute = true,
+  takeoffM = 40,
+  extra = {},
+} = {}) {
+  const plan = planFlight(surveyBox(width, height), {
+    aglM: 80,
+    captureMode,
+    continuousRoute,
+    usableBatteryMin,
+    batteryMin: 25,
+    speedMs: 8,
+    ...extra,
+  });
+  assert.equal(plan.error, undefined);
+  const ids = plan.legs.flatMap((leg) => leg.waypoints.map((w) => w.id));
+  const built = assembleMissions(plan, {
+    known: true,
+    takeoffM,
+    wpM: ids.map(() => takeoffM),
+  });
+  if (stamp === 'options')
+    built.plan.options.usableBatteryMin = usableBatteryMin;
+  else if (stamp === 'result') built.usableBatteryMin = usableBatteryMin;
+  return built;
+}
+
+function routeOf(mission) {
+  return mission.waypoints.map((w) => ({
+    lon: w.lon,
+    lat: w.lat,
+    relHeightM: w.relHeightM,
+    ...(Number.isFinite(w.dwellS) ? { dwellS: w.dwellS } : {}),
+  }));
+}
+
+function expectedPauses(result, usableMin) {
+  const speedMs = result.plan.speedMs;
+  const takeoff = {
+    lon: result.plan.takeoff.lon,
+    lat: result.plan.takeoff.lat,
+  };
+  return result.missions.flatMap((mission, missionIndex) =>
+    batteryBreaks(mission.waypoints, {
+      takeoff,
+      speedMs,
+      usableMin,
+      legs: mission.legs,
+    }).breaks.map((mark) => ({ missionIndex, mark })),
+  );
+}
+
+test('a real continuous plan shows pause markers from the normalized 20 minute default', () => {
+  const labels = [];
+  const labelOverlay = {
+    set(entries) {
+      labels.splice(0, labels.length, ...entries);
+    },
+    clear() {
+      labels.splice(0, labels.length);
+    },
+  };
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({
+    viewer,
+    cesium: fakeCesium(),
+    labelOverlay,
+  });
+  const source = viewer.dataSources.sources[0];
+  const plan = planFlight(surveyBox(1000, 600), {
+    aglM: 80,
+    captureMode: 'distance',
+    continuousRoute: true,
+    speedMs: 8,
+  });
+  assert.equal(plan.error, undefined);
+  assert.equal(plan.options.usableBatteryMin, 20);
+  const ids = plan.legs.flatMap((leg) => leg.waypoints.map((w) => w.id));
+  const planned = assembleMissions(plan, {
+    known: true,
+    takeoffM: 40,
+    wpM: ids.map(() => 40),
+  });
+  assert.equal(planned.plan.options.usableBatteryMin, 20);
+  assert.equal(planned.usableBatteryMin, undefined);
+  const expected = expectedPauses(planned, 20);
+  assert.ok(expected.length > 0, 'the normalized default places pauses');
+  const before = JSON.stringify(planned.missions.map((m) => m.waypoints));
+  preview.showPlan(planned);
+  const drawn = pauseMarks(source);
+  assert.equal(drawn.length, expected.length);
+  assert.equal(labels.length, expected.length);
+  for (const [i, entity] of drawn.entries()) {
+    const text = batteryPauseLabel(expected[i].mark);
+    assert.equal(entity.label, undefined, 'no Cesium label');
+    assert.equal(entity.pauseLabel, text);
+    assert.equal(labels[i].title, text);
+    assert.match(text, /Pause /);
+  }
+  assert.equal(
+    JSON.stringify(planned.missions.map((m) => m.waypoints)),
+    before,
+  );
+  preview.showPlan(null);
+  assert.equal(labels.length, 0);
+  preview.clear();
+  assert.equal(source.entities.values.length, 0);
+});
+
+test('showPlan draws every interpolated pause for a continuous route, with distance and minutes, and does not add KMZ waypoints', () => {
+  const labels = [];
+  const labelOverlay = {
+    set(entries) {
+      labels.splice(0, labels.length, ...entries);
+    },
+    clear() {
+      labels.splice(0, labels.length);
+    },
+  };
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({
+    viewer,
+    cesium: fakeCesium(),
+    labelOverlay,
+  });
+  const source = viewer.dataSources.sources[0];
+  const planned = continuousPlan({ usableBatteryMin: 12, takeoffM: 40 });
+  const expected = expectedPauses(planned, 12);
+  assert.ok(expected.length >= 1);
+  assert.ok(
+    expected.some(
+      (item) => item.mark.fraction > 0.001 && item.mark.fraction < 0.999,
+    ),
+    'fixture includes a mark between vertices',
+  );
+  const waypointRefs = planned.missions.map((m) => m.waypoints);
+  const waypointCount = planned.missions.map((m) => m.waypoints.length);
+  const snapshot = JSON.stringify(planned.missions.map((m) => m.waypoints));
+  preview.showPlan(planned);
+  const drawn = pauseMarks(source);
+  assert.equal(
+    drawn.length,
+    expected.length,
+    'every helper mark, none invented',
+  );
+  assert.ok(
+    drawn.some(
+      (e) => e.batteryBreak.fraction > 0.001 && e.batteryBreak.fraction < 0.999,
+    ),
+    'interpolated marks are drawn, not dropped',
+  );
+  for (const [i, entity] of drawn.entries()) {
+    const { missionIndex, mark } = expected[i];
+    const info = entity.batteryBreak;
+    assert.equal(info.missionIndex, missionIndex);
+    assert.equal(info.index, mark.index);
+    assert.equal(info.groundM, mark.groundM);
+    assert.equal(info.routeM, mark.routeM);
+    assert.equal(info.minutes, mark.minutes);
+    assert.equal(info.durationS, mark.durationS);
+    assert.equal(info.turnS, mark.turnS);
+    assert.equal(info.photoCount, mark.photoCount);
+    assert.equal(info.fraction, mark.fraction);
+    assert.equal(info.addedWaypoint, false);
+    assert.equal(info.disclaimer, undefined);
+    assert.equal(entity.label, undefined, 'no Cesium label');
+    assert.equal(entity.pauseLabel, batteryPauseLabel(mark));
+    assert.equal(labels[i].title, entity.pauseLabel);
+    assert.equal(labels[i].accessibilityLabel, entity.pauseLabel);
+    assert.equal(entity.position[0], mark.lon);
+    assert.equal(entity.position[1], mark.lat);
+    assert.equal(entity.position[2], 40 + mark.relHeightM);
+    assert.equal(
+      entity.point.heightReference,
+      undefined,
+      'airborne, not clamped',
+    );
+    const onVertex = planned.missions[missionIndex].waypoints.some(
+      (w) => w.lon === mark.lon && w.lat === mark.lat,
+    );
+    if (mark.fraction > 0.001 && mark.fraction < 0.999) {
+      assert.equal(
+        onVertex,
+        false,
+        'interpolated mark is not snapped to a waypoint',
+      );
+    }
+  }
+  const blob = JSON.stringify(drawn);
+  assert.equal(/estimate only/i.test(blob), false);
+  assert.equal(/\bwind\b/i.test(blob), false);
+  assert.equal(
+    JSON.stringify(planned.missions.map((m) => m.waypoints)),
+    snapshot,
+  );
+  planned.missions.forEach((mission, i) => {
+    assert.equal(mission.waypoints, waypointRefs[i]);
+    assert.equal(mission.waypoints.length, waypointCount[i]);
+  });
+  preview.showPlan(planned);
+  assert.equal(
+    pauseMarks(source).length,
+    expected.length,
+    'redraw does not stack marks',
+  );
+  preview.showPlan(null);
+  assert.equal(pauseMarks(source).length, 0);
+  preview.clear();
+  assert.equal(source.entities.values.length, 0);
+});
+
+test('usableBatteryMin on the assemble result is enough; a stop plan and a missing actual speed draw nothing', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  const carried = continuousPlan({ stamp: 'result', usableBatteryMin: 12 });
+  delete carried.plan.options.usableBatteryMin;
+  assert.equal(carried.plan.options.usableBatteryMin, undefined);
+  assert.equal(carried.usableBatteryMin, 12);
+  preview.showPlan(carried);
+  assert.equal(pauseMarks(source).length, expectedPauses(carried, 12).length);
+
+  const stopped = continuousPlan({
+    captureMode: 'stop',
+    continuousRoute: false,
+    usableBatteryMin: 12,
+  });
+  assert.equal(stopped.plan.options.continuousRoute, false);
+  preview.showPlan(stopped);
+  assert.equal(pauseMarks(source).length, 0);
+
+  const noSpeed = continuousPlan({ usableBatteryMin: 12 });
+  delete noSpeed.plan.speedMs;
+  delete noSpeed.totals.speedMs;
+  assert.ok(noSpeed.plan.options.speedMs > 0, 'requested speed is still there');
+  preview.showPlan(noSpeed);
+  assert.equal(
+    pauseMarks(source).length,
+    0,
+    'requested speed is not the flown speed',
+  );
+});
+
+test('a waypoint-capped continuous route pauses each file, not a route joined across files', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  const planned = continuousPlan({
+    width: 900,
+    height: 700,
+    captureMode: 'timed',
+    usableBatteryMin: 10,
+    extra: { maxWaypoints: 20, aglM: 70 },
+  });
+  assert.ok(planned.missions.length > 1);
+  const perFile = expectedPauses(planned, 10);
+  const joined = batteryBreaks(
+    planned.missions.flatMap((mission) => routeOf(mission)),
+    {
+      takeoff: planned.plan.takeoff,
+      speedMs: planned.plan.speedMs,
+      usableMin: 10,
+    },
+  );
+  assert.notEqual(perFile.length, joined.breaks.length);
+  const before = planned.missions.map((m) => m.waypointCount);
+  preview.showPlan(planned);
+  assert.equal(pauseMarks(source).length, perFile.length);
+  assert.deepEqual(
+    planned.missions.map((m) => m.waypointCount),
+    before,
+    'pause marks are not KMZ waypoints',
+  );
+  preview.clear();
+  assert.equal(pauseMarks(source).length, 0);
+});
+
+test('an unreachable round trip and a bad point draw no invented pause and do not throw', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  const far = { lon: -95, lat: 30, relHeightM: 80 };
+  const unreachable = {
+    plan: {
+      options: { continuousRoute: true, usableBatteryMin: 1 },
+      speedMs: 5,
+      takeoff: { lon: -97, lat: 30 },
+    },
+    missions: [
+      {
+        waypoints: [far, { lon: far.lon + 0.001, lat: 30, relHeightM: 80 }],
+      },
+    ],
+    totals: { speedMs: 5 },
+    ground: { known: true, takeoffM: 0 },
+  };
+  const helper = batteryBreaks(unreachable.missions[0].waypoints, {
+    takeoff: unreachable.plan.takeoff,
+    speedMs: 5,
+    usableMin: 1,
+  });
+  assert.equal(helper.breaks.length, 0);
+  assert.equal(helper.unreachable.reason, 'round-trip-exceeds-usable-minutes');
+  assert.doesNotThrow(() => preview.showPlan(unreachable));
+  assert.equal(pauseMarks(source).length, 0);
+
+  const bad = continuousPlan({ usableBatteryMin: 12 });
+  bad.missions[0].waypoints[0] = {
+    ...bad.missions[0].waypoints[0],
+    lon: Number.NaN,
+  };
+  assert.doesNotThrow(() => preview.showPlan(bad));
+  assert.equal(pauseMarks(source).length, 0);
+  assert.ok(source.entities.values.some((e) => e.name === 'Takeoff'));
+});
+
+test('a valid route whose legs do not match draws no invented pause and keeps the read error', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  const planned = continuousPlan({ usableBatteryMin: 12 });
+  const mission = planned.missions[0];
+  mission.legs = [
+    {
+      waypoints: [
+        mission.waypoints[0],
+        { lon: 0, lat: 0, relHeightM: mission.waypoints[0].relHeightM },
+      ],
+      captureMode: 'distance',
+      photoSpacingM: 25,
+    },
+  ];
+  const estimate = batteryPauseEstimate(planned, 12);
+  assert.equal(estimate.breaks.length, 0);
+  assert.equal(estimate.covered, false);
+  assert.match(estimate.errors[0].message, /match|flatten/);
+  assert.doesNotThrow(() => preview.showPlan(planned));
+  assert.equal(pauseMarks(source).length, 0);
+});
+
+test('showSuite draws pauses only on continuous passes, and hiding or clearing removes them', () => {
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({ viewer, cesium: fakeCesium() });
+  const source = viewer.dataSources.sources[0];
+  const passes = suiteOptions({
+    presetId: 'dji-mini-4-pro',
+    captureMode: 'distance',
+    continuousRoute: true,
+    usableBatteryMin: 15,
+  }).map(({ id, label, options }) => {
+    const plan = planFlight(surveyBox(500, 280), options);
+    assert.equal(plan.error, undefined);
+    const ids = plan.legs.flatMap((leg) => leg.waypoints.map((w) => w.id));
+    const result = assembleMissions(plan, {
+      known: true,
+      takeoffM: 25,
+      wpM: ids.map(() => 25),
+    });
+    result.usableBatteryMin = 15;
+    return { id, label, error: null, result };
+  });
+  const orbit = passes.find((p) => p.id === 'orbit');
+  assert.equal(orbit.result.plan.options.continuousRoute, false);
+  const continuous = passes.filter(
+    (p) => p.result.plan.options.continuousRoute === true,
+  );
+  assert.ok(continuous.length >= 1);
+  assert.ok(continuous.every((p) => p.id !== 'orbit'));
+  const expected = continuous.reduce(
+    (n, p) => n + expectedPauses(p.result, 15).length,
+    0,
+  );
+  assert.ok(expected > 0);
+  preview.showSuite(passes);
+  const drawn = pauseMarks(source);
+  assert.equal(drawn.length, expected);
+  assert.ok(drawn.every((e) => e.batteryBreak.passId !== 'orbit'));
+  assert.ok(
+    drawn.every((e) => continuous.some((p) => p.id === e.batteryBreak.passId)),
+  );
+  assert.ok(drawn.every((e) => Number.isFinite(e.batteryBreak.groundM)));
+  assert.ok(drawn.every((e) => Number.isFinite(e.batteryBreak.minutes)));
+  assert.equal(drawn[0].position[2], 25 + drawn[0].batteryBreak.relHeightM);
+  const hiddenId = continuous[0].id;
+  const hiddenCount = drawn.filter(
+    (e) => e.batteryBreak.passId === hiddenId,
+  ).length;
+  assert.ok(hiddenCount > 0);
+  preview.showSuite(passes, [hiddenId]);
+  assert.equal(
+    pauseMarks(source).filter((e) => e.batteryBreak.passId === hiddenId).length,
+    0,
+  );
+  assert.equal(pauseMarks(source).length, expected - hiddenCount);
+  preview.showSuite(null);
+  assert.equal(pauseMarks(source).length, 0);
+  preview.showSuite(passes);
+  preview.showPlan(null);
+  assert.equal(
+    pauseMarks(source).length,
+    expected,
+    'showPlan(null) keeps suite pauses',
+  );
+  preview.clear();
+  assert.equal(pauseMarks(source).length, 0);
+  assert.equal(source.entities.values.length, 0);
+});
+
+test('pause labels receive a getter when production entity.position is a ConstantPositionProperty', () => {
+  const labels = [];
+  class ConstantPositionProperty {
+    constructor(value) {
+      this.value = value;
+    }
+    getValue() {
+      return this.value;
+    }
+  }
+  const base = fakeCesium();
+  const cesium = {
+    ...base,
+    JulianDate: { now: () => 'tick' },
+    Cartesian3: {
+      ...base.Cartesian3,
+      fromDegrees: (lon, lat, h = 0) => ({ x: lon, y: lat, z: h }),
+    },
+    CustomDataSource: class extends base.CustomDataSource {
+      constructor(name) {
+        super(name);
+        const rawAdd = this.entities.add;
+        this.entities.add = (entity) => {
+          if (
+            entity?.position &&
+            typeof entity.position.getValue !== 'function'
+          ) {
+            return rawAdd({
+              ...entity,
+              position: new ConstantPositionProperty(entity.position),
+            });
+          }
+          return rawAdd(entity);
+        };
+      }
+    },
+  };
+  const viewer = fakeViewer();
+  const preview = createDronePlanPreview({
+    viewer,
+    cesium,
+    labelOverlay: {
+      set(entries) {
+        labels.splice(0, labels.length, ...entries);
+      },
+      clear() {
+        labels.splice(0, labels.length);
+      },
+    },
+  });
+  const planned = continuousPlan({ usableBatteryMin: 12, takeoffM: 40 });
+  const expected = expectedPauses(planned, 12);
+  assert.ok(expected.length >= 1);
+  preview.showPlan(planned);
+  const drawn = pauseMarks(viewer.dataSources.sources[0]);
+  assert.equal(drawn.length, expected.length);
+  assert.equal(typeof drawn[0].position.getValue, 'function');
+  assert.equal(labels.length, expected.length);
+  for (const [i, entry] of labels.entries()) {
+    const mark = expected[i].mark;
+    const resolved =
+      typeof entry.position === 'function' ? entry.position() : entry.position;
+    assert.equal(typeof entry.position.getValue, 'undefined');
+    assert.equal(Number.isFinite(resolved.x), true);
+    assert.equal(Number.isFinite(resolved.y), true);
+    assert.equal(Number.isFinite(resolved.z), true);
+    assert.equal(resolved.x, mark.lon);
+    assert.equal(resolved.y, mark.lat);
+    assert.equal(resolved.z, 40 + mark.relHeightM);
+  }
+  preview.clear();
 });

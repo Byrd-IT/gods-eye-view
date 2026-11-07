@@ -67,8 +67,13 @@ export const AGL_CAP_M = PLANNING_MAX_AGL_M;
 export const AGL_CAP_FT = PLANNING_MAX_AGL_FT;
 export const FT_PER_M = 1 / 0.3048;
 export const MIN_AGL_M = 10;
-/** DJI Fly accepts at most 200 waypoints in one mission. */
+/**
+ * DJI Fly accepts at most 200 waypoints in one mission. KMZ import
+ * (djiKmz.checkMission) warns above this same limit; do not raise it.
+ */
 export const MAX_WAYPOINTS_PER_MISSION = 200;
+/** Lowest waypoint cap a plan may ask for. The hard ceiling stays 200. */
+export const MIN_WAYPOINTS_PER_MISSION = 20;
 /**
  * The DJI Fly default altitude limit above the takeoff point, metres. This is
  * a fact about the aircraft app, not the planning maximum, and it stays 120.
@@ -163,6 +168,112 @@ export function orbitClearance({
   };
 }
 export const PHOTO_MODES = Object.freeze(['waypoint', 'interval']);
+/** Pause-estimate minutes for a continuous route. Not the 25 min split budget. */
+export const DEFAULT_USABLE_BATTERY_MIN = 20;
+/**
+ * How a survey line captures photos.
+ * stop — existing photoMode (waypoint stops, or legacy interval).
+ * distance / timed — the line is its two endpoints. Photos are counted along
+ * the straight line. distance reuses the unverified multipleDistance WPML
+ * group; timed writes no takePhoto.
+ */
+export const CAPTURE_MODES = Object.freeze(['stop', 'distance', 'timed']);
+
+export function isContinuousCapture(captureMode) {
+  return captureMode === 'distance' || captureMode === 'timed';
+}
+
+/**
+ * Trusted static setting. Default false until an owner-authorized change
+ * to this constant. A plan, voice patch, or imported file cannot flip it.
+ * False keeps the Mini 5 Pro distance-trigger notice.
+ */
+export const INTERVAL_TRIGGER_PROVEN = false;
+
+/**
+ * Whether the distance-trigger unproven notice may be omitted.
+ * The argument is ignored. Only INTERVAL_TRIGGER_PROVEN counts.
+ */
+export function isIntervalTriggerProven() {
+  return INTERVAL_TRIGGER_PROVEN === true;
+}
+
+/**
+ * Metres written as a multipleDistance trigger, and the spacing photo counts
+ * use. One decimal, the same rounding the WPML writer emits, so a foot value
+ * round-trips through parseDjiKmz and deriveImportShots. DJI requires the
+ * param to be > 0; a non-positive spacing becomes 1.
+ */
+export function writtenSpacingM(spacingM) {
+  const n = Number(spacingM);
+  if (!(n > 0)) return 1;
+  return Math.max(0.1, Number(Math.max(n, 0.1).toFixed(1)));
+}
+
+/** The trigger text for that same spacing (`15.2`, `25.0`). */
+export function distanceTriggerText(spacingM) {
+  return writtenSpacingM(spacingM).toFixed(1);
+}
+
+/**
+ * Photos along a straight line: one at the start, then every written spacing.
+ * A continued piece shares the start and does not count it again.
+ * Counts use writtenSpacingM, not the raw metre value, so the model matches
+ * the distance param in the file.
+ */
+export function linePhotoCount(lengthM, spacingM, continued = false) {
+  const step = writtenSpacingM(spacingM);
+  return Math.floor(Number(lengthM) / step + 1e-9) + (continued ? 0 : 1);
+}
+
+function explicitSpacingM(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+/**
+ * Usable minutes for a continuous-route pause estimate. Empty, zero and
+ * non-numbers return 20. A positive number is rounded and clamped to 5..60,
+ * the same window as battery time. This does not change how stop mode splits.
+ */
+export function cleanUsableBatteryMin(value) {
+  if (value == null || value === '') return DEFAULT_USABLE_BATTERY_MIN;
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_USABLE_BATTERY_MIN;
+  return Math.min(60, Math.max(5, n));
+}
+
+/**
+ * Camera minimum interval for one plan, in seconds. Null means unset: the
+ * aircraft preset's minPhotoIntervalS stays in force, including mode A.
+ * A boolean, a non-number, or a value outside 0.1..60 is rejected (null),
+ * not clamped. A numeric string from a field is accepted.
+ */
+export function cleanMinPhotoIntervalS(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'boolean') return null;
+  const n =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(n) || n < 0.1 || n > 60) return null;
+  return n;
+}
+
+/**
+ * The preset speedLimits already reads. Unset, or a value equal to the
+ * preset, keeps the original object so mode A calculations stay the default.
+ * No new speedLimits parameter: the override is minPhotoIntervalS on a copy.
+ */
+export function presetWithPhotoInterval(preset, override) {
+  if (!preset) return preset;
+  const n = cleanMinPhotoIntervalS(override);
+  if (n == null || n === preset.minPhotoIntervalS) return preset;
+  return { ...preset, minPhotoIntervalS: n };
+}
 
 export const DEFAULT_OPTIONS = Object.freeze({
   presetId: DEFAULT_PRESET_ID,
@@ -174,9 +285,19 @@ export const DEFAULT_OPTIONS = Object.freeze({
   tiltPitchDeg: -60,
   speedMs: 5,
   photoMode: 'waypoint',
+  captureMode: 'stop',
+  // Mirror of INTERVAL_TRIGGER_PROVEN. Input cannot change it.
+  intervalTriggerProven: INTERVAL_TRIGGER_PROVEN,
+  // Positive metres. Null means distance/timed spacing comes from overlap.
+  photoSpacingM: null,
+  // Seconds. Null means the aircraft preset interval. A number replaces it
+  // for this plan only. Invalid input is dropped, not clamped.
+  minPhotoIntervalS: null,
   shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
   cameraPresetId: DEFAULT_CAMERA_PRESET_ID,
   batteryMin: 25,
+  // Continuous-route pause estimate. Stop mode still splits on batteryMin.
+  usableBatteryMin: DEFAULT_USABLE_BATTERY_MIN,
   maxWaypoints: MAX_WAYPOINTS_PER_MISSION,
   orbitRadiusM: null,
   orbitHeightsM: null,
@@ -370,6 +491,15 @@ export function normalizeOptions(raw = {}, box = null) {
   o.sideOverlap = clamp(num(o.sideOverlap, 70), 30, 95);
   o.pattern = PATTERNS.includes(o.pattern) ? o.pattern : 'grid';
   o.photoMode = PHOTO_MODES.includes(o.photoMode) ? o.photoMode : 'waypoint';
+  o.captureMode = CAPTURE_MODES.includes(o.captureMode) ? o.captureMode : 'stop';
+  o.photoSpacingM = explicitSpacingM(o.photoSpacingM);
+  // Untrusted input cannot prove the trigger. Only the static setting counts.
+  o.intervalTriggerProven = INTERVAL_TRIGGER_PROVEN;
+  // Opt-in only. Absent or false stays off, so battery splits remain unless
+  // the caller sets continuousRoute true. Stop and orbit cannot turn it on.
+  const continuousEligible =
+    o.pattern !== 'orbit' && isContinuousCapture(o.captureMode);
+  o.continuousRoute = continuousEligible && raw?.continuousRoute === true;
   o.tiltPitchDeg = clamp(num(o.tiltPitchDeg, -60), -80, -45);
   o.speedMs = clamp(
     num(o.speedMs, preset.defaultSpeedMs),
@@ -379,10 +509,13 @@ export function normalizeOptions(raw = {}, box = null) {
   o.shutterDenominator = shutterDenominatorOrDefault(o.shutterDenominator);
   o.cameraPresetId = cameraPresetOrDefault(o.cameraPresetId).id;
   o.batteryMin = clamp(num(o.batteryMin, 25), 5, 60);
+  o.usableBatteryMin = cleanUsableBatteryMin(o.usableBatteryMin);
+  // Blank or unusable stays unset, so mode A keeps the preset interval.
+  o.minPhotoIntervalS = cleanMinPhotoIntervalS(o.minPhotoIntervalS);
   o.maxWaypoints = Math.floor(
     clamp(
       num(o.maxWaypoints, MAX_WAYPOINTS_PER_MISSION),
-      10,
+      MIN_WAYPOINTS_PER_MISSION,
       MAX_WAYPOINTS_PER_MISSION,
     ),
   );
@@ -460,7 +593,12 @@ export function normalizeOptions(raw = {}, box = null) {
     });
   }
   o.orbitHeightsM = rings;
-  return { options: o, preset, notes };
+  return {
+    options: o,
+    // speedLimits reads preset.minPhotoIntervalS. Unset keeps the original.
+    preset: presetWithPhotoInterval(preset, o.minPhotoIntervalS),
+    notes,
+  };
 }
 
 function clipLine(vOffset, ux, uy, vx, vy, hw, hh) {
@@ -1180,7 +1318,10 @@ export function planFlight(box, rawOptions = {}) {
     else baseAngle = options.direction;
     fpInfo = footprint(preset, agl, passes[0].tiltDeg);
     spacingInfo = spacing(fpInfo, options.frontOverlap, options.sideOverlap);
-    photoSpacingM = spacingInfo.photoM;
+    photoSpacingM =
+      isContinuousCapture(options.captureMode) && options.photoSpacingM
+        ? options.photoSpacingM
+        : spacingInfo.photoM;
     passCount = passes.length;
     for (let p = 0; p < passes.length; p += 1) {
       const pass = passes[p];
@@ -1195,10 +1336,22 @@ export function planFlight(box, rawOptions = {}) {
         lookAheadM: lookAhead,
       });
       for (const line of lines) {
-        const interval = options.photoMode === 'interval';
-        const { points, length } = interval
-          ? subdivide(line.start, line.end, INTERVAL_WAYPOINT_STEP_M)
-          : subdivide(line.start, line.end, sp.photoM);
+        const lineCapture = isContinuousCapture(options.captureMode);
+        const interval = !lineCapture && options.photoMode === 'interval';
+        const rawLegSpacing =
+          lineCapture && options.photoSpacingM
+            ? options.photoSpacingM
+            : sp.photoM;
+        // Distance and timed store the spacing the file will write, so the
+        // photo count and the distance param cannot drift.
+        const legSpacing = lineCapture
+          ? writtenSpacingM(rawLegSpacing)
+          : rawLegSpacing;
+        const { points, length } = lineCapture
+          ? subdivide(line.start, line.end, Number.POSITIVE_INFINITY)
+          : interval
+            ? subdivide(line.start, line.end, INTERVAL_WAYPOINT_STEP_M)
+            : subdivide(line.start, line.end, sp.photoM);
         if (waypointCount + points.length > MAX_WAYPOINTS_TOTAL) {
           return {
             error: 'too-large',
@@ -1212,19 +1365,22 @@ export function planFlight(box, rawOptions = {}) {
           kind: 'grid',
           pitchDeg: pass.pitch,
           photoMode: options.photoMode,
+          captureMode: options.captureMode,
+          continuousRoute: options.continuousRoute === true,
           waypoints: points.map((pt) =>
             toWaypoint(pt, {
               aglM: agl,
               pitchDeg: pass.pitch,
               headingDeg: null,
-              photo: !interval,
+              photo: !(interval || lineCapture),
             }),
           ),
           lengthM: length,
-          photoCount: interval
-            ? Math.floor(length / sp.photoM + 1e-9) + 1
-            : points.length,
-          photoSpacingM: sp.photoM,
+          photoCount:
+            interval || lineCapture
+              ? linePhotoCount(length, legSpacing)
+              : points.length,
+          photoSpacingM: legSpacing,
         });
       }
     }
@@ -1236,31 +1392,49 @@ export function planFlight(box, rawOptions = {}) {
 
   // Speed: the camera needs time between frames (photo spacing / minimum
   // interval) and the picture must not smear while the shutter is open (blur
-  // limit from the shutter type and speed), whatever speed the user asked for.
-  // The result is rounded DOWN and never raised to a floor: a floor above the
-  // camera's limit would fly faster than the camera can keep up with.
+  // limit from the shutter type and speed). Legacy stop still flies the
+  // lowered speed. Distance and timed keep the speed the user asked for and
+  // only record the limit, so a warning is not a silent speed change.
+  // The lowered result is rounded DOWN and never raised to a floor: a floor
+  // above the camera's limit would fly faster than the camera can keep up with.
+  const preserveSpeed = isContinuousCapture(options.captureMode);
+  // preset.minPhotoIntervalS is the plan override when one was set, otherwise
+  // the aircraft preset. speedLimits itself is unchanged.
   const limits = speedLimits({
     preset,
-    photoSpacingM,
+    photoSpacingM: preserveSpeed ? writtenSpacingM(photoSpacingM) : photoSpacingM,
     gsdCm: fpInfo.gsdCm,
     shutterDenominator: options.shutterDenominator,
   });
   let speedMs = options.speedMs;
   let speedLimitedBy = null;
-  if (limits.limitMs < speedMs) {
+  const overLimit = limits.limitMs < speedMs - 1e-9;
+  if (overLimit && !preserveSpeed) {
     speedMs = limits.limitMs;
     speedLimitedBy = limits.limitedBy === 'blur' ? 'blur' : 'camera';
   }
-  speedMs = Math.max(MIN_PLAN_SPEED_MS, floorTo(speedMs, 0.01));
-  if (speedLimitedBy) {
-    const code =
-      speedLimitedBy === 'blur' ? 'speed-blur-limited' : 'speed-camera-limited';
+  speedMs = preserveSpeed
+    ? Math.max(MIN_PLAN_SPEED_MS, speedMs)
+    : Math.max(MIN_PLAN_SPEED_MS, floorTo(speedMs, 0.01));
+  if (overLimit) {
+    const kind = limits.limitedBy === 'blur' ? 'blur' : 'camera';
+    const code = preserveSpeed
+      ? kind === 'blur'
+        ? 'speed-exceeds-blur-limit'
+        : 'speed-exceeds-camera-limit'
+      : kind === 'blur'
+        ? 'speed-blur-limited'
+        : 'speed-camera-limited';
     notes.push({
       code,
       params: {
         requested: options.speedMs,
-        limited: speedMs,
+        limited: preserveSpeed
+          ? Math.max(MIN_PLAN_SPEED_MS, floorTo(limits.limitMs, 0.01))
+          : speedMs,
         shutter: options.shutterDenominator,
+        preserved: preserveSpeed,
+        limitedBy: limits.limitedBy,
       },
     });
   }
@@ -1472,9 +1646,13 @@ export function assembleMissions(plan, ground) {
   let overBudget = false;
   let tooMany = false;
   const flatten = (list) => list.flatMap((leg) => leg.waypoints);
+  // Distance and timed lines stay whole. Battery time does not split them;
+  // the waypoint cap does, and only between lines (a line is two endpoints).
+  const continuous = options.continuousRoute === true;
   const feasible = (list) => {
     const wps = flatten(list);
     if (wps.length > options.maxWaypoints) return false;
+    if (continuous) return true;
     return (
       estimateMission(wps, takeoff, speedMs, list.length).durationS <= budgetS
     );
@@ -1489,9 +1667,8 @@ export function assembleMissions(plan, ground) {
   // In interval mode a piece that continues a cut leg starts where the last
   // one ended, so it does not count a second photo at that shared point.
   const photosIn = (leg, waypoints, lengthM) =>
-    leg.photoMode === 'interval'
-      ? Math.floor(lengthM / (leg.photoSpacingM || 1) + 1e-9) +
-        (leg.continued ? 0 : 1)
+    leg.photoMode === 'interval' || isContinuousCapture(leg.captureMode)
+      ? linePhotoCount(lengthM, leg.photoSpacingM, leg.continued === true)
       : waypoints.reduce(
           (sum, w) =>
             sum + (w.photo ? (w.outwardHeadingDeg != null ? 2 : 1) : 0),
@@ -1499,6 +1676,9 @@ export function assembleMissions(plan, ground) {
         );
   const pending = [...legs];
   let guard = 0;
+  // Waypoint-cap splits that start the next mission on a whole line, not a
+  // mid-line cut. Battery-only splits are not counted.
+  let capLineSplits = 0;
   while (pending.length && !tooMany) {
     guard += 1;
     if (guard > 100000) throw new Error('Mission split did not terminate');
@@ -1508,6 +1688,18 @@ export function assembleMissions(plan, ground) {
       continue;
     }
     if (current.length) {
+      const added = flatten([...current, leg]).length;
+      // The warning text says this is a continuous route. Stop mode and a
+      // distance/timed plan with the continuous route off also split between
+      // lines at the waypoint cap; emitting it there is a false warning.
+      if (
+        continuous &&
+        added > options.maxWaypoints &&
+        leg.continued !== true &&
+        leg.waypoints.length >= 2
+      ) {
+        capLineSplits += 1;
+      }
       close();
       pending.unshift(leg);
       continue;
@@ -1530,7 +1722,11 @@ export function assembleMissions(plan, ground) {
     const tail = leg.waypoints
       .slice(take - 1)
       .map((w, i) =>
-        i === 0 && leg.photoMode !== 'interval' ? withoutPhoto(w) : w,
+        i === 0 &&
+        leg.photoMode !== 'interval' &&
+        !isContinuousCapture(leg.captureMode)
+          ? withoutPhoto(w)
+          : w,
       );
     const asLeg = (waypoints, continued = leg.continued === true) => {
       const lengthM = waypoints.reduce(
@@ -1547,6 +1743,16 @@ export function assembleMissions(plan, ground) {
   }
   if (!tooMany) close();
   if (overBudget) warnings.push({ code: 'mission-over-budget', params: {} });
+  if (capLineSplits) {
+    warnings.push({
+      code: 'line-end-split',
+      params: {
+        count: capLineSplits,
+        maxWaypoints: options.maxWaypoints,
+        reason: 'waypoint-cap',
+      },
+    });
+  }
   if (tooMany) {
     warnings.push({
       code: 'too-many-missions',
@@ -1630,8 +1836,19 @@ export function assembleMissions(plan, ground) {
     }));
     const wps = flatten(reindexed);
     const est = estimateMission(wps, takeoff, speedMs, reindexed.length);
-    // The lift can make a mission longer than the battery: say so.
-    if (est.durationS > budgetS && !overBudget) {
+    // mission-over-budget blocks the file. A continuous route is not cut on
+    // time, so planned duration alone must not emit it, including when a
+    // transit lift makes an already-over file longer. A lift that does not
+    // cross the battery must not emit it either. Only a lift that pushes an
+    // otherwise fitting continuous mission over the battery still warns.
+    const planned = estimateMission(
+      flatten(rawLegs),
+      takeoff,
+      speedMs,
+      rawLegs.length,
+    );
+    const solelyPlanned = continuous && planned.durationS > budgetS;
+    if (est.durationS > budgetS && !overBudget && !solelyPlanned) {
       overBudget = true;
       warnings.push({ code: 'mission-over-budget', params: {} });
     }

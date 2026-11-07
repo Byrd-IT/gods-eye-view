@@ -47,12 +47,19 @@ export const SUITE_PASSES = Object.freeze([
   }),
 ]);
 
-/** Planner options a pass keeps from the panel (everything but the recipe). */
+/** Planner options a pass keeps from the panel (everything but the recipe).
+ * Copied only when the panel set the key. usableBatteryMin has no default here.
+ */
 const KEEP = [
   'presetId',
   'direction',
   'batteryMin',
+  'usableBatteryMin',
   'maxWaypoints',
+  'captureMode',
+  'photoSpacingM',
+  'minPhotoIntervalS',
+  'continuousRoute',
   'orbitRadiusM',
   'obstacleHeightM',
   'orbitTargetHeightM',
@@ -97,8 +104,12 @@ export function suiteReadme(passes, when = new Date()) {
     'and fly the first mission short and supervised.',
     '',
     'Fly every pass over the same area and process ALL the photos together',
-    '(one splat / one ODM run). Each folder is one pass; each KMZ in it is one battery.',
+    '(one splat / one ODM run). Each folder is one pass; each KMZ in it is one flight,',
+    'not one battery. A continuous route is not split into battery-sized files.',
     'Camera settings are in each folder README.',
+    'Each folder README lists the requested mode, waypoint cap, height, speed,',
+    'spacing, interval, camera minimum, shutter, overlap, photo count, resume',
+    'safety, and any estimated battery breaks.',
     '',
   ];
   passes.forEach((pass, i) => {

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { getCatalog } from '../../i18n/index.js';
 import { setUnitSystem } from './units.js';
 import {
+  batteryPauseLabel,
   distanceText,
   durationText,
   heightText,
@@ -10,6 +11,7 @@ import {
   planErrorText,
   speedText,
   warningText,
+  warningTone,
 } from './format.js';
 
 // The sentences below were written in metres; feet have their own tests.
@@ -19,6 +21,9 @@ const CODES = [
   ['agl-capped', { requested: 200, cap: 120 }],
   ['agl-above-400ft', { maxAglM: 300, capM: 457.2 }],
   ['speed-camera-limited', { requested: 5, limited: 4 }],
+  ['speed-exceeds-camera-limit', { requested: 15, limited: 4.2 }],
+  ['speed-exceeds-blur-limit', { requested: 12, limited: 3.5, shutter: 500 }],
+  ['line-end-split', { count: 3, maxWaypoints: 20 }],
   ['vlos', { distanceM: 640 }],
   ['terrain-unknown', {}],
   ['rel-height-over-limit', { maxRelM: 160, limitM: 120, terrainRangeM: 60 }],
@@ -57,6 +62,35 @@ test('every warning code has a sentence with its numbers filled in', () => {
   assert.match(high, /does not approve a flight and changes no limit in the aircraft/);
   assert.match(high, /airspace authorization, local rules and your duties as pilot still apply/);
   assert.equal(warningText({ code: 'mystery', params: {} }), '');
+  assert.equal(warningTone('speed-exceeds-camera-limit'), 'bad');
+  assert.equal(warningTone('speed-exceeds-blur-limit'), 'bad');
+  assert.equal(warningTone('line-end-split'), 'warn');
+  assert.equal(warningTone('vlos'), '');
+  assert.match(
+    warningText({
+      code: 'speed-exceeds-camera-limit',
+      params: { requested: 15, limited: 4 },
+    }),
+    /stays at 15\.0 m\/s, above the camera limit of 4\.0 m\/s/,
+  );
+  assert.match(
+    warningText({
+      code: 'speed-exceeds-blur-limit',
+      params: { requested: 12, limited: 3.5, shutter: 500 },
+    }),
+    /1\/500 s shutter/,
+  );
+  assert.match(
+    warningText({
+      code: 'line-end-split',
+      params: { count: 3, maxWaypoints: 20 },
+    }),
+    /split 3 times.*20 waypoints/,
+  );
+  assert.equal(
+    batteryPauseLabel({ index: 2, groundM: 1234, durationS: 12 * 60 }),
+    'Pause 2: 1.23 km · 12 min',
+  );
 });
 
 test('warning sentences are translated in every catalog', () => {

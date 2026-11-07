@@ -376,6 +376,7 @@ export function createDronePlanVoice(handle) {
 
 function readOptions(patch = {}) {
   const next = {};
+  // intervalTriggerProven is a trusted static setting. Voice cannot copy it.
   if (patch.aircraft != null) {
     const preset = matchAircraft(patch.aircraft);
     if (!preset) return { ok: false, error: 'No aircraft matched.' };

@@ -9,6 +9,7 @@ import {
   MAX_ORBIT_TARGETS,
   MAX_WAYPOINTS_PER_MISSION,
   assembleMissions,
+  cleanUsableBatteryMin,
   estimateMission,
   footprint,
   minOrbitAglM,
@@ -17,6 +18,8 @@ import {
   orbitClearance,
   planFlight,
   spacing,
+  INTERVAL_TRIGGER_PROVEN,
+  isIntervalTriggerProven,
   takeoffDistanceFromBoxM,
   MAX_MISSIONS,
   MAX_TAKEOFF_FROM_BOX_M,
@@ -907,4 +910,543 @@ test('orbit targets: bad entries are dropped and the list is capped', () => {
   assert.equal(list.length, MAX_ORBIT_TARGETS);
   assert.equal(list[0].active, true);
   assert.equal(normalizeOrbitTargets(null), null);
+});
+
+test('captureMode defaults to stop; maxWaypoints is 20 to 200', () => {
+  const { options } = normalizeOptions({});
+  assert.equal(options.captureMode, 'stop');
+  assert.equal(options.photoMode, 'waypoint');
+  assert.equal(options.continuousRoute, false);
+  assert.equal(options.intervalTriggerProven, false);
+  assert.equal(DEFAULT_OPTIONS.intervalTriggerProven, false);
+  assert.equal(options.photoSpacingM, null);
+  assert.equal(options.maxWaypoints, 200);
+  assert.equal(options.usableBatteryMin, 20);
+  assert.equal(cleanUsableBatteryMin(undefined), 20);
+  assert.equal(cleanUsableBatteryMin(null), 20);
+  assert.equal(cleanUsableBatteryMin(0), 20);
+  assert.equal(cleanUsableBatteryMin(-3), 20);
+  assert.equal(cleanUsableBatteryMin('x'), 20);
+  assert.equal(normalizeOptions({ usableBatteryMin: 4 }).options.usableBatteryMin, 5);
+  assert.equal(normalizeOptions({ usableBatteryMin: 90 }).options.usableBatteryMin, 60);
+  assert.equal(normalizeOptions({ usableBatteryMin: 18 }).options.usableBatteryMin, 18);
+  assert.equal(normalizeOptions({ usableBatteryMin: 20.6 }).options.usableBatteryMin, 21);
+  assert.equal(MAX_WAYPOINTS_PER_MISSION, 200);
+  const junk = normalizeOptions({
+    captureMode: 'hover',
+    continuousRoute: true,
+    photoSpacingM: 0,
+    maxWaypoints: 10,
+  });
+  assert.equal(junk.options.captureMode, 'stop');
+  assert.equal(junk.options.continuousRoute, false);
+  assert.equal(junk.options.photoSpacingM, null);
+  assert.equal(junk.options.maxWaypoints, 20);
+  assert.equal(normalizeOptions({ maxWaypoints: 19.9 }).options.maxWaypoints, 20);
+  assert.equal(normalizeOptions({ maxWaypoints: 200 }).options.maxWaypoints, 200);
+  assert.equal(normalizeOptions({ maxWaypoints: 5000 }).options.maxWaypoints, 200);
+  assert.equal(
+    normalizeOptions({ photoSpacingM: '25' }).options.photoSpacingM,
+    null,
+    'a numeric string is not an explicit number',
+  );
+  assert.equal(
+    normalizeOptions({ photoSpacingM: 25 }).options.photoSpacingM,
+    25,
+  );
+});
+
+test('intervalTriggerProven stays false; a stored true cannot prove the trigger', () => {
+  assert.equal(isIntervalTriggerProven(undefined), false);
+  assert.equal(isIntervalTriggerProven(false), false);
+  assert.equal(isIntervalTriggerProven('true'), false);
+  assert.equal(isIntervalTriggerProven(1), false);
+  assert.equal(INTERVAL_TRIGGER_PROVEN, false);
+  assert.equal(isIntervalTriggerProven(true), false);
+  assert.equal(isIntervalTriggerProven(), INTERVAL_TRIGGER_PROVEN);
+  assert.equal(normalizeOptions({}).options.intervalTriggerProven, false);
+  assert.equal(
+    normalizeOptions({ captureMode: 'distance' }).options.intervalTriggerProven,
+    false,
+  );
+  assert.equal(
+    normalizeOptions({ intervalTriggerProven: 'yes' }).options.intervalTriggerProven,
+    false,
+  );
+  assert.equal(
+    normalizeOptions({ intervalTriggerProven: false }).options.intervalTriggerProven,
+    false,
+  );
+  const stored = normalizeOptions({
+    captureMode: 'distance',
+    intervalTriggerProven: true,
+  });
+  assert.equal(stored.options.intervalTriggerProven, false);
+  assert.equal(stored.options.captureMode, 'distance');
+});
+
+test('distance capture flies line endpoints and counts photos by spacing', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 400, 200);
+  const stop = planFlight(box, { aglM: 100 });
+  const plan = planFlight(box, { aglM: 100, captureMode: 'distance' });
+  assert.equal(plan.options.captureMode, 'distance');
+  assert.equal(plan.options.continuousRoute, false);
+  assert.equal(plan.options.intervalTriggerProven, false);
+  assert.equal(plan.legs.length, stop.legs.length);
+  for (const leg of plan.legs) {
+    assert.equal(leg.captureMode, 'distance');
+    assert.equal(leg.continuousRoute, false);
+    assert.equal(leg.photoMode, 'waypoint');
+    assert.equal(leg.waypoints.length, 2);
+    assert.ok(leg.waypoints.every((w) => w.photo === false));
+    near(leg.photoSpacingM, 20, 1e-6);
+    assert.equal(
+      leg.photoCount,
+      Math.floor(leg.lengthM / leg.photoSpacingM + 1e-9) + 1,
+    );
+  }
+  assert.equal(plan.legs[0].photoCount, 21);
+  for (let i = 0; i < plan.legs.length; i += 1) {
+    const a = plan.legs[i].waypoints;
+    const b = stop.legs[i].waypoints;
+    near(a[0].lon, b[0].lon, 1e-8, 'start lon');
+    near(a[0].lat, b[0].lat, 1e-8, 'start lat');
+    near(a[1].lon, b.at(-1).lon, 1e-8, 'end lon');
+    near(a[1].lat, b.at(-1).lat, 1e-8, 'end lat');
+  }
+});
+
+test('explicit photoSpacingM overrides overlap only for distance and timed', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 400, 200);
+  const distance = planFlight(box, {
+    aglM: 100,
+    captureMode: 'distance',
+    photoSpacingM: 25,
+  });
+  assert.ok(distance.legs.every((leg) => leg.photoSpacingM === 25));
+  assert.equal(
+    distance.legs[0].photoCount,
+    Math.floor(distance.legs[0].lengthM / 25 + 1e-9) + 1,
+  );
+  const timed = planFlight(box, {
+    aglM: 100,
+    captureMode: 'timed',
+    photoSpacingM: 40,
+  });
+  assert.ok(timed.legs.every((leg) => leg.photoSpacingM === 40));
+  assert.ok(timed.legs.every((leg) => leg.waypoints.length === 2));
+  const ignored = planFlight(box, { aglM: 100, photoSpacingM: 25 });
+  near(ignored.legs[0].photoSpacingM, 20, 1e-6);
+  assert.ok(ignored.legs[0].waypoints.length > 2);
+  assert.equal(ignored.options.continuousRoute, false);
+  const tight = planFlight(box, {
+    aglM: 100,
+    captureMode: 'distance',
+    photoSpacingM: 8,
+    speedMs: 15,
+  });
+  const legacy = planFlight(box, { aglM: 100, photoSpacingM: 8, speedMs: 15 });
+  assert.equal(legacy.options.captureMode, 'stop');
+  assert.ok(legacy.speedMs < 15, 'legacy stop still lowers speed');
+  assert.equal(legacy.speedLimitedBy, 'camera');
+  assert.equal(tight.speedMs, 15, 'distance keeps the requested speed');
+  assert.equal(tight.speedLimitedBy, null);
+  const limit = tight.notes.find((note) => note.code === 'speed-exceeds-camera-limit');
+  assert.equal(limit.params.requested, 15);
+  assert.equal(limit.params.preserved, true);
+  assert.ok(limit.params.limited < 15);
+  assert.equal(
+    tight.notes.some((note) => note.code === 'speed-camera-limited'),
+    false,
+  );
+});
+
+test('distance with continuousRoute false keeps endpoints but still splits on battery', () => {
+  const wide = boxAround(CENTER.lon, CENTER.lat, 200, 800);
+  const plan = planFlight(wide, {
+    aglM: 100,
+    direction: 'ew',
+    captureMode: 'distance',
+    continuousRoute: false,
+    batteryMin: 5,
+    speedMs: 15,
+    maxWaypoints: 200,
+  });
+  assert.equal(plan.options.continuousRoute, false);
+  assert.ok(plan.legs.every((leg) => leg.waypoints.length === 2));
+  assert.ok(plan.legs.every((leg) => leg.continuousRoute === false));
+  const built = assembleMissions(plan, flatGround(plan));
+  assert.ok(built.missions.length > 1, 'battery split stays on');
+  assert.equal(
+    built.warnings.some((warning) => warning.code === 'line-end-split'),
+    false,
+    'a battery split is not a cap-triggered line-end split',
+  );
+  assert.equal(
+    normalizeOptions({
+      pattern: 'orbit',
+      captureMode: 'timed',
+      continuousRoute: true,
+    }).options.continuousRoute,
+    false,
+  );
+});
+
+test('distance capture overrides legacy interval subdivision but keeps photoMode', () => {
+  const plan = planFlight(boxAround(CENTER.lon, CENTER.lat, 400, 200), {
+    aglM: 100,
+    photoMode: 'interval',
+    captureMode: 'distance',
+  });
+  assert.equal(plan.options.continuousRoute, false);
+  assert.ok(plan.legs.every((leg) => leg.photoMode === 'interval'));
+  assert.ok(plan.legs.every((leg) => leg.waypoints.length === 2));
+  assert.equal(plan.legs[0].photoCount, 21);
+});
+
+test('legacy interval photoMode is unchanged when captureMode is stop', () => {
+  const plan = planFlight(boxAround(CENTER.lon, CENTER.lat, 400, 200), {
+    aglM: 100,
+    photoMode: 'interval',
+    captureMode: 'stop',
+  });
+  assert.equal(plan.options.continuousRoute, false);
+  assert.ok(plan.legs.every((leg) => leg.waypoints.length === 8));
+  assert.equal(plan.legs[0].photoCount, 21);
+  near(plan.legs[0].photoSpacingM, 20, 1e-6);
+});
+
+test('continuous distance route skips battery splits and cuts only between lines', () => {
+  const wide = boxAround(CENTER.lon, CENTER.lat, 200, 800);
+  const shared = {
+    aglM: 100,
+    direction: 'ew',
+    batteryMin: 5,
+    speedMs: 15,
+  };
+  const plan = planFlight(wide, {
+    ...shared,
+    captureMode: 'distance',
+    continuousRoute: true,
+    maxWaypoints: 20,
+  });
+  assert.ok(plan.legs.length > 10, `legs ${plan.legs.length}`);
+  assert.ok(plan.legs.every((leg) => leg.waypoints.length === 2));
+  const result = assembleMissions(plan, flatGround(plan));
+  assert.ok(result.missions.length >= 2);
+  for (const mission of result.missions) {
+    assert.ok(mission.waypointCount <= 20, `${mission.waypointCount}`);
+    assert.equal(mission.waypointCount % 2, 0);
+    assert.ok(mission.legs.every((leg) => leg.waypoints.length === 2));
+    assert.ok(mission.legs.every((leg) => leg.continued !== true));
+  }
+  const ids = result.missions.flatMap((mission) =>
+    mission.waypoints.map((w) => w.id),
+  );
+  assert.equal(new Set(ids).size, ids.length, 'no shared cut waypoint');
+  assert.equal(
+    result.totals.photoCount,
+    plan.legs.reduce((sum, leg) => sum + leg.photoCount, 0),
+  );
+  const split = result.warnings.find((warning) => warning.code === 'line-end-split');
+  assert.equal(split.params.reason, 'waypoint-cap');
+  assert.equal(split.params.count, result.missions.length - 1);
+  assert.equal(split.params.maxWaypoints, 20);
+  assert.equal(
+    result.warnings.some((warning) => warning.code === 'mission-over-budget'),
+    false,
+    'a cap split must not block on planned duration',
+  );
+  const whole = planFlight(wide, {
+    ...shared,
+    captureMode: 'timed',
+    continuousRoute: true,
+  });
+  const wholeBuilt = assembleMissions(whole, flatGround(whole));
+  assert.equal(wholeBuilt.missions.length, 1);
+  assert.ok(wholeBuilt.missions[0].durationS > 5 * 60);
+  assert.equal(
+    wholeBuilt.warnings.some((warning) => warning.code === 'mission-over-budget'),
+    false,
+    'continuous duration alone must not block the file',
+  );
+  const stop = assembleMissions(planFlight(wide, shared), flatGround(planFlight(wide, shared)));
+  assert.ok(stop.missions.length > 1, 'stop mode still splits on the battery');
+});
+
+test('line-end-split is only emitted on a continuous route', () => {
+  const wide = boxAround(CENTER.lon, CENTER.lat, 200, 800);
+  const stopPlan = planFlight(wide, {
+    aglM: 100,
+    direction: 'ew',
+    batteryMin: 60,
+    speedMs: 15,
+    maxWaypoints: 50,
+  });
+  const stopBuilt = assembleMissions(stopPlan, flatGround(stopPlan));
+  assert.equal(stopPlan.options.captureMode, 'stop');
+  assert.equal(stopPlan.options.continuousRoute, false);
+  assert.ok(stopBuilt.missions.length > 1, 'mode A still splits at the waypoint cap');
+  assert.equal(
+    stopBuilt.warnings.some((warning) => warning.code === 'line-end-split'),
+    false,
+    'mode A must not get the continuous line-end warning',
+  );
+  const off = planFlight(wide, {
+    aglM: 100,
+    direction: 'ew',
+    captureMode: 'distance',
+    continuousRoute: false,
+    photoSpacingM: 25,
+    batteryMin: 60,
+    speedMs: 8,
+    maxWaypoints: 4,
+  });
+  const offBuilt = assembleMissions(off, flatGround(off));
+  assert.equal(off.options.continuousRoute, false);
+  assert.ok(offBuilt.missions.length > 1);
+  assert.equal(
+    offBuilt.warnings.some((warning) => warning.code === 'line-end-split'),
+    false,
+  );
+});
+
+test('continuous over-budget after a transit lift does not block unless the lift is what crosses the battery', () => {
+  const m = metersPerDegree(CENTER.lat);
+  const box = boxAround(CENTER.lon, CENTER.lat, 160, 60);
+  const takeoff = { lon: box.east + 200 / m.lon, lat: CENTER.lat };
+  const shared = {
+    aglM: 40,
+    direction: 'ew',
+    captureMode: 'distance',
+    continuousRoute: true,
+    photoSpacingM: 20,
+    batteryMin: 60,
+    speedMs: 5,
+    presetId: 'dji-mini-5-pro',
+    takeoff,
+  };
+  // On the outbound leg, clear of the survey, so only the transit lift changes height.
+  const obstacle = {
+    id: 'transit-tree',
+    kind: 'tree',
+    lon: takeoff.lon - 25 / m.lon,
+    lat: takeoff.lat,
+    heightM: 400,
+    radiusM: 8,
+  };
+  const plainPlan = planFlight(box, shared);
+  const liftedPlan = planFlight(box, { ...shared, obstacles: [obstacle] });
+  assert.equal(plainPlan.takeoff.custom, true);
+  const plain = assembleMissions(plainPlan, flatGround(plainPlan));
+  const lifted = assembleMissions(liftedPlan, flatGround(liftedPlan));
+  const plainS = plain.missions[0].durationS;
+  const liftedS = lifted.missions[0].durationS;
+  assert.equal(
+    lifted.missions[0].waypoints[1].aglM,
+    plain.missions[0].waypoints[1].aglM,
+    'the survey line itself is not raised',
+  );
+  assert.ok(
+    lifted.missions[0].waypoints[0].aglM > plain.missions[0].waypoints[0].aglM,
+    'transit lift raised the first waypoint',
+  );
+  assert.ok(liftedS > plainS + 1, `lift added time ${plainS} -> ${liftedS}`);
+  const at = (plan, batteryMin) =>
+    assembleMissions(
+      { ...plan, options: { ...plan.options, batteryMin } },
+      flatGround(plan),
+    );
+  const longBox = boxAround(CENTER.lon, CENTER.lat, 2400, 40);
+  const longTakeoff = { lon: longBox.east + 200 / m.lon, lat: CENTER.lat };
+  const longLifted = planFlight(longBox, {
+    ...shared,
+    takeoff: longTakeoff,
+    speedMs: 12,
+    batteryMin: 5,
+    obstacles: [{ ...obstacle, lon: longTakeoff.lon - 25 / m.lon }],
+  });
+  const alreadyOver = assembleMissions(longLifted, flatGround(longLifted));
+  assert.ok(alreadyOver.missions[0].durationS > 5 * 60);
+  assert.ok(alreadyOver.missions[0].waypoints[0].aglM > 40);
+  assert.equal(
+    alreadyOver.warnings.some((warning) => warning.code === 'mission-over-budget'),
+    false,
+    'a continuous file already over the battery must not be blocked by the transit lift',
+  );
+  const fitsMin = Math.ceil(liftedS / 60) + 1;
+  const stillFits = at(liftedPlan, fitsMin);
+  assert.ok(stillFits.missions[0].durationS <= fitsMin * 60);
+  assert.equal(
+    stillFits.warnings.some((warning) => warning.code === 'mission-over-budget'),
+    false,
+    'a transit lift that still fits must not block',
+  );
+  const crossMin = Math.ceil(plainS / 60);
+  assert.ok(
+    plainS <= crossMin * 60 && liftedS > crossMin * 60,
+    `need a minute the lift crosses: plain ${plainS} lifted ${liftedS}`,
+  );
+  const crossed = at(liftedPlan, crossMin);
+  assert.equal(
+    crossed.warnings.some((warning) => warning.code === 'mission-over-budget'),
+    true,
+    'a lift that pushes an otherwise fitting continuous mission over the battery still warns',
+  );
+});
+
+test('orbit geometry ignores distance capture and does not go continuous', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 100, 100);
+  const shared = { pattern: 'orbit', orbitRadiusM: 40, orbitHeightsM: [40] };
+  const stop = planFlight(box, shared);
+  const distance = planFlight(box, {
+    ...shared,
+    captureMode: 'distance',
+    continuousRoute: true,
+    photoSpacingM: 12,
+  });
+  assert.equal(distance.error, undefined);
+  assert.equal(distance.options.captureMode, 'distance');
+  assert.equal(distance.options.continuousRoute, false);
+  assert.equal(distance.waypointCount, stop.waypointCount);
+  assert.equal(distance.legs.length, stop.legs.length);
+});
+
+test('usableBatteryMin 20 rides on a generated plan and does not change mode A splits', () => {
+  const wide = boxAround(CENTER.lon, CENTER.lat, 200, 800);
+  const shared = { aglM: 100, direction: 'ew', batteryMin: 5, speedMs: 15 };
+  const plain = planFlight(wide, shared);
+  assert.equal(plain.options.usableBatteryMin, 20);
+  assert.equal(plain.options.captureMode, 'stop');
+  const marked = planFlight(wide, { ...shared, usableBatteryMin: 16 });
+  assert.equal(marked.options.usableBatteryMin, 16);
+  const split = (plan) => assembleMissions(plan, flatGround(plan)).missions.length;
+  assert.equal(split(plain), split(marked));
+  assert.ok(split(plain) > 1, 'mode A still splits on battery time');
+  const distance = planFlight(wide, {
+    ...shared,
+    captureMode: 'distance',
+    continuousRoute: true,
+    usableBatteryMin: 12,
+  });
+  assert.equal(distance.options.usableBatteryMin, 12);
+  assert.equal(distance.options.continuousRoute, true);
+  assert.equal(distance.options.captureMode, 'distance');
+});
+
+test('KMZ import still warns above 200 waypoints and not at 200', async () => {
+  const { checkMission } = await import('./djiKmz.js');
+  const { WPML_NAMESPACE } = await import('./wpml.js');
+  const mission = (count) => ({
+    namespace: WPML_NAMESPACE,
+    hasWaylines: true,
+    config: { droneEnumValue: 68, droneSubEnumValue: 0 },
+    wayline: { executeHeightMode: 'relativeToStartPoint' },
+    waypoints: Array.from({ length: count }, (_, index) => ({
+      index,
+      lon: 0,
+      lat: 0,
+      heightM: 50,
+      speedMs: 5,
+      heading: { mode: 'followWayline' },
+      groups: [],
+    })),
+  });
+  assert.equal(
+    checkMission(mission(200)).some((item) => item.code === 'too-many'),
+    false,
+  );
+  const warn = checkMission(mission(201)).find((item) => item.code === 'too-many');
+  assert.equal(warn.level, 'warn');
+  assert.equal(warn.args.max, 200);
+  assert.equal(warn.args.count, 201);
+});
+
+test('Mini 5 Pro 50 MP interval is 5 s, derived and unverified', () => {
+  assert.equal(mini.minPhotoIntervalS, 5);
+  assert.equal(mini.minPhotoIntervalStatus, 'derived');
+  assert.equal(mini.verified, 'unverified');
+  assert.ok(mini.flags.includes('interval-derived'));
+  assert.equal(DEFAULT_OPTIONS.minPhotoIntervalS, null);
+});
+
+test('unset camera minimum keeps mode A on the preset speed limit', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 400, 200);
+  const legacy = planFlight(box, {
+    aglM: 100,
+    speedMs: 5,
+    captureMode: 'stop',
+  });
+  const absent = planFlight(box, { aglM: 100, speedMs: 5 });
+  assert.equal(legacy.speedMs, 4);
+  assert.equal(absent.speedMs, 4);
+  assert.ok(Math.abs(legacy.speedLimits.intervalMs - 4) < 1e-9);
+  assert.equal(legacy.preset, mini);
+  assert.equal(absent.preset, mini);
+  assert.equal(legacy.options.minPhotoIntervalS, null);
+  const same = planFlight(box, {
+    aglM: 100,
+    speedMs: 5,
+    minPhotoIntervalS: 5,
+  });
+  assert.equal(same.speedMs, 4);
+  assert.equal(same.preset, mini);
+  assert.equal(same.footprint.alongM, legacy.footprint.alongM);
+  assert.equal(same.gsdCm, legacy.gsdCm);
+});
+
+test('a custom camera minimum drives the planner speedLimits', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 400, 200);
+  const plan = planFlight(box, {
+    aglM: 100,
+    speedMs: 5,
+    captureMode: 'stop',
+    minPhotoIntervalS: 10,
+  });
+  // 20 m spacing / 10 s = 2 m/s. The preset default would have been 4 m/s.
+  assert.ok(Math.abs(plan.speedLimits.intervalMs - 2) < 1e-9);
+  assert.equal(plan.speedLimits.limitedBy, 'interval');
+  assert.equal(plan.speedMs, 2);
+  assert.equal(plan.speedLimitedBy, 'camera');
+  assert.equal(plan.preset.minPhotoIntervalS, 10);
+  assert.notEqual(plan.preset, mini);
+  assert.equal(plan.preset.imageWidthPx, mini.imageWidthPx);
+  assert.equal(
+    plan.footprint.alongM,
+    planFlight(box, { aglM: 100 }).footprint.alongM,
+  );
+
+  const distance = planFlight(box, {
+    aglM: 100,
+    speedMs: 5,
+    captureMode: 'distance',
+    photoSpacingM: 20,
+    minPhotoIntervalS: 10,
+  });
+  assert.equal(distance.speedMs, 5, 'distance mode does not silently slow down');
+  assert.equal(distance.speedLimits.intervalMs, 2);
+  assert.ok(
+    distance.notes.some((n) => n.code === 'speed-exceeds-camera-limit'),
+  );
+});
+
+test('an unusable camera minimum is rejected and mode A stays on the preset', () => {
+  const box = boxAround(CENTER.lon, CENTER.lat, 400, 200);
+  for (const bad of [0, -1, 0.05, 61, NaN, Infinity, true, false, 'fast', {}, []]) {
+    const plan = planFlight(box, {
+      aglM: 100,
+      speedMs: 5,
+      minPhotoIntervalS: bad,
+    });
+    assert.equal(plan.speedMs, 4, `bad ${bad}`);
+    assert.equal(plan.options.minPhotoIntervalS, null, `stored ${bad}`);
+    assert.equal(plan.preset, mini, `preset ${bad}`);
+  }
+  const typed = planFlight(box, {
+    aglM: 100,
+    speedMs: 5,
+    minPhotoIntervalS: '10',
+  });
+  assert.equal(typed.speedMs, 2);
+  assert.equal(typed.options.minPhotoIntervalS, 10);
 });
