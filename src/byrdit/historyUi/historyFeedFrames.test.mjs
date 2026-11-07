@@ -686,8 +686,26 @@ function firmsLive(url) {
  */
 function firmsHarness(t, { altitude }) {
   const originalDocument = globalThis.document;
-  // glowSprite draws on a 2-D canvas; no canvas in node -> an empty image
-  globalThis.document = { createElement: () => ({ getContext: () => null }) };
+  // glowSprite draws on a 2-D canvas; no canvas in node -> an empty image.
+  // The heat map is the exception: it needs a context that takes image data
+  // (the raster is wide, the glow sprite is not), so that canvas gets a no-op one.
+  globalThis.document = {
+    createElement: () => {
+      const canvas = {
+        width: 0,
+        height: 0,
+        toDataURL: () => 'data:image/png;base64,AAAA',
+        getContext: () =>
+          canvas.width > 256
+            ? {
+                createImageData: () => ({ data: { set() {} } }),
+                putImageData() {},
+              }
+            : null,
+      };
+      return canvas;
+    },
+  };
   const originalProject = Cesium.SceneTransforms.worldToWindowCoordinates;
   // a flat projection keeps every in-view fire (or cell) on screen and apart
   const pxPerDeg = altitude < 1_000_000 ? 4000 : 200;
@@ -700,6 +718,20 @@ function firmsHarness(t, { altitude }) {
   };
   const primitives = [];
   const viewer = sceneViewer({ at: AUSTIN, altitude, primitives });
+  // The draped heat map: one imagery layer whose `show` the layer drives.
+  const heatLayers = [];
+  viewer.imageryLayers = {
+    addImageryProvider() {
+      const layer = { show: true, alpha: 1 };
+      heatLayers.push(layer);
+      return layer;
+    },
+    remove(layer) {
+      heatLayers.splice(heatLayers.indexOf(layer), 1);
+      return true;
+    },
+    raiseToTop() {},
+  };
   viewer.camera.moveEnd = new Cesium.Event();
   // the real BillboardCollection reads the scene mode when a sprite is added
   viewer.scene.frameState = { mode: Cesium.SceneMode.SCENE3D };
@@ -786,6 +818,8 @@ function firmsHarness(t, { altitude }) {
     ...stack,
     layer,
     viewer,
+    /** the draped heat-map layers: [{show}] (one once painted, none before) */
+    heat: () => heatLayers,
     /** whether the glow-sprite collection is visible (the hand-off fade) */
     markersShown: () => billboards()?.show,
     /** what the layer draws right now, beyond its count */
@@ -821,12 +855,15 @@ for (const [band, altitude, drawnAt] of [
     assert.ok(d.context > 0, 'context registrations at t');
     for (const [k, v] of Object.entries(drawnAt(RECORDED_FIRES[T1])))
       assert.equal(d[k], v);
-    if (band === 'cells')
+    if (band === 'cells') {
       assert.equal(
         app.markersShown(),
         false,
         'the far band hides the built markers behind the heat map',
       );
+      assert.equal(app.heat().length, 1, 'the heat map is draped at t');
+      assert.equal(app.heat()[0].show, true, 'the heat map shows at t');
+    }
 
     // the recorded gap (D3): NOTHING drawn, not the sprites/cards of T1
     app.driver.onHistory({ active: true, timeMs: T0, playing: false });
@@ -838,6 +875,12 @@ for (const [band, altitude, drawnAt] of [
       cells: 0,
       context: 0,
     });
+    // ... and no old heat is left behind: B12b renders on an empty answer and
+    // the empty shown set hides the heat map (upstream de87aaf8)
+    if (band === 'cells')
+      assert.equal(app.heat().length, 1, 'the heat map was painted before the gap');
+    for (const layer of app.heat())
+      assert.equal(layer.show, false, 'no heat map in the recorded gap');
     // a camera move in the gap must not bring the old cards back
     app.viewer.camera.moveEnd.raiseEvent();
     assert.equal(app.drawn().cards, 0, 'no stale card after moveEnd');
@@ -847,6 +890,8 @@ for (const [band, altitude, drawnAt] of [
     await app.layer.update();
     assert.equal(app.drawn().count, RECORDED_FIRES[T2]);
     assert.ok(app.drawn().cards > 0);
+    if (band === 'cells')
+      assert.equal(app.heat()[0].show, true, 'the heat map returns with fires');
 
     // LIVE (D4): the driver refreshes the layer once
     app.driver.onHistory({ active: false });

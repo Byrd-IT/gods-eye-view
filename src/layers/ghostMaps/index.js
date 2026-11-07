@@ -236,6 +236,8 @@ export function createGhostMapsLayer({
     const at = ageClock();
     let changed = false;
     for (const [productId, item] of _loaded) {
+      // The edition now reflects expiry at this instant (see sync's reload).
+      if (at > item.ageAt) item.ageAt = at;
       for (const [index, feature] of item.features) {
         if (!isGhostMapsEventExpired(feature.dateMs, at, _ageDays)) continue;
         for (const entity of feature.entities)
@@ -255,6 +257,8 @@ export function createGhostMapsLayer({
   /** Build one product's data source off-scene, then swap it in. */
   async function load(product, signal, catalog = _catalog) {
     const ageDays = _ageDays;
+    // The instant the age window counts back from, fixed for this edition.
+    const ageAt = ageClock();
     // An archived edition is named by its commit and blob; never a live file.
     const bytes = catalog?.history
       ? await source.getFileAt(product.id, product.version, catalog.commit, {
@@ -291,11 +295,10 @@ export function createGhostMapsLayer({
       );
       const features = new Map();
       const pins = [];
-      const at = ageClock();
       dataSource.entities.suspendEvents();
       parsed.features.forEach((feature, index) => {
         const dateMs = ghostMapsEventDate(feature.description);
-        if (isGhostMapsEventExpired(dateMs, at, ageDays)) return;
+        if (isGhostMapsEventExpired(dateMs, ageAt, ageDays)) return;
         const key = `${product.id}:${index}`;
         const { style } = feature;
         const entities = [];
@@ -402,6 +405,7 @@ export function createGhostMapsLayer({
       return {
         version: product.version,
         ageDays,
+        ageAt,
         dataSource,
         urls,
         features,
@@ -430,7 +434,16 @@ export function createGhostMapsLayer({
         // A newer catalog (a seek, LIVE) took over: it syncs next.
         if (_catalog !== catalog) return;
         const loaded = _loaded.get(product.id);
-        if (loaded?.version === product.version && loaded.ageDays === _ageDays)
+        // Byrd-IT: expiry only removes markers, so an edition filtered at a
+        // later instant lacks reports an earlier viewed moment still shows
+        // (LIVE to history, or a backward seek inside one edition): reload.
+        const needsEarlier =
+          _ageDays !== null && Boolean(loaded) && ageClock() < loaded.ageAt;
+        if (
+          loaded?.version === product.version &&
+          loaded.ageDays === _ageDays &&
+          !needsEarlier
+        )
           continue;
         _loading.set(product.id, product.version);
         _failed.delete(product.id);

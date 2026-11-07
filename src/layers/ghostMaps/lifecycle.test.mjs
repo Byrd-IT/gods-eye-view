@@ -96,6 +96,7 @@ function fixture(
     now,
     products,
     controls = {},
+    historySource = {},
   } = {},
 ) {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'DOMParser');
@@ -145,6 +146,7 @@ function fixture(
         beforeFileReturns?.(layer);
         return fixtureKmz();
       },
+      ...historySource,
     },
   });
   layer.init(viewer);
@@ -608,4 +610,69 @@ test('narrowing to a window the loaded data covers clears a failed wider reload'
   await ageChip(layer, 3).onClick();
   assert.equal(layer.getStats().error, null);
   assert.equal(layer.getStats().count, 1);
+});
+
+// Byrd-IT: History shows the editions S2 had published at the viewed moment,
+// so the event-age window counts back from that moment, not from today.
+test('in history the age window counts back from the viewed moment, and a backward seek restores older reports', async (t) => {
+  const live = Date.UTC(2026, 10, 20, 12);
+  const early = Date.UTC(2026, 10, 4, 12);
+  const late = Date.UTC(2026, 10, 12, 12);
+  const sha = 'a'.repeat(40);
+  const { layer, viewer } = fixture(t, {
+    now: () => live,
+    reports: [
+      dated('Early', '11/2/2026'),
+      dated('Mid', '11/10/2026'),
+      dated('Later', '11/18/2026'),
+    ],
+    historySource: {
+      // Every moment maps to the same edition (same blob), as in a quiet week.
+      getCatalogAt: async (tMs) => ({
+        products: [{ id: 'cip', version: sha, defaultOn: true }],
+        commit: 'c'.repeat(40),
+        committedAt: tMs,
+        message: 'edition',
+      }),
+      getFileAt: async () => fixtureKmz(),
+    },
+  });
+  const names = () =>
+    layer
+      .getAnalystRecords()
+      .map((r) => r.name)
+      .sort();
+  await layer.update(viewer);
+  // LIVE, 7 days back from Nov 20 12:00Z: only the Nov 18 report.
+  assert.deepEqual(names(), ['Later']);
+  assert.doesNotMatch(layer.getRowControls().info, /^HISTORY /);
+
+  // History at Nov 4: the window is Oct 28 and later, so Nov 2 is in; the
+  // edition is the same blob, so only the clock can bring the report back.
+  await layer.setHistoryTime(early);
+  assert.deepEqual(names(), ['Early', 'Later', 'Mid']);
+  assert.match(layer.getRowControls().info, /^HISTORY /);
+  assert.doesNotMatch(
+    layer.getRowControls().info,
+    /Event age/,
+    'in history the row text is the banner alone',
+  );
+  assert.equal(
+    ageChip(layer, 7).active,
+    true,
+    'the chips still show the window',
+  );
+
+  // Forward to Nov 12: Nov 2 is now 10 days old and expires.
+  await layer.setHistoryTime(late);
+  assert.deepEqual(names(), ['Later', 'Mid']);
+
+  // Backward again inside the same edition: the Nov 2 report returns.
+  await layer.setHistoryTime(early);
+  assert.deepEqual(names(), ['Early', 'Later', 'Mid']);
+
+  // Back to LIVE: today's window applies again.
+  await layer.setHistoryTime(null);
+  await layer.update(viewer);
+  assert.deepEqual(names(), ['Later']);
 });
