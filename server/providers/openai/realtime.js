@@ -13,7 +13,11 @@ import {
   OPENAI_REALTIME_TRANSCRIBE_MODEL_DEFAULT,
 } from './constants.js';
 import { realtimeInstructions } from './instructions.js';
-import { GEV_REALTIME_TOOLS, offeredTools } from './tools.js';
+import {
+  GEV_REALTIME_TOOLS,
+  offeredTools,
+  openAiPortableTools,
+} from './tools.js';
 import { resolveOverpassUpstreams } from '../overpass/constants.js';
 import {
   preferCodexOAuth,
@@ -303,7 +307,7 @@ function createRealtimeTokenHandler({
           output: { voice },
         },
         instructions: realtimeInstructions(annotationGuidance, { overpass }),
-        tools: offeredTools(tools, { overpass }),
+        tools: openAiPortableTools(offeredTools(tools, { overpass })),
         tool_choice: 'auto',
       },
     };

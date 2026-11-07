@@ -3,7 +3,11 @@ import { preferCodexOAuth } from './codex-auth.js';
 import { OPENAI_DEFAULT_PER_MIN } from './rate-limit.js';
 import { invalidCalls } from '../common/textTools.js';
 import { textInstructions } from '../common/textInstructions.js';
-import { GEV_REALTIME_TOOLS, offeredTools } from './tools.js';
+import {
+  GEV_REALTIME_TOOLS,
+  offeredTools,
+  openAiPortableTools,
+} from './tools.js';
 import { resolveOverpassUpstreams } from '../overpass/constants.js';
 
 const object = (value) =>
@@ -123,7 +127,7 @@ export function createOpenAiChatHandler({
             },
             ...input.messages,
           ],
-          tools: offeredTools(tools, { overpass }).map(
+          tools: openAiPortableTools(offeredTools(tools, { overpass })).map(
             ({ name, description, parameters }) => ({
               type: 'function',
               function: { name, description, parameters, strict: false },
