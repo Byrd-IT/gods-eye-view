@@ -100,7 +100,8 @@ export const ASSUMPTIONS = Object.freeze({
   turnPenaltyOnBreaks: true,
   turnPenaltyRequiresLegs: true,
   windModelled: false,
-  climbModel: '3D segment length inside estimateMission; no separate climb rate',
+  climbModel:
+    '3D segment length inside estimateMission; no separate climb rate',
   groundSwapTimeIncluded: false,
   resumeLegSeparate: false,
   greedyPrefix: true,
@@ -135,7 +136,9 @@ function requirePoint(p, label) {
 }
 
 function hoverSeconds(action) {
-  const func = String(action?.func ?? action?.type ?? action?.actionActuatorFunc ?? '');
+  const func = String(
+    action?.func ?? action?.type ?? action?.actionActuatorFunc ?? '',
+  );
   if (func !== 'hover') return 0;
   const raw =
     action?.hoverTime ??
@@ -459,7 +462,9 @@ export function batteryBreaks(route, options = {}) {
   if (opts.photoSpacingM != null) {
     photoSpacingM = Number(opts.photoSpacingM);
     if (!Number.isFinite(photoSpacingM) || photoSpacingM <= 0) {
-      throw new RangeError('photoSpacingM must be a finite spacing greater than 0');
+      throw new RangeError(
+        'photoSpacingM must be a finite spacing greater than 0',
+      );
     }
   }
   const suppliedLegs = normalizeLegs(opts.legs, photoSpacingM);
@@ -506,9 +511,11 @@ export function batteryBreaks(route, options = {}) {
     if (toM <= fromM + DIST_EPS_M) return 1;
     let n = 0;
     for (const leg of chain.legSpans) {
-      const overlap = Math.min(toM, leg.endRouteM) - Math.max(fromM, leg.startRouteM);
+      const overlap =
+        Math.min(toM, leg.endRouteM) - Math.max(fromM, leg.startRouteM);
       const startsInside =
-        leg.startRouteM > fromM + DIST_EPS_M && leg.startRouteM <= toM + DIST_EPS_M;
+        leg.startRouteM > fromM + DIST_EPS_M &&
+        leg.startRouteM <= toM + DIST_EPS_M;
       if (overlap > DIST_EPS_M || startsInside) n += 1;
     }
     return Math.max(1, n);
@@ -601,8 +608,7 @@ export function batteryBreaks(route, options = {}) {
       durationS,
       fits: true,
       legCount: pieceLegCount(from.routeM, to.routeM),
-      photoCount:
-        endPhotos == null ? null : endPhotos - (startPhotos ?? 0),
+      photoCount: endPhotos == null ? null : endPhotos - (startPhotos ?? 0),
       advanceM: to.routeM - from.routeM,
     };
   }
@@ -633,9 +639,11 @@ export function batteryBreaks(route, options = {}) {
 
   function snapToVertex(routeDist) {
     if (routeDist <= VERTEX_SNAP_M) return 0;
-    if (Math.abs(routeDist - chain.routeM) <= VERTEX_SNAP_M) return chain.routeM;
+    if (Math.abs(routeDist - chain.routeM) <= VERTEX_SNAP_M)
+      return chain.routeM;
     for (const seg of chain.segments) {
-      if (Math.abs(routeDist - seg.endRouteM) <= VERTEX_SNAP_M) return seg.endRouteM;
+      if (Math.abs(routeDist - seg.endRouteM) <= VERTEX_SNAP_M)
+        return seg.endRouteM;
     }
     return routeDist;
   }
@@ -684,9 +692,12 @@ export function batteryBreaks(route, options = {}) {
   let guard = 0;
   while (cursor < chain.routeM - DIST_EPS_M) {
     guard += 1;
-    if (guard > 10000) throw new Error('battery break search did not terminate');
+    if (guard > 10000)
+      throw new Error('battery break search did not terminate');
     if (fits(cursor, chain.routeM)) {
-      pieces.push(piece(cursor, chain.routeM, durationOf(cursor, chain.routeM)));
+      pieces.push(
+        piece(cursor, chain.routeM, durationOf(cursor, chain.routeM)),
+      );
       break;
     }
     const stay = durationOf(cursor, cursor);

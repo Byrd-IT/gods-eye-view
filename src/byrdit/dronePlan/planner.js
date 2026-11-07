@@ -491,7 +491,9 @@ export function normalizeOptions(raw = {}, box = null) {
   o.sideOverlap = clamp(num(o.sideOverlap, 70), 30, 95);
   o.pattern = PATTERNS.includes(o.pattern) ? o.pattern : 'grid';
   o.photoMode = PHOTO_MODES.includes(o.photoMode) ? o.photoMode : 'waypoint';
-  o.captureMode = CAPTURE_MODES.includes(o.captureMode) ? o.captureMode : 'stop';
+  o.captureMode = CAPTURE_MODES.includes(o.captureMode)
+    ? o.captureMode
+    : 'stop';
   o.photoSpacingM = explicitSpacingM(o.photoSpacingM);
   // Untrusted input cannot prove the trigger. Only the static setting counts.
   o.intervalTriggerProven = INTERVAL_TRIGGER_PROVEN;
@@ -1402,7 +1404,9 @@ export function planFlight(box, rawOptions = {}) {
   // the aircraft preset. speedLimits itself is unchanged.
   const limits = speedLimits({
     preset,
-    photoSpacingM: preserveSpeed ? writtenSpacingM(photoSpacingM) : photoSpacingM,
+    photoSpacingM: preserveSpeed
+      ? writtenSpacingM(photoSpacingM)
+      : photoSpacingM,
     gsdCm: fpInfo.gsdCm,
     shutterDenominator: options.shutterDenominator,
   });

@@ -12,7 +12,11 @@
  * Pure: no DOM, no Cesium. Everything read back is re-validated here, because
  * a `.gevplan` file is untrusted input.
  */
-import { cleanMinPhotoIntervalS, normalizeLookAtPaths, normalizeOrbitTargets } from './planner.js';
+import {
+  cleanMinPhotoIntervalS,
+  normalizeLookAtPaths,
+  normalizeOrbitTargets,
+} from './planner.js';
 import { normalizeObstacles } from './obstacles.js';
 import { getPreset } from './presets.js';
 import { isCameraPresetId } from './cameraSettings.js';

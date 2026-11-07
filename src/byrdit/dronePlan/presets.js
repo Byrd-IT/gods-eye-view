@@ -118,7 +118,12 @@ const MINI_5_PRO = {
   kmz: KMZ_OK,
   verified: 'unverified',
   sources: [SRC.mini5, SRC.mini5Grid, SRC.wpmlCommunity],
-  flags: ['dji-page-geoblocked', 'max-speed-conflict', 'wpml-community', 'interval-derived'],
+  flags: [
+    'dji-page-geoblocked',
+    'max-speed-conflict',
+    'wpml-community',
+    'interval-derived',
+  ],
 };
 
 const MINI_4_PRO = {

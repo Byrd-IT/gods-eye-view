@@ -3213,6 +3213,7 @@ export function initDronePlan({
       w: fp ? heightText(fp.widthM) : '-',
       d: fp ? heightText(fp.depthM) : '-',
     };
+    const theoretical = cur.captureMode === distance && underMin;
     ui.checkReadout.textContent = cur.estimated
       ? t(
           'Estimated station {n} of {total}: {pass}, tilt {pitch} deg, height {h}, covers {w} by {d}. Not a photo the camera will take.',
@@ -3529,11 +3530,7 @@ export function initDronePlan({
       figs = null;
     }
     const saySafety = () => {
-      say(
-        t(PAUSE_MODEL_NOTE),
-        'capture-wind',
-        'warn',
-      );
+      say(t(PAUSE_MODEL_NOTE), 'capture-wind', 'warn');
       say(
         t(
           'Pausing and resuming is your procedure in DJI Fly. This tool has not verified that DJI Fly resumes after a landing. Check the first resume.',

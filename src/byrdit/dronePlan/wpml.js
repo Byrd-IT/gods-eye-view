@@ -45,7 +45,11 @@
  */
 import { jobFolder, jobSlug } from './areas.js';
 import { batteryBreaks, DISCLAIMER } from './batteryBreaks.js';
-import { TRANSIT_SPEED_MS, writtenSpacingM, INTERVAL_TRIGGER_PROVEN } from './planner.js';
+import {
+  TRANSIT_SPEED_MS,
+  writtenSpacingM,
+  INTERVAL_TRIGGER_PROVEN,
+} from './planner.js';
 import { minShutterDenominator, SHUTTER_DENOMINATORS } from './speed.js';
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
 import { makeZip } from './zip.js';
@@ -620,7 +624,11 @@ function overlapLine(plan, spacingM) {
       : plan.options?.sideOverlap;
   let text = `Overlap: ${fmt1(front)}% front, ${fmt1(side)}% side`;
   const requested = plan.options?.frontOverlap;
-  if (Number.isFinite(requested) && Number.isFinite(front) && Math.abs(front - requested) > 0.15) {
+  if (
+    Number.isFinite(requested) &&
+    Number.isFinite(front) &&
+    Math.abs(front - requested) > 0.15
+  ) {
     text += ` (requested ${fmt1(requested)}% front, ${fmt1(plan.options?.sideOverlap)}% side)`;
   }
   return text;
@@ -688,8 +696,12 @@ function routePoints(mission) {
     .map((w) => ({
       lon: w.lon,
       lat: w.lat,
-      relHeightM: Number.isFinite(Number(w.relHeightM)) ? Number(w.relHeightM) : 0,
-      ...(Number.isFinite(Number(w.dwellS)) ? { dwellS: Number(w.dwellS) } : {}),
+      relHeightM: Number.isFinite(Number(w.relHeightM))
+        ? Number(w.relHeightM)
+        : 0,
+      ...(Number.isFinite(Number(w.dwellS))
+        ? { dwellS: Number(w.dwellS) }
+        : {}),
     }));
 }
 
@@ -704,7 +716,8 @@ function pointAtRouteM(points, routeM) {
     const ground = groundDistanceM(a, b);
     const len = Math.hypot(ground, (b.relHeightM ?? 0) - (a.relHeightM ?? 0));
     if (walked + len + 1e-6 >= routeM || i === points.length - 1) {
-      const t = len <= 1e-9 ? 1 : Math.min(1, Math.max(0, (routeM - walked) / len));
+      const t =
+        len <= 1e-9 ? 1 : Math.min(1, Math.max(0, (routeM - walked) / len));
       if (t <= 0) return a;
       if (t >= 1) return b;
       const frame = makeFrame(
@@ -717,7 +730,8 @@ function pointAtRouteM(points, routeM) {
       return {
         lon: ll.lon,
         lat: ll.lat,
-        relHeightM: (a.relHeightM ?? 0) + ((b.relHeightM ?? 0) - (a.relHeightM ?? 0)) * t,
+        relHeightM:
+          (a.relHeightM ?? 0) + ((b.relHeightM ?? 0) - (a.relHeightM ?? 0)) * t,
       };
     }
     walked += len;
@@ -815,9 +829,7 @@ function breakLines(mission, plan, capture) {
   if (!estimate) {
     return ['Estimated battery breaks: not calculated (no route or takeoff).'];
   }
-  const lines = [
-    `Usable battery: ${estimate.usableMin} min (estimate only)`,
-  ];
+  const lines = [`Usable battery: ${estimate.usableMin} min (estimate only)`];
   if (!estimate.breaks.length && !estimate.unreachable) {
     lines.push(
       `Estimated battery breaks: none. This file fits in ${estimate.usableMin} usable minutes.`,
@@ -871,7 +883,8 @@ function breakLines(mission, plan, capture) {
  */
 function shutterSafetyLines(plan, indent = '  ') {
   const chosenN = Number(plan.options?.shutterDenominator);
-  const chosen = Number.isFinite(chosenN) && chosenN > 0 ? `1/${chosenN} s` : 'unknown';
+  const chosen =
+    Number.isFinite(chosenN) && chosenN > 0 ? `1/${chosenN} s` : 'unknown';
   const gsdCm = Number(plan.gsdCm);
   const speedMs = Number(plan.speedMs);
   const raw =
@@ -937,9 +950,13 @@ function fileReadmeLines(result) {
     lines.push(`File ${index + 1}:`);
     lines.push(`  ${requestedModeText(capture, marked)}`);
     lines.push(`  Waypoint cap: ${plan.options?.maxWaypoints ?? 200}`);
-    lines.push(`  Height: ${fmt1(plan.options?.aglM)} m above ground (requested)`);
+    lines.push(
+      `  Height: ${fmt1(plan.options?.aglM)} m above ground (requested)`,
+    );
     lines.push(`  ${speedLine(plan, capture)}`);
-    lines.push(`  Spacing: ${spacingM > 0 ? `${fmt1(spacingM)} m` : 'unknown'}`);
+    lines.push(
+      `  Spacing: ${spacingM > 0 ? `${fmt1(spacingM)} m` : 'unknown'}`,
+    );
     lines.push(
       `  Interval: ${seconds == null ? 'unknown' : `${fmt1(seconds)} s`} between pictures at the plan speed`,
     );
@@ -953,7 +970,8 @@ function fileReadmeLines(result) {
     lines.push(`  ${overlapLine(plan, spacingM)}`);
     lines.push(`  ${photoCountLine(mission.photoCount, capture, marked)}`);
     for (const line of resumeLines(capture)) lines.push(`  ${line}`);
-    for (const line of breakLines(mission, plan, capture)) lines.push(`  ${line}`);
+    for (const line of breakLines(mission, plan, capture))
+      lines.push(`  ${line}`);
   });
   return lines;
 }
