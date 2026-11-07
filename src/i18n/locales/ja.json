@@ -3765,5 +3765,6 @@
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "各ファイルのウェイポイント：{waypoints}。最大のファイル：{max}ウェイポイント。",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "固定の写真間隔も設定されています。写真の間隔はインターバルで決まり、固定距離は使用されません。",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地表高が不完全なため、対地高度、撮影範囲、インターバルは不明です。",
-  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: 地形の高さが不完全なため、オーバーラップは不明です。"
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: 地形の高さが不完全なため、オーバーラップは不明です。",
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "すべてのパスを前回計画してから設定が変わりました。これらの行は、そのときの計画のままです。更新するには「推奨パスをすべて計画」をもう一度押してください。"
 }

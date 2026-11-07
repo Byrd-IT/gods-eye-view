@@ -3765,5 +3765,6 @@
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "每个文件的航点数：{waypoints}。最大文件：{max} 个航点。",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "同时还设置了固定照片间距。由间隔决定间距，不使用固定距离。",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地形高度数据不完整，因此离地高度、覆盖范围和间隔都不知道。",
-  "{pass}: terrain heights incomplete, overlap not known.": "{pass}：地形高度不完整，重叠率未知。"
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}：地形高度不完整，重叠率未知。",
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "自上次规划所有航线以来，设置已更改：这些行显示的是当时规划的结果。请再次点击“规划所有推荐航线”以更新。"
 }

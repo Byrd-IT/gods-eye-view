@@ -3798,7 +3798,10 @@ export function initDronePlan({
     const renderSuiteRows = () => {
       const passes = state.suite?.passes;
       if (timed && passes?.length && !state.suiteBusy) {
-        const rows = suiteTimingRows(passes, o.timedIntervalS);
+        // Each row is read with the interval its pass was planned with: the
+        // README spacing and station count come from that one, not from the
+        // field as it is now.
+        const rows = suiteTimingRows(passes);
         if (rows.length) {
           show(ui.timingSuite, true);
           el(doc, 'p', ui.timingSuite, {
@@ -3807,6 +3810,21 @@ export function initDronePlan({
               'Plan all passes: each pass has its own height, tilt and speed, so one interval gives each its own overlap.',
             ),
           });
+          // A change since PLAN ALL (the replan is already waiting, or the
+          // interval no longer matches) leaves these rows describing the old
+          // plan: say so rather than mix the old plan with the new field.
+          const nowS = timed ? cleanTimedIntervalS(o.timedIntervalS) : null;
+          if (state.dirty || rows.some((r) => r.plannedIntervalS !== nowS)) {
+            const stale = el(doc, 'p', ui.timingSuite, {
+              cls: 'gev-dp-note',
+              attrs: { 'data-role': 'timing-suite-stale' },
+              text: t(
+                'Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.',
+              ),
+            });
+            stale.setAttribute('data-tone', 'warn');
+            stale.style.color = WARNING_TONE_COLOR.warn;
+          }
           const list = el(doc, 'ul', ui.timingSuite, {
             cls: 'gev-dp-warnings',
           });
@@ -3871,7 +3889,12 @@ export function initDronePlan({
       ui.timingSpacingNote,
       !orbit && timed && o.timedIntervalS != null && o.photoSpacingM > 0,
     );
-    if (orbit) return;
+    // The grid and oblique passes of PLAN ALL have their own figures even
+    // when the single plan is an orbit.
+    if (orbit) {
+      renderSuiteRows();
+      return;
+    }
     if (terrainOff) {
       // Without the ground heights the footprint is unknown, so no figure is
       // given: not the interval, not the overlap an interval would give.

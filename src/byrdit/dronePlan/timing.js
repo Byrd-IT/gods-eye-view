@@ -132,17 +132,31 @@ export function timingFigures({
  * the interval that pass would need. A pass whose own ground heights are
  * incomplete has an unknown footprint: its row is `unknown`, with no overlap
  * and no interval, not a figure worked out from a made-up height.
+ * With no second argument each pass is read with the interval it was planned
+ * with (its own options), the one its README spacing and station count come
+ * from. Pass an interval (or null) only to ask "what if". `plannedIntervalS`
+ * on each row is that planned interval, so the panel can tell a stale row.
  * @returns {{id:string,label:string,speedMs:number,frontPct:number|null,
  *   desiredFrontPct:number,recommendedIntervalS:number|null,
- *   state:'meets'|'short'|'gap'|null, unknown:boolean}[]}
+ *   state:'meets'|'short'|'gap'|null, unknown:boolean,
+ *   plannedIntervalS:number|null}[]}
  */
 export function suiteTimingRows(passes, timedIntervalS) {
-  const interval = cleanTimedIntervalS(timedIntervalS);
   if (!Array.isArray(passes)) return [];
   const rows = [];
   for (const pass of passes) {
     const plan = pass?.result?.plan;
     if (!plan || plan.options?.pattern === 'orbit') continue;
+    // Stop and waypoint capture ignore the interval, so only a timed pass was
+    // planned with one.
+    const plannedIntervalS =
+      plan.options?.captureMode === 'timed'
+        ? cleanTimedIntervalS(plan.options.timedIntervalS)
+        : null;
+    const interval =
+      timedIntervalS === undefined
+        ? plannedIntervalS
+        : cleanTimedIntervalS(timedIntervalS);
     if (pass.result.terrainComplete === false) {
       rows.push({
         id: String(pass.id),
@@ -153,6 +167,7 @@ export function suiteTimingRows(passes, timedIntervalS) {
         recommendedIntervalS: null,
         state: null,
         unknown: true,
+        plannedIntervalS,
       });
       continue;
     }
@@ -172,6 +187,7 @@ export function suiteTimingRows(passes, timedIntervalS) {
       recommendedIntervalS: figs.recommendedIntervalS,
       state: figs.chosen ? figs.chosen.state : null,
       unknown: false,
+      plannedIntervalS,
     });
   }
   return rows;

@@ -3933,5 +3933,6 @@
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Points de passage dans chaque fichier : {waypoints}. Plus grand fichier : {max} points de passage.",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Un espacement fixe des photos est aussi défini. L'intervalle fixe l'espacement ; la distance fixe n'est pas utilisée.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Les altitudes du sol sont incomplètes ; la hauteur au-dessus du sol, l'empreinte et l'intervalle ne sont donc pas connus.",
-  "{pass}: terrain heights incomplete, overlap not known.": "{pass} : hauteurs du terrain incomplètes, recouvrement inconnu."
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass} : hauteurs du terrain incomplètes, recouvrement inconnu.",
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Les réglages ont changé depuis la dernière planification de tous les passages : ces lignes montrent ce plan tel qu'il a été fait. Appuyez de nouveau sur « PLANIFIER TOUS LES PASSAGES CONSEILLÉS » pour les mettre à jour."
 }

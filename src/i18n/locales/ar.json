@@ -4185,5 +4185,6 @@
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "نقاط المسار في كل ملف: {waypoints}. أكبر ملف: {max} نقطة مسار.",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "تم أيضًا تحديد مسافة ثابتة بين الصور. يحدد الفاصل المسافة بين الصور؛ ولا تُستخدم المسافة الثابتة.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "ارتفاعات التضاريس غير مكتملة، لذلك الارتفاع فوق الأرض والمساحة المغطاة والفاصل غير معروفة.",
-  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: ارتفاعات التضاريس غير مكتملة، التداخل غير معروف."
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: ارتفاعات التضاريس غير مكتملة، التداخل غير معروف.",
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "تغيّرت الإعدادات منذ آخر تخطيط لكل الممرات: تعرض هذه الصفوف ذلك التخطيط كما أُنشئ. اضغط على «تخطيط كل الممرات الموصى بها» مرة أخرى لتحديثها."
 }

@@ -4932,6 +4932,61 @@ test('timing: Plan all rows still show when the single plan figures cannot be wo
   w.handle.destroy();
 });
 
+test('timing: Plan all rows show when the single pattern is Orbit, and nothing is stale', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.captureMode = 'timed';
+  o.timedIntervalS = 7;
+  o.pattern = 'orbit';
+  await w.handle.replan();
+  await w.handle.planSuite();
+  assert.equal(w.handle.getState().options.pattern, 'orbit');
+  assert.equal(captureRole(w, 'timing-recommended').hidden, true, 'the single plan has no survey figure');
+  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  assert.ok(rows.length >= 3, 'the grid and oblique passes keep their rows');
+  for (const r of rows) assert.match(r.textContent, /% front/);
+  assert.equal(captureRole(w, 'timing-suite-stale'), undefined, 'a fresh PLAN ALL is not stale');
+  w.handle.destroy();
+});
+
+test('timing: after the interval changes the Plan all rows keep the planned interval and say they are old', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.captureMode = 'timed';
+  o.timedIntervalS = 7;
+  await w.handle.replan();
+  await w.handle.planSuite();
+  const rowsNow = () => w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  const before = rowsNow().map((r) => [r.getAttribute('data-pass'), r.getAttribute('data-front'), r.textContent]);
+  assert.ok(before.length >= 3);
+  assert.equal(captureRole(w, 'timing-suite-stale'), undefined);
+  const planned = w.handle.getState().suite.passes.filter((p) => p.result?.plan && p.result.plan.options.pattern !== 'orbit');
+  for (const p of planned) assert.equal(p.result.plan.options.timedIntervalS, 7);
+  // The field moves on; the suite (README spacing, station counts) did not.
+  const input = w.control(INTERVAL);
+  input.value = '11';
+  input.dispatch('input');
+  assert.equal(w.handle.getState().options.timedIntervalS, 11);
+  const after = rowsNow().map((r) => [r.getAttribute('data-pass'), r.getAttribute('data-front'), r.textContent]);
+  assert.deepEqual(after, before, 'rows still describe the 7 s plan');
+  const stale = captureRole(w, 'timing-suite-stale');
+  assert.ok(stale, 'the stale note shows');
+  assert.equal(stale.getAttribute('data-tone'), 'warn');
+  assert.match(stale.textContent, /PLAN ALL RECOMMENDED PASSES again/);
+  // The changed settings drop the old suite when the replan runs; planning
+  // all passes again reads the new interval and clears the note.
+  await w.handle.replan();
+  assert.equal(w.handle.getState().suite, null);
+  await w.handle.planSuite();
+  const fresh = rowsNow();
+  assert.ok(fresh.length >= 3);
+  assert.equal(captureRole(w, 'timing-suite-stale'), undefined);
+  assert.notDeepEqual(fresh.map((r) => r.getAttribute('data-front')), before.map((b) => b[1]), 'the new interval gives new figures');
+  w.handle.destroy();
+});
+
 const mphForTest = (mph) => (mph * 1609.344) / 3600;
 
 test('timing: 15 and 16 mph show as that in the speed readout, in feet and in metres', () => {

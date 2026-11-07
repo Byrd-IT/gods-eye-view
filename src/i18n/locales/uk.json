@@ -4017,5 +4017,6 @@
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Шляхових точок у кожному файлі: {waypoints}. Найбільший файл: {max} шляхових точок.",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Також задано фіксований інтервал між фото. Інтервал визначає крок; фіксована відстань не використовується.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Дані про висоти рельєфу неповні, тому висота над землею, охоплення знімка та інтервал невідомі.",
-  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: висоти рельєфу неповні, перекриття невідоме."
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: висоти рельєфу неповні, перекриття невідоме.",
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Налаштування змінилися з останнього планування всіх проходів: ці рядки показують той план, яким він був складений. Щоб оновити їх, знову натисніть «СПЛАНУВАТИ ВСІ РЕКОМЕНДОВАНІ ПРОХОДИ»."
 }

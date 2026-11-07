@@ -359,3 +359,38 @@ test('suite rows: a pass with incomplete terrain heights is unknown, not a made-
     assert.equal(by.legacy.unknown, false, 'only an explicit false is unknown');
   }
 });
+
+test('suite rows: each pass is read with the interval it was planned with', () => {
+  const nadir = footprint(preset, 80, 0).alongM;
+  const pass = (id, options) => ({
+    id,
+    label: id,
+    result: {
+      plan: {
+        speedMs: 3,
+        footprint: { alongM: nadir },
+        options: { frontOverlap: 80, pattern: 'grid', ...options },
+      },
+    },
+  });
+  const passes = [
+    pass('seven', { captureMode: 'timed', timedIntervalS: 7 }),
+    pass('ten', { captureMode: 'timed', timedIntervalS: 10 }),
+    pass('stop', { captureMode: 'stop', timedIntervalS: 7 }),
+    pass('none', { captureMode: 'timed', timedIntervalS: null }),
+  ];
+  const own = Object.fromEntries(suiteTimingRows(passes).map((r) => [r.id, r]));
+  assert.equal(own.seven.plannedIntervalS, 7);
+  assert.equal(own.ten.plannedIntervalS, 10);
+  assert.ok(Math.abs(own.seven.frontPct - (1 - 21 / nadir) * 100) < 0.2);
+  assert.ok(Math.abs(own.ten.frontPct - (1 - 30 / nadir) * 100) < 0.2);
+  assert.equal(own.stop.plannedIntervalS, null, 'stop capture ignores the interval');
+  assert.equal(own.stop.frontPct, null);
+  assert.equal(own.none.frontPct, null);
+  assert.ok(own.none.recommendedIntervalS > 0);
+  // An explicit interval is still a what-if for every pass.
+  const asked = Object.fromEntries(suiteTimingRows(passes, 7).map((r) => [r.id, r]));
+  assert.ok(Math.abs(asked.ten.frontPct - (1 - 21 / nadir) * 100) < 0.2);
+  assert.equal(asked.ten.plannedIntervalS, 10, 'the planned interval is still reported');
+  assert.equal(suiteTimingRows(passes, null)[0].frontPct, null);
+});

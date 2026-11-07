@@ -3933,5 +3933,6 @@
   "Waypoints in each file: {waypoints}. Largest file: {max} waypoints.": "Puntos de ruta en cada archivo: {waypoints}. Archivo más grande: {max} puntos de ruta.",
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "También se ha definido una separación fija entre fotos. El intervalo determina la separación; la distancia fija no se usa.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Las alturas del terreno están incompletas, por lo que no se conocen la altura sobre el suelo, la huella ni el intervalo.",
-  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: alturas del terreno incompletas, solapamiento desconocido."
+  "{pass}: terrain heights incomplete, overlap not known.": "{pass}: alturas del terreno incompletas, solapamiento desconocido.",
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Los ajustes cambiaron desde la última planificación de todas las pasadas: estas filas muestran ese plan tal como se hizo. Pulse de nuevo «PLANIFICAR TODAS LAS PASADAS RECOMENDADAS» para actualizarlas."
 }

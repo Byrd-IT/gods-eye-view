@@ -257,10 +257,130 @@ async function exercise(page, label) {
   await planReady(page, `${label} 5 s`);
 }
 
+/** PLAN ALL rows as the page shows them. */
+const readSuiteRows = (page) =>
+  page.evaluate(() => {
+    const rows = [
+      ...document.querySelectorAll(
+        '#drone-plan-panel [data-role="timing-suite-row"]',
+      ),
+    ];
+    const stale = document.querySelector(
+      '#drone-plan-panel [data-role="timing-suite-stale"]',
+    );
+    const rec = document.querySelector(
+      '#drone-plan-panel [data-role="timing-recommended"]',
+    );
+    return {
+      fronts: rows.map((r) => r.getAttribute('data-front')),
+      texts: rows.map((r) => r.textContent),
+      stale: stale ? stale.textContent : null,
+      recHidden: rec ? rec.hidden : null,
+      pattern: window.__gevDronePlan.getState().options.pattern,
+      suitePlanned: Boolean(window.__gevDronePlan.getState().suite),
+    };
+  });
+
+async function planAllReady(page, label) {
+  await page.evaluate(() => {
+    document
+      .querySelector('#drone-plan-panel [data-action="plan-suite"]')
+      .click();
+  });
+  try {
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll(
+          '#drone-plan-panel [data-role="timing-suite-row"]',
+        ).length >= 3,
+      { timeout: 120_000 },
+    );
+    check(`${label}: PLAN ALL gives a row for each survey pass`, true);
+  } catch {
+    check(`${label}: PLAN ALL gives a row for each survey pass`, false, 'timed out');
+  }
+}
+
+/**
+ * PLAN ALL timing rows: read with the interval each pass was planned with,
+ * flagged when the field moves on, and still shown when the single pattern is
+ * an orbit. Leaves the original single pattern planned again.
+ */
+async function suiteChecks(page, label) {
+  const pattern = await page.evaluate(
+    () => window.__gevDronePlan.getState().options.pattern,
+  );
+  await planAllReady(page, label);
+  await scrollTo(page, 'timing-suite');
+  const fresh = await readSuiteRows(page);
+  console.log(`${label} PLAN ALL rows:`, JSON.stringify(fresh));
+  check(`${label}: a fresh PLAN ALL is not marked old`, fresh.stale === null);
+  // Change the interval in the field and read in the same tick, before the
+  // waiting replan drops the suite.
+  const changed = await page.evaluate(() => {
+    const input = document.querySelector(
+      '#drone-plan-panel [data-role="timing-interval"]',
+    );
+    input.value = '9';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const rows = [
+      ...document.querySelectorAll(
+        '#drone-plan-panel [data-role="timing-suite-row"]',
+      ),
+    ];
+    const stale = document.querySelector(
+      '#drone-plan-panel [data-role="timing-suite-stale"]',
+    );
+    return {
+      fronts: rows.map((r) => r.getAttribute('data-front')),
+      stale: stale ? stale.textContent : null,
+    };
+  });
+  check(
+    `${label}: after the interval changes the rows keep the planned figures`,
+    JSON.stringify(changed.fronts) === JSON.stringify(fresh.fronts),
+    `${fresh.fronts} -> ${changed.fronts}`,
+  );
+  check(
+    `${label}: and a note says PLAN ALL must be pressed again`,
+    /Press PLAN ALL RECOMMENDED PASSES again/.test(changed.stale ?? ''),
+    changed.stale ?? 'no note',
+  );
+  await page.screenshot({
+    path: path.join(SHOT_DIR, `${label}-5-plan-all-old.jpg`),
+    type: 'jpeg',
+    quality: 85,
+  });
+  await wait(2500);
+  await planReady(page, `${label} 9 s`);
+  // The single pattern is an orbit: the survey passes keep their rows.
+  await page.evaluate(() => window.__gevDronePlan.applyOptions({ pattern: 'orbit' }));
+  await wait(2500);
+  await planReady(page, `${label} orbit`);
+  await planAllReady(page, `${label} orbit`);
+  await scrollTo(page, 'timing-suite');
+  const orbit = await readSuiteRows(page);
+  check(
+    `${label}: with Orbit as the single pattern the PLAN ALL rows still show`,
+    orbit.pattern === 'orbit' && orbit.fronts.length >= 3 && orbit.recHidden === true,
+    `${orbit.fronts.length} rows, pattern ${orbit.pattern}`,
+  );
+  check(`${label}: and they are not marked old`, orbit.stale === null);
+  await page.screenshot({
+    path: path.join(SHOT_DIR, `${label}-6-plan-all-orbit.jpg`),
+    type: 'jpeg',
+    quality: 85,
+  });
+  await page.evaluate((p) => window.__gevDronePlan.applyOptions({ pattern: p }), pattern);
+  await wait(2500);
+  await planReady(page, `${label} back to ${pattern}`);
+}
+
 try {
   const desktop = await browser.newPage();
   const dErrors = await boot(desktop, { width: 1280, height: 860 });
   await exercise(desktop, 'desktop');
+  await suiteChecks(desktop, 'desktop');
   // Export one mission and read every waypoint.
   const client = await desktop.createCDPSession();
   await client.send('Browser.setDownloadBehavior', {
@@ -303,6 +423,7 @@ try {
     deviceScaleFactor: 2,
   });
   await exercise(phone, 'phone');
+  await suiteChecks(phone, 'phone');
   const pFatal = pErrors.filter((e) => !/WebGL|swiftshader|GPU|net::|Failed to load resource/i.test(e));
   check('no page errors on the phone', pFatal.length === 0, pFatal.join(' | '));
 } catch (error) {
