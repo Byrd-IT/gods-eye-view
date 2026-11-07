@@ -226,6 +226,38 @@ test('an out-of-range height is refused without the bad value', async () => {
   assert.equal(calls.length, 0);
 });
 
+test('status reports the speed in m/s and mph and the timed-shot interval in seconds', async () => {
+  const { handle, state } = fakeHandle();
+  state.options.speedMs = 6.7056;
+  state.options.captureMode = 'timed';
+  state.options.timedIntervalS = 7;
+  const status = await createDronePlanVoice(handle).status();
+  assert.equal(status.speedMs, 6.7056);
+  assert.equal(status.speedMph, 15);
+  assert.equal(status.captureMode, 'timed');
+  assert.equal(status.timedIntervalS, 7);
+  state.options.timedIntervalS = null;
+  state.options.captureMode = undefined;
+  const none = await createDronePlanVoice(handle).status();
+  assert.equal(none.timedIntervalS, null);
+  assert.equal(none.captureMode, 'stop');
+});
+
+test('options forwards a timed-shot interval in seconds and refuses an unusable one', async () => {
+  const { handle, calls } = fakeHandle();
+  const voice = createDronePlanVoice(handle);
+  const ok = await voice.options({ timedIntervalS: 7 });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(calls.find((c) => c[0] === 'applyOptions')[1], { timedIntervalS: 7 });
+  for (const bad of [0, -2, 'seven', 4000, NaN]) {
+    const before = calls.length;
+    const refused = await voice.options({ timedIntervalS: bad });
+    assert.equal(refused.ok, false, String(bad));
+    assert.equal(refused.error, 'That option is outside the panel range');
+    assert.equal(calls.length, before);
+  }
+});
+
 test('box sets coordinates and a refused box does not echo them', async () => {
   const good = fakeHandle();
   const voice = createDronePlanVoice(good.handle);

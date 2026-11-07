@@ -173,7 +173,7 @@ test('interval capture settings round-trip; legacy plans do not grow defaults', 
   assert.equal(legacy.options.speedMs, 4);
   assert.equal(legacy.options.photoMode, 'waypoint');
   assert.equal(legacy.options.batteryMin, 25);
-  for (const key of ['captureMode', 'photoSpacingM', 'continuousRoute', 'usableBatteryMin', 'maxWaypoints', 'intervalTriggerProven', 'minPhotoIntervalS']) {
+  for (const key of ['captureMode', 'photoSpacingM', 'continuousRoute', 'usableBatteryMin', 'maxWaypoints', 'intervalTriggerProven', 'minPhotoIntervalS', 'timedIntervalS']) {
     assert.equal(Object.hasOwn(legacy.options, key), false, key);
   }
 
@@ -231,6 +231,49 @@ test('a forged intervalTriggerProven true is dropped from a plan and a .gevplan 
   const parsed = parseGevPlanFile(rawFile);
   assert.equal(parsed.plan.options.captureMode, 'distance');
   assert.equal(Object.hasOwn(parsed.plan.options, 'intervalTriggerProven'), false);
+});
+
+test('a chosen Timed-shot interval round-trips; an old plan has none; bad values are dropped', () => {
+  const s = state();
+  s.options.captureMode = 'timed';
+  s.options.timedIntervalS = 7;
+  const doc = serializePlan(s);
+  assert.equal(doc.options.timedIntervalS, 7);
+  const back = readPlan(JSON.parse(JSON.stringify(doc)));
+  assert.equal(back.options.timedIntervalS, 7);
+  const filed = parseGevPlanFile(buildGevPlanFile({ name: 'timed' }, doc));
+  assert.equal(filed.plan.options.timedIntervalS, 7);
+  const fractional = state();
+  fractional.options.timedIntervalS = 6.5;
+  assert.equal(serializePlan(fractional).options.timedIntervalS, 6.5);
+
+  // A plan saved before this setting has no key, and reads back with none.
+  const old = readPlan({
+    schema: 'gevplan',
+    version: 1,
+    areas: [],
+    options: { speedMs: 4, captureMode: 'timed', minPhotoIntervalS: 5 },
+  });
+  assert.equal(Object.hasOwn(old.options, 'timedIntervalS'), false);
+  assert.equal(old.options.minPhotoIntervalS, 5, 'the camera minimum is a different setting');
+
+  for (const bad of [0, -2, 3601, NaN, '7', true, null]) {
+    const dirty = state();
+    dirty.options.timedIntervalS = bad;
+    assert.equal(
+      Object.hasOwn(serializePlan(dirty).options, 'timedIntervalS'),
+      false,
+      `saved ${bad}`,
+    );
+    const read = readPlan({
+      schema: 'gevplan',
+      version: 1,
+      areas: [],
+      options: { timedIntervalS: bad, speedMs: 4 },
+    });
+    assert.equal(Object.hasOwn(read.options, 'timedIntervalS'), false, `read ${bad}`);
+    assert.equal(read.options.speedMs, 4);
+  }
 });
 
 test('a custom camera minimum round-trips; invalid values are dropped', () => {

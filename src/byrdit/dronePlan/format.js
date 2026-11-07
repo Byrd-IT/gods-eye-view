@@ -5,6 +5,7 @@
 import { formatNumber, t } from '../../i18n/index.js';
 import { OBSTACLE_MARGIN_M } from './planner.js';
 import { lengthFromM, lengthUnit, speedFromMs, speedUnit } from './units.js';
+import { MPH_PER_MS } from './timing.js';
 
 const fixed = (value, digits = 0) =>
   formatNumber(value, {
@@ -25,6 +26,11 @@ export function heightText(metres) {
 /** `16.4 ft/s` or `5.0 m/s`. */
 export function speedText(ms, digits = 1) {
   return `${fixed(speedFromMs(ms), digits)} ${speedUnit()}`;
+}
+
+/** `22.0 ft/s · 15.0 mph`: the speed in the chosen unit and in miles per hour. */
+export function speedWithMphText(ms, digits = 1) {
+  return `${speedText(ms, digits)} · ${fixed(Number(ms) * MPH_PER_MS, 1)} mph`;
 }
 
 /** `1.2 km` or `640 m`; in feet `2100 ft` or `1.2 mi`. */

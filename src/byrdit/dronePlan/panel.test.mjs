@@ -1921,7 +1921,8 @@ test('Steps: nine numbered collapsible steps hold every control in the planned o
   assert.equal(stepOf(w.control('Tree / obstacle height')), 5);
   assert.equal(stepOf(action('add-obstacle')), 5);
   assert.equal(stepOf(checkSlider(w, 'width')), 5);
-  assert.equal(stepOf(w.control('Speed')), 6);
+  // Speed and front overlap sit together in the Speed & photo timing section.
+  assert.equal(stepOf(w.control('Speed')), 3);
   assert.equal(
     stepOf(w.control('Usable flight time per battery (minutes)')),
     6,
@@ -2608,9 +2609,11 @@ test('units: feet by default, the ft/m switch changes every shown length and spe
     w.control(label).parentNode.children.find((n) => n.tagName === 'OUTPUT')
       .textContent;
   assert.equal(out('Height above ground'), '262 ft');
+  // The speed readout also gives miles per hour, so 16 ft/s is not read as mph.
+  const speedNow = w.handle.getState().options.speedMs;
   assert.equal(
     out('Speed'),
-    `${(w.handle.getState().options.speedMs * 3.28084).toFixed(1)} ft/s`,
+    `${(speedNow * 3.28084).toFixed(1)} ft/s · ${((speedNow * 3600) / 1609.344).toFixed(1)} mph`,
   );
   assert.equal(w.control('Height above ground').max, '1500');
   assert.equal(w.control('Height above ground').step, '10');
@@ -4629,5 +4632,375 @@ test('a custom camera minimum drives warnings, save/load and the planned speed l
   pick(w, 'Aircraft', 'dji-mavic-3');
   assert.equal(w.handle.getState().options.minPhotoIntervalS, null);
   assert.equal(w.control('Camera minimum interval (s)').value, '');
+  w.handle.destroy();
+});
+
+// ------------------------------------------------ Speed & photo timing ----
+
+const INTERVAL = 'Interval you can set in DJI Fly (s)';
+const timingText = (w, role) => captureRole(w, role)?.textContent ?? '';
+const insideDetails = (node) => {
+  for (let n = node; n; n = n.parentNode) {
+    if (n.getAttribute?.('data-role') === 'capture-details') return true;
+  }
+  return false;
+};
+const timedWorld = async (extra = {}) => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.aglM = 100;
+  o.speedMs = 3.2;
+  o.captureMode = 'timed';
+  Object.assign(o, extra);
+  await w.handle.replan();
+  return w;
+};
+const figuresNow = (w) => {
+  const o = w.handle.getState().options;
+  return captureFigures({
+    preset: getPreset(o.presetId),
+    aglM: o.aglM,
+    tiltDeg: captureTiltDeg(o),
+    frontOverlap: o.frontOverlap,
+    sideOverlap: o.sideOverlap,
+    speedMs: o.speedMs,
+    shutterDenominator: o.shutterDenominator,
+  });
+};
+
+test('timing: one compact section holds speed, wanted front overlap, the recommended interval and the interval you can set', () => {
+  const w = setup();
+  const section = captureRole(w, 'timing');
+  assert.ok(section);
+  assert.match(section.textContent, /Speed & photo timing/);
+  // The speed and front-overlap controls live in this section; side overlap
+  // does not, so it is not confused with the front overlap.
+  const within = (control) => {
+    for (let n = control; n; n = n.parentNode) if (n === section) return true;
+    return false;
+  };
+  assert.ok(within(w.control('Speed')));
+  assert.ok(within(w.control('Front overlap')));
+  assert.equal(within(w.control('Side overlap')), false);
+  assert.ok(captureRole(w, 'timing-recommended'));
+  assert.ok(w.control(INTERVAL));
+  w.handle.destroy();
+});
+
+test('timing: the recommended interval is the wanted spacing over the speed, in seconds', async () => {
+  const w = await timedWorld();
+  const o = w.handle.getState().options;
+  const figs = figuresNow(w);
+  const want = (figs.footprint.alongM * (1 - o.frontOverlap / 100)) / o.speedMs;
+  const rec = captureRole(w, 'timing-recommended');
+  assert.ok(Math.abs(Number(rec.getAttribute('data-seconds')) - want) < 1e-9);
+  assert.match(
+    timingText(w, 'timing-recommended'),
+    new RegExp(`${want.toFixed(1)} s`),
+  );
+  // The speed readout names both units, so 15 is never read as mph.
+  assert.match(w.control('Speed').parentNode.textContent, /m\/s · [\d.]+ mph/);
+  w.handle.destroy();
+});
+
+test('timing: typing an interval shows the resulting front overlap at once and plans with it', async () => {
+  const w = await timedWorld();
+  const input = w.control(INTERVAL);
+  input.value = '7';
+  input.dispatch('input');
+  const o = w.handle.getState().options;
+  assert.equal(o.timedIntervalS, 7);
+  const figs = figuresNow(w);
+  const spacing = writtenSpacingM(o.speedMs * 7);
+  const front = (1 - spacing / figs.footprint.alongM) * 100;
+  const result = captureRole(w, 'timing-result');
+  assert.ok(Math.abs(Number(result.getAttribute('data-front')) - front) < 1e-9);
+  assert.match(result.textContent, new RegExp(`${front.toFixed(1)}%`));
+  assert.match(result.textContent, /wanted 80%/);
+  await w.handle.replan();
+  const plan = w.handle.getResult().plan;
+  assert.equal(plan.options.timedIntervalS, 7);
+  assert.ok(plan.spacing.photoM > 0);
+  assert.equal(w.handle.getResult().missions[0].legs[0].photoSpacingM, spacing);
+  assert.equal(plan.speedMs, 3.2, 'the speed is never changed to fit the interval');
+  w.handle.destroy();
+});
+
+test('timing: 5, 7 and 10 are quick-fill examples; CLEAR removes the interval; any positive number works', async () => {
+  const w = await timedWorld();
+  const chips = w.find((n) => n.getAttribute('data-role') === 'timing-chip');
+  assert.deepEqual(chips.map((c) => c.getAttribute('data-seconds')), ['5', '7', '10']);
+  chips[1].click();
+  assert.equal(w.handle.getState().options.timedIntervalS, 7);
+  assert.equal(w.control(INTERVAL).value, '7');
+  chips[2].click();
+  assert.equal(w.handle.getState().options.timedIntervalS, 10);
+  const input = w.control(INTERVAL);
+  input.value = '6.5';
+  input.dispatch('change');
+  assert.equal(w.handle.getState().options.timedIntervalS, 6.5);
+  w.find((n) => n.getAttribute('data-action') === 'timing-clear')[0].click();
+  assert.equal(w.handle.getState().options.timedIntervalS, null);
+  assert.equal(w.control(INTERVAL).value, '');
+  assert.equal(captureRole(w, 'timing-result').hidden, true);
+  w.handle.destroy();
+});
+
+test('timing: zero, negative and oversized intervals are refused, not stored', async () => {
+  const w = await timedWorld({ timedIntervalS: 7 });
+  const input = w.control(INTERVAL);
+  for (const bad of ['0', '-3', '99999']) {
+    input.value = bad;
+    input.dispatch('change');
+    assert.equal(w.handle.getState().options.timedIntervalS, 7, bad);
+    assert.equal(input.value, '7', bad);
+    assert.equal(input.getAttribute('aria-invalid'), 'true', bad);
+    assert.match(timingText(w, 'timing-interval-note'), /was not used/);
+  }
+  input.value = '8';
+  input.dispatch('change');
+  assert.equal(input.getAttribute('aria-invalid'), 'false');
+  assert.equal(w.handle.getState().options.timedIntervalS, 8);
+  w.handle.destroy();
+});
+
+test('timing: an interval that is too long for the wanted overlap says so and offers a speed, which only a click applies', async () => {
+  const w = await timedWorld();
+  const o = w.handle.getState().options;
+  const input = w.control(INTERVAL);
+  input.value = '10';
+  input.dispatch('input');
+  const result = captureRole(w, 'timing-result');
+  assert.equal(result.getAttribute('data-state'), 'short');
+  assert.equal(result.getAttribute('data-tone'), 'warn');
+  const fit = captureRole(w, 'timing-fit');
+  assert.equal(fit.hidden, false);
+  const fitMs = Number(fit.getAttribute('data-speed-ms'));
+  assert.ok(fitMs > 0 && fitMs < o.speedMs);
+  assert.equal(o.speedMs, 3.2, 'nothing changed the speed');
+  w.find((n) => n.getAttribute('data-action') === 'timing-use-speed')[0].click();
+  assert.equal(w.handle.getState().options.speedMs, fitMs);
+  assert.equal(captureRole(w, 'timing-result').getAttribute('data-state'), 'meets');
+  assert.equal(captureRole(w, 'timing-fit').hidden, true);
+  w.handle.destroy();
+});
+
+test('timing: an interval under the camera minimum is flagged and the overlap is called theoretical', async () => {
+  const w = await timedWorld();
+  const min = getPreset(w.handle.getState().options.presetId).minPhotoIntervalS;
+  const input = w.control(INTERVAL);
+  input.value = String(min / 2);
+  input.dispatch('input');
+  const note = captureRole(w, 'timing-under-minimum');
+  assert.ok(note);
+  assert.equal(note.getAttribute('data-tone'), 'bad');
+  assert.match(note.textContent, /theoretical/);
+  assert.equal(note.hidden, false);
+  assert.equal(insideDetails(note), false, 'an important warning is not folded away');
+  w.handle.destroy();
+});
+
+test('timing: outside Timed shot the interval is not asked for, and one click switches to it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  assert.equal(captureRole(w, 'timing-timed').hidden, true);
+  assert.equal(captureRole(w, 'timing-recommended').hidden, false);
+  w.find((n) => n.getAttribute('data-action') === 'timing-use-timed')[0].click();
+  const o = w.handle.getState().options;
+  assert.equal(o.captureMode, 'timed');
+  assert.equal(w.control('Capture mode').value, 'timed');
+  assert.equal(captureRole(w, 'timing-timed').hidden, false);
+  assert.equal(o.timedIntervalS, null, 'switching does not invent an interval');
+  pick(w, 'Capture mode', 'distance');
+  assert.equal(captureRole(w, 'timing-timed').hidden, true);
+  w.handle.destroy();
+});
+
+test('timing: the interval is ignored by stop and distance capture, so the plan does not change', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const before = w.handle.getResult().missions[0].legs[0].photoSpacingM;
+  w.handle.getState().options.timedIntervalS = 7;
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().missions[0].legs[0].photoSpacingM, before);
+  w.handle.destroy();
+});
+
+test('timing: a speed the plan lowers is shown as lowered, not as the requested one', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.speedMs = mphForTest(16);
+  await w.handle.replan();
+  const plan = w.handle.getResult().plan;
+  assert.ok(plan.speedMs < o.speedMs);
+  const note = captureRole(w, 'timing-planned');
+  assert.equal(note.hidden, false);
+  assert.match(note.textContent, /not the .* you asked for/);
+  assert.equal(note.getAttribute('data-tone'), 'warn');
+  // Timed shot keeps the requested speed: nothing to say.
+  pick(w, 'Capture mode', 'timed');
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.speedMs, o.speedMs);
+  assert.equal(captureRole(w, 'timing-planned').hidden, true);
+  w.handle.destroy();
+});
+
+const mphForTest = (mph) => (mph * 1609.344) / 3600;
+
+test('timing: 15 and 16 mph show as that in the speed readout, in feet and in metres', () => {
+  for (const [system, unit] of [
+    ['ft', /22\.0 ft\/s · 15\.0 mph/],
+    ['m', /6\.7 m\/s · 15\.0 mph/],
+  ]) {
+    const w = setup({ storage: memoryStorage({ 'gev.dronePlan.units': system }) });
+    w.handle.applyOptions({ speedMs: mphForTest(15) });
+    assert.match(w.control('Speed').parentNode.textContent, unit);
+    w.handle.applyOptions({ speedMs: mphForTest(16) });
+    assert.match(w.control('Speed').parentNode.textContent, /16\.0 mph/);
+    w.handle.destroy();
+  }
+});
+
+test('timing: the whole wordy readout is folded into Details; important warnings stay outside it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Capture mode', 'distance');
+  await w.handle.replan();
+  const details = captureRole(w, 'capture-details');
+  assert.equal(details.tagName, 'DETAILS');
+  for (const role of [
+    'capture-footprint',
+    'capture-overlap',
+    'capture-interval',
+    'capture-interval-derived',
+    'capture-speed-limit',
+    'capture-shutter',
+    'capture-light',
+    'capture-shutter-table',
+    'capture-wind',
+    'capture-resume',
+    'capture-clearance',
+    'capture-overlap-break',
+    'capture-waypoints',
+  ]) {
+    const node = captureRole(w, role);
+    assert.ok(node, role);
+    assert.ok(insideDetails(node), `${role} is in Details`);
+  }
+  // Still in the readout text, so nothing is lost.
+  assert.match(captureRole(w, 'capture-readout').textContent, /along the track/);
+  for (const role of ['capture-unproven', 'capture-interval-warn']) {
+    const node = captureRole(w, role);
+    assert.ok(node, role);
+    assert.equal(insideDetails(node), false, `${role} stays visible`);
+  }
+  const cautions = captureRole(w, 'capture-cautions');
+  assert.ok(cautions);
+  assert.equal(insideDetails(cautions), false);
+  assert.match(cautions.textContent, /see Details/);
+  w.handle.destroy();
+});
+
+test('timing: an orbit has its own spacing, so the interval parts stay out of the way', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 300));
+  w.handle.getState().options.timedIntervalS = 7;
+  pick(w, 'Pattern', 'orbit');
+  assert.equal(captureRole(w, 'timing-recommended').hidden, true);
+  assert.equal(captureRole(w, 'timing-timed').hidden, true);
+  w.handle.destroy();
+});
+
+test('timing: a tilt that reaches the horizon gives no interval instead of a made-up one', () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.pattern = 'double';
+  o.tiltPitchDeg = -5;
+  o.captureMode = 'timed';
+  o.timedIntervalS = 7;
+  w.handle.applyOptions({ pattern: 'double' });
+  const rec = captureRole(w, 'timing-recommended');
+  assert.equal(rec.getAttribute('data-seconds'), null);
+  assert.match(rec.textContent, /annot be calculated/);
+  assert.equal(captureRole(w, 'timing-result').hidden, true);
+  w.handle.destroy();
+});
+
+test('timing: an incomplete terrain model is called out; the interval assumes the planned height above ground', async () => {
+  const w = await timedWorld();
+  assert.equal(captureRole(w, 'timing-terrain').hidden, w.handle.getResult().terrainComplete !== false);
+  w.handle.destroy();
+  const gap = setup({ sample: async (cartos) => cartos.map((c) => ({ ...c, height: undefined })) });
+  gap.handle.setBox(boxM(300, 200));
+  gap.handle.getState().options.captureMode = 'timed';
+  await gap.handle.replan();
+  if (gap.handle.getResult()?.terrainComplete === false) {
+    const note = captureRole(gap, 'timing-terrain');
+    assert.equal(note.hidden, false);
+    assert.match(note.textContent, /terrain/i);
+  }
+  gap.handle.destroy();
+});
+
+test('timing: Plan all passes gives each pass its own overlap for the one interval', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  const o = w.handle.getState().options;
+  o.captureMode = 'timed';
+  o.timedIntervalS = 7;
+  await w.handle.replan();
+  await w.handle.planSuite();
+  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  assert.ok(rows.length >= 3, 'nadir and two oblique passes');
+  const fronts = rows.map((r) => Number(r.getAttribute('data-front')));
+  assert.ok(new Set(fronts.map((f) => Math.round(f))).size > 1, 'the passes differ');
+  assert.match(captureRole(w, 'timing-suite').textContent, /own overlap/);
+  for (const r of rows) assert.match(r.textContent, /% front/);
+  w.handle.destroy();
+});
+
+test('timing: the chosen interval saves with the plan, an old plan has none, a bad one is dropped', async () => {
+  const w = await timedWorld({ timedIntervalS: 7 });
+  const doc = serializePlan(w.handle.getState(), {});
+  assert.equal(doc.options.timedIntervalS, 7);
+  const w2 = setup();
+  await w2.handle.loadPlan(JSON.parse(JSON.stringify(doc)));
+  assert.equal(w2.handle.getState().options.timedIntervalS, 7);
+  assert.equal(w2.control(INTERVAL).value, '7');
+  // An older file without the setting clears a previous plan's interval.
+  await w2.handle.loadPlan({
+    schema: 'gevplan',
+    version: 1,
+    areas: [],
+    options: { speedMs: 4 },
+  });
+  assert.equal(w2.handle.getState().options.timedIntervalS, null);
+  assert.equal(w2.control(INTERVAL).value, '');
+  w.handle.destroy();
+  w2.handle.destroy();
+});
+
+test('timing: voice and AI options set the interval through the same cleaner', async () => {
+  const w = setup();
+  w.handle.applyOptions({ timedIntervalS: 7 });
+  assert.equal(w.handle.getState().options.timedIntervalS, 7);
+  assert.equal(w.control(INTERVAL).value, '7');
+  w.handle.applyOptions({ timedIntervalS: -2 });
+  assert.equal(w.handle.getState().options.timedIntervalS, null);
+  w.handle.destroy();
+});
+
+test('timing: the capture readout figures follow the interval, not a stale spacing', async () => {
+  const w = await timedWorld({ timedIntervalS: 7 });
+  const o = w.handle.getState().options;
+  const readout = captureRole(w, 'capture-readout');
+  const spacing = writtenSpacingM(o.speedMs * 7);
+  assert.equal(Number(readout.getAttribute('data-photo-m')), spacing);
+  assert.ok(Math.abs(Number(readout.getAttribute('data-seconds')) - spacing / o.speedMs) < 1e-9);
   w.handle.destroy();
 });

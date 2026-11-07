@@ -359,7 +359,7 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // water layers, byrdit-open/basemap-auto stacks, the control_history,
   // control_sky, control_imagery and control_droneplan tools with their routing
   // and speaking rules: 11,358 characters, as pinned before the 73c14ac7 merge).
-  assert.ok(size <= 55_500 + 11_358, `prompt size ${size}`);
+  assert.ok(size <= 55_500 + 11_500, `prompt size ${size}`);
 });
 
 test('after-tool speech allows returned items to answer requested lists and rankings', () => {

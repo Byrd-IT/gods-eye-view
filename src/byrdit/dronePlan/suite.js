@@ -59,6 +59,7 @@ const KEEP = [
   'captureMode',
   'photoSpacingM',
   'minPhotoIntervalS',
+  'timedIntervalS',
   'continuousRoute',
   'orbitRadiusM',
   'obstacleHeightM',

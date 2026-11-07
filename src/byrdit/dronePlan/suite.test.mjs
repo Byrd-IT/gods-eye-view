@@ -60,10 +60,21 @@ test('suite passes keep interval settings and do not invent them', () => {
   for (const p of legacy) {
     assert.equal(p.options.batteryMin, 20);
     assert.equal(p.options.pattern, p.id === 'nadir' ? 'grid' : p.id === 'orbit' ? 'orbit' : 'double');
-    for (const key of ['captureMode', 'photoSpacingM', 'continuousRoute', 'usableBatteryMin', 'maxWaypoints', 'intervalTriggerProven', 'minPhotoIntervalS']) {
+    for (const key of ['captureMode', 'photoSpacingM', 'continuousRoute', 'usableBatteryMin', 'maxWaypoints', 'intervalTriggerProven', 'minPhotoIntervalS', 'timedIntervalS']) {
       assert.equal(Object.hasOwn(p.options, key), false, `${p.id} ${key}`);
     }
   }
+});
+
+test('suiteOptions gives every pass the chosen Timed-shot interval, each with its own speed', () => {
+  const o = suiteOptions({
+    presetId: 'dji-mini-5-pro',
+    captureMode: 'timed',
+    timedIntervalS: 7,
+  });
+  assert.ok(o.every((p) => p.options.timedIntervalS === 7));
+  assert.ok(o.every((p) => p.options.captureMode === 'timed'));
+  assert.ok(new Set(o.map((p) => p.options.speedMs)).size > 1, 'passes keep their own speeds');
 });
 
 test('suiteOptions gives one recommended set per pass', () => {

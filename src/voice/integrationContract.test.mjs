@@ -715,8 +715,9 @@ test('without an operator Overpass the prompt never offers place search', () => 
 
 test('the Realtime prompt stays within its size budget', () => {
   // Byrd-IT fork: characters the fork adds on top of upstream's ceiling (the
-  // same constant is inlined in pointAndAsk.test.mjs).
-  const BYRDIT_FORK_PROMPT_CHARS = 11_358;
+  // same constant is inlined in pointAndAsk.test.mjs). 11_358 -> 11_500: the
+  // control_droneplan timedIntervalS option (about 130 chars).
+  const BYRDIT_FORK_PROMPT_CHARS = 11_500;
   // Instructions plus tool schemas, in characters, under the same 55,500
   // ceiling as the deixis prompt lint. Voice geometry adds resolve_area,
   // find_imagery and the analyst area scopes (osm_query only with an

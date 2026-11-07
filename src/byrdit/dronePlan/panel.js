@@ -77,7 +77,9 @@ import {
   footprint,
   INTERVAL_TRIGGER_PROVEN,
   isContinuousCapture,
+  captureSpacingM,
   cleanMinPhotoIntervalS,
+  cleanTimedIntervalS,
   presetWithPhotoInterval,
   spacing,
   takeoffDistanceFromBoxM,
@@ -90,6 +92,13 @@ import {
   listPresets,
 } from './presets.js';
 import { MODES, modeFor, recommend, recommendedOptions } from './recommend.js';
+import {
+  INTERVAL_QUICK_FILL_S,
+  MAX_TIMED_INTERVAL_S,
+  effectiveSpeedMs,
+  suiteTimingRows,
+  timingFigures,
+} from './timing.js';
 import {
   DEFAULT_SHUTTER_DENOMINATOR,
   MIN_PLAN_SPEED_MS,
@@ -120,6 +129,7 @@ import {
   lengthText,
   planErrorText,
   speedText,
+  speedWithMphText,
   warningText,
   warningTone,
 } from './format.js';
@@ -278,12 +288,20 @@ export function captureFigures({
   photoSpacingM = null,
   speedMs,
   shutterDenominator,
+  captureMode,
+  timedIntervalS = null,
 }) {
   if (!preset || !(aglM > 0) || !(speedMs > 0)) return null;
   const fp = footprint(preset, aglM, tiltDeg);
   if (!(fp.alongM > 0) || !(fp.acrossM > 0)) return null;
   const fromOverlap = spacing(fp, frontOverlap, sideOverlap);
-  const rawPhotoM = photoSpacingM > 0 ? photoSpacingM : fromOverlap.photoM;
+  // The same rule the planner uses: with Timed shot and a chosen interval the
+  // spacing is speed x interval; otherwise a fixed distance; otherwise the
+  // spacing that gives the wanted front overlap.
+  const rawPhotoM = captureSpacingM(
+    { captureMode, timedIntervalS, speedMs, photoSpacingM },
+    photoSpacingM > 0 ? photoSpacingM : fromOverlap.photoM,
+  );
   const photoM = writtenSpacingM(rawPhotoM);
   if (!(photoM > 0) || !(fromOverlap.lineM > 0)) return null;
   const limits = speedLimits({
@@ -328,6 +346,21 @@ export function usableBatteryCount(durationS, usableBatteryMin) {
 }
 
 /** Inline colours: the warning list's CSS is amber for every row. */
+/**
+ * Capture-readout lines that stay in view. Every other line is folded into
+ * Details (a 'bad' tone also stays in view). One line counts the cautions
+ * inside Details so none is hidden without a sign.
+ */
+const VISIBLE_CAPTURE_ROLES = new Set([
+  'capture-unproven',
+  'capture-interval-warn',
+  'capture-footprint-error',
+  'capture-cautions',
+]);
+
+/** Explanations that always fold, even when their tone is 'bad': a short line says it. */
+const FOLDED_CAPTURE_ROLES = new Set(['capture-interval']);
+
 export const WARNING_TONE_COLOR = Object.freeze({
   bad: '#ff4d4f',
   warn: '#ffb547',
@@ -335,6 +368,8 @@ export const WARNING_TONE_COLOR = Object.freeze({
 
 const num = (v, d = 0) =>
   formatNumber(v, { minimumFractionDigits: d, maximumFractionDigits: d });
+/** A percentage: whole numbers without a decimal (80), others with one (77.6). */
+const pct = (v) => num(v, Math.abs(v - Math.round(v)) < 1e-9 ? 0 : 1);
 
 const PAUSE_MODEL_NOTE =
   'Each extra survey line in a battery adds 3 seconds. Wind and extra climb time are not in the model, so the real pause point moves.';
@@ -504,6 +539,8 @@ export function initDronePlan({
       cameraPresetId: DEFAULT_CAMERA_PRESET_ID,
       // Null uses the aircraft preset interval. A number is this plan only.
       minPhotoIntervalS: null,
+      // Seconds the person will set for the camera's Timed shot. Null: none.
+      timedIntervalS: null,
       batteryMin: 25,
       maxWaypoints: MAX_WAYPOINTS_PER_MISSION,
       usableBatteryMin: DEFAULT_USABLE_BATTERY_MIN,
@@ -1724,6 +1761,166 @@ export function initDronePlan({
     const into = (key) => {
       host = ui.steps[key].body;
     };
+    // The "Speed & photo timing" section of the Shots step. It owns the speed
+    // and front-overlap sliders, the recommended interval, the interval the
+    // person can set, the result of that interval, and a collapsed Details
+    // block that holds the long capture readout.
+    const buildTimingSection = ({ field: makeField }) => {
+      const outer = host;
+      ui.timing = el(doc, 'section', outer, {
+        cls: 'gev-dp-timing',
+        attrs: {
+          'data-role': 'timing',
+          'aria-label': t('Speed & photo timing'),
+        },
+      });
+      el(doc, 'h4', ui.timing, {
+        cls: 'gev-dp-timing-title',
+        text: t('Speed & photo timing'),
+      });
+      host = ui.timing;
+      ui.speed = lslider(t('Speed'), {
+        minM: MIN_PLAN_SPEED_MS,
+        maxM: 15,
+        stepM: 0.1,
+        stepFt: 0.5,
+        kind: 'speed',
+      });
+      ({ out: ui.speedOut } = makeField(t('Speed'), ui.speed));
+      ui.front = slider(t('Front overlap'), 50, 98, 0.5);
+      ({ out: ui.frontOut } = makeField(t('Front overlap'), ui.front));
+      ui.timingPlanned = el(doc, 'p', ui.timing, {
+        cls: 'gev-dp-warning',
+        attrs: { 'data-role': 'timing-planned' },
+      });
+      // The recommended interval is the headline number.
+      ui.timingRec = el(doc, 'div', ui.timing, {
+        cls: 'gev-dp-timing-rec',
+        attrs: { 'data-role': 'timing-recommended' },
+      });
+      ui.timingRecLabel = el(doc, 'span', ui.timingRec, {
+        cls: 'gev-dp-label',
+        text: t('Recommended interval'),
+      });
+      ui.timingRecValue = el(doc, 'strong', ui.timingRec, {
+        cls: 'gev-dp-timing-big',
+        attrs: { 'data-role': 'timing-recommended-value' },
+      });
+      ui.timingRecNote = el(doc, 'span', ui.timingRec, {
+        cls: 'gev-dp-note',
+        attrs: { 'data-role': 'timing-recommended-note' },
+      });
+      ui.timingTimed = el(doc, 'div', ui.timing, {
+        cls: 'gev-dp-timing-timed',
+        attrs: { 'data-role': 'timing-timed' },
+      });
+      host = ui.timingTimed;
+      ui.timedInterval = el(doc, 'input', null, {
+        cls: 'pp-text-input gev-dp-text',
+        attrs: {
+          type: 'number',
+          min: '0.1',
+          max: String(MAX_TIMED_INTERVAL_S),
+          step: 'any',
+          inputmode: 'decimal',
+          'aria-label': t('Interval you can set in DJI Fly (s)'),
+          'aria-invalid': 'false',
+          'data-role': 'timing-interval',
+        },
+      });
+      makeField(t('Interval you can set in DJI Fly (s)'), ui.timedInterval, {
+        value: false,
+      });
+      ui.timingChips = el(doc, 'div', ui.timingTimed, {
+        cls: 'gev-dp-timing-chips',
+      });
+      ui.timingChipButtons = INTERVAL_QUICK_FILL_S.map((seconds) =>
+        el(doc, 'button', ui.timingChips, {
+          cls: 'data-toggle-chip',
+          text: t('{n} s', { n: String(seconds) }),
+          attrs: {
+            type: 'button',
+            'data-role': 'timing-chip',
+            'data-seconds': String(seconds),
+            title: t(
+              'Fill in this many seconds. An example only: use the interval your aircraft and DJI Fly allow.',
+            ),
+          },
+        }),
+      );
+      ui.timingClear = el(doc, 'button', ui.timingChips, {
+        cls: 'data-toggle-chip',
+        text: t('Clear'),
+        attrs: { type: 'button', 'data-action': 'timing-clear' },
+      });
+      el(doc, 'p', ui.timingTimed, {
+        cls: 'gev-dp-note',
+        text: t(
+          'Set this interval in DJI Fly Timed shot and start it by hand. The file takes no photos itself.',
+        ),
+      });
+      ui.timingIntervalNote = el(doc, 'p', ui.timingTimed, {
+        cls: 'gev-dp-warning',
+        attrs: { 'data-role': 'timing-interval-note' },
+      });
+      ui.timingResult = el(doc, 'p', ui.timingTimed, {
+        cls: 'gev-dp-note gev-dp-timing-result',
+        attrs: { 'data-role': 'timing-result' },
+      });
+      ui.timingUnder = el(doc, 'p', ui.timingTimed, {
+        cls: 'gev-dp-warning',
+        attrs: { 'data-role': 'timing-under-minimum', 'data-tone': 'bad' },
+      });
+      ui.timingFit = el(doc, 'div', ui.timingTimed, {
+        cls: 'gev-dp-timing-fit',
+        attrs: { 'data-role': 'timing-fit' },
+      });
+      ui.timingFitText = el(doc, 'span', ui.timingFit, {
+        cls: 'gev-dp-note',
+      });
+      ui.timingFitButton = el(doc, 'button', ui.timingFit, {
+        cls: 'data-toggle-chip',
+        attrs: { type: 'button', 'data-action': 'timing-use-speed' },
+      });
+      ui.timingMode = el(doc, 'div', ui.timing, {
+        cls: 'gev-dp-timing-mode',
+        attrs: { 'data-role': 'timing-mode' },
+      });
+      ui.timingModeText = el(doc, 'span', ui.timingMode, {
+        cls: 'gev-dp-note',
+        text: t(
+          'The interval applies to the camera Timed shot. The plan is not changed until you switch.',
+        ),
+      });
+      ui.timingUseTimed = el(doc, 'button', ui.timingMode, {
+        cls: 'data-toggle-chip',
+        text: t('USE TIMED SHOT'),
+        attrs: { type: 'button', 'data-action': 'timing-use-timed' },
+      });
+      ui.timingTerrain = el(doc, 'p', ui.timing, {
+        cls: 'gev-dp-warning',
+        attrs: { 'data-role': 'timing-terrain', 'data-tone': 'warn' },
+      });
+      ui.timingSuite = el(doc, 'div', ui.timing, {
+        cls: 'gev-dp-timing-suite',
+        attrs: { 'data-role': 'timing-suite' },
+      });
+      // The long readout (footprint, overlap, shutter table, explanations)
+      // is kept, folded into Details.
+      ui.captureReadout = el(doc, 'div', ui.timing, {
+        attrs: { 'data-role': 'capture-readout' },
+      });
+      // Visible lines go here; the long ones go into Details below it. Both
+      // stay in the readout, so it keeps its text and its data attributes.
+      ui.captureAlerts = el(doc, 'div', ui.captureReadout);
+      ui.captureDetails = el(doc, 'details', ui.captureReadout, {
+        cls: 'gev-dp-timing-details',
+        attrs: { 'data-role': 'capture-details' },
+      });
+      el(doc, 'summary', ui.captureDetails, { text: t('Details') });
+      ui.captureDetailsBody = el(doc, 'div', ui.captureDetails);
+      host = outer;
+    };
 
     into('area');
     ui.drawButton = el(doc, 'button', host, {
@@ -1909,8 +2106,6 @@ export function initDronePlan({
       t('Height above ground'),
       ui.agl,
     ));
-    ui.front = slider(t('Front overlap'), 50, 98, 0.5);
-    ({ out: ui.frontOut } = field(t('Front overlap'), ui.front));
     ui.side = slider(t('Side overlap'), 40, 95, 1);
     ({ out: ui.sideOut } = field(t('Side overlap'), ui.side));
 
@@ -2247,18 +2442,8 @@ export function initDronePlan({
       ui.photoSpacing,
       { value: false },
     ));
-    ui.captureReadout = el(doc, 'div', host, {
-      attrs: { 'data-role': 'capture-readout' },
-    });
+    buildTimingSection({ field, select });
     into('flight');
-    ui.speed = lslider(t('Speed'), {
-      minM: MIN_PLAN_SPEED_MS,
-      maxM: 15,
-      stepM: 0.1,
-      stepFt: 0.5,
-      kind: 'speed',
-    });
-    ({ out: ui.speedOut } = field(t('Speed'), ui.speed));
     ui.battery = el(doc, 'input', null, {
       cls: 'pp-text-input gev-dp-text',
       attrs: {
@@ -2788,6 +2973,62 @@ export function initDronePlan({
       syncControls();
       schedule();
     });
+    // Timed-shot interval: typing a usable number updates the figures at
+    // once; leaving the field with something unusable keeps the old value and
+    // says so (the same rule as the camera minimum field).
+    ui.timedInterval.addEventListener('input', () => {
+      const n = cleanTimedIntervalS(ui.timedInterval.value);
+      if (n == null) return;
+      state.timedReject = false;
+      o.timedIntervalS = n;
+      syncControls();
+      schedule();
+    });
+    ui.timedInterval.addEventListener('change', () => {
+      const raw = String(ui.timedInterval.value ?? '').trim();
+      if (raw === '') {
+        o.timedIntervalS = null;
+        state.timedReject = false;
+      } else {
+        const n = cleanTimedIntervalS(raw);
+        if (n == null) state.timedReject = true;
+        else {
+          o.timedIntervalS = n;
+          state.timedReject = false;
+        }
+      }
+      syncControls();
+      schedule();
+    });
+    ui.timingChipButtons.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        o.timedIntervalS = cleanTimedIntervalS(
+          chip.getAttribute('data-seconds'),
+        );
+        state.timedReject = false;
+        syncControls();
+        schedule();
+      });
+    });
+    ui.timingClear.addEventListener('click', () => {
+      o.timedIntervalS = null;
+      state.timedReject = false;
+      syncControls();
+      schedule();
+    });
+    ui.timingFitButton.addEventListener('click', () => {
+      // The one place the interval panel changes the speed, and only on a click.
+      const ms = Number(ui.timingFit.getAttribute('data-speed-ms'));
+      if (!(ms > 0)) return;
+      o.speedMs = ms;
+      syncControls();
+      schedule();
+    });
+    ui.timingUseTimed.addEventListener('click', () => {
+      o.captureMode = 'timed';
+      syncControls();
+      schedule();
+    });
     ui.continuous.addEventListener('change', () => {
       o.continuousRoute = ui.continuous.checked === true;
       syncControls();
@@ -2857,6 +3098,9 @@ export function initDronePlan({
         orbit ? '' : heightText(Math.min(o.aglM, AGL_CAP_M)),
         orbit ? '' : `${num(o.frontOverlap)}% / ${num(o.sideOverlap)}%`,
         captureStepLabel(o.captureMode),
+        o.captureMode === 'timed' && o.timedIntervalS != null
+          ? t('{n} s', { n: num(o.timedIntervalS, 1) })
+          : '',
       ],
       orbits: [
         lengthText(o.orbitRadiusM ?? result?.plan?.options?.orbitRadiusM ?? 40),
@@ -3393,7 +3637,13 @@ export function initDronePlan({
     ui.continuousRow.hidden = !surveyCapture;
     ui.continuousNote.hidden = !surveyCapture;
     ui.speed.value = String(Math.round(speedFromMs(o.speedMs) * 10) / 10);
-    ui.speedOut.textContent = speedText(o.speedMs);
+    ui.speedOut.textContent = speedWithMphText(o.speedMs);
+    o.timedIntervalS = cleanTimedIntervalS(o.timedIntervalS);
+    // Do not rewrite what is being typed when it already means the same number.
+    if (cleanTimedIntervalS(ui.timedInterval.value) !== o.timedIntervalS) {
+      ui.timedInterval.value =
+        o.timedIntervalS == null ? '' : String(o.timedIntervalS);
+    }
     ui.battery.value = String(o.batteryMin);
     ui.enum.value = String(
       state.wpml.droneEnumValue ?? preset.wpml?.droneEnumValue ?? '',
@@ -3451,14 +3701,278 @@ export function initDronePlan({
     renderPaths();
     renderObstacleStatus();
     renderObstacles();
+    renderTiming();
     renderCaptureReadout();
     renderStepLines();
+  }
+
+  /**
+   * The compact "Speed & photo timing" block. Everything here is read from
+   * the current settings with the same math the plan uses (the along-track
+   * footprint, speed x interval); a setting that cannot give a number gives
+   * no number. Nothing here changes the speed, the height or the plan: the
+   * only controls that do are the ones the person presses.
+   */
+  function renderTiming() {
+    if (!ui.timing) return;
+    const o = state.options;
+    const orbit = o.pattern === 'orbit';
+    const timed = o.captureMode === 'timed';
+    const show = (node, on) => {
+      node.hidden = !on;
+    };
+    const tone = (node, value) => {
+      if (value) node.setAttribute('data-tone', value);
+      else node.removeAttribute('data-tone');
+      node.style.color = value ? (WARNING_TONE_COLOR[value] ?? '') : '';
+    };
+    const preset = presetWithPhotoInterval(
+      getPreset(o.presetId),
+      o.minPhotoIntervalS,
+    );
+    const requestedMs = effectiveSpeedMs(o.speedMs, preset);
+
+    // Requested vs planned speed: the plan can lower the speed in Stop mode.
+    const plan = !state.dirty && !state.busy ? state.result?.plan : null;
+    const lowered =
+      plan && Number(plan.speedMs) > 0 && requestedMs - plan.speedMs > 1e-6;
+    let loweredFor = t('blur at this shutter');
+    if (plan?.speedLimitedBy === 'camera')
+      loweredFor = t('the camera interval');
+    show(ui.timingPlanned, Boolean(lowered) && !orbit);
+    ui.timingPlanned.textContent = lowered
+      ? t(
+          'The plan flies at {planned}, not the {requested} you asked for: lowered for {why}.',
+          {
+            planned: speedWithMphText(plan.speedMs),
+            requested: speedWithMphText(requestedMs),
+            why: loweredFor,
+          },
+        )
+      : '';
+    tone(ui.timingPlanned, lowered ? 'warn' : null);
+
+    show(ui.timingRec, !orbit);
+    show(ui.timingTimed, !orbit && timed);
+    show(ui.timingMode, !orbit && !timed);
+    const terrainOff =
+      !orbit &&
+      !state.dirty &&
+      state.result &&
+      state.result.terrainComplete === false;
+    show(ui.timingTerrain, Boolean(terrainOff));
+    ui.timingTerrain.textContent = terrainOff
+      ? t(
+          'Terrain heights are incomplete. The interval assumes the planned height above ground; the real footprint can differ.',
+        )
+      : '';
+    for (const key of ['data-seconds', 'data-desired-m', 'data-speed-ms'])
+      ui.timingRec.removeAttribute(key);
+    for (const key of [
+      'data-front',
+      'data-state',
+      'data-seconds',
+      'data-speed-ms',
+    ]) {
+      ui.timingResult.removeAttribute(key);
+      ui.timingFit.removeAttribute(key);
+    }
+    ui.timingSuite.replaceChildren();
+    show(ui.timingSuite, false);
+    show(ui.timingResult, false);
+    show(ui.timingUnder, false);
+    show(ui.timingFit, false);
+    show(ui.timingIntervalNote, state.timedReject === true);
+    ui.timingIntervalNote.textContent =
+      state.timedReject === true
+        ? t(
+            'That interval was not used: enter a positive number of seconds, up to {max}.',
+            { max: num(MAX_TIMED_INTERVAL_S) },
+          )
+        : '';
+    ui.timedInterval.setAttribute(
+      'aria-invalid',
+      state.timedReject === true ? 'true' : 'false',
+    );
+    if (orbit) return;
+
+    let figs = null;
+    try {
+      figs = captureFigures({
+        preset,
+        aglM: Math.min(Math.max(Number(o.aglM) || 0, MIN_AGL_M), AGL_CAP_M),
+        tiltDeg: captureTiltDeg(o),
+        frontOverlap: o.frontOverlap,
+        sideOverlap: o.sideOverlap,
+        photoSpacingM: null,
+        speedMs: requestedMs,
+        shutterDenominator: o.shutterDenominator,
+      });
+    } catch {
+      figs = null;
+    }
+    const timing = figs
+      ? timingFigures({
+          alongM: figs.footprint.alongM,
+          speedMs: requestedMs,
+          frontOverlapPct: o.frontOverlap,
+          timedIntervalS: timed ? o.timedIntervalS : null,
+          minIntervalS: preset.minPhotoIntervalS,
+        })
+      : null;
+    if (!timing) {
+      ui.timingRecValue.textContent = '–';
+      ui.timingRecNote.textContent = t(
+        'Cannot be calculated for these settings: check the camera tilt and height.',
+      );
+      tone(ui.timingRecNote, 'warn');
+      return;
+    }
+    ui.timingRec.setAttribute(
+      'data-seconds',
+      String(timing.recommendedIntervalS),
+    );
+    ui.timingRec.setAttribute('data-desired-m', String(timing.desiredSpacingM));
+    ui.timingRec.setAttribute('data-speed-ms', String(requestedMs));
+    ui.timingRecValue.textContent = t('{n} s', {
+      n: num(timing.recommendedIntervalS, 1),
+    });
+    const under = timing.recommendedIntervalS + 1e-9 < preset.minPhotoIntervalS;
+    ui.timingRecNote.textContent = under
+      ? t(
+          'for {front}% front overlap at {speed}. Under the camera minimum of {min} s: slow to {limit} or lower the overlap.',
+          {
+            front: pct(o.frontOverlap),
+            speed: speedWithMphText(requestedMs),
+            min: num(preset.minPhotoIntervalS, 1),
+            limit: speedWithMphText(
+              Math.max(
+                MIN_PLAN_SPEED_MS,
+                timing.desiredSpacingM / preset.minPhotoIntervalS,
+              ),
+            ),
+          },
+        )
+      : t('for {front}% front overlap at {speed}', {
+          front: pct(o.frontOverlap),
+          speed: speedWithMphText(requestedMs),
+        });
+    tone(ui.timingRecNote, under ? 'warn' : null);
+
+    if (timed && timing.chosen) {
+      const c = timing.chosen;
+      show(ui.timingResult, true);
+      ui.timingResult.setAttribute('data-front', String(c.frontPct));
+      ui.timingResult.setAttribute('data-state', c.state);
+      ui.timingResult.setAttribute('data-seconds', String(c.intervalS));
+      ui.timingResult.textContent =
+        c.state === 'gap'
+          ? t(
+              '{s} s at {speed} leaves a gap: photos {gap} apart do not touch ({along} footprint). Wanted {want}% front overlap.',
+              {
+                s: num(c.intervalS, 1),
+                speed: speedWithMphText(requestedMs),
+                gap: lengthText(c.spacingM),
+                along: lengthText(figs.footprint.alongM),
+                want: pct(o.frontOverlap),
+              },
+            )
+          : t(
+              '{s} s at {speed} gives {front}% front overlap (wanted {want}%).',
+              {
+                s: num(c.intervalS, 1),
+                speed: speedWithMphText(requestedMs),
+                front: pct(c.frontPct),
+                want: pct(o.frontOverlap),
+              },
+            );
+      tone(
+        ui.timingResult,
+        c.state === 'gap' ? 'bad' : c.state === 'short' ? 'warn' : null,
+      );
+      if (c.underCameraMin) {
+        show(ui.timingUnder, true);
+        ui.timingUnder.textContent = t(
+          '{s} s is under the camera minimum of {min} s: the camera may skip pictures, so this overlap is theoretical.',
+          {
+            s: num(c.intervalS, 1),
+            min: num(preset.minPhotoIntervalS, 1),
+          },
+        );
+        tone(ui.timingUnder, 'bad');
+      }
+      if (c.state !== 'meets' && c.fitSpeedMs != null) {
+        show(ui.timingFit, true);
+        ui.timingFit.setAttribute('data-speed-ms', String(c.fitSpeedMs));
+        ui.timingFitText.textContent = t(
+          'To reach {want}% with {s} s, fly at {speed}.',
+          {
+            want: pct(o.frontOverlap),
+            s: num(c.intervalS, 1),
+            speed: speedWithMphText(c.fitSpeedMs),
+          },
+        );
+        ui.timingFitButton.textContent = t('USE {speed}', {
+          speed: speedText(c.fitSpeedMs),
+        });
+      }
+    }
+
+    // Plan all passes: one interval, a different overlap on each pass.
+    const passes = state.suite?.passes;
+    if (timed && passes?.length && !state.suiteBusy) {
+      const rows = suiteTimingRows(passes, o.timedIntervalS);
+      if (rows.length) {
+        show(ui.timingSuite, true);
+        el(doc, 'p', ui.timingSuite, {
+          cls: 'gev-dp-note',
+          text: t(
+            'Plan all passes: each pass has its own height, tilt and speed, so one interval gives each its own overlap.',
+          ),
+        });
+        const list = el(doc, 'ul', ui.timingSuite, { cls: 'gev-dp-warnings' });
+        for (const row of rows) {
+          const li = el(doc, 'li', list, {
+            attrs: {
+              'data-role': 'timing-suite-row',
+              'data-pass': row.id,
+              ...(row.frontPct == null
+                ? {}
+                : { 'data-front': String(row.frontPct) }),
+            },
+            text:
+              row.frontPct == null
+                ? t(
+                    '{pass}: {speed}, about {s} s between pictures for {want}% front.',
+                    {
+                      pass: row.label,
+                      speed: speedText(row.speedMs),
+                      s: num(row.recommendedIntervalS, 1),
+                      want: pct(row.desiredFrontPct),
+                    },
+                  )
+                : t('{pass}: {speed}, {front}% front (wanted {want}%).', {
+                    pass: row.label,
+                    speed: speedText(row.speedMs),
+                    front: pct(row.frontPct),
+                    want: pct(row.desiredFrontPct),
+                  }),
+          });
+          const toneName =
+            row.state === 'gap' ? 'bad' : row.state === 'short' ? 'warn' : null;
+          if (toneName) {
+            li.setAttribute('data-tone', toneName);
+            li.style.color = WARNING_TONE_COLOR[toneName];
+          }
+        }
+      }
+    }
   }
 
   function renderCaptureReadout() {
     const box = ui.captureReadout;
     if (!box) return;
-    box.replaceChildren();
+    ui.captureAlerts.replaceChildren();
     for (const key of [
       'data-seconds',
       'data-photo-m',
@@ -3475,16 +3989,29 @@ export function initDronePlan({
     const o = state.options;
     const interval = isContinuousCapture(o.captureMode);
     box.hidden = !interval;
+    ui.captureDetailsBody.replaceChildren();
     if (!interval) return;
+    // Short, important lines stay in the box. The long explanations go into
+    // Details; the cautions in there are counted in one visible line.
+    let cautionCount = 0;
     const say = (text, role, tone) => {
-      const node = el(doc, 'p', box, {
-        cls: tone ? 'gev-dp-warning' : 'gev-dp-note',
-        text,
-        attrs: {
-          'data-role': role,
-          ...(tone ? { 'data-tone': tone } : {}),
+      const folded =
+        FOLDED_CAPTURE_ROLES.has(role) ||
+        !(tone === 'bad' || VISIBLE_CAPTURE_ROLES.has(role));
+      if (folded && tone === 'warn') cautionCount += 1;
+      const node = el(
+        doc,
+        'p',
+        folded ? ui.captureDetailsBody : ui.captureAlerts,
+        {
+          cls: tone ? 'gev-dp-warning' : 'gev-dp-note',
+          text,
+          attrs: {
+            'data-role': role,
+            ...(tone ? { 'data-tone': tone } : {}),
+          },
         },
-      });
+      );
       if (tone && WARNING_TONE_COLOR[tone])
         node.style.color = WARNING_TONE_COLOR[tone];
       return node;
@@ -3524,11 +4051,24 @@ export function initDronePlan({
         photoSpacingM: o.photoSpacingM,
         speedMs: o.speedMs,
         shutterDenominator: o.shutterDenominator,
+        captureMode: o.captureMode,
+        timedIntervalS: o.timedIntervalS,
       });
     } catch (err) {
       figureError = err;
       figs = null;
     }
+    const finishReadout = () => {
+      if (cautionCount > 0) {
+        say(
+          t('{n} cautions about pausing, resuming and light: see Details.', {
+            n: num(cautionCount),
+          }),
+          'capture-cautions',
+          'warn',
+        );
+      }
+    };
     const saySafety = () => {
       say(t(PAUSE_MODEL_NOTE), 'capture-wind', 'warn');
       say(
@@ -3570,6 +4110,8 @@ export function initDronePlan({
         'capture-overlap-break',
         'warn',
       );
+      // saySafety is the last thing every path says: close the readout here.
+      finishReadout();
     };
     if (o.pattern === 'orbit') {
       say(
@@ -3745,7 +4287,7 @@ export function initDronePlan({
       ),
       'capture-light',
     );
-    const table = el(doc, 'ul', box, {
+    const table = el(doc, 'ul', ui.captureDetailsBody, {
       cls: 'gev-dp-warnings',
       attrs: { 'data-role': 'capture-shutter-table' },
     });
@@ -3764,43 +4306,34 @@ export function initDronePlan({
         (max, item) => Math.max(max, item.waypointCount || 0),
         0,
       );
+      const photoCount = num(state.result.totals.photoCount);
       say(
         figs.seconds < figs.minPhotoIntervalS
           ? t(
-              'Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum. Waypoints in each file: {waypoints}. Largest file: {max} waypoints.',
-              {
-                photos: num(state.result.totals.photoCount),
-                waypoints:
-                  missions.map((item) => num(item.waypointCount)).join(' / ') ||
-                  num(0),
-                max: num(maxWp),
-              },
+              'Station count {photos} is theoretical, not photos the camera will take. The interval is under the camera minimum.',
+              { photos: photoCount },
             )
           : o.captureMode === 'timed'
             ? t(
-                'Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand. Waypoints in each file: {waypoints}. Largest file: {max} waypoints.',
-                {
-                  photos: num(state.result.totals.photoCount),
-                  waypoints:
-                    missions
-                      .map((item) => num(item.waypointCount))
-                      .join(' / ') || num(0),
-                  max: num(maxWp),
-                },
+                'Estimated stations in the plan: {photos}. This is not a count of photos the camera will take. You start the timed shot by hand.',
+                { photos: photoCount },
               )
-            : t(
-                'Photos in the plan: {photos}. Waypoints in each file: {waypoints}. Largest file: {max} waypoints.',
-                {
-                  photos: num(state.result.totals.photoCount),
-                  waypoints:
-                    missions
-                      .map((item) => num(item.waypointCount))
-                      .join(' / ') || num(0),
-                  max: num(maxWp),
-                },
-              ),
+            : t('Photos in the plan: {photos}.', { photos: photoCount }),
         'capture-counts',
         figs.seconds < figs.minPhotoIntervalS ? 'bad' : undefined,
+      );
+      // Which files hold which waypoints is detail: it goes in Details.
+      say(
+        t(
+          'Waypoints in each file: {waypoints}. Largest file: {max} waypoints.',
+          {
+            waypoints:
+              missions.map((item) => num(item.waypointCount)).join(' / ') ||
+              num(0),
+            max: num(maxWp),
+          },
+        ),
+        'capture-waypoints',
       );
       const minutes = o.usableBatteryMin;
       const battery = continuousBatteryLines(state.result, minutes);
@@ -5163,6 +5696,12 @@ export function initDronePlan({
     state.options.photoSpacingM = cleanPhotoSpacingM(
       state.options.photoSpacingM,
     );
+    // A plan saved before this setting has no interval; do not keep the last
+    // plan's. The planDoc check already dropped unusable numbers.
+    state.options.timedIntervalS = cleanTimedIntervalS(
+      plan.options.timedIntervalS,
+    );
+    state.timedReject = false;
     // Absence in the file is unset. Do not keep a previous plan's override.
     state.options.minPhotoIntervalS = cleanMinPhotoIntervalS(
       plan.options.minPhotoIntervalS,
@@ -5363,6 +5902,11 @@ export function initDronePlan({
     }
     if (Object.hasOwn(patch, 'photoSpacingM')) {
       o.photoSpacingM = cleanPhotoSpacingM(patch.photoSpacingM);
+      plan = true;
+    }
+    if (Object.hasOwn(patch, 'timedIntervalS')) {
+      o.timedIntervalS = cleanTimedIntervalS(patch.timedIntervalS);
+      state.timedReject = false;
       plan = true;
     }
     if (Object.hasOwn(patch, 'continuousRoute')) {

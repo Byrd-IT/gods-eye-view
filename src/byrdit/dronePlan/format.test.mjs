@@ -10,6 +10,7 @@ import {
   lengthText,
   planErrorText,
   speedText,
+  speedWithMphText,
   warningText,
   warningTone,
 } from './format.js';
@@ -119,6 +120,19 @@ test('number formatting', () => {
   assert.equal(distanceText(1234), '1.23 km');
   assert.equal(durationText(14 * 60), '14 min');
   assert.equal(durationText(65 * 60), '1 h 05 min');
+});
+
+test('speedWithMphText gives the unit chosen and miles per hour (15 mph = 6.7056 m/s)', () => {
+  assert.equal(speedWithMphText(6.7056), '6.7 m/s · 15.0 mph');
+  assert.equal(speedWithMphText(7.15264), '7.2 m/s · 16.0 mph');
+  setUnitSystem('ft');
+  try {
+    assert.equal(speedWithMphText(6.7056), '22.0 ft/s · 15.0 mph');
+    // 15 ft/s is NOT 15 mph: it is about 10.2 mph.
+    assert.equal(speedWithMphText(15 * 0.3048), '15.0 ft/s · 10.2 mph');
+  } finally {
+    setUnitSystem('m');
+  }
 });
 
 test('feet: every length, speed and warning is in the chosen unit', () => {

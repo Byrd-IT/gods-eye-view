@@ -271,9 +271,11 @@ test('outward: time and photo totals include the turn; WPML orders photo, turn, 
   const { waylinesWpml } = buildMissionFiles(a.missions[0], a.plan);
   const groups = waylinesWpml.split('<wpml:actionGroup>').slice(1);
   const seq = groups.filter((g) => g.includes('<wpml:actionGroupMode>sequence<'));
-  // One ordered tilt-then-photo group per outward shot, plus the mission's
-  // first waypoint; never two photos in one group, never a yaw action.
-  assert.equal(seq.length, stops + 1);
+  // Every photo waypoint holds one ordered tilt-then-photo group (each waypoint
+  // states its own gimbal pitch), the outward shots among them; never two
+  // photos in one group, never a yaw action.
+  assert.equal(seq.length, a.totals.photoCount);
+  assert.ok(seq.length >= stops, 'at least one group per outward shot');
   for (const g of seq) {
     const funcs = [...g.matchAll(/<wpml:actionActuatorFunc>(\w+)</g)].map((m) => m[1]);
     assert.deepEqual(funcs, ['gimbalRotate', 'takePhoto']);

@@ -801,6 +801,11 @@ export const ACTION_DESCRIPTIONS = {
             'For options: a catalog aircraft name or preset id, such as Mini 5 Pro or dji-phantom-4. An unknown name returns no match.',
           $position: 1,
         },
+        timedIntervalS: {
+          description:
+            'For options: Timed-shot interval in seconds, as set in DJI Fly.',
+          $position: 1,
+        },
         which: {
           description: 'For download: mission, all, or suite.',
           $position: 1,

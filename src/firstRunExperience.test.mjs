@@ -1061,11 +1061,13 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // basemap-auto, the four USGS water layers in the layer enums and alias
   // hint, and the control_sky, control_history, control_imagery and
   // control_droneplan tools (aglM / orbitHeightsM maximum 457.2, the 1500 ft
-  // planning maximum, dronePlan/heightLimits.js).
-  assert.equal(block.length, 40659, 'serialized tool schema length drifted');
+  // planning maximum, dronePlan/heightLimits.js). Re-pinned again at the
+  // Speed & photo timing change (40659 -> 40803, +144): control_droneplan
+  // gains the timedIntervalS option (Timed-shot interval, seconds).
+  assert.equal(block.length, 40803, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'e47b8b4864048326945bd15a211a029220422f08a4091a9c1ff9d46d36a085d0',
+    '8dbf4cfedfd92f9ca1f3ecc1cfa9e203c2e6427dc53fcc50fb5ffb889eea39ab',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

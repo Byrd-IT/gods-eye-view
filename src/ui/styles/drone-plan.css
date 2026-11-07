@@ -450,3 +450,83 @@ body.gev-drone-box .cesium-widget canvas {
 .gev-dp-warning[data-level='info'] {
   opacity: 0.8;
 }
+
+/* Speed & photo timing: the speed, the wanted front overlap, one big
+   recommended interval, the interval you can set, and the result. The long
+   capture readout is folded into Details inside it. */
+.gev-dp-timing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.14));
+  border-radius: 6px;
+}
+.gev-dp-timing[hidden],
+.gev-dp-timing [hidden] {
+  display: none;
+}
+.gev-dp-timing-title {
+  margin: 0;
+  color: var(--text-dim, #8a94a0);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.gev-dp-timing-rec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.gev-dp-timing-big {
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.gev-dp-timing-rec .gev-dp-note {
+  flex: 1 1 100%;
+  margin: 0;
+}
+.gev-dp-timing-timed,
+.gev-dp-timing-suite {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.gev-dp-timing-chips,
+.gev-dp-timing-fit,
+.gev-dp-timing-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.gev-dp-timing .gev-dp-note,
+.gev-dp-timing .gev-dp-warning {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.gev-dp-timing input[aria-invalid='true'] {
+  outline: 1px solid #ff6b6b;
+}
+.gev-dp-timing-details > summary {
+  cursor: pointer;
+  color: var(--text-dim, #8a94a0);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.gev-dp-timing-details > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}

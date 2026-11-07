@@ -78,7 +78,14 @@ if (cmd === 'compare') {
   const xml = read(a);
   const { mission, plan } = missionOf(xml);
   process.exit(
-    report(compareWaylines(buildMissionFiles(mission, plan).waylinesWpml, xml)),
+    report(
+      compareWaylines(
+        // DJI Fly's own re-save has no gimbalRotate on every waypoint.
+        buildMissionFiles(mission, plan, { explicitWaypointGimbal: false })
+          .waylinesWpml,
+        xml,
+      ),
+    ),
   );
 } else {
   console.error('usage: compare | rewrite | selfcheck (see the file header)');

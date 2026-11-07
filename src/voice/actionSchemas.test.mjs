@@ -76,7 +76,9 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // (control_history/sky/imagery/droneplan, byrdit-open and basemap-auto in
     // set_map_stack, the four USGS water layers in the layer enums and the
     // water alias hint, and control_droneplan aglM/orbitHeightsM maximum 457.2).
-    '8a4545b127bbc5768e0c24c465f4822333a5fca6a07f694d526b927cd7b1948f',
+    // Drone Flight Plan voice: options accepts timedIntervalS (seconds, the
+    // Timed-shot interval); status reports speedMph, captureMode and the same.
+    'e1c34163de708f57d944aa8bae4ce884dc756faf2f47a606d53ea202095ce27b',
   );
 });
 

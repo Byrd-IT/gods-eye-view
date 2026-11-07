@@ -34,8 +34,12 @@ function write(input) {
     routeM: 1234,
     durationS: 567,
   };
+  // DJI Fly's own re-save has no gimbalRotate on every waypoint, so the
+  // equivalence is checked against the form without them. The form with them
+  // is covered in wpmlWaypointState.test.mjs.
   return buildMissionFiles(mission, { preset, speedMs: input.speedMs }, {
     createdMs: 1793387368322,
+    explicitWaypointGimbal: false,
   });
 }
 

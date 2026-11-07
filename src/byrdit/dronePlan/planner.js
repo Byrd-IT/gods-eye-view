@@ -275,6 +275,55 @@ export function presetWithPhotoInterval(preset, override) {
   return { ...preset, minPhotoIntervalS: n };
 }
 
+/** Longest Timed-shot interval the plan accepts, seconds. A sanity bound only. */
+export const MAX_TIMED_INTERVAL_S = 3600;
+
+/**
+ * The Timed-shot interval the person will set in DJI Fly, in seconds. Null
+ * means none was chosen. This is NOT the camera's minimum interval
+ * (`minPhotoIntervalS`): that is what the camera can do, this is what the
+ * person picked. Any positive number up to MAX_TIMED_INTERVAL_S is kept; a
+ * boolean, a non-number, zero, a negative or a larger value is dropped (null),
+ * not clamped. A numeric string from a field is accepted.
+ */
+export function cleanTimedIntervalS(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'boolean') return null;
+  const n =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(n) || !(n > 0) || n > MAX_TIMED_INTERVAL_S) return null;
+  return n;
+}
+
+/**
+ * Metres between photos along a survey line, before the 0.1 m rounding of
+ * writtenSpacingM. One rule for the plan, the panel and the README:
+ *  1. Timed shot with a chosen interval: speed x interval. The camera fires
+ *     on its own clock, so the spacing on the ground is how far the aircraft
+ *     flies in that time. The plan speed is never changed to fit it.
+ *  2. Distance or timed with a fixed distance: that distance.
+ *  3. Otherwise the spacing that gives the wanted front overlap.
+ * Stop capture ignores the interval: the aircraft stops for every photo.
+ */
+export function captureSpacingM(options, overlapPhotoM) {
+  if (
+    options.captureMode === 'timed' &&
+    cleanTimedIntervalS(options.timedIntervalS) != null &&
+    Number(options.speedMs) > 0
+  ) {
+    return (
+      Number(options.speedMs) * cleanTimedIntervalS(options.timedIntervalS)
+    );
+  }
+  return isContinuousCapture(options.captureMode) && options.photoSpacingM
+    ? options.photoSpacingM
+    : overlapPhotoM;
+}
+
 export const DEFAULT_OPTIONS = Object.freeze({
   presetId: DEFAULT_PRESET_ID,
   aglM: 80,
@@ -293,6 +342,10 @@ export const DEFAULT_OPTIONS = Object.freeze({
   // Seconds. Null means the aircraft preset interval. A number replaces it
   // for this plan only. Invalid input is dropped, not clamped.
   minPhotoIntervalS: null,
+  // Seconds. The Timed-shot interval the person will set in DJI Fly. Null
+  // means none chosen (the spacing comes from the wanted overlap). Used only
+  // by Timed capture on a survey pattern.
+  timedIntervalS: null,
   shutterDenominator: DEFAULT_SHUTTER_DENOMINATOR,
   cameraPresetId: DEFAULT_CAMERA_PRESET_ID,
   batteryMin: 25,
@@ -514,6 +567,7 @@ export function normalizeOptions(raw = {}, box = null) {
   o.usableBatteryMin = cleanUsableBatteryMin(o.usableBatteryMin);
   // Blank or unusable stays unset, so mode A keeps the preset interval.
   o.minPhotoIntervalS = cleanMinPhotoIntervalS(o.minPhotoIntervalS);
+  o.timedIntervalS = cleanTimedIntervalS(o.timedIntervalS);
   o.maxWaypoints = Math.floor(
     clamp(
       num(o.maxWaypoints, MAX_WAYPOINTS_PER_MISSION),
@@ -1320,10 +1374,7 @@ export function planFlight(box, rawOptions = {}) {
     else baseAngle = options.direction;
     fpInfo = footprint(preset, agl, passes[0].tiltDeg);
     spacingInfo = spacing(fpInfo, options.frontOverlap, options.sideOverlap);
-    photoSpacingM =
-      isContinuousCapture(options.captureMode) && options.photoSpacingM
-        ? options.photoSpacingM
-        : spacingInfo.photoM;
+    photoSpacingM = captureSpacingM(options, spacingInfo.photoM);
     passCount = passes.length;
     for (let p = 0; p < passes.length; p += 1) {
       const pass = passes[p];
@@ -1340,10 +1391,7 @@ export function planFlight(box, rawOptions = {}) {
       for (const line of lines) {
         const lineCapture = isContinuousCapture(options.captureMode);
         const interval = !lineCapture && options.photoMode === 'interval';
-        const rawLegSpacing =
-          lineCapture && options.photoSpacingM
-            ? options.photoSpacingM
-            : sp.photoM;
+        const rawLegSpacing = captureSpacingM(options, sp.photoM);
         // Distance and timed store the spacing the file will write, so the
         // photo count and the distance param cannot drift.
         const legSpacing = lineCapture

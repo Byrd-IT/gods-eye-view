@@ -119,8 +119,10 @@ test('the camera is tilted before the first photo of the mission and before ever
   // (a gradual tilt written on the outward waypoint).
   assert.deepEqual(m[1].funcs, ['gimbalRotate', 'takePhoto', 'gimbalEvenlyRotate']);
   assert.match(m[1].text, /gimbalEvenlyRotate<\/wpml:actionActuatorFunc>\s*<wpml:actionActuatorFuncParam>\s*<wpml:gimbalPitchRotateAngle>-?\d+(\.\d+)?</);
-  // A plain inward waypoint in the middle has just its photo.
-  assert.deepEqual(m[2].funcs, ['takePhoto']);
+  // A plain inward waypoint in the middle states its own pitch, then photos
+  // (every waypoint carries its own gimbal angle; see wpmlWaypointState.test.mjs).
+  assert.deepEqual(m[2].funcs, ['gimbalRotate', 'takePhoto']);
+  assert.match(m[2].text, /<wpml:actionGroupMode>sequence</);
 });
 
 test('a plan without outward photos is unchanged: one waypoint per stop, one photo each', () => {

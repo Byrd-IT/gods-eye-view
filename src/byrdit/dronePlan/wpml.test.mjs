@@ -164,7 +164,11 @@ test('photo at every waypoint: one group per waypoint, tilt on the first, gradua
   const funcs = all(doc, 'wpml:actionActuatorFunc').map((n) => n.text.trim());
   const count = (f) => funcs.filter((x) => x === f).length;
   assert.equal(count('takePhoto'), mission.photoCount);
-  assert.equal(count('gimbalRotate'), 1, 'a plain rotate on the first waypoint only');
+  assert.equal(
+    count('gimbalRotate'),
+    mission.waypointCount,
+    'every waypoint states its own pitch with a gimbalRotate',
+  );
   assert.equal(count('gimbalEvenlyRotate'), mission.legs.length - 1);
   assert.ok(mission.legs.length > 2, 'the test needs several legs');
   const actionIds = all(doc, 'wpml:actionId').map((n) => Number(n.text));
@@ -178,8 +182,9 @@ test('photo at every waypoint: one group per waypoint, tilt on the first, gradua
     const groups = all(mark, 'wpml:actionGroup');
     groups.forEach((g, n) => {
       assert.equal(textOf(g, 'wpml:actionTriggerType'), 'reachPoint');
-      // The first waypoint's tilt and photo are one ORDERED group (tilt first).
-      assert.equal(textOf(g, 'wpml:actionGroupMode'), i === 0 && n === 0 ? 'sequence' : 'parallel');
+      // Every photo waypoint: rotate and photo are one ORDERED group (rotate
+      // first). The gradual tilt group is parallel.
+      assert.equal(textOf(g, 'wpml:actionGroupMode'), n === 0 ? 'sequence' : 'parallel');
       assert.equal(textOf(g, 'wpml:actionGroupId'), String(n + 1), 'group ids restart at 1');
     });
     const first = groups[0];
@@ -189,7 +194,7 @@ test('photo at every waypoint: one group per waypoint, tilt on the first, gradua
     // First waypoint: tilt and photo in ONE sequence group, TILT first, so the
     // first photo is taken at the planned pitch (DJI Fly's parallel form took it
     // at the leftover pitch on the 2026-11-01 flight).
-    assert.deepEqual(fns, i === 0 ? ['gimbalRotate', 'takePhoto'] : ['takePhoto']);
+    assert.deepEqual(fns, ['gimbalRotate', 'takePhoto']);
     if (groups[1]) {
       assert.equal(groups.length, 2);
       assert.equal(textOf(groups[1], 'wpml:actionGroupStartIndex'), String(i));
@@ -845,7 +850,12 @@ test('mode A (stop at every photo) writes the same WPML as before the capture mo
       wpM: ids.map((id) => 100 + (id % 5)),
     });
     for (const mi of r.missions) {
-      const f = buildMissionFiles(mi, r.plan, { createdMs: 1793176000000 });
+      // The pinned hash is the older form, without a gimbalRotate on every
+      // waypoint; the new form is covered by wpmlWaypointState.test.mjs.
+      const f = buildMissionFiles(mi, r.plan, {
+        createdMs: 1793176000000,
+        explicitWaypointGimbal: false,
+      });
       out.push(f.waylinesWpml, f.templateKml);
     }
   }

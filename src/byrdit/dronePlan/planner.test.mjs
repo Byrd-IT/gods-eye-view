@@ -9,7 +9,9 @@ import {
   MAX_ORBIT_TARGETS,
   MAX_WAYPOINTS_PER_MISSION,
   assembleMissions,
+  cleanTimedIntervalS,
   cleanUsableBatteryMin,
+  captureSpacingM,
   estimateMission,
   footprint,
   minOrbitAglM,
@@ -1449,4 +1451,126 @@ test('an unusable camera minimum is rejected and mode A stays on the preset', ()
   });
   assert.equal(typed.speedMs, 2);
   assert.equal(typed.options.minPhotoIntervalS, 10);
+});
+
+// ---- Timed shot interval (speed & photo timing) ---------------------------
+
+const TIMED_BOX = boxAround(CENTER.lon, CENTER.lat, 400, 200);
+
+test('timed shot with a chosen interval spaces stations at speed x interval', () => {
+  // 100 m height on the Mini 5 Pro: 100 m along-track footprint. 4 m/s x 7 s = 28 m.
+  const plan = planFlight(TIMED_BOX, {
+    aglM: 100,
+    captureMode: 'timed',
+    speedMs: 4,
+    timedIntervalS: 7,
+  });
+  assert.equal(plan.options.timedIntervalS, 7);
+  assert.ok(plan.legs.every((leg) => leg.photoSpacingM === 28));
+  assert.ok(plan.legs.every((leg) => leg.waypoints.length === 2));
+  assert.equal(
+    plan.legs[0].photoCount,
+    Math.floor(plan.legs[0].lengthM / 28 + 1e-9) + 1,
+  );
+  assert.equal(plan.speedMs, 4, 'the plan speed is not changed to fit the interval');
+  const overlap = (1 - plan.legs[0].photoSpacingM / plan.footprint.alongM) * 100;
+  near(overlap, 72, 1e-9, 'front overlap at 7 s');
+});
+
+test('a chosen interval beats a fixed distance; clearing it falls back to the fixed distance', () => {
+  const withBoth = planFlight(TIMED_BOX, {
+    aglM: 100,
+    captureMode: 'timed',
+    speedMs: 4,
+    photoSpacingM: 40,
+    timedIntervalS: 5,
+  });
+  assert.ok(withBoth.legs.every((leg) => leg.photoSpacingM === 20));
+  const cleared = planFlight(TIMED_BOX, {
+    aglM: 100,
+    captureMode: 'timed',
+    speedMs: 4,
+    photoSpacingM: 40,
+    timedIntervalS: null,
+  });
+  assert.ok(cleared.legs.every((leg) => leg.photoSpacingM === 40));
+  const overlapOnly = planFlight(TIMED_BOX, {
+    aglM: 100,
+    captureMode: 'timed',
+    speedMs: 4,
+  });
+  near(overlapOnly.legs[0].photoSpacingM, 20, 1e-6, 'from 80% front overlap');
+});
+
+test('the interval is ignored by stop, distance and orbit capture', () => {
+  const base = { aglM: 100, speedMs: 4, timedIntervalS: 7 };
+  const stop = planFlight(TIMED_BOX, base);
+  near(stop.legs[0].photoSpacingM, 20, 1e-6, 'stop');
+  const distance = planFlight(TIMED_BOX, { ...base, captureMode: 'distance' });
+  near(distance.legs[0].photoSpacingM, 20, 1e-6, 'distance');
+  const orbit = planFlight(TIMED_BOX, {
+    ...base,
+    captureMode: 'timed',
+    pattern: 'orbit',
+  });
+  const orbitWithout = planFlight(TIMED_BOX, {
+    aglM: 100,
+    speedMs: 4,
+    captureMode: 'timed',
+    pattern: 'orbit',
+  });
+  assert.deepEqual(
+    orbit.legs.map((l) => l.photoSpacingM),
+    orbitWithout.legs.map((l) => l.photoSpacingM),
+  );
+});
+
+test('an interval under the camera minimum keeps the speed and says so', () => {
+  // 4 m/s x 3 s = 12 m; the Mini 5 Pro preset minimum is 5 s -> limit 2.4 m/s
+  const plan = planFlight(TIMED_BOX, {
+    aglM: 100,
+    captureMode: 'timed',
+    speedMs: 4,
+    timedIntervalS: 3,
+  });
+  assert.equal(plan.speedMs, 4, 'no silent slowdown in timed mode');
+  const note = plan.notes.find((n) => n.code === 'speed-exceeds-camera-limit');
+  assert.ok(note, 'warned');
+  assert.equal(note.params.preserved, true);
+});
+
+test('timed and distance keep 15 and 16 mph; stop mode still lowers to the camera limit', () => {
+  // 15 mph = 6.7056 m/s and 16 mph = 7.15264 m/s (python3: mph x 1609.344 / 3600)
+  for (const mph of [15, 16]) {
+    const ms = (mph * 1609.344) / 3600;
+    for (const captureMode of ['timed', 'distance']) {
+      const plan = planFlight(TIMED_BOX, { aglM: 100, captureMode, speedMs: ms });
+      assert.equal(plan.options.speedMs, ms, `${mph} mph ${captureMode} requested`);
+      assert.equal(plan.speedMs, ms, `${mph} mph ${captureMode} planned`);
+      assert.equal(plan.speedLimitedBy, null);
+    }
+    const stop = planFlight(TIMED_BOX, { aglM: 100, speedMs: ms });
+    assert.ok(stop.speedMs < ms, `${mph} mph stop is lowered to the camera limit`);
+    assert.equal(stop.speedLimitedBy, 'camera');
+    assert.ok(
+      stop.notes.some((n) => n.code === 'speed-camera-limited'),
+      'and the plan says so',
+    );
+  }
+});
+
+test('timedIntervalS is cleaned like a seconds field and survives normalizeOptions', () => {
+  assert.equal(cleanTimedIntervalS('7'), 7);
+  assert.equal(cleanTimedIntervalS(0), null);
+  assert.equal(normalizeOptions({ timedIntervalS: -1 }).options.timedIntervalS, null);
+  assert.equal(normalizeOptions({ timedIntervalS: 6.4 }).options.timedIntervalS, 6.4);
+  assert.equal(DEFAULT_OPTIONS.timedIntervalS, null);
+  assert.equal(
+    captureSpacingM({ captureMode: 'timed', timedIntervalS: 6, speedMs: 3 }, 99),
+    18,
+  );
+  assert.equal(
+    captureSpacingM({ captureMode: 'stop', timedIntervalS: 6, speedMs: 3 }, 99),
+    99,
+  );
 });

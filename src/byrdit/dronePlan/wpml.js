@@ -34,6 +34,23 @@
  *    are one SEQUENCE group (tilt first), not two parallel actions, because
  *    the first photo was taken at the leftover pitch.
  *
+ * Explicit state at every waypoint (so a paused and resumed mission, a battery
+ * swap or a split file never depends on a command given at an earlier waypoint):
+ *  - `wpml:waypointSpeed` is written in every Placemark (it always was). DJI's
+ *    reference: the speed from that waypoint to the next. No speed-reset action
+ *    exists in WPML and none is invented;
+ *  - every waypoint carries its OWN pitch-only `gimbalRotate` (absoluteAngle,
+ *    yaw and roll disabled) at the pitch of that waypoint. Before, only the
+ *    first waypoint of a file and the outward shot of a ring stop did; every
+ *    other waypoint relied on the pitch left by an earlier command. A photo
+ *    waypoint gets it in the same ordered (sequence) group, rotate then photo.
+ *    The gradual tilt (gimbalEvenlyRotate) between legs is kept.
+ *  Pass `explicitWaypointGimbal: false` to build the older form (tests only).
+ *  Not verified in DJI Fly or in the air: that a reachPoint action on a
+ *  fly-through waypoint does not slow it (a real DJI Fly file already puts a
+ *  takePhoto there), and the order of the per-waypoint rotate and a later tilt
+ *  that starts at the same waypoint (the tilt group is numbered after it).
+ *
  * Still NOT verified by a real DJI Fly file: multipleDistance interval photos
  * (legacy photoMode "interval" and captureMode "distance" write that same
  * group; this is not a claim that DJI Fly will fly it), timed capture (the
@@ -53,6 +70,7 @@ import {
 import { minShutterDenominator, SHUTTER_DENOMINATORS } from './speed.js';
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
 import { makeZip } from './zip.js';
+import { MPH_PER_MS } from './timing.js';
 import { cameraChecklistLines } from './cameraSettings.js';
 import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
 import {
@@ -297,7 +315,7 @@ ${groups}        <wpml:waypointGimbalHeadingParam>
  * not in any DJI Fly file: they keep GEV's own groups and are only renumbered
  * the same way.
  */
-function placemarks(mission, speedMs) {
+function placemarks(mission, speedMs, explicit = true) {
   const flat = [];
   for (const leg of mission.legs) {
     leg.waypoints.forEach((wp, i) => flat.push({ wp, leg, first: i === 0 }));
@@ -325,6 +343,9 @@ function placemarks(mission, speedMs) {
     // they are not the plain photo group, so the tilt is set before they run.
     const tiltFirst = missionStart && (distance || timed);
     if (tiltFirst) item.tilt.id = actionId++;
+    // The first waypoint's rotate is placed in pass 2; the others are added
+    // below when the waypoint has none of its own yet.
+    let ownRotate = missionStart;
     if (distance) {
       if (first) {
         item.groups.push({
@@ -339,10 +360,15 @@ function placemarks(mission, speedMs) {
           actions: [photoAction(actionId++)],
         });
       }
-    } else if (!timed && wp.photo && item.tilt && (missionStart || outShot)) {
+    } else if (
+      !timed &&
+      wp.photo &&
+      ((item.tilt && (missionStart || outShot)) || explicit)
+    ) {
       // The camera must be at its pitch BEFORE the photo: one ordered group,
       // tilt then photo. In a parallel group both fire at once and the first
-      // photo of the mission was taken at the leftover pitch.
+      // photo of the mission was taken at the leftover pitch. With explicit
+      // waypoint gimbal every photo waypoint is written this way.
       const tiltId = actionId++;
       item.groups.push({
         start: wp.index,
@@ -351,13 +377,24 @@ function placemarks(mission, speedMs) {
         mode: 'sequence',
         actions: [gimbalAction(tiltId, wp.pitchDeg), photoAction(actionId++)],
       });
-      item.tilt = null;
+      if (missionStart || outShot) item.tilt = null;
+      ownRotate = true;
     } else if (!timed && wp.photo) {
       item.groups.push({
         start: wp.index,
         end: wp.index,
         trigger: 'reachPoint',
         actions: [photoAction(actionId++)],
+      });
+    }
+    if (explicit && !ownRotate) {
+      // No photo group to share: a group of its own, ahead of the others so
+      // the pitch is set before a spanning photo group starts.
+      item.groups.unshift({
+        start: wp.index,
+        end: wp.index,
+        trigger: 'reachPoint',
+        actions: [gimbalAction(actionId++, wp.pitchDeg)],
       });
     }
     if (item.tilt && !tiltFirst) item.tilt.id = actionId++;
@@ -502,15 +539,25 @@ function oneShotPerWaypoint(mission) {
  * The two XML documents of one mission.
  * @param {object} mission One entry of assembleMissions().missions.
  * @param {object} plan The plan it came from.
- * @param {{ name?: string, createdMs?: number, wpml?: object }} [opts]
+ * @param {{ name?: string, createdMs?: number, wpml?: object,
+ *   explicitWaypointGimbal?: boolean }} [opts]
  */
 export function buildMissionFiles(mission, plan, opts = {}) {
   const preset = plan.preset;
   const speedMs = plan.speedMs;
+  // Every waypoint states this speed. An unusable one would be written as
+  // NaN or 0, which the aircraft would read as "use a default".
+  if (!(Number(speedMs) > 0) || !Number.isFinite(Number(speedMs))) {
+    throw new Error(`Cannot write a mission: the plan speed is ${speedMs}`);
+  }
   const created = opts.createdMs ?? Date.now();
   const author = esc(opts.name ?? 'fly');
   const config = missionConfig(preset, plan, opts.wpml);
-  const body = placemarks(oneShotPerWaypoint(mission), speedMs);
+  const body = placemarks(
+    oneShotPerWaypoint(mission),
+    speedMs,
+    opts.explicitWaypointGimbal !== false,
+  );
   const templateKml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="${WPML_NAMESPACE}">
   <Document>
@@ -641,13 +688,13 @@ function overlapLine(plan, spacingM) {
 function speedLine(plan, capture) {
   const flown = Number(plan.speedMs);
   const requested = Number(plan.options?.speedMs);
-  const text = `Speed: ${fmt1(flown)} m/s`;
   if (!(flown > 0)) return 'Speed: unknown';
+  const text = `Speed: ${fmt1(flown)} m/s (${fmt1(flown * MPH_PER_MS)} mph)`;
   if (capture !== 'stop' && Math.abs(requested - flown) < 1e-6) {
     return `${text} (requested; not slowed to the camera or blur limit)`;
   }
   if (requested - flown > 1e-6) {
-    return `${text} (requested ${fmt1(requested)} m/s; lowered so the camera can keep up)`;
+    return `${text} (requested ${fmt1(requested)} m/s, ${fmt1(requested * MPH_PER_MS)} mph; lowered so the camera can keep up)`;
   }
   return text;
 }
@@ -958,6 +1005,9 @@ function fileReadmeLines(result) {
       `  Height: ${fmt1(plan.options?.aglM)} m above ground (requested)`,
     );
     lines.push(`  ${speedLine(plan, capture)}`);
+    lines.push(
+      '  Every waypoint states the plan speed and its own gimbal pitch, so a resumed file does not depend on an earlier waypoint. Not verified in DJI Fly.',
+    );
     lines.push(
       `  Spacing: ${spacingM > 0 ? `${fmt1(spacingM)} m` : 'unknown'}`,
     );

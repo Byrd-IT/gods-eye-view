@@ -5,7 +5,8 @@
  * control and does not change the panel. It calls the handle methods the
  * buttons already call, and it never puts caller text into an error.
  */
-import { MIN_AGL_M, AGL_CAP_M } from './planner.js';
+import { MIN_AGL_M, AGL_CAP_M, MAX_TIMED_INTERVAL_S } from './planner.js';
+import { MPH_PER_MS } from './timing.js';
 import { getPreset, kmzStatus, listPresets } from './presets.js';
 import { MODES, modeFor } from './recommend.js';
 import { MIN_PLAN_SPEED_MS, SHUTTER_DENOMINATORS } from './speed.js';
@@ -133,6 +134,17 @@ export function createDronePlanVoice(handle) {
       frontOverlap: options.frontOverlap ?? null,
       sideOverlap: options.sideOverlap ?? null,
       speedMs: options.speedMs ?? null,
+      // The same speed in miles per hour, one decimal: the unit a pilot reads.
+      speedMph:
+        typeof options.speedMs === 'number' && Number.isFinite(options.speedMs)
+          ? Math.round(options.speedMs * MPH_PER_MS * 10) / 10
+          : null,
+      // The trigger and, for Timed shot, the interval (seconds) the person
+      // will set in DJI Fly. Null: none chosen. Not the camera minimum.
+      captureMode: ['distance', 'timed'].includes(options.captureMode)
+        ? options.captureMode
+        : 'stop',
+      timedIntervalS: options.timedIntervalS ?? null,
       photoMode: options.photoMode ?? null,
       jobs: state.jobGrouping ?? null,
       areaCount: state.areas?.length ?? 0,
@@ -445,6 +457,11 @@ function readOptions(patch = {}) {
     if (!finite(patch.speedMs, MIN_PLAN_SPEED_MS, SPEED_MAX_MS))
       return { ok: false, error: OUT_OF_RANGE };
     next.speedMs = patch.speedMs;
+  }
+  if (patch.timedIntervalS != null) {
+    if (!finite(patch.timedIntervalS, 0.1, MAX_TIMED_INTERVAL_S))
+      return { ok: false, error: OUT_OF_RANGE };
+    next.timedIntervalS = patch.timedIntervalS;
   }
   if (patch.shutterDenominator != null) {
     if (!SHUTTER_DENOMINATORS.includes(patch.shutterDenominator))

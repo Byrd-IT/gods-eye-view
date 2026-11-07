@@ -14,6 +14,7 @@
  */
 import {
   cleanMinPhotoIntervalS,
+  cleanTimedIntervalS,
   normalizeLookAtPaths,
   normalizeOrbitTargets,
 } from './planner.js';
@@ -52,6 +53,9 @@ const OPTION_TYPES = Object.freeze({
   // Seconds. Only a usable number is stored. Absent means the aircraft preset.
   minPhotoIntervalS: (v) =>
     typeof v === 'number' && cleanMinPhotoIntervalS(v) === v,
+  // Seconds the person will set for the camera's Timed shot. Only a usable
+  // number is stored; absent means none chosen. Not the camera minimum.
+  timedIntervalS: (v) => typeof v === 'number' && cleanTimedIntervalS(v) === v,
   continuousRoute: (v) => typeof v === 'boolean',
   // intervalTriggerProven is not a plan field. A .gevplan file cannot set it.
   shutterDenominator: finite,
