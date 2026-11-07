@@ -3813,7 +3813,7 @@ export function initDronePlan({
           // A change since PLAN ALL (the replan is already waiting, or the
           // interval no longer matches) leaves these rows describing the old
           // plan: say so rather than mix the old plan with the new field.
-          const nowS = timed ? cleanTimedIntervalS(o.timedIntervalS) : null;
+          const nowS = cleanTimedIntervalS(o.timedIntervalS);
           if (state.dirty || rows.some((r) => r.plannedIntervalS !== nowS)) {
             const stale = el(doc, 'p', ui.timingSuite, {
               cls: 'gev-dp-note',

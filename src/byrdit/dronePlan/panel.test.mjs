@@ -4946,6 +4946,13 @@ test('timing: Plan all rows show when the single pattern is Orbit, and nothing i
   const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
   assert.ok(rows.length >= 3, 'the grid and oblique passes keep their rows');
   for (const r of rows) assert.match(r.textContent, /% front/);
+  // Each row is the 7 s the pass was planned with, worked out from that pass.
+  for (const p of w.handle.getState().suite.passes.filter((x) => x.result?.plan && x.result.plan.options.pattern !== 'orbit')) {
+    const row = rows.find((r) => r.getAttribute('data-pass') === String(p.id));
+    assert.ok(row, `${p.id} has a row`);
+    const want = (1 - writtenSpacingM(p.result.plan.speedMs * 7) / p.result.plan.footprint.alongM) * 100;
+    assert.ok(Math.abs(Number(row.getAttribute('data-front')) - want) < 1e-6, `${p.id}: ${row.getAttribute('data-front')} vs ${want}`);
+  }
   assert.equal(captureRole(w, 'timing-suite-stale'), undefined, 'a fresh PLAN ALL is not stale');
   w.handle.destroy();
 });
