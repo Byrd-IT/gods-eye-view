@@ -41,6 +41,20 @@ page.on("response", (r) => {
   const u = new URL(r.url());
   if (u.pathname.startsWith("/basemap/odm3d/")) requests.push({ path: u.pathname, status: r.status() });
 });
+// QA only, our own key from our own host name: Google answers 403 to any other referrer.
+if (process.env.QA_GOOGLE_REFERER) {
+  await page.setRequestInterception(true);
+  page.on("request", (req) => {
+    let host = "";
+    try {
+      host = new URL(req.url()).hostname;
+    } catch {
+      /* not a URL */
+    }
+    if (/(^|\.)googleapis\.com$/.test(host)) req.continue({ headers: { ...req.headers(), referer: process.env.QA_GOOGLE_REFERER } });
+    else req.continue();
+  });
+}
 page.on("pageerror", (e) => console.log("  pageerror:", e.message));
 page.on("console", (m) => {
   if (m.type() === "error") console.log("  console.error:", m.text().slice(0, 200));
@@ -187,6 +201,24 @@ const p120 = await probe();
 check("90 ft: clipping plane enabled at ground + 27.43 m", p90?.clipEnabled === true && Math.abs(p90.plane - GROUND - 27.432) < 0.05, JSON.stringify(p90));
 check("Off: clipping disabled", poff?.clipEnabled === false, JSON.stringify(poff));
 check("120 ft: plane above the 90 ft one by 9.14 m", p120?.clipEnabled === true && p90 && Math.abs(p120.plane - p90.plane - 9.144) < 0.01, `${p90?.plane} -> ${p120?.plane}`);
+
+// Fly to from the Auto map: close in, Auto would pick Google 3D and drop the model.
+// Fly to selects Byrd-IT Open first, so the model must still be there afterwards.
+await page.evaluate(async () => {
+  await window.__godsEyeView.mapStackController.setStack("basemap-auto", { intent: "user" });
+});
+await flyToBuild({ southM: 0, heightM: 20000, pitchDeg: -89 });
+await sleep(6000);
+await page.evaluate((id) => document.querySelector(`#gev-overlays-panel [data-overlay="${id}"] .gev-ov-cut [data-chip-id="fly"]`).click(), id);
+await sleep(15000);
+const afterFly = await page.evaluate(() => ({
+  active: window.__godsEyeView.mapStackController.getActiveId(),
+  cam: Math.round(window.__godsEyeView.viewer.camera.positionCartographic.height),
+}));
+console.log("after Fly to", JSON.stringify(afterFly));
+check("Fly to from Auto keeps Byrd-IT Open selected", afterFly.active === "byrdit-open", JSON.stringify(afterFly));
+check("Fly to brings the camera close to the model", afterFly.cam < 1500, JSON.stringify(afterFly));
+check("the model is still drawn after Fly to", (await probe()) !== null);
 
 // Plane-frame proof: looking straight down, the 90 ft cut leaves the model whole
 // (the tallest tree is only ~31 m), but a probe cut 8 m above the ground must
