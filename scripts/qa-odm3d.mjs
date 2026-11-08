@@ -172,6 +172,7 @@ const probe = () =>
   });
 
 const shot = async (name) => {
+  if (process.env.QA_SHORT) return; // checks only, no pictures (software GL is slow)
   // wait (<= 60 s) until every tile this view asks for has loaded
   for (let i = 0; i < 12; i += 1) {
     await page.evaluate(() => window.__godsEyeView.viewer.scene.requestRender?.());
