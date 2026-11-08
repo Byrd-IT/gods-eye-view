@@ -103,7 +103,7 @@ check("3D layer offered with canopy options", entry && entry.kind === "3d" && en
 // The app does not export Cesium: build positions with the viewer's own classes.
 const flyToBuild = ({ southM = 380, heightM = 260, pitchDeg = -38, headingDeg = 0, eastM = 0, northM = 0 } = {}) =>
   page.evaluate(
-    async ({ id, southM, heightM, pitchDeg, headingDeg, eastM, northM }) => {
+    async ({ id, southM, heightM, pitchDeg, headingDeg, eastM, northM, ground }) => {
       const { viewer } = window.__godsEyeView;
       const bounds = (await (await fetch("/basemap/config.json")).json()).overlays.layers.find((l) => l.id === id).bounds;
       const Carto = viewer.camera.positionCartographic.constructor;
@@ -112,12 +112,12 @@ const flyToBuild = ({ southM = 380, heightM = 260, pitchDeg = -38, headingDeg = 
       const rad = (d) => (d * Math.PI) / 180;
       const dLat = (southM - northM) / 111320;
       const dLon = eastM / (111320 * Math.cos(rad(lat)));
-      const position = viewer.scene.globe.ellipsoid.cartographicToCartesian(new Carto(rad(lon + dLon), rad(lat - dLat), heightM + (Number(process.env.QA_GROUND_M) || 112)));
+      const position = viewer.scene.globe.ellipsoid.cartographicToCartesian(new Carto(rad(lon + dLon), rad(lat - dLat), heightM + ground));
       viewer.camera.setView({ destination: position, orientation: { heading: rad(headingDeg), pitch: rad(pitchDeg), roll: 0 } });
       viewer.scene.requestRender?.();
       return { lon, lat };
     },
-    { id, southM, heightM, pitchDeg, headingDeg, eastM, northM },
+    { id, southM, heightM, pitchDeg, headingDeg, eastM, northM, ground: GROUND },
   );
 console.log("fly", JSON.stringify(await flyToBuild()));
 await page.evaluate((id) => {
