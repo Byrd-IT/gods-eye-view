@@ -104,7 +104,7 @@ export class Odm3dLayer {
     this.entry = entry;
     this.sampleTerrain = sampleTerrain;
     this.tileset = null;
-    this.status = 'idle'; // idle | loading | ready | error
+    this.status = 'idle'; // idle | loading | ready | failed
     this.alignedM = 0;
     this.cutFt = null;
     this.opacity = 1;
@@ -151,7 +151,7 @@ export class Odm3dLayer {
         this.status = 'ready';
         viewer.scene.requestRender?.();
       } catch (error) {
-        this.status = this.destroyed ? 'idle' : 'error';
+        this.status = this.destroyed ? 'idle' : 'failed';
         this.error = String(error?.message ?? error).slice(0, 120);
       }
     })();

@@ -501,7 +501,7 @@ test('Odm3dLayer: terrain failure keeps the manifest offset; load failure is an 
     entry: { ...entry3d(), url: '/basemap/odm3d/broken/tileset.json' },
   });
   await broken.load();
-  assert.equal(broken.status, 'error');
+  assert.equal(broken.status, 'failed');
   assert.equal(b.calls.added.length, 0);
 
   const c = fake3dCesium();
@@ -797,6 +797,10 @@ test('panel: a 3D row has Full model / Cut above 90 ft / Cut above 120 ft / Fly 
     ['false', 'false', 'true', undefined],
   );
   assert.equal(note.textContent, '');
+  panel.update({
+    layers: [layers[0], { ...layers[1], canopyFt: 120, status: 'failed' }],
+  });
+  assert.match(note.textContent, /could not be loaded/);
   chips[2].click();
   assert.equal(calls.length, 4, 'chips are bound once, not once per update');
 });

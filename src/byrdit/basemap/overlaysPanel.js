@@ -26,6 +26,13 @@ const DEFAULT_OPEN_GROUPS = Object.freeze(['lakes', 'byrd-ranch']);
 // shared tokens; raise/lower are the shared .data-toggle-chip (chipGroup.js)
 // and the opacity range is the shared .gev-quantitative-slider (ui/slider.js).
 
+/** What a 3D row says while its model loads or when it did not load. */
+function loadNote(status) {
+  if (status === 'loading') return t('Loading 3D model...');
+  if (status === 'failed') return t('The 3D model could not be loaded');
+  return '';
+}
+
 function el(doc, tag, parent, { text, cls, attrs } = {}) {
   const node = doc.createElement(tag);
   if (text != null) node.textContent = text;
@@ -328,12 +335,7 @@ export function createOverlaysPanel({
               else onCanopy(layer.id, chip === 'off' ? null : Number(chip));
             });
           }
-          row.note.textContent =
-            layer.status === 'loading'
-              ? t('Loading 3D model...')
-              : layer.status === 'error'
-                ? t('The 3D model could not be loaded')
-                : '';
+          row.note.textContent = loadNote(layer.status);
         }
         if (nextOrder.length === rows.size) {
           row.up.disabled = index === 0;
