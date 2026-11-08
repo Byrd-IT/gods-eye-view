@@ -789,3 +789,58 @@ test('panel: a 3D row has Full model / Cut above 90 ft / Cut above 120 ft / Fly 
   chips[2].click();
   assert.equal(calls.length, 4, 'chips are bound once, not once per update');
 });
+
+test('Odm3dLayer: frames are requested while tiles load and stop once the tileset has settled; camera moves restart it; destroy stops it', async () => {
+  const { Cesium, viewer } = fake3dCesium();
+  let renders = 0;
+  viewer.scene.requestRender = () => {
+    renders += 1;
+  };
+  const camListeners = [];
+  viewer.camera.moveEnd = {
+    addEventListener(fn) {
+      camListeners.push(fn);
+      return () => camListeners.splice(camListeners.indexOf(fn), 1);
+    },
+  };
+  const intervals = new Map();
+  let nextId = 1;
+  const timers = {
+    setInterval: (fn) => (intervals.set(nextId, fn), nextId++),
+    clearInterval: (id) => intervals.delete(id),
+  };
+  const progress = [];
+  const orig = Cesium.Cesium3DTileset.fromUrl;
+  Cesium.Cesium3DTileset.fromUrl = async (url, options) => {
+    const tileset = await orig(url, options);
+    tileset.tilesLoaded = false;
+    tileset.loadProgress = {
+      addEventListener(fn) {
+        progress.push(fn);
+        return () => progress.splice(progress.indexOf(fn), 1);
+      },
+    };
+    return tileset;
+  };
+  const layer = new Odm3dLayer({ Cesium, viewer, entry: entry3d(), timers });
+  await layer.load();
+  assert.equal(intervals.size, 1, 'pump runs after the tileset is added');
+  const tick = () => [...intervals.values()].forEach((fn) => fn());
+  const before = renders;
+  tick();
+  assert.equal(renders, before + 1, 'a frame per tick while loading');
+  layer.tileset.tilesLoaded = true;
+  tick();
+  tick();
+  tick();
+  assert.equal(intervals.size, 0, 'quiet after 3 loaded ticks');
+  camListeners.forEach((fn) => fn());
+  assert.equal(intervals.size, 1, 'a camera move starts it again');
+  layer.tileset.tilesLoaded = false;
+  progress.forEach((fn) => fn(3, 1));
+  assert.equal(intervals.size, 1, 'no second timer');
+  layer.destroy();
+  assert.equal(intervals.size, 0);
+  assert.equal(camListeners.length, 0);
+  assert.equal(progress.length, 0);
+});

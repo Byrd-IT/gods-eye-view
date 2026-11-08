@@ -82,7 +82,17 @@ export class Odm3dLayer {
    * @param {{Cesium: object, viewer: object, entry: object,
    *   sampleTerrain?: Function}} options
    */
-  constructor({ Cesium, viewer, entry, sampleTerrain = null }) {
+  constructor({
+    Cesium,
+    viewer,
+    entry,
+    sampleTerrain = null,
+    timers = globalThis,
+  }) {
+    this.timers = timers;
+    this._pumpTimer = null;
+    this._settled = 0;
+    this._offs = [];
     this.Cesium = Cesium;
     this.viewer = viewer;
     this.entry = entry;
@@ -120,6 +130,14 @@ export class Odm3dLayer {
         }
         this.tileset = tileset;
         viewer.scene.primitives.add(tileset);
+        // GEV draws on demand (requestRenderMode): tile decoding only moves
+        // when frames are drawn, so keep frames coming while tiles are
+        // pending and after every camera move, then go quiet again.
+        this._offs.push(
+          tileset.loadProgress?.addEventListener?.(() => this._pump()),
+          viewer.camera?.moveEnd?.addEventListener?.(() => this._pump()),
+        );
+        this._pump();
         await this._align();
         this._applyCut();
         this._applyOpacity();
@@ -132,6 +150,27 @@ export class Odm3dLayer {
       }
     })();
     return this._loading;
+  }
+
+  /** Request frames every 250 ms until the tileset reports loaded 3 times. */
+  _pump() {
+    if (this.destroyed || this._pumpTimer !== null) return;
+    this._settled = 0;
+    this._pumpTimer = this.timers.setInterval(() => {
+      const tileset = this.tileset;
+      if (this.destroyed || !tileset) return this._stopPump();
+      this.viewer.scene.requestRender?.();
+      this._settled = tileset.tilesLoaded === true ? this._settled + 1 : 0;
+      if (this._settled >= 3) this._stopPump();
+    }, 250);
+    // A pending frame request must never keep a node process alive (tests).
+    this._pumpTimer?.unref?.();
+  }
+
+  _stopPump() {
+    if (this._pumpTimer === null) return;
+    this.timers.clearInterval(this._pumpTimer);
+    this._pumpTimer = null;
   }
 
   async _align() {
@@ -229,6 +268,15 @@ export class Odm3dLayer {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this._stopPump();
+    for (const off of this._offs) {
+      try {
+        off?.();
+      } catch {
+        /* listener already gone */
+      }
+    }
+    this._offs = [];
     const { tileset, viewer } = this;
     this.tileset = null;
     if (tileset) {
