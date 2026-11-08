@@ -310,6 +310,17 @@ test('odm3d helpers: median, alignment, cut height, opacity colour, sample grid'
   assert.equal(median([null, undefined, NaN]), null);
   // terrain 94 m under a model whose ground is 112 m -> lower by 18 m
   assert.equal(alignmentOffset(112, [94, 94.5, 93.5, null]), -18);
+  assert.equal(
+    alignmentOffset(112, [0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    null,
+    'flat ellipsoid is no terrain',
+  );
+  assert.equal(alignmentOffset(112, [94, 94]), null, 'too few samples');
+  assert.equal(
+    alignmentOffset(112, [0, 94, 94.5, 93.5]),
+    -18.25,
+    'one real zero among real samples is fine',
+  );
   assert.equal(alignmentOffset(112, []), null);
   assert.equal(alignmentOffset(112, [9000]), null, 'absurd lift is refused');
   assert.ok(Math.abs(cutHeightLocal(112, 90) - (112 + 27.432)) < 1e-9);

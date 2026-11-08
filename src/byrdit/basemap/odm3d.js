@@ -39,7 +39,13 @@ export function median(values) {
  * @param {Array<number|null|undefined>} terrainHeights terrain under the model
  */
 export function alignmentOffset(groundM, terrainHeights) {
-  const terrain = median(terrainHeights ?? []);
+  const valid = (terrainHeights ?? []).filter(
+    (h) => typeof h === 'number' && Number.isFinite(h),
+  );
+  // Too few samples, or every one exactly 0: a flat ellipsoid answering for
+  // missing terrain. Lifting the model by that would bury it.
+  if (valid.length < 3 || valid.every((h) => h === 0)) return null;
+  const terrain = median(valid);
   if (terrain === null || !Number.isFinite(groundM)) return null;
   const offset = terrain - groundM;
   return Math.abs(offset) <= MAX_ALIGN_M ? offset : null;

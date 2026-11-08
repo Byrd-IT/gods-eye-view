@@ -110,6 +110,19 @@ check("3D model loaded (status ready)", ready?.status === "ready");
 check("tileset.json and tile files were served", requests.some((r) => r.path.endsWith("/tileset.json") && r.status === 200) && requests.some((r) => r.path.endsWith(".b3dm") && r.status === 200), `${requests.length} requests`);
 check("no failed 3D requests", requests.every((r) => r.status < 400), JSON.stringify(requests.filter((r) => r.status >= 400)));
 
+// A software-GL browser cannot draw the full-detail model in reasonable time;
+// QA_SSE raises the screen-space error (coarser tiles) for the pictures only.
+const coarsen = () =>
+  page.evaluate((sse) => {
+    const { viewer } = window.__godsEyeView;
+    const prims = viewer.scene.primitives;
+    for (let i = 0; i < prims.length; i += 1) {
+      const p = prims.get(i);
+      if (p?.constructor?.name === "Cesium3DTileset" && /odm3d/.test(p.resource?.url ?? "")) p.maximumScreenSpaceError = sse;
+    }
+  }, Number(process.env.QA_SSE || 24));
+await coarsen();
+
 const probe = () =>
   page.evaluate(() => {
     const { viewer } = window.__godsEyeView;
