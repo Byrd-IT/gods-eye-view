@@ -290,18 +290,28 @@ export function attachOverlays({
      * back with the Auto chip).
      */
     flyTo(id) {
-      // Enabled but not built yet (a switch between maps just removed it):
-      // build it now rather than lose the click.
-      if (!models.get(id) && state.get(id)?.enabled) evaluate();
-      const model = models.get(id);
-      if (!model) return false;
+      const entry = order.find((e) => e.id === id);
+      if (entry?.kind !== '3d' || !state.get(id)?.enabled) return false;
       Promise.resolve()
         .then(() =>
           controller.setStack?.(BYRDIT_OPEN_STACK_ID, { intent: USER_INTENT }),
         )
         .catch(() => {})
         .then(() => {
-          if (!detached && models.get(id) === model) model.flyTo();
+          if (detached || !state.get(id)?.enabled) return;
+          // Whatever the map switch did (a Google reveal can still be
+          // finishing), look at the model that exists now, building it if the
+          // layer is on but was taken away; without one, fly to the footprint.
+          if (!models.get(id)) evaluate();
+          const model = models.get(id);
+          if (model) model.flyTo();
+          else {
+            const [w, s, e, n] = entry.bounds;
+            viewer.camera?.flyTo?.({
+              destination: Cesium.Rectangle.fromDegrees(w, s, e, n),
+              duration: 1.5,
+            });
+          }
         });
       return true;
     },

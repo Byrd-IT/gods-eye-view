@@ -396,3 +396,32 @@ test('publish_odm_3d: a bad number or an unknown option never echoes its value, 
     noLeak(text, argv.join(' ').slice(0, 40));
   }
 });
+
+test('publish_odm_3d: a trailing newline does not pass the id, name, credit or tile-name checks (whole-string match)', () => {
+  const out = pyJson(`
+print(json.dumps({
+  "id": bool(p.ID_RE.fullmatch("odm-3d-ok\\n")),
+  "id_ok": bool(p.ID_RE.fullmatch("odm-3d-ok")),
+  "name": bool(p.NAME_RE.fullmatch("Shop\\n")),
+  "tile": bool(p.TILE_URI_RE.fullmatch("LOD-0/a.b3dm\\n")),
+  "tile_ok": bool(p.TILE_URI_RE.fullmatch("LOD-0/a.b3dm")),
+}))
+`);
+  assert.deepEqual(out, {
+    id: false,
+    id_ok: true,
+    name: false,
+    tile: false,
+    tile_ok: true,
+  });
+  const { rc, text } = run([
+    '--source',
+    '/x',
+    '--id',
+    'odm-3d-ok\n',
+    '--name',
+    'ok',
+  ]);
+  assert.equal(rc, 2);
+  assert.match(text, /--id must look like/);
+});

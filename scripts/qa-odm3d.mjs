@@ -131,6 +131,11 @@ await sleep(25000);
 const ready = await page.evaluate((id) => window.__gevOverlays.state().layers.find((l) => l.id === id), id);
 console.log("state", JSON.stringify(ready));
 check("3D model loaded (status ready)", ready?.status === "ready");
+const moves = await page.evaluate((id) => {
+  const n = document.querySelector(`#gev-overlays-panel [data-overlay="${id}"] .gev-ov-moves`);
+  return n ? getComputedStyle(n).display : "missing";
+}, id);
+check("a 3D row has no raise/lower chips on screen", moves === "none", moves);
 check("tileset.json and tile files were served", requests.some((r) => r.path.endsWith("/tileset.json") && r.status === 200) && requests.some((r) => r.path.endsWith(".b3dm") && r.status === 200), `${requests.length} requests`);
 check("no failed 3D requests", requests.every((r) => r.status < 400), JSON.stringify(requests.filter((r) => r.status >= 400)));
 

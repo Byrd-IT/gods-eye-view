@@ -228,27 +228,27 @@ def safe_source(host, path) -> str:
     """host:<build folder> for logs and the manifest; anything not shaped like a
     build id (a uuid) is shown as <custom> so a stray token in a path is never logged."""
     name = path.rstrip("/").rsplit("/", 1)[-1]
-    shown = name if BUILD_RE.match(name) else "<custom>"
+    shown = name if BUILD_RE.fullmatch(name) else "<custom>"
     return f"{host or 'local'}:{shown}"
 
 
 def safe_id(value) -> str:
-    return value if isinstance(value, str) and ID_RE.match(value) else "<invalid>"
+    return value if isinstance(value, str) and ID_RE.fullmatch(value) else "<invalid>"
 
 
 def parse_source(value: str):
-    m = SRC_RE.match(value)
+    m = SRC_RE.fullmatch(value)
     if not m:
         raise Fail("--source must be [host:]/absolute/path with plain characters")
     return m.group("host"), m.group("path").rstrip("/")
 
 
 def check_args(args) -> None:
-    if not ID_RE.match(args.id):
+    if not ID_RE.fullmatch(args.id):
         raise Fail("--id must look like odm-3d-<8 hex>: lower case, starts with odm- (that prefix files it under Byrd Ranch builds)")
-    if not NAME_RE.match(args.name):
+    if not NAME_RE.fullmatch(args.name):
         raise Fail("--name: 1-80 chars of letters, digits, space and / & + ( ) . , ' - (no colon)")
-    if not CREDIT_RE.match(args.credit):
+    if not CREDIT_RE.fullmatch(args.credit):
         raise Fail("--credit has characters the GEV manifest check refuses")
     if args.canopy_default_ft not in ("none", "90", "120"):
         raise Fail("--canopy-default-ft must be none, 90 or 120")
@@ -485,7 +485,7 @@ def main(argv=None) -> int:
             missing = sorted(n for n in names if n not in hashes)
             if missing:
                 raise Fail(f"tileset names {len(missing)} files that are not in the build")
-            unservable = sorted(n for n in names if not TILE_URI_RE.match(n))
+            unservable = sorted(n for n in names if not TILE_URI_RE.fullmatch(n))
             if unservable:
                 raise Fail(f"{len(unservable)} tile file names are not ones the GEV server will serve (folders and names of letters, digits, - and _ only)")
             published = dict(hashes)

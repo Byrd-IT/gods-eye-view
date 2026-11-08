@@ -68,6 +68,7 @@ request. Tile files are cached for 30 days, `tileset.json` for 60 s.
 
 ## Checks
 
-    node --test src/byrdit/basemap/odm3d.test.mjs
+    node --test src/byrdit/basemap/odm3d.test.mjs src/byrdit/basemap/odm3dSafety.test.mjs \
+                src/byrdit/basemap/publishOdm3d.test.mjs
     QA_BASE_URL=http://127.0.0.1:4191 node scripts/qa-odm3d.mjs     # rendered proof
     QA_BASE_URL=http://127.0.0.1:4191 node scripts/qa-basemap-auto.mjs

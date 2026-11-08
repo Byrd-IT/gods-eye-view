@@ -535,7 +535,7 @@ function event() {
 
 function setup3d({ session = { tileset: null } } = {}) {
   const made = [];
-  const { Cesium, viewer } = fake3dCesium();
+  const { Cesium, viewer, calls } = fake3dCesium();
   viewer.imageryLayers = {
     add() {},
     remove() {},
@@ -593,7 +593,7 @@ function setup3d({ session = { tileset: null } } = {}) {
       destroy() {},
     }),
   });
-  return { detach, controller, made, panel, session, stackCalls };
+  return { detach, controller, made, panel, session, stackCalls, calls };
 }
 
 test('attachOverlays: a 3D build is OFF until toggled, then loads once with the default 90 ft cut and the chosen opacity', async () => {
@@ -1017,20 +1017,73 @@ test('attachOverlays: raise/lower never swaps a flat layer with a 3D build and n
   ]);
 });
 
-test('attachOverlays: Fly to on a layer that is switched on but has no model yet builds it first; with Open not shown it does nothing', async () => {
-  const { detach, controller, made, stackCalls } = setup3d();
-  detach.setEnabled(THREE_D.id, true);
-  controller.switchTo('esri-imagery'); // another map: the model is taken away, the choice is kept
-  assert.deepEqual(detach.state().active, []);
-  assert.equal(
-    detach.flyTo(THREE_D.id),
-    false,
-    'Open is not shown: nothing to fly to',
-  );
-  assert.deepEqual(stackCalls, []);
-  controller.switchTo(BYRDIT_OPEN_STACK_ID);
-  assert.equal(made.length, 2, 'rebuilt when Open came back');
-  assert.equal(detach.flyTo(THREE_D.id), true);
+test('attachOverlays: Fly to on a layer that is on but has no model (another map shown): pins Open, then builds and flies the model, or flies to the footprint when it cannot', async () => {
+  // the pin really switches the map: the model is rebuilt and flown
+  const a = setup3d();
+  a.detach.setEnabled(THREE_D.id, true);
+  a.controller.switchTo('esri-imagery'); // the model is taken away, the choice is kept
+  assert.deepEqual(a.detach.state().active, []);
+  a.controller.setStack = async (id, options) => {
+    a.stackCalls.push([id, options]);
+    a.controller.switchTo(id);
+  };
+  assert.equal(a.detach.flyTo(THREE_D.id), true);
   await new Promise((r) => setImmediate(r));
-  assert.equal(made[1].calls.at(-1), 'fly');
+  assert.deepEqual(a.stackCalls, [['byrdit-open', { intent: 'user' }]]);
+  assert.equal(a.made.length, 2, 'rebuilt once Open is back');
+  assert.equal(a.made[1].calls.at(-1), 'fly');
+  assert.equal(
+    a.calls.flown.length,
+    0,
+    'no footprint flight when the model flies',
+  );
+
+  // the pin does not change the map (a Google reveal is still finishing): no model, so the footprint
+  const b = setup3d();
+  b.detach.setEnabled(THREE_D.id, true);
+  b.controller.switchTo('esri-imagery');
+  assert.equal(b.detach.flyTo(THREE_D.id), true);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(b.calls.flown.length, 1);
+  assert.deepEqual(b.calls.flown[0].destination, {
+    w: -95.1545,
+    s: 32.6896,
+    e: -95.1511,
+    n: 32.6918,
+  });
+
+  // switched off, or not a 3D build: no flight at all
+  assert.equal(b.detach.flyTo('ustopo'), false);
+  b.detach.setEnabled(THREE_D.id, false);
+  assert.equal(b.detach.flyTo(THREE_D.id), false);
+});
+
+test('Odm3dLayer: placed again when the terrain provider changes (flat fallback at load, real terrain later)', async () => {
+  const { Cesium, viewer, calls } = fake3dCesium();
+  const listeners = [];
+  viewer.scene.terrainProviderChanged = {
+    addEventListener(fn) {
+      listeners.push(fn);
+      return () => listeners.splice(listeners.indexOf(fn), 1);
+    },
+  };
+  let heights = [0, 0, 0, 0, 0, 0, 0, 0, 0]; // flat ellipsoid answering for missing terrain
+  const layer = new Odm3dLayer({
+    Cesium,
+    viewer,
+    entry: entry3d(),
+    sampleTerrain: async () => heights,
+  });
+  await layer.load();
+  assert.equal(layer.alignedM, 0, 'flat fallback: manifest offset only');
+  assert.equal(calls.added[0].modelMatrix.translation.z, 0);
+  heights = [94, 94, 94, 94, 94, 94, 94, 94, 94];
+  listeners.forEach((fn) => fn());
+  listeners.forEach((fn) => fn()); // a second change while the first runs is folded in
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(layer.alignedM, -18);
+  assert.equal(calls.added[0].modelMatrix.translation.z, -18);
+  layer.destroy();
+  assert.equal(listeners.length, 0, 'listener removed on destroy');
 });

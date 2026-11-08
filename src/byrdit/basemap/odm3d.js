@@ -142,6 +142,11 @@ export class Odm3dLayer {
         this._offs.push(
           tileset.loadProgress?.addEventListener?.(() => this._pump()),
           viewer.camera?.moveEnd?.addEventListener?.(() => this._pump()),
+          // The terrain can come back (or change) after the model was placed:
+          // place it again on the terrain that is there now.
+          viewer.scene?.terrainProviderChanged?.addEventListener?.(() =>
+            this._realign(),
+          ),
         );
         this._pump();
         await this._align();
@@ -180,6 +185,25 @@ export class Odm3dLayer {
     if (this._pumpTimer === null) return;
     this.timers.clearInterval(this._pumpTimer);
     this._pumpTimer = null;
+  }
+
+  /** Align again; one at a time, and once more if asked while running. */
+  async _realign() {
+    if (this.destroyed || !this.tileset) return;
+    if (this._aligning) {
+      this._alignAgain = true;
+      return;
+    }
+    this._aligning = true;
+    try {
+      do {
+        this._alignAgain = false;
+        await this._align();
+      } while (this._alignAgain && !this.destroyed && this.tileset);
+    } finally {
+      this._aligning = false;
+    }
+    this.viewer.scene.requestRender?.();
   }
 
   async _align() {
