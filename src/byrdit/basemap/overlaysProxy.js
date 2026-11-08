@@ -38,7 +38,15 @@ const LIVE = new Set(['live', 'live-data']);
 const KINDS = Object.freeze({
   'overlay-raster': { kind: 'raster', format: 'webp' },
   'overlay-vector': { kind: 'vector', format: 'mvt' },
+  // Our own OpenDroneMap 3D model (3D Tiles, b3dm). Not a z/x/y tile layer:
+  // the files under hires/odm3d/<id>/ are relayed one by one.
+  'overlay-3d': { kind: '3d', format: '3dtiles' },
 });
+/** Canopy heights the panel may offer, feet above local ground. */
+export const CANOPY_MAX_FT = 120;
+/** A file inside a 3D build: up to 3 plain segments, no dots-only parts. */
+export const ODM3D_FILE_ROUTE =
+  /^\/basemap\/odm3d\/([a-z0-9][a-z0-9-]{0,31})\/((?!\.{1,2}\/)(?:[A-Za-z0-9_-]{1,64}\/){0,2}[A-Za-z0-9_-]{1,96}\.(?:json|b3dm|glb|i3dm|pnts|cmpt|jpg|png))$/;
 /** Default cap (raised from 50 on 2026-11-01); env-tunable via GEV_BASEMAP_OVERLAYS_MAX_LAYERS. */
 export const DEFAULT_OVERLAY_MAX_LAYERS = 200;
 
@@ -80,6 +88,38 @@ function vectorLayers(raw) {
   return out;
 }
 
+const num = (v, lo, hi) =>
+  typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : null;
+
+/**
+ * The 3D build facts the browser needs, from an overlay-3d manifest entry.
+ * ground_m is the median bare-ground height (ODM DTM) in the model's own
+ * heights; the canopy cut is measured from it. Null = entry unusable.
+ */
+function tileset3d(raw) {
+  const groundM = num(raw?.ground_m, -500, 9000);
+  if (groundM === null) return null;
+  const offset = num(raw?.height_offset_m, -300, 300);
+  const options = (
+    Array.isArray(raw?.canopy_options_ft) ? raw.canopy_options_ft : [90, 120]
+  )
+    .map((v) => num(v, 10, CANOPY_MAX_FT))
+    .filter((v) => v !== null)
+    .slice(0, 4);
+  const def = raw?.canopy_default_ft;
+  return {
+    groundM,
+    heightOffsetM: offset ?? 0,
+    canopyOptionsFt: options,
+    canopyDefaultFt:
+      def === null || def === undefined
+        ? null
+        : options.includes(def)
+          ? def
+          : null,
+  };
+}
+
 /**
  * overlays.json -> { browser, routes }. `browser` is the `overlays` block of
  * /basemap/config.json; `routes` maps a layer id to its upstream archive,
@@ -100,17 +140,21 @@ export function composeOverlays(
     if (!LIVE.has(entry?.status)) continue;
     const type = KINDS[entry?.kind];
     const id = typeof entry?.id === 'string' ? entry.id : '';
-    const minzoom = int(entry?.minzoom, 0, 22);
-    const maxzoom = int(entry?.maxzoom, 0, 22);
+    const is3d = type?.kind === '3d';
+    // A 3D model has no zoom range: it is fetched by screen error, not by level.
+    const minzoom = is3d ? 0 : int(entry?.minzoom, 0, 22);
+    const maxzoom = is3d ? 22 : int(entry?.maxzoom, 0, 22);
     const bounds = bbox(entry?.bounds);
     if (!type || entry?.format !== type.format) continue;
     if (!ID.test(id) || routes.has(id)) continue;
     if (minzoom === null || maxzoom === null || maxzoom < minzoom) continue;
     if (!bounds || !archiveOk(entry?.archive)) continue;
+    const model = is3d ? tileset3d(entry) : null;
+    if (is3d && !model) continue;
     routes.set(id, {
       archive: String(entry.archive),
       format: type.format,
-      port: int(entry?.edge?.port, 1024, 65535),
+      port: is3d ? null : int(entry?.edge?.port, 1024, 65535),
     });
     const opacity = Number(entry?.default_opacity);
     layers.push({
@@ -118,7 +162,9 @@ export function composeOverlays(
       name: text(entry?.name, id),
       kind: type.kind,
       format: type.format,
-      url: `/basemap/overlay/${id}/{z}/{x}/{y}.${type.format}`,
+      url: is3d
+        ? `/basemap/odm3d/${id}/tileset.json`
+        : `/basemap/overlay/${id}/{z}/{x}/{y}.${type.format}`,
       minzoom,
       maxzoom,
       bounds,
@@ -128,6 +174,7 @@ export function composeOverlays(
       ...(type.kind === 'vector'
         ? { vectorLayers: vectorLayers(entry?.vector_layers) }
         : {}),
+      ...(is3d ? { model } : {}),
     });
   }
   return {
@@ -168,6 +215,48 @@ export function resolveOverlayTile(pathname, routes, settings) {
     bases: overlayBases(settings.hiresUrls, route.port),
     path: `/${route.archive}/${z}/${x}/${y}.${ext}`,
   };
+}
+
+/**
+ * Resolve /basemap/odm3d/<id>/<file> to {bases, path} (the S1 origin, which
+ * serves the published build folders as plain files), or null when the id is
+ * not an offered 3D layer or the path is not a plain file inside it.
+ * @param {string} pathname
+ * @param {ReturnType<typeof composeOverlays>['routes']|null} routes
+ * @param {{odm3dUrls: string[]}} settings
+ */
+export function resolveOdm3dFile(pathname, routes, settings) {
+  const m = ODM3D_FILE_ROUTE.exec(pathname);
+  if (!m) return null;
+  const [, id, file] = m;
+  const route = routes?.get(id);
+  if (!route || route.format !== '3dtiles' || !settings.odm3dUrls?.length)
+    return null;
+  return { bases: settings.odm3dUrls, path: `/${route.archive}/${file}` };
+}
+
+/**
+ * Origin bases for the 3D files, derived from the overlays.json location
+ * (http://host:8480/hires/m2/overlays.json -> http://host:8480/hires) unless
+ * set explicitly. File paths are not accepted for this (no local reads).
+ * @param {string[]} configSources
+ * @param {string[]} explicit
+ */
+export function odm3dBases(configSources, explicit = []) {
+  if (explicit.length) return explicit;
+  const out = [];
+  for (const source of configSources ?? []) {
+    if (!/^https?:\/\//i.test(source)) continue;
+    try {
+      const url = new URL(source);
+      const base = `${url.origin}${url.pathname.replace(/\/[^/]+\/overlays\.json$/, '')}`;
+      if (base !== url.origin + url.pathname)
+        out.push(base.replace(/\/+$/, ''));
+    } catch {
+      /* skip */
+    }
+  }
+  return out;
 }
 
 /**

@@ -9,7 +9,9 @@ import {
 import {
   DEFAULT_OVERLAY_MAX_LAYERS,
   composeOverlays,
+  odm3dBases,
   overlaysEnabled,
+  resolveOdm3dFile,
   resolveOverlayTile,
   safeErrorText,
 } from './overlaysProxy.js';
@@ -167,6 +169,15 @@ export function basemapSettingsFromEnv(env = process.env) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    // Origin(s) holding hires/odm3d/<id>/ (3D builds); default: the folder
+    // overlays.json is read from.
+    odm3dUrls: odm3dBases(
+      String(env.GEV_BASEMAP_OVERLAYS_CONFIG ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      urlList(env.GEV_BASEMAP_ODM3D_URLS),
+    ),
     naipUrls: urlList(env.GEV_BASEMAP_NAIP_URLS),
     hiresUrls: urlList(env.GEV_BASEMAP_HIRES_URLS),
     buildings: buildingsSettings(env),
@@ -983,6 +994,19 @@ export function createBasemapHandler(
         });
         if (tile) {
           await relay(req, res, tile.bases, tile.path, { kind: 'overlay' });
+          return;
+        }
+      }
+      if (overlaysOn && url.pathname.startsWith('/basemap/odm3d/')) {
+        await config();
+        const file = resolveOdm3dFile(url.pathname, overlayRoutes, {
+          odm3dUrls: settings.odm3dUrls ?? [],
+        });
+        if (file) {
+          await relay(req, res, file.bases, file.path, {
+            kind: 'odm3d',
+            meta: file.path.endsWith('/tileset.json'),
+          });
           return;
         }
       }

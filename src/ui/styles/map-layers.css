@@ -238,3 +238,21 @@
     height: 24px;
   }
 }
+
+/* 3D builds (OpenDroneMap): canopy cut chips and load note */
+.gev-ov-cut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.gev-ov-3d-note {
+  display: block;
+  font-size: 0.8em;
+  opacity: 0.8;
+}
+
+.gev-ov-3d-note:empty {
+  display: none;
+}

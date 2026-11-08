@@ -6,6 +6,7 @@
 
 const URL_PATH =
   /^\/basemap\/overlay\/[a-z0-9][a-z0-9-]{0,31}\/\{z\}\/\{x\}\/\{y\}\.(?:webp|mvt)$/;
+const URL_3D = /^\/basemap\/odm3d\/[a-z0-9][a-z0-9-]{0,31}\/tileset\.json$/;
 const TEXT = /^[A-Za-z0-9 /&+().,'-]{1,80}$/;
 const VECTOR_LAYER_ID = /^[A-Za-z0-9_]{1,40}$/;
 const int = (v, lo, hi) =>
@@ -20,6 +21,28 @@ function bounds(value) {
   return [w, s, e, n];
 }
 
+const finite = (v, lo, hi) =>
+  typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+
+/** The `model` block of a 3D layer (composed by overlaysProxy.js). */
+function normalizeModel(raw) {
+  if (!finite(raw?.groundM, -500, 9000)) return null;
+  const options = (
+    Array.isArray(raw.canopyOptionsFt) ? raw.canopyOptionsFt : []
+  )
+    .filter((v) => finite(v, 10, 120))
+    .slice(0, 4);
+  const def = options.includes(raw.canopyDefaultFt)
+    ? raw.canopyDefaultFt
+    : null;
+  return {
+    groundM: raw.groundM,
+    heightOffsetM: finite(raw.heightOffsetM, -300, 300) ? raw.heightOffsetM : 0,
+    canopyOptionsFt: options,
+    canopyDefaultFt: def,
+  };
+}
+
 /** Missing or broken = {available: false}: no overlay panel is offered. */
 export function normalizeOverlays(raw) {
   const layers = [];
@@ -27,17 +50,33 @@ export function normalizeOverlays(raw) {
   for (const entry of Array.isArray(raw?.layers) ? raw.layers : []) {
     const id = typeof entry?.id === 'string' ? entry.id : '';
     const kind = entry?.kind;
-    const format = kind === 'raster' ? 'webp' : kind === 'vector' ? 'mvt' : '';
+    const is3d = kind === '3d';
+    const format = is3d
+      ? '3dtiles'
+      : kind === 'raster'
+        ? 'webp'
+        : kind === 'vector'
+          ? 'mvt'
+          : '';
     const url =
-      typeof entry?.url === 'string' && URL_PATH.test(entry.url)
+      typeof entry?.url === 'string' &&
+      (is3d ? URL_3D.test(entry.url) : URL_PATH.test(entry.url))
         ? entry.url
         : null;
     const minzoom = int(entry?.minzoom, 0, 22);
     const maxzoom = int(entry?.maxzoom, 0, 22);
     const b = bounds(entry?.bounds);
     if (!id || seen.has(id) || !format || entry.format !== format) continue;
-    if (!url || !url.startsWith(`/basemap/overlay/${id}/`)) continue;
-    if (!url.endsWith(`.${format}`)) continue;
+    if (!url) continue;
+    if (
+      is3d
+        ? url !== `/basemap/odm3d/${id}/tileset.json`
+        : !url.startsWith(`/basemap/overlay/${id}/`)
+    )
+      continue;
+    if (!is3d && !url.endsWith(`.${format}`)) continue;
+    const model = is3d ? normalizeModel(entry.model) : null;
+    if (is3d && !model) continue;
     if (minzoom === null || maxzoom === null || maxzoom < minzoom || !b)
       continue;
     seen.add(id);
@@ -63,6 +102,7 @@ export function normalizeOverlays(raw) {
         typeof entry.credit === 'string' && TEXT.test(entry.credit)
           ? entry.credit
           : 'Byrd-IT',
+      ...(is3d ? { model } : {}),
       vectorLayers:
         kind === 'vector'
           ? (Array.isArray(entry.vectorLayers) ? entry.vectorLayers : [])

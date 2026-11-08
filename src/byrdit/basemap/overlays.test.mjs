@@ -913,6 +913,7 @@ test('grouped panel: Lakes open first, other groups collapsed, 63 rows, search b
     .map((n) => n.attrs['data-group']);
   assert.deepEqual(order, [
     'lakes',
+    'byrd-ranch',
     'topo',
     'hillshade',
     'relief',

@@ -20,7 +20,7 @@ import {
 export const OVERLAYS_PANEL_ID = 'gev-overlays-panel';
 
 /** Groups that start expanded in the card; the others open on demand. */
-const DEFAULT_OPEN_GROUPS = Object.freeze(['lakes']);
+const DEFAULT_OPEN_GROUPS = Object.freeze(['lakes', 'byrd-ranch']);
 
 // All look and layout is CSS (src/ui/styles/map-layers.css, .gev-ov-*) on the
 // shared tokens; raise/lower are the shared .data-toggle-chip (chipGroup.js)
@@ -37,7 +37,8 @@ function el(doc, tag, parent, { text, cls, attrs } = {}) {
 
 /**
  * @param {{container: object, state: {layers: object[]}, onEnabled: Function,
- *   onOpacity: Function, onMove?: Function, embedded?: boolean,
+ *   onOpacity: Function, onMove?: Function, onCanopy?: Function,
+ *   onFlyTo?: Function, embedded?: boolean,
  *   grouped?: boolean, onOpenAerial?: Function|null, doc?: object}} options
  */
 export function createOverlaysPanel({
@@ -46,6 +47,8 @@ export function createOverlaysPanel({
   onEnabled,
   onOpacity,
   onMove = () => {},
+  onCanopy = () => {},
+  onFlyTo = () => {},
   embedded = false,
   grouped = false,
   onOpenAerial = null,
@@ -173,6 +176,8 @@ export function createOverlaysPanel({
       button.removeAttribute?.('aria-busy');
       button.addEventListener('click', () => onMove(layer.id, direction));
     });
+    // A 3D model is not part of the imagery stack: nothing to raise or lower.
+    if (layer.kind === '3d') moves.hidden = true;
     const line = el(doc, 'div', row, { cls: 'gev-ov-line' });
     const range = createSlider({
       documentRef: doc,
@@ -183,6 +188,20 @@ export function createOverlaysPanel({
     });
     line.append(range);
     const out = el(doc, 'output', line, { cls: 'gev-slider-value' });
+    // 3D builds: canopy cut (Off / 90 ft / 120 ft above local ground) and a
+    // shortcut to fly to the model. Rows of flat layers have neither.
+    let cut = null;
+    let note = null;
+    if (layer.kind === '3d') {
+      cut = el(doc, 'div', row, {
+        cls: 'gev-ov-cut',
+        attrs: { role: 'group', 'aria-label': t('Cut canopy above') },
+      });
+      note = el(doc, 'span', row, {
+        cls: 'gev-ov-3d-note',
+        attrs: { role: 'status' },
+      });
+    }
     box.addEventListener('change', () =>
       onEnabled(layer.id, Boolean(box.checked)),
     );
@@ -190,6 +209,8 @@ export function createOverlaysPanel({
       onOpacity(layer.id, Number(range.value) / 100),
     );
     rows.set(layer.id, {
+      cut,
+      note,
       row,
       box,
       range,
@@ -272,6 +293,43 @@ export function createOverlaysPanel({
         row.range.disabled = !layer.enabled;
         row.range.setAttribute('aria-valuetext', `${pct}%`);
         row.out.textContent = `${pct}%`;
+        if (row.cut) {
+          const feet = layer.canopyFt ?? null;
+          syncChipGroup(row.cut, [
+            {
+              id: 'off',
+              label: t('Full model'),
+              active: feet === null,
+              title: t('Show the whole model, tree tops included'),
+            },
+            ...(layer.canopyOptionsFt ?? []).map((ft) => ({
+              id: String(ft),
+              label: `${t('Cut above')} ${ft} ft`,
+              active: feet === ft,
+              title: `${t('Hide everything higher than')} ${ft} ft ${t('above local ground')}`,
+            })),
+            { id: 'fly', label: t('Fly to'), title: t('Fly to this model') },
+          ]);
+          for (const button of row.cut.children) {
+            const chip = button.dataset.chipId;
+            if (chip === 'fly') {
+              button.removeAttribute?.('aria-pressed');
+              button.removeAttribute?.('aria-busy');
+            }
+            if (button.dataset.bound === '1') continue;
+            button.dataset.bound = '1';
+            button.addEventListener('click', () => {
+              if (chip === 'fly') onFlyTo(layer.id);
+              else onCanopy(layer.id, chip === 'off' ? null : Number(chip));
+            });
+          }
+          row.note.textContent =
+            layer.status === 'loading'
+              ? t('Loading 3D model...')
+              : layer.status === 'error'
+                ? t('The 3D model could not be loaded')
+                : '';
+        }
         if (nextOrder.length === rows.size) {
           row.up.disabled = index === 0;
           row.down.disabled = index === nextOrder.length - 1;

@@ -7,6 +7,7 @@ import {
   zoomForHeight,
 } from './naip.js';
 import { createVectorOverlayProvider } from './overlaysVector.js';
+import { Odm3dLayer, terrainSampler } from './odm3d.js';
 
 export { normalizeOverlays } from './overlaysConfig.js';
 
@@ -63,6 +64,13 @@ export function attachOverlays({
       ? createVectorOverlayProvider(Cesium, entry)
       : createNaipImageryProvider(Cesium, entry),
   createPanel = null,
+  create3d = (entry) =>
+    new Odm3dLayer({
+      Cesium,
+      viewer,
+      entry,
+      sampleTerrain: terrainSampler(Cesium, viewer),
+    }),
 }) {
   const scene = viewer.scene;
   const collection = viewer.imageryLayers;
@@ -74,10 +82,16 @@ export function attachOverlays({
   const state = new Map(
     order.map((entry) => [
       entry.id,
-      { enabled: false, opacity: entry.defaultOpacity },
+      {
+        enabled: false,
+        opacity: entry.defaultOpacity,
+        // 3D builds only: canopy cut in feet above local ground (null = off)
+        canopyFt: entry.kind === '3d' ? entry.model.canopyDefaultFt : null,
+      },
     ]),
   );
   const layers = new Map(); // id -> Cesium imagery layer
+  const models = new Map(); // id -> Odm3dLayer (3D builds)
   const credits = new Map();
   const creditObjects = new Map();
   let created = 0;
@@ -97,14 +111,44 @@ export function attachOverlays({
     destroyed += 1;
     if (!layer.isDestroyed?.()) collection.remove(layer, true);
   }
+  function removeModel(id) {
+    const model = models.get(id);
+    if (!model) return;
+    models.delete(id);
+    destroyed += 1;
+    model.destroy();
+  }
   const removeAll = () => {
     for (const id of [...layers.keys()]) removeLayer(id);
+    for (const id of [...models.keys()]) removeModel(id);
   };
+
+  function syncModel(entry, s) {
+    let model = models.get(entry.id);
+    if (!model) {
+      model = create3d(entry);
+      models.set(entry.id, model);
+      created += 1;
+      model.setOpacity(s.opacity);
+      model.setCut(s.canopyFt);
+      // Loading is async; the panel re-reads the status when it is done.
+      Promise.resolve(model.load()).then(() => {
+        if (!detached) evaluate();
+      });
+    }
+    model.setOpacity(s.opacity);
+    model.setCut(s.canopyFt);
+  }
 
   function syncLayers() {
     let added = false;
     for (const entry of order) {
       const s = state.get(entry.id);
+      if (entry.kind === '3d') {
+        if (s.enabled) syncModel(entry, s);
+        else removeModel(entry.id);
+        continue;
+      }
       if (!s.enabled) {
         removeLayer(entry.id);
         continue;
@@ -168,6 +212,14 @@ export function attachOverlays({
       enabled: state.get(entry.id).enabled,
       opacity: state.get(entry.id).opacity,
       minzoom: entry.minzoom,
+      ...(entry.kind === '3d'
+        ? {
+            canopyFt: state.get(entry.id).canopyFt,
+            canopyOptionsFt: entry.model.canopyOptionsFt,
+            status: models.get(entry.id)?.status ?? 'idle',
+            alignedM: models.get(entry.id)?.alignedM ?? 0,
+          }
+        : {}),
     })),
   });
 
@@ -189,11 +241,12 @@ export function attachOverlays({
       // zoomForHeight is only an estimate of the level Cesium draws; credit a
       // little early rather than draw tiles with no attribution.
       if (
-        layers.has(entry.id) &&
-        layerOnScreen(
-          { ...entry, minzoom: entry.minzoom - CREDIT_ZOOM_SLACK },
-          { viewBounds, zoom },
-        )
+        models.has(entry.id) ||
+        (layers.has(entry.id) &&
+          layerOnScreen(
+            { ...entry, minzoom: entry.minzoom - CREDIT_ZOOM_SLACK },
+            { viewBounds, zoom },
+          ))
       )
         texts.add(entry.credit);
     setCredits(texts);
@@ -218,6 +271,25 @@ export function attachOverlays({
       evaluate();
       return true;
     },
+    /** 3D builds: canopy cut in feet above local ground; null/0 = off. */
+    setCanopy(id, feet) {
+      const s = state.get(id);
+      const entry = order.find((e) => e.id === id);
+      if (!s || entry?.kind !== '3d') return false;
+      const ft = Number(feet);
+      if (feet === null || ft === 0) s.canopyFt = null;
+      else if (entry.model.canopyOptionsFt.includes(ft)) s.canopyFt = ft;
+      else return false;
+      evaluate();
+      return true;
+    },
+    /** 3D builds: fly the camera to the build. */
+    flyTo(id) {
+      const model = models.get(id);
+      if (!model) return false;
+      model.flyTo();
+      return true;
+    },
     /** direction 'up' = toward the top of the stack. false at the ends. */
     moveLayer(id, direction) {
       const i = order.findIndex((entry) => entry.id === id);
@@ -237,6 +309,8 @@ export function attachOverlays({
       onEnabled: (id, on) => api.setEnabled(id, on),
       onOpacity: (id, value) => api.setOpacity(id, value),
       onMove: (id, direction) => api.moveLayer(id, direction),
+      onCanopy: (id, feet) => api.setCanopy(id, feet),
+      onFlyTo: (id) => api.flyTo(id),
     });
 
   removers.push(controller.subscribe?.(() => evaluate()));
@@ -267,7 +341,7 @@ export function attachOverlays({
     evaluate,
     state: () => ({
       ...uiState(),
-      active: [...layers.keys()],
+      active: [...layers.keys(), ...models.keys()],
       stack: order.map((entry) => entry.id),
       credits: [...credits.keys()],
       created,

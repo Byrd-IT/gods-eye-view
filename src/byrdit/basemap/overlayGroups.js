@@ -13,6 +13,14 @@ export const OVERLAY_GROUPS = Object.freeze([
     title: msg('Lakes and bays (depth)'),
     test: /(^|-)(lake|bay)-depth($|-)/,
   }),
+  // Our own drone builds (OpenDroneMap): flat orthophotos and 3D models.
+  // Matched by id so saved states and share links keep working; the
+  // publish scripts name every build layer `odm-...`.
+  Object.freeze({
+    id: 'byrd-ranch',
+    title: msg('Byrd Ranch builds'),
+    test: /^odm-/,
+  }),
   Object.freeze({
     id: 'topo',
     title: msg('Topo maps'),
