@@ -546,7 +546,11 @@ function setup3d({ session = { tileset: null } } = {}) {
   viewer.scene.preUpdate = event();
   let active = BYRDIT_OPEN_STACK_ID;
   const subs = new Set();
+  const stackCalls = [];
   const controller = {
+    setStack: async (id, options) => {
+      stackCalls.push([id, options]);
+    },
     getActiveId: () => active,
     subscribe(fn) {
       subs.add(fn);
@@ -589,7 +593,7 @@ function setup3d({ session = { tileset: null } } = {}) {
       destroy() {},
     }),
   });
-  return { detach, controller, made, panel, session };
+  return { detach, controller, made, panel, session, stackCalls };
 }
 
 test('attachOverlays: a 3D build is OFF until toggled, then loads once with the default 90 ft cut and the chosen opacity', async () => {
@@ -618,7 +622,7 @@ test('attachOverlays: a 3D build is OFF until toggled, then loads once with the 
   assert.equal(made[0].calls.filter((c) => c === 'load').length, 1);
 });
 
-test('attachOverlays: canopy cut accepts only Off or the offered heights; Off/120 are applied; fly-to reaches the model', () => {
+test('attachOverlays: canopy cut accepts only Off or the offered heights; Off/120 are applied; fly-to reaches the model', async () => {
   const { detach, made } = setup3d();
   detach.setEnabled(THREE_D.id, true);
   assert.equal(detach.setCanopy(THREE_D.id, 120), true);
@@ -633,7 +637,8 @@ test('attachOverlays: canopy cut accepts only Off or the offered heights; Off/12
   assert.equal(detach.setCanopy(THREE_D.id, 75), false);
   assert.equal(detach.setCanopy('ustopo', 90), false, 'not a 3D build');
   assert.equal(detach.setCanopy('nope', 90), false);
-  detach.flyTo(THREE_D.id);
+  assert.equal(detach.flyTo(THREE_D.id), true);
+  await new Promise((r) => setImmediate(r));
   assert.equal(made[0].calls.at(-1), 'fly');
   assert.equal(detach.flyTo('nope'), false);
 });
@@ -801,6 +806,16 @@ test('panel: a 3D row has Full model / Cut above 90 ft / Cut above 120 ft / Fly 
     layers: [layers[0], { ...layers[1], canopyFt: 120, status: 'failed' }],
   });
   assert.match(note.textContent, /could not be loaded/);
+  panel.update({
+    layers: [layers[0], { ...layers[1], enabled: false, status: 'idle' }],
+  });
+  assert.equal(
+    cuts[0].children[3].disabled,
+    true,
+    'Fly to waits for the layer to be on',
+  );
+  panel.update({ layers });
+  assert.equal(cuts[0].children[3].disabled, false);
   chips[2].click();
   assert.equal(calls.length, 4, 'chips are bound once, not once per update');
 });
@@ -889,4 +904,115 @@ test('Odm3dLayer: destroyed while the terrain is being sampled never shows the t
   );
   assert.equal(calls.added[0].destroyed, true);
   assert.deepEqual(calls.removed, [calls.added[0]]);
+});
+
+test('attachOverlays: Fly to selects Byrd-IT Open (user intent) BEFORE the camera moves, so Auto cannot swap the model for Google 3D', async () => {
+  const { detach, made, stackCalls } = setup3d();
+  detach.setEnabled(THREE_D.id, true);
+  detach.flyTo(THREE_D.id);
+  assert.equal(
+    made[0].calls.includes('fly'),
+    false,
+    'not before the map is pinned',
+  );
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(stackCalls, [['byrdit-open', { intent: 'user' }]]);
+  assert.equal(made[0].calls.at(-1), 'fly');
+});
+
+test('attachOverlays: Fly to still flies when the map switch fails, and not at all if the layer was switched off meanwhile', async () => {
+  const a = setup3d();
+  a.controller.setStack = async () => {
+    throw new Error('switch failed');
+  };
+  a.detach.setEnabled(THREE_D.id, true);
+  a.detach.flyTo(THREE_D.id);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(a.made[0].calls.at(-1), 'fly');
+
+  const b = setup3d();
+  b.detach.setEnabled(THREE_D.id, true);
+  b.detach.flyTo(THREE_D.id);
+  b.detach.setEnabled(THREE_D.id, false);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(b.made[0].calls.includes('fly'), false);
+});
+
+test("Odm3dLayer.flyTo: uses the drawn model's bounding sphere (terrain lift included), falls back to the footprint rectangle", async () => {
+  const { Cesium, viewer, calls } = fake3dCesium();
+  Cesium.HeadingPitchRange = class {
+    constructor(heading, pitch, range) {
+      Object.assign(this, { heading, pitch, range });
+    }
+  };
+  Cesium.Math = { toRadians: (d) => (d * Math.PI) / 180 };
+  const sphereCalls = [];
+  viewer.camera.flyToBoundingSphere = (sphere, options) =>
+    sphereCalls.push([sphere, options]);
+  const layer = new Odm3dLayer({ Cesium, viewer, entry: entry3d() });
+  await layer.load();
+  calls.added[0].boundingSphere = { center: { x: 1 }, radius: 200 };
+  layer.flyTo();
+  assert.equal(sphereCalls.length, 1);
+  assert.equal(
+    calls.flown.length,
+    0,
+    'no rectangle flight when the sphere is known',
+  );
+  assert.ok(Math.abs(sphereCalls[0][1].offset.range - 440) < 1e-6);
+  assert.ok(sphereCalls[0][1].offset.pitch < 0, 'looking down');
+  layer.destroy();
+});
+
+test('Odm3dLayer: a load that throws after the pump started stops the pump and removes the tileset', async () => {
+  const { Cesium, viewer, calls } = fake3dCesium();
+  const intervals = new Map();
+  let nextId = 1;
+  const timers = {
+    setInterval: (fn) => (intervals.set(nextId, fn), nextId++),
+    clearInterval: (id) => intervals.delete(id),
+  };
+  const layer = new Odm3dLayer({
+    Cesium,
+    viewer,
+    entry: entry3d(),
+    timers,
+    sampleTerrain: async () => [94, 94, 94],
+  });
+  // a failure late in the load: the style cannot be built
+  Cesium.Cesium3DTileStyle = class {
+    constructor() {
+      throw new Error('style failed');
+    }
+  };
+  layer.setOpacity(0.5);
+  await layer.load();
+  assert.equal(layer.status, 'failed');
+  assert.equal(intervals.size, 0, 'no frame pump left running');
+  assert.equal(calls.removed.length, 1);
+  assert.equal(calls.added[0].destroyed, true);
+  assert.equal(layer.tileset, null);
+});
+
+test('attachOverlays: raise/lower never swaps a flat layer with a 3D build and never moves a 3D build', () => {
+  const { detach } = setup3d();
+  const before = detach.state().stack;
+  assert.equal(detach.moveLayer(THREE_D.id, 'up'), false);
+  assert.equal(detach.moveLayer(THREE_D.id, 'down'), false);
+  assert.deepEqual(detach.state().stack, before);
+  // the flat layers still move, past the 3D entry when it is in the way
+  const flat = before.filter((id) => id !== THREE_D.id);
+  const top = flat[flat.length - 1];
+  assert.equal(
+    detach.moveLayer(flat[0], 'down'),
+    false,
+    'already at the bottom',
+  );
+  assert.equal(detach.moveLayer(top, 'up'), false, 'already at the top');
+  assert.equal(detach.moveLayer(flat[0], 'up'), true);
+  const after = detach.state().stack;
+  assert.deepEqual(after.filter((id) => id !== THREE_D.id).slice(0, 2), [
+    flat[1],
+    flat[0],
+  ]);
 });

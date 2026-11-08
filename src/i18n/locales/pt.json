@@ -3941,7 +3941,7 @@
   "Cut above {ft} ft": "Cortar acima de {ft} ft",
   "Hide everything higher than {ft} ft above local ground": "Ocultar tudo acima de {ft} ft sobre o solo local",
   "Fly to": "Ir até lá",
-  "Fly to this model": "Ir até este modelo",
+  "Fly to this model and keep Byrd-IT Open selected": "Ir até este modelo e manter o Byrd-IT Open selecionado",
   "Loading 3D model...": "Carregando modelo 3D...",
   "The 3D model could not be loaded": "Não foi possível carregar o modelo 3D",
   "Byrd Ranch builds": "Byrd Ranch builds"

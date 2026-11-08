@@ -46,6 +46,8 @@ STORE = "/srv/gev-basemap/hires"
 MANIFEST = f"{STORE}/m2/overlays.json"
 ORIGIN = "http://10.10.99.101:8480/hires"
 GDAL_PY = "/opt/gev-basemap/gdalenv/bin/python3"
+# The GEV relay (overlaysProxy.js ODM3D_FILE_ROUTE) serves only these file names.
+TILE_URI_RE = re.compile(r"^(?:[A-Za-z0-9_-]{1,64}/){0,2}[A-Za-z0-9_-]{1,96}\.(?:json|b3dm|glb|i3dm|pnts|cmpt|jpg|png)$")
 ID_RE = re.compile(r"^odm-[a-z0-9][a-z0-9-]{0,26}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9 /&+().,'-]{1,80}$")
 CREDIT_RE = NAME_RE
@@ -58,6 +60,27 @@ FT = 0.3048
 
 class Fail(Exception):
     pass
+
+
+class QuietParser(argparse.ArgumentParser):
+    """argparse echoes the offending value in its messages; a value can be a
+    token, so say only that the command line was not accepted."""
+
+    def error(self, message):
+        self.exit(2, "ERROR bad command line: a value is missing, unknown or out of range (run with --help)\n")
+
+
+def finite(lo, hi):
+    def parse(text):
+        try:
+            value = float(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError("must be a number") from None
+        if not (math.isfinite(value) and lo <= value <= hi):
+            raise argparse.ArgumentTypeError(f"must be a finite number from {lo} to {hi}")
+        return value
+
+    return parse
 
 
 def log(level: str, message: str) -> None:
@@ -307,8 +330,11 @@ print("%.2f %.2f %.2f" % tuple(p))
 """
 
 
-def ground_height(host, path, stage_tmp) -> tuple[float, float, float]:
+def ground_height(host, path) -> tuple[float, float, float]:
     dtm = f"{path}/odm_dem/dtm.tif"
+    stage_tmp = sh(S1, "mktemp /tmp/odm3d-dtm.XXXXXXXX").stdout.strip()
+    if not re.match(r"^/tmp/odm3d-dtm\.[A-Za-z0-9]{8}$", stage_tmp):
+        raise Fail("could not make a temp file on S1")
     cmd = f"cat {shlex.quote(dtm)}"
     left = ["ssh", "-o", "BatchMode=yes", host, cmd] if host else ["bash", "-c", cmd]
     right = ["ssh", "-o", "BatchMode=yes", S1, f"cat > {shlex.quote(stage_tmp)}"]
@@ -316,6 +342,7 @@ def ground_height(host, path, stage_tmp) -> tuple[float, float, float]:
     p2 = subprocess.Popen(right, stdin=p1.stdout)
     p1.stdout.close()
     if p2.wait() or p1.wait():
+        sh(S1, f"rm -f {shlex.quote(stage_tmp)}", check=False)
         raise Fail("could not copy dtm.tif to S1 for the ground height")
     try:
         out = run(
@@ -331,18 +358,38 @@ def ground_height(host, path, stage_tmp) -> tuple[float, float, float]:
     return lo, mid, hi
 
 
+def manifest_lacks(layer_id: str) -> bool:
+    """True only when the manifest was read and does not list the id."""
+    program = (
+        "import json,sys; d=json.load(open(sys.argv[1])); "
+        "print('LACKS' if not any(l.get('id')==sys.argv[2] for l in d['layers']) else 'LISTED')"
+    )
+    result = run(
+        ["ssh", "-o", "BatchMode=yes", S1, f"python3 -c {shlex.quote(program)} {shlex.quote(MANIFEST)} {shlex.quote(layer_id)}"],
+        check=False,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "LACKS"
+
+
 def add_manifest_entry(entry: dict) -> None:
     """Atomic add on S1: backup, id must be new, write tmp, rename."""
     program = r"""
-import json, os, sys, time, shutil, hashlib
+import fcntl, json, math, os, sys, time, shutil
 entry = json.loads(sys.stdin.read()); M = sys.argv[1]
+# one writer at a time (the other publish scripts do not lock; this one does not race itself)
+lock = open(M + ".lock", "w"); fcntl.flock(lock, fcntl.LOCK_EX)
 d = json.load(open(M))
 if any(l.get("id") == entry["id"] for l in d["layers"]): sys.exit("id exists in manifest")
 bak = M + ".bak-odm3d-" + time.strftime("%Y%m%d-%H%M%S"); shutil.copy2(M, bak)
 d["layers"].append(entry)
 d["generated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 d["note"] = d.get("note", "") + " | publish_odm_3d: +3d layer " + entry["id"]
-tmp = M + ".tmp"; json.dump(d, open(tmp, "w"), indent=1); os.replace(tmp, M)
+text = json.dumps(d, indent=1, allow_nan=False)   # NaN / Infinity are not JSON: refuse, never write
+tmp = "%s.tmp.%d" % (M, os.getpid())
+with open(tmp, "w") as f:
+    f.write(text); f.flush(); os.fsync(f.fileno())
+shutil.copystat(M, tmp)                            # same mode and times as the manifest it replaces
+os.replace(tmp, M)
 print("backup", bak, "layers", len(d["layers"]))
 """
     out = run(
@@ -353,15 +400,15 @@ print("backup", bak, "layers", len(d["layers"]))
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = QuietParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--source", required=True, help="[host:]/path of the ODM build folder")
     ap.add_argument("--id", required=True)
     ap.add_argument("--name", required=True)
     ap.add_argument("--credit", default="Byrd-IT ODM drone survey")
     ap.add_argument("--canopy-default-ft", default="none", help="none, 90 or 120 (small shop-area builds: 90)")
-    ap.add_argument("--ground-m", type=float, help="override the DTM-derived ground height (m)")
-    ap.add_argument("--height-offset-m", type=float, default=0.0, help="manual lift on top of the automatic terrain alignment")
-    ap.add_argument("--max-gb", type=float, default=3.0, help="refuse bigger models unless --allow-large")
+    ap.add_argument("--ground-m", type=finite(-500, 9000), help="override the DTM-derived ground height (m)")
+    ap.add_argument("--height-offset-m", type=finite(-300, 300), default=0.0, help="manual lift on top of the automatic terrain alignment (m, within 300)")
+    ap.add_argument("--max-gb", type=finite(0.001, 1000), default=3.0, help="refuse bigger models unless --allow-large")
     ap.add_argument("--allow-large", action="store_true", help="owner has approved a model above --max-gb")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
@@ -382,7 +429,7 @@ def main(argv=None) -> int:
             raise Fail(f"tileset origin is {origin_h:.1f} m above the ellipsoid; the cut maths assumes 0 (not an ODM export?)")
         if not (-180 < bounds[0] < bounds[2] < 180 and -90 < bounds[1] < bounds[3] < 90):
             raise Fail(f"footprint {bounds} is not a valid lon/lat box")
-        lo, mid, hi = (args.ground_m,) * 3 if args.ground_m is not None else ground_height(host, path, f"/tmp/{args.id}-dtm.tif")
+        lo, mid, hi = (args.ground_m,) * 3 if args.ground_m is not None else ground_height(host, path)
         log("info", f"footprint {bounds}; ground height median {mid:.1f} m (5%-95%: {lo:.1f}-{hi:.1f} m)")
         if not (zlo - 5 <= mid <= zhi + 5):
             raise Fail(f"ground height {mid:.1f} m is outside the model's heights {zlo:.1f}-{zhi:.1f} m: DTM and tileset do not match")
@@ -437,7 +484,10 @@ def main(argv=None) -> int:
             )
             missing = sorted(n for n in names if n not in hashes)
             if missing:
-                raise Fail(f"tileset names {len(missing)} files that are not in the build, e.g. {missing[0]}")
+                raise Fail(f"tileset names {len(missing)} files that are not in the build")
+            unservable = sorted(n for n in names if not TILE_URI_RE.match(n))
+            if unservable:
+                raise Fail(f"{len(unservable)} tile file names are not ones the GEV server will serve (folders and names of letters, digits, - and _ only)")
             published = dict(hashes)
             published["tileset.original.json"] = hashes["tileset.json"]
             published["tileset.json"] = hashlib.sha256(fixed_text.encode()).hexdigest()
@@ -455,9 +505,15 @@ def main(argv=None) -> int:
         try:
             add_manifest_entry(entry)
         except BaseException:
-            # The folder was created by this run (it did not exist before); take it
-            # back out so the same id can be tried again. ODM data is never touched.
-            sh(S1, f"rm -rf {shlex.quote(final)}", check=False)
+            # The folder was created by this run (it did not exist before). Take it
+            # back out so the same id can be tried again, but ONLY when the manifest
+            # does not list the id: a write that succeeded before the error (a
+            # dropped ssh) means the build is live and its files must stay. If the
+            # manifest cannot be read, nothing is deleted. ODM data is never touched.
+            if manifest_lacks(args.id):
+                sh(S1, f"rm -rf {shlex.quote(final)}", check=False)
+            else:
+                log("error", "manifest state unknown or the layer is listed: the folder on S1 was left in place")
             raise
 
         got = run(["curl", "-sf", "--max-time", "60", f"{ORIGIN}/odm3d/{args.id}/tileset.json"]).stdout
@@ -471,8 +527,11 @@ def main(argv=None) -> int:
     except subprocess.TimeoutExpired as error:
         log("error", f"publish failed id={safe_id(args.id)}: timed out ({error.timeout}s)")
         return 3
-    except KeyError as error:
+    except KeyError:
         log("error", f"publish failed id={safe_id(args.id)}: tileset.json is missing a required field")
+        return 2
+    except Exception:  # fixed text only: an exception can carry paths, hosts or tokens
+        log("error", f"publish failed id={safe_id(args.id)}: unexpected error; nothing was added to the manifest unless the last step says so")
         return 2
 
 

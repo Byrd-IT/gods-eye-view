@@ -7,7 +7,9 @@ section of the Map layers card (`src/byrdit/basemap/overlayGroups.js`).
 
 Each 3D layer has a toggle, an opacity slider, its version name (the layer
 name), a canopy cut (Full model / Cut above 90 ft / Cut above 120 ft) and a
-**Fly to** button. The model is placed on the terrain automatically and is
+**Fly to** button. Fly to selects the Byrd-IT Open map first (as if its chip
+had been pressed): close in, the Auto map would otherwise switch to Google 3D
+and take the model away. Auto comes back with the Auto chip. The model is placed on the terrain automatically and is
 drawn only while Byrd-IT Open is the map shown (Google 3D carries its own
 buildings; the layer is removed while it is drawn and comes back after).
 
@@ -15,9 +17,12 @@ buildings; the layer is removed while it is drawn and comes back after).
 
 Run on any host with ssh to the source host and to S1 (the map store). The
 tileset is streamed to S1, every file is SHA256-checked against the source,
-and the layer is added to `hires/m2/overlays.json` last (atomic write, backup
-`overlays.json.bak-odm3d-<stamp>`). No restart: GEV reads the manifest on its
-own.
+every tile name is checked against what the GEV server will serve, and the
+layer is added to `hires/m2/overlays.json` last (locked, unique temp file,
+mode kept, fsync, atomic replace, backup `overlays.json.bak-odm3d-<stamp>`).
+If that last step fails the script removes its own new folder, but only when
+the manifest was read and does not list the id. No restart: GEV reads the
+manifest on its own.
 
     python3 scripts/publish_odm_3d.py \
         --source S4:/srv/odm/data/<build-uuid> \
@@ -25,7 +30,9 @@ own.
         --name "Byrd Ranch shop area 3D (2026-10-31, 574 photos)" \
         --canopy-default-ft 90          # small shop-area builds; none for big ones
 
-`--dry-run` prints the manifest entry and copies nothing. A model above
+`--dry-run` prints the manifest entry and writes nothing to the map store (the
+ground-height step passes the DTM through a temp file on S1, removed at once).
+A model above
 `--max-gb` (default 3) is refused until the owner has approved it
 (`--allow-large`). Ids are never reused; a new build gets a new id. Logs go
 to stdout and to syslog (tag `gev-publish-odm3d`), which Fleet ships to
@@ -53,7 +60,9 @@ that much.
 
 `/basemap/odm3d/<id>/<file>` is relayed from the S1 origin
 (`GEV_BASEMAP_ODM3D_URLS`, default: the folder `GEV_BASEMAP_OVERLAYS_CONFIG`
-is read from). Only plain files with a tile extension inside an offered build
+is read from; with a file path and no URL set, 3D builds are not offered and a
+warning is logged). A tile can be about 100 MB, so the route has its own time
+limit, `GEV_BASEMAP_ODM3D_TIMEOUT_MS` (default 60000). Only plain files with a tile extension inside an offered build
 are served; unknown ids and any other path are 404 without an upstream
 request. Tile files are cached for 30 days, `tileset.json` for 60 s.
 

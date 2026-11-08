@@ -3773,7 +3773,7 @@
   "Cut above {ft} ft": "裁切 {ft} ft 以上",
   "Hide everything higher than {ft} ft above local ground": "隱藏距當地地面高於 {ft} ft 的所有內容",
   "Fly to": "飛往",
-  "Fly to this model": "飛往此模型",
+  "Fly to this model and keep Byrd-IT Open selected": "飛往此模型並保持選取 Byrd-IT Open",
   "Loading 3D model...": "正在載入 3D 模型...",
   "The 3D model could not be loaded": "無法載入 3D 模型",
   "Byrd Ranch builds": "Byrd Ranch builds"

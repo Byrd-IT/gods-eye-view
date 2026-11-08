@@ -4025,7 +4025,7 @@
   "Cut above {ft} ft": "Зрізати вище {ft} футів",
   "Hide everything higher than {ft} ft above local ground": "Сховати все вище {ft} футів над місцевим ґрунтом",
   "Fly to": "Перелетіти",
-  "Fly to this model": "Перелетіти до цієї моделі",
+  "Fly to this model and keep Byrd-IT Open selected": "Перелетіти до цієї моделі й залишити вибраним Byrd-IT Open",
   "Loading 3D model...": "Завантаження 3D-моделі...",
   "The 3D model could not be loaded": "Не вдалося завантажити 3D-модель",
   "Byrd Ranch builds": "Byrd Ranch builds"

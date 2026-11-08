@@ -75,6 +75,9 @@ await page.evaluate(async () => {
 });
 await sleep(3000);
 const entry = await page.evaluate((id) => window.__gevOverlays.state().layers.find((l) => l.id === id), id);
+// the layer's own published ground height (the panel state has no model block)
+const model = await page.evaluate(async (id) => (await (await fetch("/basemap/config.json")).json()).overlays.layers.find((l) => l.id === id).model, id);
+const GROUND = model.groundM;
 check("3D layer offered with canopy options", entry && entry.kind === "3d" && entry.canopyOptionsFt?.includes(90), JSON.stringify(entry));
 // The app does not export Cesium: build positions with the viewer's own classes.
 const flyToBuild = ({ southM = 380, heightM = 260, pitchDeg = -38, headingDeg = 0, eastM = 0, northM = 0 } = {}) =>
@@ -88,7 +91,7 @@ const flyToBuild = ({ southM = 380, heightM = 260, pitchDeg = -38, headingDeg = 
       const rad = (d) => (d * Math.PI) / 180;
       const dLat = (southM - northM) / 111320;
       const dLon = eastM / (111320 * Math.cos(rad(lat)));
-      const position = viewer.scene.globe.ellipsoid.cartographicToCartesian(new Carto(rad(lon + dLon), rad(lat - dLat), heightM + 112));
+      const position = viewer.scene.globe.ellipsoid.cartographicToCartesian(new Carto(rad(lon + dLon), rad(lat - dLat), heightM + (Number(process.env.QA_GROUND_M) || 112)));
       viewer.camera.setView({ destination: position, orientation: { heading: rad(headingDeg), pitch: rad(pitchDeg), roll: 0 } });
       viewer.scene.requestRender?.();
       return { lon, lat };
@@ -181,7 +184,7 @@ const poff = await probe();
 await setCut("120");
 await shot("cut-120ft");
 const p120 = await probe();
-check("90 ft: clipping plane enabled at ground + 27.43 m", p90?.clipEnabled === true && Math.abs(p90.plane - (entry.model?.groundM ?? 112.01) - 27.432) < 0.05, JSON.stringify(p90));
+check("90 ft: clipping plane enabled at ground + 27.43 m", p90?.clipEnabled === true && Math.abs(p90.plane - GROUND - 27.432) < 0.05, JSON.stringify(p90));
 check("Off: clipping disabled", poff?.clipEnabled === false, JSON.stringify(poff));
 check("120 ft: plane above the 90 ft one by 9.14 m", p120?.clipEnabled === true && p90 && Math.abs(p120.plane - p90.plane - 9.144) < 0.01, `${p90?.plane} -> ${p120?.plane}`);
 
@@ -200,17 +203,17 @@ await setCut("off");
 await shot("top-off");
 await setCut("90");
 await shot("top-90ft");
-await page.evaluate(() => {
+await page.evaluate((ground) => {
   const { viewer } = window.__godsEyeView;
   const prims = viewer.scene.primitives;
   for (let i = 0; i < prims.length; i += 1) {
     const p = prims.get(i);
     if (p?.constructor?.name === "Cesium3DTileset" && p.clippingPlanes?.length) {
-      p.clippingPlanes.get(0).distance = 112.01 + 8;
+      p.clippingPlanes.get(0).distance = ground + 8;
     }
   }
   viewer.scene.requestRender?.();
-});
+}, GROUND);
 await shot("top-probe-8m-above-ground");
 await setCut("off");
 await shot("top-off-again");

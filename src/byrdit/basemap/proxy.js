@@ -12,6 +12,7 @@ import {
   odm3dBases,
   overlaysEnabled,
   resolveOdm3dFile,
+  withoutModels,
   resolveOverlayTile,
   safeErrorText,
 } from './overlaysProxy.js';
@@ -178,6 +179,7 @@ export function basemapSettingsFromEnv(env = process.env) {
         .filter(Boolean),
       urlList(env.GEV_BASEMAP_ODM3D_URLS),
     ),
+    odm3dTimeoutMs: num(env.GEV_BASEMAP_ODM3D_TIMEOUT_MS, 60_000),
     naipUrls: urlList(env.GEV_BASEMAP_NAIP_URLS),
     hiresUrls: urlList(env.GEV_BASEMAP_HIRES_URLS),
     buildings: buildingsSettings(env),
@@ -740,9 +742,17 @@ export function createBasemapHandler(
             await beforeDeadline(readFileImpl(source, 'utf8'), deadline),
           );
         }
-        const overlays = composeOverlays(raw, {
+        let overlays = composeOverlays(raw, {
           maxLayers: settings.overlaysMaxLayers,
         });
+        if (!(settings.odm3dUrls ?? []).length) {
+          const without = withoutModels(overlays);
+          if (without !== overlays)
+            log(
+              '[basemap] 3D builds not offered: no origin for them (set GEV_BASEMAP_ODM3D_URLS or read overlays.json from a URL)',
+            );
+          overlays = without;
+        }
         if (overlays.browser.available) return overlays;
         throw new Error('invalid overlays config');
       } catch (error) {
@@ -845,7 +855,13 @@ export function createBasemapHandler(
     res.end(head ? undefined : body);
   }
 
-  async function relay(req, res, bases, path, { kind, meta = false }) {
+  async function relay(
+    req,
+    res,
+    bases,
+    path,
+    { kind, meta = false, timeoutMs = settings.timeoutMs },
+  ) {
     const head = req.method === 'HEAD';
     const headers = {};
     for (const name of ['accept', 'if-none-match', 'if-modified-since'])
@@ -854,6 +870,7 @@ export function createBasemapHandler(
     try {
       got = await upstream(bases, path, {
         headers,
+        timeoutMs,
         read: async (response) => {
           const status = response.status;
           if (status !== 200 || head) {
@@ -1006,6 +1023,7 @@ export function createBasemapHandler(
           await relay(req, res, file.bases, file.path, {
             kind: 'odm3d',
             meta: file.path.endsWith('/tileset.json'),
+            timeoutMs: settings.odm3dTimeoutMs ?? settings.timeoutMs,
           });
           return;
         }

@@ -205,3 +205,194 @@ except p.Fail as e:
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /refused/);
 });
+
+const importScript = `
+import json, os, stat, subprocess, sys, tempfile
+sys.path.insert(0, ${JSON.stringify(path.dirname(script))})
+import publish_odm_3d as p
+
+def local_run(cmd, check=True, input=None, **kw):
+    # the manifest step runs on S1 over ssh; here the last argument runs locally
+    r = subprocess.run(["bash", "-c", cmd[-1]], input=input, text=True, capture_output=True)
+    if check and r.returncode != 0:
+        raise p.Fail("failed")
+    return r
+`;
+
+function pyJson(body) {
+  const r = python(['-c', importScript + body]);
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout.trim().split('\n').at(-1));
+}
+
+test('publish_odm_3d: manifest write adds one layer, keeps the file mode, keeps a backup, refuses a duplicate id and a NaN, and never leaves a temp file', () => {
+  const out = pyJson(`
+d = tempfile.mkdtemp()
+m = os.path.join(d, "overlays.json")
+json.dump({"layers": [{"id": "a"}], "note": ""}, open(m, "w"))
+os.chmod(m, 0o644)
+p.MANIFEST = m
+p.run = local_run
+p.add_manifest_entry({"id": "odm-3d-x", "n": 1})
+after = json.load(open(m))
+mode = stat.S_IMODE(os.stat(m).st_mode)
+try:
+    p.add_manifest_entry({"id": "odm-3d-x", "n": 2})
+    dup = "accepted"
+except p.Fail:
+    dup = "refused"
+try:
+    p.add_manifest_entry({"id": "odm-3d-nan", "height_offset_m": float("nan")})
+    nan = "accepted"
+except p.Fail:
+    nan = "refused"
+final = json.load(open(m))
+print(json.dumps({
+  "ids": [l["id"] for l in after["layers"]], "mode": mode, "dup": dup, "nan": nan,
+  "final_ids": [l["id"] for l in final["layers"]],
+  "files": sorted(f.split(".bak")[0] if ".bak" in f else f for f in os.listdir(d)),
+}))
+`);
+  assert.deepEqual(out.ids, ['a', 'odm-3d-x']);
+  assert.equal(out.mode, 0o644);
+  assert.equal(out.dup, 'refused');
+  assert.equal(out.nan, 'refused');
+  assert.deepEqual(
+    out.final_ids,
+    ['a', 'odm-3d-x'],
+    'a refused write leaves the manifest as it was',
+  );
+  assert.ok(
+    out.files.includes('overlays.json') && out.files.includes('overlays.json'),
+    'files: ' + out.files,
+  );
+  assert.ok(
+    !out.files.some((f) => f.includes('.tmp.')),
+    'no temp file left: ' + out.files,
+  );
+});
+
+test('publish_odm_3d: manifest_lacks is true only when the manifest was read and the id is absent (a rollback must never delete a live build)', () => {
+  const out = pyJson(`
+d = tempfile.mkdtemp()
+m = os.path.join(d, "overlays.json")
+json.dump({"layers": [{"id": "live-one"}]}, open(m, "w"))
+p.MANIFEST = m
+p.run = lambda cmd, check=True, input=None, **kw: subprocess.run(["bash", "-c", cmd[-1]], text=True, capture_output=True)
+res = {"absent": p.manifest_lacks("other"), "listed": p.manifest_lacks("live-one")}
+p.MANIFEST = os.path.join(d, "missing.json")
+res["unreadable"] = p.manifest_lacks("other")
+print(json.dumps(res))
+`);
+  assert.deepEqual(out, { absent: true, listed: false, unreadable: false });
+});
+
+test('publish_odm_3d: a checksum mismatch, a missing file or an extra file in the S1 copy is refused', () => {
+  const out = pyJson(`
+class R:  # what sh() returns
+    def __init__(self, stdout): self.stdout = stdout
+def stage(listing): return R("".join(f"{h}  ./{n}\\n" for n, h in listing.items()))
+src = {"tileset.json": "a" * 64, "LOD-0/x.b3dm": "b" * 64}
+res = {}
+for name, listing in {
+    "ok": src,
+    "differs": {**src, "LOD-0/x.b3dm": "c" * 64},
+    "missing": {"tileset.json": "a" * 64},
+    "extra": {**src, "LOD-0/y.b3dm": "d" * 64},
+}.items():
+    p.sh = lambda *a, **k: stage(listing)
+    try:
+        p.verify_stage("/stage", src)
+        res[name] = "ok"
+    except p.Fail as e:
+        res[name] = str(e)
+print(json.dumps(res))
+`);
+  assert.equal(out.ok, 'ok');
+  assert.match(out.differs, /1 differ/);
+  assert.match(out.missing, /1 missing/);
+  assert.match(out.extra, /1 extra/);
+});
+
+test('publish_odm_3d: tile names the GEV relay would refuse are caught before anything is moved into place; numbers must be finite', () => {
+  const out = pyJson(`
+import argparse
+good = ["tileset.json", "LOD-0/Mesh-XL-YR-XR-YL.b3dm", "a/b/c.b3dm"]
+bad = ["a.b/c.b3dm", "a/b/c/d.b3dm", "x" * 100 + ".b3dm", "a/../b.b3dm", "x.exe", "/abs.b3dm"]
+f = p.finite(-300, 300)
+nums = {}
+for text in ["12.5", "nan", "inf", "-inf", "1e9", "x"]:
+    try:
+        nums[text] = f(text)
+    except argparse.ArgumentTypeError:
+        nums[text] = None
+print(json.dumps({
+  "good": [bool(p.TILE_URI_RE.match(n)) for n in good],
+  "bad": [bool(p.TILE_URI_RE.match(n)) for n in bad],
+  "nums": nums,
+}))
+`);
+  assert.deepEqual(out.good, [true, true, true]);
+  assert.ok(
+    out.bad.every((x) => x === false),
+    JSON.stringify(out.bad),
+  );
+  assert.deepEqual(out.nums, {
+    12.5: 12.5,
+    nan: null,
+    inf: null,
+    '-inf': null,
+    '1e9': null,
+    x: null,
+  });
+});
+
+test('publish_odm_3d: a bad number or an unknown option never echoes its value, and --height-offset-m nan is refused', () => {
+  for (const argv of [
+    [
+      '--source',
+      '/x',
+      '--id',
+      'odm-3d-a',
+      '--name',
+      'ok',
+      '--max-gb',
+      SYN.apiKey,
+    ],
+    [
+      '--source',
+      '/x',
+      '--id',
+      'odm-3d-a',
+      '--name',
+      'ok',
+      '--height-offset-m',
+      'nan',
+    ],
+    [
+      '--source',
+      '/x',
+      '--id',
+      'odm-3d-a',
+      '--name',
+      'ok',
+      '--ground-m',
+      SYN.bearer,
+    ],
+    [
+      '--source',
+      '/x',
+      '--id',
+      'odm-3d-a',
+      '--name',
+      'ok',
+      `--${SYN.token}`,
+      'x',
+    ],
+  ]) {
+    const { rc, text } = run(argv);
+    assert.equal(rc, 2, argv.join(' '));
+    assert.match(text, /bad command line/);
+    noLeak(text, argv.join(' ').slice(0, 40));
+  }
+});

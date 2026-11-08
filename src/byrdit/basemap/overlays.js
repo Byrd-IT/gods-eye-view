@@ -1,5 +1,5 @@
 import { BYRDIT_OPEN_STACK_ID } from './stack.js';
-import { cameraHeight } from './autoSwitch.js';
+import { USER_INTENT, cameraHeight } from './autoSwitch.js';
 import {
   createNaipImageryProvider,
   layerOnScreen,
@@ -283,18 +283,34 @@ export function attachOverlays({
       evaluate();
       return true;
     },
-    /** 3D builds: fly the camera to the build. */
+    /**
+     * 3D builds: fly the camera to the build. Close in, the Auto map would
+     * switch to Google 3D within seconds and take the model away, so Byrd-IT
+     * Open is selected first (as if the Open chip had been pressed; Auto comes
+     * back with the Auto chip).
+     */
     flyTo(id) {
       const model = models.get(id);
       if (!model) return false;
-      model.flyTo();
+      Promise.resolve()
+        .then(() =>
+          controller.setStack?.(BYRDIT_OPEN_STACK_ID, { intent: USER_INTENT }),
+        )
+        .catch(() => {})
+        .then(() => {
+          if (!detached && models.get(id) === model) model.flyTo();
+        });
       return true;
     },
     /** direction 'up' = toward the top of the stack. false at the ends. */
     moveLayer(id, direction) {
       const i = order.findIndex((entry) => entry.id === id);
-      const j = direction === 'up' ? i + 1 : direction === 'down' ? i - 1 : -1;
-      if (i < 0 || j < 0 || j >= order.length) return false;
+      // 3D builds are not in the imagery stack: neither moved nor swapped with.
+      if (i < 0 || order[i].kind === '3d') return false;
+      const step = direction === 'up' ? 1 : direction === 'down' ? -1 : 0;
+      let j = i + step;
+      while (step && order[j]?.kind === '3d') j += step;
+      if (!step || j < 0 || j >= order.length) return false;
       [order[i], order[j]] = [order[j], order[i]];
       orderChanged = true;
       evaluate();

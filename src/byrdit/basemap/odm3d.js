@@ -152,6 +152,8 @@ export class Odm3dLayer {
         this.status = 'ready';
         viewer.scene.requestRender?.();
       } catch (error) {
+        // Nothing half-loaded may keep drawing or requesting frames.
+        this._releaseTileset();
         this.status = this.destroyed ? 'idle' : 'failed';
         this.error = String(error?.message ?? error).slice(0, 120);
       }
@@ -264,7 +266,24 @@ export class Odm3dLayer {
 
   /** Camera to the build (used by the panel's "Fly to"). */
   flyTo() {
-    const { Cesium, viewer, entry } = this;
+    const { Cesium, viewer, entry, tileset } = this;
+    // The drawn model knows its real place and size (terrain lift included);
+    // a lat/lon rectangle would ignore the ground height.
+    if (
+      tileset?.boundingSphere &&
+      Cesium.HeadingPitchRange &&
+      viewer.camera.flyToBoundingSphere
+    ) {
+      viewer.camera.flyToBoundingSphere(tileset.boundingSphere, {
+        duration: 1.5,
+        offset: new Cesium.HeadingPitchRange(
+          0,
+          Cesium.Math.toRadians(-40),
+          tileset.boundingSphere.radius * 2.2,
+        ),
+      });
+      return;
+    }
     const [w, s, e, n] = entry.bounds;
     viewer.camera.flyTo({
       destination: Cesium.Rectangle.fromDegrees(w, s, e, n),
@@ -272,9 +291,8 @@ export class Odm3dLayer {
     });
   }
 
-  destroy() {
-    if (this.destroyed) return;
-    this.destroyed = true;
+  /** Stop the frame pump, drop the listeners, take the tileset out of the scene. */
+  _releaseTileset() {
     this._stopPump();
     for (const off of this._offs) {
       try {
@@ -295,6 +313,12 @@ export class Odm3dLayer {
       if (!tileset.isDestroyed?.()) tileset.destroy?.();
     }
     viewer.scene.requestRender?.();
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this._releaseTileset();
   }
 }
 

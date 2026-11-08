@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { basemapSettingsFromEnv, createBasemapHandler } from './proxy.js';
-import { composeOverlays } from './overlaysProxy.js';
+import path from 'node:path';
+import { composeOverlays, withoutModels } from './overlaysProxy.js';
 import { OVERLAYS_PUBLISH } from './fixtures/overlays.mjs';
 
 /**
@@ -198,4 +199,95 @@ test('composeOverlays: the browser block for a 3D layer carries no archive, hash
       !text.includes(secret),
       `browser block leaked ${secret.length} chars`,
     );
+});
+
+test('withoutModels: drops only the 3D builds, their routes too; nothing left = unavailable', () => {
+  const composed = composeOverlays(manifest);
+  assert.ok(composed.browser.layers.some((l) => l.kind === '3d'));
+  const plain = withoutModels(composed);
+  assert.ok(!plain.browser.layers.some((l) => l.kind === '3d'));
+  assert.equal(plain.browser.layers.length, composed.browser.layers.length - 1);
+  assert.equal(plain.routes.has(LAYER.id), false);
+  assert.ok(plain.routes.size > 0);
+  assert.equal(withoutModels(plain), plain, 'nothing to drop: same object');
+  const only = withoutModels(composeOverlays({ ...manifest, layers: [LAYER] }));
+  assert.deepEqual(only.browser, { available: false });
+});
+
+test('proxy: with the overlays config read from a file and no 3D origin set, 3D builds are not offered and a warning is logged', async () => {
+  const m = await meta();
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const file = path.join(os.tmpdir(), `odm3d-manifest-${process.pid}.json`);
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  const logs = [];
+  const handler = createBasemapHandler(
+    basemapSettingsFromEnv(
+      environment(m.url, { GEV_BASEMAP_OVERLAYS_CONFIG: file }),
+    ),
+    {
+      log: (...a) => logs.push(a.map(String).join(' ')),
+      readFileImpl: (f, enc) => fs.promises.readFile(f, enc),
+    },
+  );
+  const s = await listen((req, res) =>
+    handler(req, res, () => res.end('next')),
+  );
+  try {
+    const config = await (await fetch(`${s.url}/basemap/config.json`)).json();
+    assert.ok(config.overlays.layers.length > 0);
+    assert.ok(!config.overlays.layers.some((l) => l.kind === '3d'));
+    assert.ok(logs.some((l) => l.includes('3D builds not offered')));
+    assert.equal(
+      (await fetch(`${s.url}/basemap/odm3d/${LAYER.id}/tileset.json`)).status,
+      404,
+    );
+  } finally {
+    fs.rmSync(file, { force: true });
+    await Promise.all([s.close(), m.close()]);
+  }
+});
+
+test('proxy: 3D tiles get their own, longer time limit (GEV_BASEMAP_ODM3D_TIMEOUT_MS); ordinary routes keep GEV_BASEMAP_TIMEOUT_MS', async () => {
+  const m = await meta();
+  const origin = await listen((req, res) => {
+    setTimeout(() => {
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      res.end(Buffer.from('SLOW'));
+    }, 700);
+  });
+  const make = async (extra) => {
+    const handler = createBasemapHandler(
+      basemapSettingsFromEnv(
+        environment(m.url, {
+          GEV_BASEMAP_ODM3D_URLS: `${origin.url}/hires`,
+          GEV_BASEMAP_TIMEOUT_MS: '300',
+          ...extra,
+        }),
+      ),
+      { log: () => {} },
+    );
+    return listen((req, res) => handler(req, res, () => res.end('next')));
+  };
+  const longer = await make({ GEV_BASEMAP_ODM3D_TIMEOUT_MS: '5000' });
+  const same = await make({ GEV_BASEMAP_ODM3D_TIMEOUT_MS: '300' });
+  try {
+    const url = (s) =>
+      `${s.url}/basemap/odm3d/${LAYER.id}/model/LOD-0/Mesh-XL.b3dm`;
+    const ok = await fetch(url(longer));
+    assert.equal(ok.status, 200);
+    assert.equal(Buffer.from(await ok.arrayBuffer()).toString(), 'SLOW');
+    assert.equal(
+      (await fetch(url(same))).status,
+      502,
+      'a 300 ms limit cuts a 700 ms answer',
+    );
+  } finally {
+    await Promise.all([
+      longer.close(),
+      same.close(),
+      origin.close(),
+      m.close(),
+    ]);
+  }
 });

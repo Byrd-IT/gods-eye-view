@@ -3773,7 +3773,7 @@
   "Cut above {ft} ft": "{ft} ft 以上をカット",
   "Hide everything higher than {ft} ft above local ground": "地面から {ft} ft より高いものをすべて非表示",
   "Fly to": "移動",
-  "Fly to this model": "このモデルへ移動",
+  "Fly to this model and keep Byrd-IT Open selected": "このモデルへ移動し、Byrd-IT Open を選択したままにする",
   "Loading 3D model...": "3Dモデルを読み込み中...",
   "The 3D model could not be loaded": "3Dモデルを読み込めませんでした",
   "Byrd Ranch builds": "Byrd Ranch builds"

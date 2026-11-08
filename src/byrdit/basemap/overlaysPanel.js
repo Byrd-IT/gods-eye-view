@@ -320,7 +320,12 @@ export function createOverlaysPanel({
                 },
               ),
             })),
-            { id: 'fly', label: t('Fly to'), title: t('Fly to this model') },
+            {
+              id: 'fly',
+              label: t('Fly to'),
+              disabled: !layer.enabled,
+              title: t('Fly to this model and keep Byrd-IT Open selected'),
+            },
           ]);
           for (const button of row.cut.children) {
             const chip = button.dataset.chipId;

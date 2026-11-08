@@ -9,14 +9,15 @@
  *
  * Source: the M2 manifest hires/m2/overlays.json (schema 1). Layers are
  * DISCOVERED from it; nothing here lists a layer. Only status "live" or
- * "live-data" entries of kind overlay-raster (webp) or overlay-vector (mvt)
- * are offered.
+ * "live-data" entries of kind overlay-raster (webp), overlay-vector (mvt) or
+ * overlay-3d (our OpenDroneMap 3D builds, 3D Tiles) are offered.
  *
  * The browser block is rebuilt field by field from validated values and
  * same-origin paths. Archive names, edge ports, origin URLs, hashes and file
  * names stay server-side: the browser only ever sees
  *   /basemap/overlay/<id>/{z}/{x}/{y}.webp   (raster)
  *   /basemap/overlay/<id>/{z}/{x}/{y}.mvt    (vector)
+ *   /basemap/odm3d/<id>/<file>               (3D build: tileset.json, tiles)
  * and the proxy maps <id> back to the archive with the cached config, so an
  * unknown id is a 404, never an upstream request.
  *
@@ -25,6 +26,10 @@
  *   GEV_BASEMAP_OVERLAYS_CONFIG=x[,y]   overlays.json: http(s) URL or absolute file path
  *   GEV_BASEMAP_HIRES_URLS=a,b          tile servers (go-pmtiles :12353); a layer's
  *                                       edge.port, when present, replaces the port
+ *   GEV_BASEMAP_ODM3D_URLS=a,b          origins holding hires/odm3d/<id>/ (3D builds);
+ *                                       default: the folder the overlays.json URL is in
+ *   GEV_BASEMAP_ODM3D_TIMEOUT_MS=n      per-file time limit for 3D tiles (default 60000;
+ *                                       a tile can be about 100 MB)
  */
 import { layerCap } from './layerCap.js';
 
@@ -214,6 +219,25 @@ export function resolveOverlayTile(pathname, routes, settings) {
   return {
     bases: overlayBases(settings.hiresUrls, route.port),
     path: `/${route.archive}/${z}/${x}/${y}.${ext}`,
+  };
+}
+
+/**
+ * The composed overlays without the 3D builds (when no origin is known to
+ * serve their files, offering them would only end in 404s).
+ * @param {ReturnType<typeof composeOverlays>} overlays
+ */
+export function withoutModels(overlays) {
+  const layers = (overlays.browser.layers ?? []).filter(
+    (layer) => layer.kind !== '3d',
+  );
+  if (layers.length === (overlays.browser.layers ?? []).length) return overlays;
+  const routes = new Map(
+    [...overlays.routes].filter(([, route]) => route.format !== '3dtiles'),
+  );
+  return {
+    browser: layers.length ? { available: true, layers } : { available: false },
+    routes,
   };
 }
 

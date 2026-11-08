@@ -1272,3 +1272,33 @@ test('Auto from Esri high up still lands on Byrd-IT Open', async () => {
   assert.equal(w.controller.getActiveId(), 'byrdit-open');
   assertInStep(w, 'Auto high up');
 });
+
+test('Fly to pattern: Auto close in swaps Open for Google 3D; an explicit Open pick first keeps Open at 400 m', async () => {
+  const auto = world();
+  await auto.start();
+  assert.equal(
+    auto.controller.getActiveId(),
+    'byrdit-open',
+    'global view: Open',
+  );
+  await auto.fly(400);
+  assert.equal(
+    auto.controller.getActiveId(),
+    'photoreal',
+    'Auto alone goes to Google 3D close in',
+  );
+
+  const pinned = world();
+  await pinned.start();
+  await pinned.pick('byrdit-open');
+  await pinned.fly(400);
+  assert.equal(
+    pinned.controller.getActiveId(),
+    'byrdit-open',
+    'the pinned Open map stays',
+  );
+  assert.equal(pinned.machine.mode, 'open');
+  // Auto comes back with the Auto chip
+  await pinned.pick('basemap-auto');
+  assert.equal(pinned.controller.getActiveId(), 'photoreal');
+});
