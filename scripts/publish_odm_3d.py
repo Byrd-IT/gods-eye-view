@@ -50,6 +50,7 @@ ID_RE = re.compile(r"^odm-[a-z0-9][a-z0-9-]{0,26}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9 /&+().,'-]{1,80}$")
 CREDIT_RE = NAME_RE
 SRC_RE = re.compile(r"^(?:(?P<host>[A-Za-z0-9._-]+):)?(?P<path>/[A-Za-z0-9._/-]+)$")
+BUILD_RE = re.compile(r"^[0-9a-f][0-9a-f-]{7,39}$")
 TAG = "gev-publish-odm3d"
 PRIORITY = {"info": "user.info", "warn": "user.warning", "error": "user.err"}
 FT = 0.3048
@@ -82,8 +83,10 @@ def run(cmd, *, check=True, input=None, timeout=3600, capture=True):
         check=False,
     )
     if check and result.returncode != 0:
-        tail = (result.stderr or result.stdout or "").strip().splitlines()[-3:]
-        raise Fail(f"command failed ({result.returncode}): {cmd[0]} ... {' | '.join(tail)}")
+        # Size only: a child's stderr can repeat the paths, hosts or tokens it
+        # was given. Re-run the failing step by hand to read it.
+        size = len(result.stderr or "") + len(result.stdout or "")
+        raise Fail(f"command failed (exit {result.returncode}): {cmd[0]}, {size} bytes of output not shown")
     return result
 
 
@@ -198,6 +201,18 @@ def tile_uris(node: dict, out: set[str]) -> None:
 
 
 # ---- steps ------------------------------------------------------------------
+def safe_source(host, path) -> str:
+    """host:<build folder> for logs and the manifest; anything not shaped like a
+    build id (a uuid) is shown as <custom> so a stray token in a path is never logged."""
+    name = path.rstrip("/").rsplit("/", 1)[-1]
+    shown = name if BUILD_RE.match(name) else "<custom>"
+    return f"{host or 'local'}:{shown}"
+
+
+def safe_id(value) -> str:
+    return value if isinstance(value, str) and ID_RE.match(value) else "<invalid>"
+
+
 def parse_source(value: str):
     m = SRC_RE.match(value)
     if not m:
@@ -355,7 +370,7 @@ def main(argv=None) -> int:
     try:
         check_args(args)
         host, path = parse_source(args.source)
-        log("info", f"start id={args.id} source={host or 'local'}:{path}")
+        log("info", f"start id={args.id} source={safe_source(host, path)}")
         model, tileset, size, count = read_source(host, path)
         gb = size / 1e9
         log("info", f"source tileset: {count} files, {gb:.2f} GB")
@@ -393,7 +408,7 @@ def main(argv=None) -> int:
             "default_opacity": 1.0,
             "status": "live-data",
             "credit": args.credit,
-            "source": f"{host or 'local'}:{path}",
+            "source": safe_source(host, path),
         }
         if args.dry_run:
             log("info", "dry run: nothing copied")
@@ -445,13 +460,13 @@ def main(argv=None) -> int:
         log("info", f"published {args.id}: {count} files, {gb:.2f} GB, served and verified in {time.time() - started:.0f}s")
         return 0
     except Fail as error:
-        log("error", f"publish failed id={getattr(args, 'id', '?')}: {error}")
+        log("error", f"publish failed id={safe_id(getattr(args, 'id', None))}: {error}")
         return 2
     except subprocess.TimeoutExpired as error:
-        log("error", f"publish failed id={args.id}: timed out ({error.timeout}s)")
+        log("error", f"publish failed id={safe_id(args.id)}: timed out ({error.timeout}s)")
         return 3
     except KeyError as error:
-        log("error", f"publish failed id={args.id}: tileset.json is missing {error}")
+        log("error", f"publish failed id={safe_id(args.id)}: tileset.json is missing a required field")
         return 2
 
 
