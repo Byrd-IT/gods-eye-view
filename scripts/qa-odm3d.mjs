@@ -165,8 +165,8 @@ const probe = () =>
   });
 
 const shot = async (name) => {
-  // wait (<= 150 s) until every tile this view asks for has loaded
-  for (let i = 0; i < 30; i += 1) {
+  // wait (<= 60 s) until every tile this view asks for has loaded
+  for (let i = 0; i < 12; i += 1) {
     await page.evaluate(() => window.__godsEyeView.viewer.scene.requestRender?.());
     await sleep(5000);
     if ((await probe())?.tilesLoaded) break;
