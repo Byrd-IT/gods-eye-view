@@ -1016,3 +1016,21 @@ test('attachOverlays: raise/lower never swaps a flat layer with a 3D build and n
     flat[0],
   ]);
 });
+
+test('attachOverlays: Fly to on a layer that is switched on but has no model yet builds it first; with Open not shown it does nothing', async () => {
+  const { detach, controller, made, stackCalls } = setup3d();
+  detach.setEnabled(THREE_D.id, true);
+  controller.switchTo('esri-imagery'); // another map: the model is taken away, the choice is kept
+  assert.deepEqual(detach.state().active, []);
+  assert.equal(
+    detach.flyTo(THREE_D.id),
+    false,
+    'Open is not shown: nothing to fly to',
+  );
+  assert.deepEqual(stackCalls, []);
+  controller.switchTo(BYRDIT_OPEN_STACK_ID);
+  assert.equal(made.length, 2, 'rebuilt when Open came back');
+  assert.equal(detach.flyTo(THREE_D.id), true);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(made[1].calls.at(-1), 'fly');
+});

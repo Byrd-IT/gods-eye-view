@@ -290,6 +290,9 @@ export function attachOverlays({
      * back with the Auto chip).
      */
     flyTo(id) {
+      // Enabled but not built yet (a switch between maps just removed it):
+      // build it now rather than lose the click.
+      if (!models.get(id) && state.get(id)?.enabled) evaluate();
       const model = models.get(id);
       if (!model) return false;
       Promise.resolve()

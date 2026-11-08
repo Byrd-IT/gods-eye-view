@@ -216,6 +216,9 @@ await page.evaluate(async () => {
 });
 await flyToBuild({ southM: 0, heightM: 20000, pitchDeg: -89 });
 await sleep(6000);
+await page
+  .waitForFunction((id) => window.__gevOverlays.state().layers.find((l) => l.id === id)?.status === "ready", { timeout: 180000 }, id)
+  .catch(() => {});
 await page.evaluate((id) => document.querySelector(`#gev-overlays-panel [data-overlay="${id}"] .gev-ov-cut [data-chip-id="fly"]`).click(), id);
 await sleep(15000);
 const afterFly = await page.evaluate(() => ({
@@ -263,7 +266,10 @@ await page.evaluate((id) => {
   r.value = "40";
   r.dispatchEvent(new Event("input", { bubbles: true }));
 }, id);
-await sleep(1500);
+for (let i = 0; i < 40; i += 1) {
+  await sleep(1500);
+  if ((await probe())?.style) break; // the model may have been rebuilt: wait for its style
+}
 const pop = await probe();
 check("opacity 40% applied as a tile style", pop?.style?.includes("0.40"), pop?.style ?? "no style");
 await shot("opacity-40");
