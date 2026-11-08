@@ -65,6 +65,13 @@ await page.waitForFunction(() => window.__gevOverlays && window.__godsEyeView?.v
 await sleep(8000);
 await page.keyboard.press("Escape");
 
+// The Map layers card exists only while Byrd-IT Open is the map shown (with Google
+// reachable, Auto starts on Google 3D at the default close-in camera).
+await page.evaluate(async () => {
+  await window.__godsEyeView.mapStackController.setStack("byrdit-open", { intent: "user" });
+});
+await sleep(4000);
+
 // 1. groups
 await page.click('[data-rail-item="map-layers-panel"]').catch(() => {});
 await page.waitForSelector("#map-layers-panel:not(.collapsed)", { visible: true, timeout: 60000 });
