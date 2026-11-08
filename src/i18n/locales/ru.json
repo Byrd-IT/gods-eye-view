@@ -4018,5 +4018,15 @@
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Также задан фиксированный интервал между фото. Интервал определяет шаг; фиксированное расстояние не используется.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Данные о высотах рельефа неполные, поэтому высота над землёй, охват снимка и интервал неизвестны.",
   "{pass}: terrain heights incomplete, overlap not known.": "{pass}: высоты рельефа неполные, перекрытие неизвестно.",
-  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Настройки изменились с последнего планирования всех проходов: эти строки показывают тот план, каким он был составлен. Чтобы обновить их, снова нажмите «ЗАПЛАНИРОВАТЬ ВСЕ РЕКОМЕНДУЕМЫЕ ПРОЛЁТЫ»."
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Настройки изменились с последнего планирования всех проходов: эти строки показывают тот план, каким он был составлен. Чтобы обновить их, снова нажмите «ЗАПЛАНИРОВАТЬ ВСЕ РЕКОМЕНДУЕМЫЕ ПРОЛЁТЫ».",
+  "Cut canopy above": "Срезать кроны выше",
+  "Full model": "Вся модель",
+  "Show the whole model, tree tops included": "Показать всю модель, включая верхушки деревьев",
+  "Cut above {ft} ft": "Срезать выше {ft} футов",
+  "Hide everything higher than {ft} ft above local ground": "Скрыть всё выше {ft} футов над местным грунтом",
+  "Fly to": "Перелететь",
+  "Fly to this model": "Перелететь к этой модели",
+  "Loading 3D model...": "Загрузка 3D-модели...",
+  "The 3D model could not be loaded": "Не удалось загрузить 3D-модель",
+  "Byrd Ranch builds": "Byrd Ranch builds"
 }

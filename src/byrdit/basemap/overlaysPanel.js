@@ -304,9 +304,14 @@ export function createOverlaysPanel({
             },
             ...(layer.canopyOptionsFt ?? []).map((ft) => ({
               id: String(ft),
-              label: `${t('Cut above')} ${ft} ft`,
+              label: t('Cut above {ft} ft', { ft }),
               active: feet === ft,
-              title: `${t('Hide everything higher than')} ${ft} ft ${t('above local ground')}`,
+              title: t(
+                'Hide everything higher than {ft} ft above local ground',
+                {
+                  ft,
+                },
+              ),
             })),
             { id: 'fly', label: t('Fly to'), title: t('Fly to this model') },
           ]);

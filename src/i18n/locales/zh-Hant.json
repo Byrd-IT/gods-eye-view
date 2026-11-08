@@ -3766,5 +3766,15 @@
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "同時還設定了固定照片間距。由間隔決定間距，不使用固定距離。",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地形高度資料不完整，因此離地高度、覆蓋範圍和間隔都不知道。",
   "{pass}: terrain heights incomplete, overlap not known.": "{pass}：地形高度不完整，重疊率未知。",
-  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "自上次規劃所有航線以來，設定已變更：這些列顯示的是當時規劃的結果。請再按一次「規劃全部推薦航次」以更新。"
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "自上次規劃所有航線以來，設定已變更：這些列顯示的是當時規劃的結果。請再按一次「規劃全部推薦航次」以更新。",
+  "Cut canopy above": "裁切樹冠高度",
+  "Full model": "完整模型",
+  "Show the whole model, tree tops included": "顯示完整模型，包含樹梢",
+  "Cut above {ft} ft": "裁切 {ft} ft 以上",
+  "Hide everything higher than {ft} ft above local ground": "隱藏距當地地面高於 {ft} ft 的所有內容",
+  "Fly to": "飛往",
+  "Fly to this model": "飛往此模型",
+  "Loading 3D model...": "正在載入 3D 模型...",
+  "The 3D model could not be loaded": "無法載入 3D 模型",
+  "Byrd Ranch builds": "Byrd Ranch builds"
 }

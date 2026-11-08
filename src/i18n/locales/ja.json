@@ -3766,5 +3766,15 @@
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "固定の写真間隔も設定されています。写真の間隔はインターバルで決まり、固定距離は使用されません。",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "地表高が不完全なため、対地高度、撮影範囲、インターバルは不明です。",
   "{pass}: terrain heights incomplete, overlap not known.": "{pass}: 地形の高さが不完全なため、オーバーラップは不明です。",
-  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "すべてのパスを前回計画してから設定が変わりました。これらの行は、そのときの計画のままです。更新するには「推奨パスをすべて計画」をもう一度押してください。"
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "すべてのパスを前回計画してから設定が変わりました。これらの行は、そのときの計画のままです。更新するには「推奨パスをすべて計画」をもう一度押してください。",
+  "Cut canopy above": "樹冠をカットする高さ",
+  "Full model": "モデル全体",
+  "Show the whole model, tree tops included": "木の梢を含むモデル全体を表示",
+  "Cut above {ft} ft": "{ft} ft 以上をカット",
+  "Hide everything higher than {ft} ft above local ground": "地面から {ft} ft より高いものをすべて非表示",
+  "Fly to": "移動",
+  "Fly to this model": "このモデルへ移動",
+  "Loading 3D model...": "3Dモデルを読み込み中...",
+  "The 3D model could not be loaded": "3Dモデルを読み込めませんでした",
+  "Byrd Ranch builds": "Byrd Ranch builds"
 }

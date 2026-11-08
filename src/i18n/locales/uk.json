@@ -4018,5 +4018,15 @@
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Також задано фіксований інтервал між фото. Інтервал визначає крок; фіксована відстань не використовується.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Дані про висоти рельєфу неповні, тому висота над землею, охоплення знімка та інтервал невідомі.",
   "{pass}: terrain heights incomplete, overlap not known.": "{pass}: висоти рельєфу неповні, перекриття невідоме.",
-  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Налаштування змінилися з останнього планування всіх проходів: ці рядки показують той план, яким він був складений. Щоб оновити їх, знову натисніть «СПЛАНУВАТИ ВСІ РЕКОМЕНДОВАНІ ПРОХОДИ»."
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Налаштування змінилися з останнього планування всіх проходів: ці рядки показують той план, яким він був складений. Щоб оновити їх, знову натисніть «СПЛАНУВАТИ ВСІ РЕКОМЕНДОВАНІ ПРОХОДИ».",
+  "Cut canopy above": "Зрізати крони вище",
+  "Full model": "Уся модель",
+  "Show the whole model, tree tops included": "Показати всю модель, разом із верхівками дерев",
+  "Cut above {ft} ft": "Зрізати вище {ft} футів",
+  "Hide everything higher than {ft} ft above local ground": "Сховати все вище {ft} футів над місцевим ґрунтом",
+  "Fly to": "Перелетіти",
+  "Fly to this model": "Перелетіти до цієї моделі",
+  "Loading 3D model...": "Завантаження 3D-моделі...",
+  "The 3D model could not be loaded": "Не вдалося завантажити 3D-модель",
+  "Byrd Ranch builds": "Byrd Ranch builds"
 }

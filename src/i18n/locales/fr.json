@@ -3934,5 +3934,15 @@
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Un espacement fixe des photos est aussi défini. L'intervalle fixe l'espacement ; la distance fixe n'est pas utilisée.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Les altitudes du sol sont incomplètes ; la hauteur au-dessus du sol, l'empreinte et l'intervalle ne sont donc pas connus.",
   "{pass}: terrain heights incomplete, overlap not known.": "{pass} : hauteurs du terrain incomplètes, recouvrement inconnu.",
-  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Les réglages ont changé depuis la dernière planification de tous les passages : ces lignes montrent ce plan tel qu'il a été fait. Appuyez de nouveau sur « PLANIFIER TOUS LES PASSAGES CONSEILLÉS » pour les mettre à jour."
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Les réglages ont changé depuis la dernière planification de tous les passages : ces lignes montrent ce plan tel qu'il a été fait. Appuyez de nouveau sur « PLANIFIER TOUS LES PASSAGES CONSEILLÉS » pour les mettre à jour.",
+  "Cut canopy above": "Couper la canopée au-dessus de",
+  "Full model": "Modèle complet",
+  "Show the whole model, tree tops included": "Afficher le modèle entier, cimes des arbres comprises",
+  "Cut above {ft} ft": "Couper au-delà de {ft} ft",
+  "Hide everything higher than {ft} ft above local ground": "Masquer tout ce qui dépasse {ft} ft au-dessus du sol local",
+  "Fly to": "Y aller",
+  "Fly to this model": "Aller à ce modèle",
+  "Loading 3D model...": "Chargement du modèle 3D...",
+  "The 3D model could not be loaded": "Impossible de charger le modèle 3D",
+  "Byrd Ranch builds": "Byrd Ranch builds"
 }

@@ -4186,5 +4186,15 @@
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "تم أيضًا تحديد مسافة ثابتة بين الصور. يحدد الفاصل المسافة بين الصور؛ ولا تُستخدم المسافة الثابتة.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "ارتفاعات التضاريس غير مكتملة، لذلك الارتفاع فوق الأرض والمساحة المغطاة والفاصل غير معروفة.",
   "{pass}: terrain heights incomplete, overlap not known.": "{pass}: ارتفاعات التضاريس غير مكتملة، التداخل غير معروف.",
-  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "تغيّرت الإعدادات منذ آخر تخطيط لكل الممرات: تعرض هذه الصفوف ذلك التخطيط كما أُنشئ. اضغط على «تخطيط كل الممرات الموصى بها» مرة أخرى لتحديثها."
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "تغيّرت الإعدادات منذ آخر تخطيط لكل الممرات: تعرض هذه الصفوف ذلك التخطيط كما أُنشئ. اضغط على «تخطيط كل الممرات الموصى بها» مرة أخرى لتحديثها.",
+  "Cut canopy above": "قص الأشجار فوق",
+  "Full model": "النموذج الكامل",
+  "Show the whole model, tree tops included": "إظهار النموذج كاملًا بما في ذلك قمم الأشجار",
+  "Cut above {ft} ft": "قص ما فوق {ft} قدم",
+  "Hide everything higher than {ft} ft above local ground": "إخفاء كل ما يرتفع عن {ft} قدم فوق الأرض المحلية",
+  "Fly to": "الانتقال إلى",
+  "Fly to this model": "الانتقال إلى هذا النموذج",
+  "Loading 3D model...": "جارٍ تحميل النموذج ثلاثي الأبعاد...",
+  "The 3D model could not be loaded": "تعذّر تحميل النموذج ثلاثي الأبعاد",
+  "Byrd Ranch builds": "Byrd Ranch builds"
 }

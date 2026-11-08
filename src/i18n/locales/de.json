@@ -3850,5 +3850,15 @@
   "A fixed photo spacing is also set. The interval sets the spacing; the fixed distance is not used.": "Zusätzlich ist ein fester Fotoabstand eingestellt. Das Intervall legt den Abstand fest; der feste Abstand wird nicht verwendet.",
   "Terrain heights are incomplete, so the height above ground, the footprint and the interval are not known.": "Geländehöhen sind unvollständig, daher sind die Höhe über Grund, die Bildfläche und das Intervall nicht bekannt.",
   "{pass}: terrain heights incomplete, overlap not known.": "{pass}: Geländehöhen unvollständig, Überlappung nicht bekannt.",
-  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Die Einstellungen haben sich seit der letzten Planung aller Durchgänge geändert: Diese Zeilen zeigen jene Planung, wie sie erstellt wurde. Zum Aktualisieren erneut „ALLE EMPFOHLENEN DURCHGÄNGE PLANEN“ drücken."
+  "Settings changed since the last plan of all passes: these rows show that plan as it was made. Press PLAN ALL RECOMMENDED PASSES again to update them.": "Die Einstellungen haben sich seit der letzten Planung aller Durchgänge geändert: Diese Zeilen zeigen jene Planung, wie sie erstellt wurde. Zum Aktualisieren erneut „ALLE EMPFOHLENEN DURCHGÄNGE PLANEN“ drücken.",
+  "Cut canopy above": "Kronendach kappen ab",
+  "Full model": "Ganzes Modell",
+  "Show the whole model, tree tops included": "Das ganze Modell zeigen, einschließlich Baumkronen",
+  "Cut above {ft} ft": "Ab {ft} ft kappen",
+  "Hide everything higher than {ft} ft above local ground": "Alles ausblenden, was höher als {ft} ft über dem lokalen Boden liegt",
+  "Fly to": "Hinfliegen",
+  "Fly to this model": "Zu diesem Modell fliegen",
+  "Loading 3D model...": "3D-Modell wird geladen ...",
+  "The 3D model could not be loaded": "Das 3D-Modell konnte nicht geladen werden",
+  "Byrd Ranch builds": "Byrd Ranch builds"
 }
