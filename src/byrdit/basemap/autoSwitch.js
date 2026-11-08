@@ -65,7 +65,21 @@ export function createSwitchMachine({
   };
 }
 
-/** Camera height above terrain; falls back to height above the ellipsoid. */
+/**
+ * Terrain heights the Earth can have (Dead Sea -430 m, Everest 8,849 m), with
+ * margin. A globe sample outside this is not terrain.
+ */
+const MIN_GROUND_M = -500;
+const MAX_GROUND_M = 9_000;
+
+/**
+ * Camera height above terrain; falls back to height above the ellipsoid.
+ * Right after the map (and so the terrain provider) changes, the globe can
+ * answer getHeight with a stale or placeholder number (about -28,000 m was
+ * seen in a browser); trusting it made a 1,500 m camera look 29,589 m high,
+ * and the Auto chip then chose Byrd-IT Open instead of Google 3D. A sample
+ * that is not a possible ground height is ignored.
+ */
 export function cameraHeight(viewer) {
   const carto = viewer?.camera?.positionCartographic;
   if (!carto) return NaN;
@@ -75,7 +89,9 @@ export function cameraHeight(viewer) {
   } catch {
     ground = undefined;
   }
-  return Number.isFinite(ground) ? carto.height - ground : carto.height;
+  const plausible =
+    Number.isFinite(ground) && ground >= MIN_GROUND_M && ground <= MAX_GROUND_M;
+  return plausible ? carto.height - ground : carto.height;
 }
 
 /**

@@ -1215,3 +1215,60 @@ test('R6: an unpinned map stays unpinned through a lease and a share/recipe rest
   assert.equal(getGoogleRootCount(), 0);
   assertInStep(w, 'restored');
 });
+
+// ---------------------------------------------------------------------------
+// Auto button did nothing after a switch to Esri / OSM / Bing (2026-11-08): the
+// globe's terrain sample right after the map changed was far outside anything
+// the Earth has (about -28,000 m in a real browser), so the camera looked
+// 29,589 m high at a true 1,500 m. Auto then picked Open (>= 8,000 m) instead
+// of Google 3D and nothing seemed to happen.
+
+test('camera height: a terrain sample outside what the Earth has is ignored', () => {
+  const camera = { positionCartographic: { height: 1_500 } };
+  const at = (ground) => ({
+    camera,
+    scene: { globe: { getHeight: () => ground } },
+  });
+  assert.equal(cameraHeight(at(-28_089)), 1_500, 'stale deep sample');
+  assert.equal(cameraHeight(at(250_000)), 1_500, 'stale high sample');
+  assert.equal(cameraHeight(at(Number.NaN)), 1_500);
+  assert.equal(cameraHeight(at(Infinity)), 1_500);
+  // real terrain still counts, down to the Dead Sea and up to the Himalaya
+  assert.equal(cameraHeight(at(-430)), 1_930);
+  assert.equal(cameraHeight(at(8_000)), -6_500);
+  assert.equal(cameraHeight(at(112)), 1_388);
+});
+
+test('Auto from Esri / OSM / Bing lands on Google 3D close in even when the globe reports a stale terrain height', async () => {
+  for (const other of ['esri-imagery', 'osm', 'bing-aerial']) {
+    const w = world();
+    w.viewer.camera.positionCartographic = { height: 1_500 };
+    await w.start();
+    assert.equal(
+      w.controller.getActiveId(),
+      'photoreal',
+      'starts close in on Google',
+    );
+    await w.pick(other);
+    // the terrain changed under the camera: the globe answers with nonsense
+    w.viewer.scene.globe.getHeight = () => -28_089;
+    await w.pick('basemap-auto');
+    await settle();
+    assert.equal(w.controller.getActiveId(), 'photoreal', `${other} -> Auto`);
+    assert.equal(w.machine.mode, 'auto');
+    assertInStep(w, `${other} -> Auto`);
+  }
+});
+
+test('Auto from Esri high up still lands on Byrd-IT Open', async () => {
+  const w = world();
+  w.viewer.camera.positionCartographic = { height: 1_500 };
+  await w.start();
+  await w.pick('esri-imagery');
+  await w.fly(60_000);
+  w.viewer.scene.globe.getHeight = () => -28_089;
+  await w.pick('basemap-auto');
+  await settle();
+  assert.equal(w.controller.getActiveId(), 'byrdit-open');
+  assertInStep(w, 'Auto high up');
+});

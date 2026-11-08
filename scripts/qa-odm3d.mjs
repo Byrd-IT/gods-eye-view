@@ -135,8 +135,13 @@ const probe = () =>
   });
 
 const shot = async (name) => {
-  await page.evaluate(() => window.__godsEyeView.viewer.scene.requestRender?.());
-  await sleep(9000);
+  // wait (<= 150 s) until every tile this view asks for has loaded
+  for (let i = 0; i < 30; i += 1) {
+    await page.evaluate(() => window.__godsEyeView.viewer.scene.requestRender?.());
+    await sleep(5000);
+    if ((await probe())?.tilesLoaded) break;
+  }
+  await sleep(3000);
   const file = path.join(outDir, `${name}.png`);
   await page.screenshot({ path: file });
   console.log("shot", file);
@@ -195,6 +200,7 @@ await page.evaluate(() => {
 });
 await shot("top-probe-8m-above-ground");
 await setCut("off");
+await shot("top-off-again");
 
 // opacity
 await page.evaluate((id) => {
