@@ -33,6 +33,7 @@ const browser = await puppeteer.launch({
   headless: "new",
   ...(process.env.PUPPETEER_EXECUTABLE_PATH ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH } : {}),
   args: ["--use-gl=angle", "--use-angle=swiftshader", "--no-sandbox", "--enable-unsafe-swiftshader"],
+  protocolTimeout: 600000,
 });
 const page = await browser.newPage();
 await page.setViewport({ width: 1280, height: 800 });
@@ -235,6 +236,9 @@ console.log("after Fly to", JSON.stringify(afterFly));
 check("Fly to from Auto keeps Byrd-IT Open selected", afterFly.active === "byrdit-open", JSON.stringify(afterFly));
 check("Fly to brings the camera close to the model", afterFly.cam < 1500, JSON.stringify(afterFly));
 check("the model is still drawn after Fly to", (await probe()) !== null);
+// Back up to 3 km for the remaining steps: software GL stalls close to the full-detail model.
+await flyToBuild({ southM: 0, heightM: 3000, pitchDeg: -89 });
+await sleep(5000);
 
 // Plane-frame proof: looking straight down, the 90 ft cut leaves the model whole
 // (the tallest tree is only ~31 m), but a probe cut 8 m above the ground must
