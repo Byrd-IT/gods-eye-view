@@ -145,6 +145,7 @@ export class Odm3dLayer {
         );
         this._pump();
         await this._align();
+        if (this.destroyed) return;
         this._applyCut();
         this._applyOpacity();
         tileset.show = true;

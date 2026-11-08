@@ -452,7 +452,13 @@ def main(argv=None) -> int:
         except BaseException:
             sh(S1, f"rm -rf {shlex.quote(stage)}", check=False)
             raise
-        add_manifest_entry(entry)
+        try:
+            add_manifest_entry(entry)
+        except BaseException:
+            # The folder was created by this run (it did not exist before); take it
+            # back out so the same id can be tried again. ODM data is never touched.
+            sh(S1, f"rm -rf {shlex.quote(final)}", check=False)
+            raise
 
         got = run(["curl", "-sf", "--max-time", "60", f"{ORIGIN}/odm3d/{args.id}/tileset.json"]).stdout
         if hashlib.sha256(got.encode()).hexdigest() != published["tileset.json"]:

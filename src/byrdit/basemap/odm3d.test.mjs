@@ -859,3 +859,34 @@ test('Odm3dLayer: frames are requested while tiles load and stop once the tilese
   assert.equal(camListeners.length, 0);
   assert.equal(progress.length, 0);
 });
+
+test('Odm3dLayer: destroyed while the terrain is being sampled never shows the tileset', async () => {
+  const { Cesium, viewer, calls } = fake3dCesium();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const layer = new Odm3dLayer({
+    Cesium,
+    viewer,
+    entry: entry3d(),
+    sampleTerrain: async () => {
+      await gate;
+      return [94, 94, 94];
+    },
+  });
+  const pending = layer.load();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(calls.added.length, 1, 'tileset added, still hidden');
+  assert.equal(calls.added[0].show, false);
+  layer.destroy();
+  release();
+  await pending;
+  assert.equal(
+    calls.added[0].show,
+    false,
+    'a destroyed tileset is never shown',
+  );
+  assert.equal(calls.added[0].destroyed, true);
+  assert.deepEqual(calls.removed, [calls.added[0]]);
+});
