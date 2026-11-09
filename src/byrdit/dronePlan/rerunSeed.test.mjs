@@ -139,6 +139,14 @@ test('seeding keeps the geometry, camera preset and a readable plan; re-running 
     assert.equal(stored.orbitTargets[0].radiusM, 30);
     assert.equal(stored.options.pattern, 'orbit');
     assert.match(test12.notes, /Planned by GEV: \d+ waypoints/);
+    assert.match(
+      test12.notes,
+      /speed \d+\.\d\d mph \(\d+\.\d\d m\/s\)/,
+      'the pilot sees mph next to m/s',
+    );
+    // The stored plan keeps its numeric m/s speed; mph is display text only.
+    const planText = JSON.stringify(store.get('byrdit', test12.id).plan);
+    assert.ok(!planText.toLowerCase().includes('mph'), planText);
     // A changed plan becomes a new version, not a second plan.
     const edited = [
       { ...items[0], plan: { ...items[0].plan, nextArea: 9 } },

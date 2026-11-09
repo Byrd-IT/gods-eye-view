@@ -3065,7 +3065,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "Le mode de hauteur est {found} ; les missions DJI Fly utilisent relativeToStartPoint",
   "A waypoint has no height": "Un point de passage n'a pas de hauteur",
   "Heights {min} to {max} m are outside 0 to {limit} m": "Les hauteurs de {min} à {max} m sont hors de 0 à {limit} m",
-  "A waypoint speed is missing, zero or above {max} m/s": "Une vitesse de point de passage manque, est nulle ou dépasse {max} m/s",
   "Waypoint {index} faces a point of interest that is not set": "Le point de passage {index} vise un point d'intérêt qui n'est pas défini",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "Les groupes d'actions ne sont pas en mode parallel (DJI Fly écrit parallel)",
   "Action group numbers do not start at 1 and rise": "Les numéros de groupes d'actions ne commencent pas à 1 et ne croissent pas",
@@ -3168,7 +3167,6 @@
   "Close the Drone Flight Plan and clear it from the globe": "Fermer le plan de vol drone et l'effacer du globe",
   "Units": "Unités",
   "M": "M",
-  "Show feet and ft/s. The mission file always stays in metres": "Afficher les pieds et ft/s. Le fichier de mission reste toujours en mètres",
   "Show metres and m/s. The mission file always stays in metres": "Afficher les mètres et m/s. Le fichier de mission reste toujours en mètres",
   "Aircraft & camera": "Aéronef et caméra",
   "Shots": "Prises",
@@ -3945,5 +3943,7 @@
   "Loading 3D model...": "Chargement du modèle 3D...",
   "The 3D model could not be loaded": "Impossible de charger le modèle 3D",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "Aéronefs militaires uniquement (copie enregistrée)"
+  "Military aircraft only (recorded copy)": "Aéronefs militaires uniquement (copie enregistrée)",
+  "Show feet and mph. The mission file always stays in metres": "Afficher les pieds et les mph. Le fichier de mission reste toujours en mètres",
+  "A waypoint speed is missing, zero or above {max}": "Une vitesse de point de passage manque, est nulle ou dépasse {max}"
 }

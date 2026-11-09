@@ -3065,7 +3065,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "La modalità quota è {found}; le missioni DJI Fly usano relativeToStartPoint",
   "A waypoint has no height": "Un punto di passaggio non ha quota",
   "Heights {min} to {max} m are outside 0 to {limit} m": "Le quote da {min} a {max} m sono fuori da 0 a {limit} m",
-  "A waypoint speed is missing, zero or above {max} m/s": "Manca la velocità di un punto di passaggio, è zero o supera {max} m/s",
   "Waypoint {index} faces a point of interest that is not set": "Il punto di passaggio {index} guarda un punto di interesse non impostato",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "I gruppi di azioni non sono in modalità parallel (DJI Fly scrive parallel)",
   "Action group numbers do not start at 1 and rise": "I numeri dei gruppi di azioni non partono da 1 e non crescono",
@@ -3168,7 +3167,6 @@
   "Close the Drone Flight Plan and clear it from the globe": "Chiudi il piano di volo drone e toglilo dal globo",
   "Units": "Unità",
   "M": "M",
-  "Show feet and ft/s. The mission file always stays in metres": "Mostra piedi e ft/s. Il file di missione resta sempre in metri",
   "Show metres and m/s. The mission file always stays in metres": "Mostra metri e m/s. Il file di missione resta sempre in metri",
   "Aircraft & camera": "Aeromobile e fotocamera",
   "Shots": "Scatti",
@@ -3945,5 +3943,7 @@
   "Loading 3D model...": "Caricamento del modello 3D...",
   "The 3D model could not be loaded": "Impossibile caricare il modello 3D",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "Solo velivoli militari (copia registrata)"
+  "Military aircraft only (recorded copy)": "Solo velivoli militari (copia registrata)",
+  "Show feet and mph. The mission file always stays in metres": "Mostra piedi e mph. Il file di missione resta sempre in metri",
+  "A waypoint speed is missing, zero or above {max}": "Manca la velocità di un punto di passaggio, è zero o supera {max}"
 }

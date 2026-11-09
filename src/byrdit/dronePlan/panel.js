@@ -1703,7 +1703,7 @@ export function initDronePlan({
           'aria-pressed': 'false',
           title:
             system === 'ft'
-              ? t('Show feet and ft/s. The mission file always stays in metres')
+              ? t('Show feet and mph. The mission file always stays in metres')
               : t(
                   'Show metres and m/s. The mission file always stays in metres',
                 ),
@@ -1783,7 +1783,7 @@ export function initDronePlan({
         minM: MIN_PLAN_SPEED_MS,
         maxM: 15,
         stepM: 0.1,
-        stepFt: 0.5,
+        stepFt: 0.1, // one 0.1 mph step in the feet system
         kind: 'speed',
       });
       ({ out: ui.speedOut } = makeField(t('Speed'), ui.speed));
@@ -1995,9 +1995,13 @@ export function initDronePlan({
     ui.applyUnitRanges = () => {
       for (const { control, spec } of unitSliders) {
         const range = sliderRange(spec);
-        control.min = String(range.min);
-        control.max = String(range.max);
-        control.step = String(range.step);
+        // The converted endpoints carry float dust (e.g. 0.3 mph comes out as
+        // 0.30000000000000004); a slider attribute wants the clean number on
+        // the step grid it was built from.
+        const snap = (value) => Math.round(value * 1e6) / 1e6;
+        control.min = String(snap(range.min));
+        control.max = String(snap(range.max));
+        control.step = String(snap(range.step));
       }
     };
 

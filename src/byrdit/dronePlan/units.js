@@ -8,8 +8,9 @@
  * aircraft reads.
  */
 import { FT_PER_M } from './planner.js';
+import { MPH_PER_MS } from './timing.js';
 
-export { FT_PER_M };
+export { FT_PER_M, MPH_PER_MS };
 export const UNITS_STORAGE_KEY = 'gev.dronePlan.units';
 export const UNIT_SYSTEMS = Object.freeze(['ft', 'm']);
 export const DEFAULT_UNIT_SYSTEM = 'ft';
@@ -31,9 +32,11 @@ const isFeet = (system) => normalizeUnitSystem(system) === 'ft';
 
 /** `ft` or `m`. */
 export const lengthUnit = (system = current) => (isFeet(system) ? 'ft' : 'm');
-/** `ft/s` or `m/s`. */
-export const speedUnit = (system = current) =>
-  isFeet(system) ? 'ft/s' : 'm/s';
+/**
+ * The speed label: `mph` in the feet system (the pilot's road-speed unit) or
+ * `m/s` in metric. Internal speeds are always m/s; this is display only.
+ */
+export const speedUnit = (system = current) => (isFeet(system) ? 'mph' : 'm/s');
 
 /** Metres to the display unit (a number, not rounded). */
 export const lengthFromM = (metres, system = current) =>
@@ -43,14 +46,21 @@ export const lengthToM = (value, system = current) =>
   isFeet(system)
     ? Math.round((Number(value) / FT_PER_M) * 100) / 100
     : Number(value);
-/** m/s to the display unit. */
+/** m/s to mph (1 m/s = 3.6000/1.609344 mph); pure, no display system. */
+export const speedMphFromMs = (ms) => Number(ms) * MPH_PER_MS;
+/** mph to m/s, to the mm/s; pure, no display system. */
+export const speedMphToMs = (value) =>
+  Math.round((Number(value) / MPH_PER_MS) * 1000) / 1000;
+/**
+ * m/s to the display speed: mph in the feet system, m/s in metric. The metre
+ * branch returns the value unchanged so metric display and internal m/s stay
+ * the same number, as they always have.
+ */
 export const speedFromMs = (ms, system = current) =>
-  isFeet(system) ? ms * FT_PER_M : ms;
-/** The display speed to m/s, to the mm/s. */
+  isFeet(system) ? speedMphFromMs(ms) : ms;
+/** The display speed to internal m/s, to the mm/s. */
 export const speedToMs = (value, system = current) =>
-  isFeet(system)
-    ? Math.round((Number(value) / FT_PER_M) * 1000) / 1000
-    : Number(value);
+  isFeet(system) ? speedMphToMs(value) : Number(value);
 
 /**
  * A slider range in the display unit. The metre range is kept; in feet the

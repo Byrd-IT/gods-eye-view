@@ -3303,7 +3303,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "Режим высоты {found}; миссии DJI Fly используют relativeToStartPoint",
   "A waypoint has no height": "У путевой точки нет высоты",
   "Heights {min} to {max} m are outside 0 to {limit} m": "Высоты от {min} до {max} м вне диапазона от 0 до {limit} м",
-  "A waypoint speed is missing, zero or above {max} m/s": "Скорость путевой точки не задана, равна нулю или выше {max} м/с",
   "Waypoint {index} faces a point of interest that is not set": "Путевая точка {index} направлена на не заданную точку интереса",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "Группы действий не в параллельном режиме (DJI Fly записывает parallel)",
   "Action group numbers do not start at 1 and rise": "Номера групп действий не начинаются с 1 и не растут",
@@ -3385,7 +3384,6 @@
   "Obstacle height": "Высота препятствия",
   "Units": "Единицы",
   "M": "М",
-  "Show feet and ft/s. The mission file always stays in metres": "Показывать футы и фут/с. Файл миссии всегда остаётся в метрах",
   "Show metres and m/s. The mission file always stays in metres": "Показывать метры и м/с. Файл миссии всегда остаётся в метрах",
   "Aircraft & camera": "Дрон и камера",
   "Shots": "Съёмка",
@@ -4029,5 +4027,7 @@
   "Loading 3D model...": "Загрузка 3D-модели...",
   "The 3D model could not be loaded": "Не удалось загрузить 3D-модель",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "Только военные самолёты (записанная копия)"
+  "Military aircraft only (recorded copy)": "Только военные самолёты (записанная копия)",
+  "Show feet and mph. The mission file always stays in metres": "Показывать футы и мили в час (mph). Файл миссии всегда остаётся в метрах",
+  "A waypoint speed is missing, zero or above {max}": "Скорость путевой точки не задана, равна нулю или выше {max}"
 }

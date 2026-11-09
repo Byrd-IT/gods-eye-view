@@ -15,6 +15,7 @@
 import { assembleMissions, planFlight } from './planner.js';
 import { serializePlan } from './planDoc.js';
 import { DEFAULT_CAMERA_PRESET_ID } from './cameraSettings.js';
+import { MPH_PER_MS } from './timing.js';
 
 export const SEED_PREFIXES = Object.freeze([
   'Suggested rerun - ',
@@ -196,7 +197,7 @@ export function buildItem(spec, entry, clean = (details) => details) {
   const planned =
     `Planned by GEV: ${stats.waypointCount} waypoints, ${stats.photoCount} photos, ` +
     `${stats.missionCount} mission${stats.missionCount === 1 ? '' : 's'}, ` +
-    `speed ${stats.speedMs.toFixed(2)} m/s.`;
+    `speed ${(stats.speedMs * MPH_PER_MS).toFixed(2)} mph (${stats.speedMs.toFixed(2)} m/s).`;
   // `clean` is the store's own cleaning (trim, length limits), so the stored
   // name and text equal what is compared on the next run.
   const details = clean({

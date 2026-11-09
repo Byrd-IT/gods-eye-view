@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   DEFAULT_UNIT_SYSTEM,
   FT_PER_M,
+  MPH_PER_MS,
   UNITS_STORAGE_KEY,
   browserStorage,
   getUnitSystem,
@@ -14,6 +15,8 @@ import {
   setUnitSystem,
   sliderRange,
   speedFromMs,
+  speedMphFromMs,
+  speedMphToMs,
   speedToMs,
   speedUnit,
   writeUnitSystem,
@@ -50,14 +53,28 @@ test('conversion: 1 ft is exactly 0.3048 m and the round trip comes back', () =>
       `${m} m`,
     );
   }
-  assert.equal(speedToMs(speedFromMs(5, 'ft'), 'ft'), 5);
+  // 15 mph is 6.7056 m/s: display mph converts back to internal metres/second
+  // to the millimetre per second.
+  assert.equal(speedToMs(15, 'ft'), 6.706);
   assert.equal(speedToMs(10, 'm'), 10);
+  // speedFromMs/speedToMs are the DISPLAY converters: mph in the feet system.
+  assert.equal(speedToMs(speedFromMs(6.7056, 'ft'), 'ft'), 6.706);
+  assert.deepEqual(speedFromMs(6.7056, 'ft'), speedMphFromMs(6.7056));
+  assert.ok(Math.abs(speedMphFromMs(6.7056) - 15) < 1e-9);
+  assert.equal(speedMphToMs(speedMphFromMs(2.2352), 'ft'), 2.235);
+  // Metric stays m/s with no mph conversion at all.
+  assert.equal(speedToMs(5, 'm'), 5);
+  assert.equal(speedFromMs(5, 'm'), 5);
+  // The pure m/s <-> mph converters do not look at the display system.
+  assert.ok(Math.abs(speedMphFromMs(5) - 5 * MPH_PER_MS) < 1e-12);
+  assert.equal(speedMphToMs(5), 2.235);
 });
 
 test('labels follow the current system', () => {
   assert.equal(lengthUnit('ft'), 'ft');
   assert.equal(lengthUnit('m'), 'm');
-  assert.equal(speedUnit('ft'), 'ft/s');
+  // Speed display is mph in the feet system: the ft/s label is gone.
+  assert.equal(speedUnit('ft'), 'mph');
   assert.equal(speedUnit('m'), 'm/s');
   setUnitSystem('m');
   assert.equal(getUnitSystem(), 'm');

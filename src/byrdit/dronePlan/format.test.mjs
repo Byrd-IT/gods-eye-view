@@ -60,8 +60,14 @@ test('every warning code has a sentence with its numbers filled in', () => {
   });
   assert.match(high, /up to 300 m above ground, higher than 400 ft/);
   assert.match(high, /457 m is only the most GEV will plan/);
-  assert.match(high, /does not approve a flight and changes no limit in the aircraft/);
-  assert.match(high, /airspace authorization, local rules and your duties as pilot still apply/);
+  assert.match(
+    high,
+    /does not approve a flight and changes no limit in the aircraft/,
+  );
+  assert.match(
+    high,
+    /airspace authorization, local rules and your duties as pilot still apply/,
+  );
   assert.equal(warningText({ code: 'mystery', params: {} }), '');
   assert.equal(warningTone('speed-exceeds-camera-limit'), 'bad');
   assert.equal(warningTone('speed-exceeds-blur-limit'), 'bad');
@@ -127,12 +133,15 @@ test('speedWithMphText gives the unit chosen and miles per hour (15 mph = 6.7056
   assert.equal(speedWithMphText(7.15264), '7.2 m/s · 16.0 mph');
   setUnitSystem('ft');
   try {
-    assert.equal(speedWithMphText(6.7056), '22.0 ft/s · 15.0 mph');
+    // In the feet system the speed is shown as mph only, not ft/s.
+    assert.equal(speedWithMphText(6.7056), '15.0 mph');
     // 15 ft/s is NOT 15 mph: it is about 10.2 mph.
-    assert.equal(speedWithMphText(15 * 0.3048), '15.0 ft/s · 10.2 mph');
+    assert.equal(speedWithMphText(15 * 0.3048), '10.2 mph');
+    // Metric behaviour is unchanged.
   } finally {
     setUnitSystem('m');
   }
+  assert.equal(speedWithMphText(6.7056), '6.7 m/s · 15.0 mph');
 });
 
 test('feet: every length, speed and warning is in the chosen unit', () => {
@@ -141,7 +150,8 @@ test('feet: every length, speed and warning is in the chosen unit', () => {
     assert.equal(heightText(120), '394 ft');
     assert.equal(lengthText(80), '262 ft');
     assert.equal(lengthText(1.5, 1), '4.9 ft');
-    assert.equal(speedText(5), '16.4 ft/s');
+    assert.equal(speedText(5), '11.2 mph');
+    assert.equal(speedText(5, 2), '11.18 mph');
     assert.equal(distanceText(640), '2,100 ft');
     assert.equal(distanceText(2000), '1.24 mi');
     assert.match(
@@ -153,7 +163,7 @@ test('feet: every length, speed and warning is in the chosen unit', () => {
         code: 'speed-camera-limited',
         params: { requested: 5, limited: 4 },
       }),
-      /from 16\.4 ft\/s to 13\.1 ft\/s/,
+      /from 11\.2 mph to 8\.9 mph/,
     );
     for (const [code, params] of CODES) {
       const text = warningText({ code, params });

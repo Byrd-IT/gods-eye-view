@@ -2995,7 +2995,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "Höhenmodus ist {found}; DJI-Fly-Missionen verwenden relativeToStartPoint",
   "A waypoint has no height": "Ein Wegpunkt hat keine Höhe",
   "Heights {min} to {max} m are outside 0 to {limit} m": "Höhen von {min} bis {max} m liegen außerhalb von 0 bis {limit} m",
-  "A waypoint speed is missing, zero or above {max} m/s": "Eine Wegpunktgeschwindigkeit fehlt, ist null oder liegt über {max} m/s",
   "Waypoint {index} faces a point of interest that is not set": "Wegpunkt {index} richtet sich auf einen Interessenpunkt, der nicht gesetzt ist",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "Aktionsgruppen sind nicht im Modus parallel (DJI Fly schreibt parallel)",
   "Action group numbers do not start at 1 and rise": "Aktionsgruppennummern beginnen nicht bei 1 und steigen nicht",
@@ -3098,7 +3097,6 @@
   "Close the Drone Flight Plan and clear it from the globe": "Drohnenflugplan schließen und vom Globus entfernen",
   "Units": "Einheiten",
   "M": "M",
-  "Show feet and ft/s. The mission file always stays in metres": "Fuß und ft/s anzeigen. Die Missionsdatei bleibt immer in Metern",
   "Show metres and m/s. The mission file always stays in metres": "Meter und m/s anzeigen. Die Missionsdatei bleibt immer in Metern",
   "Aircraft & camera": "Luftfahrzeug und Kamera",
   "Shots": "Aufnahmen",
@@ -3861,5 +3859,7 @@
   "Loading 3D model...": "3D-Modell wird geladen ...",
   "The 3D model could not be loaded": "Das 3D-Modell konnte nicht geladen werden",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "Nur Militärflugzeuge (aufgezeichnete Kopie)"
+  "Military aircraft only (recorded copy)": "Nur Militärflugzeuge (aufgezeichnete Kopie)",
+  "Show feet and mph. The mission file always stays in metres": "Fuß und mph anzeigen. Die Missionsdatei bleibt immer in Metern",
+  "A waypoint speed is missing, zero or above {max}": "Eine Wegpunktgeschwindigkeit fehlt, ist null oder liegt über {max}"
 }

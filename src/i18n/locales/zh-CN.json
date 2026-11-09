@@ -3093,7 +3093,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "高度模式为 {found}；DJI Fly 任务使用 relativeToStartPoint",
   "A waypoint has no height": "有航点没有高度",
   "Heights {min} to {max} m are outside 0 to {limit} m": "{min} 至 {max} 米的高度超出 0 至 {limit} 米的范围",
-  "A waypoint speed is missing, zero or above {max} m/s": "有航点速度缺失、为零或超过 {max} 米/秒",
   "Waypoint {index} faces a point of interest that is not set": "航点 {index} 朝向的兴趣点未设置",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "动作组不是并行模式（DJI Fly 写入 parallel）",
   "Action group numbers do not start at 1 and rise": "动作组编号不是从 1 开始递增",
@@ -3175,7 +3174,6 @@
   "Obstacle height": "障碍物高度",
   "Units": "单位",
   "M": "米",
-  "Show feet and ft/s. The mission file always stays in metres": "显示英尺和英尺/秒。任务文件始终使用米",
   "Show metres and m/s. The mission file always stays in metres": "显示米和米/秒。任务文件始终使用米",
   "Aircraft & camera": "飞行器和相机",
   "Shots": "拍摄",
@@ -3777,5 +3775,7 @@
   "Loading 3D model...": "正在加载 3D 模型...",
   "The 3D model could not be loaded": "无法加载 3D 模型",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "仅限军用飞机（已记录副本）"
+  "Military aircraft only (recorded copy)": "仅限军用飞机（已记录副本）",
+  "Show feet and mph. The mission file always stays in metres": "显示英尺和英里/小时（mph）。任务文件始终使用米",
+  "A waypoint speed is missing, zero or above {max}": "有航点速度缺失、为零或超过 {max}"
 }

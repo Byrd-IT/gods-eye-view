@@ -22,6 +22,7 @@ import { drawableFor, openDroneFile } from './importFile.js';
 import { createLibraryClient } from './libraryClient.js';
 import { cheatSheetHtml, cheatSheetText } from './cheatSheet.js';
 import { flightCode } from './missionLabel.js';
+import { speedText } from './format.js';
 
 const COLORS = [
   '#ff9f1c',
@@ -98,7 +99,12 @@ export function warningText({ code, args = {} }) {
     case 'height-range':
       return t('Heights {min} to {max} m are outside 0 to {limit} m', args);
     case 'speed-range':
-      return t('A waypoint speed is missing, zero or above {max} m/s', args);
+      // The limit stays internal m/s; what the pilot reads is mph in the
+      // feet system, m/s in metric (see units.js / format.speedText).
+      return t('A waypoint speed is missing, zero or above {max}', {
+        ...args,
+        max: args.max == null ? '' : speedText(args.max),
+      });
     case 'poi-missing':
       return t(
         'Waypoint {index} faces a point of interest that is not set',

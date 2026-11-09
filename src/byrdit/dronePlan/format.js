@@ -23,14 +23,20 @@ export function heightText(metres) {
   return lengthText(metres);
 }
 
-/** `16.4 ft/s` or `5.0 m/s`. */
+/** `15.0 mph` (feet) or `5.0 m/s` (metric): internal speeds stay m/s. */
 export function speedText(ms, digits = 1) {
   return `${fixed(speedFromMs(ms), digits)} ${speedUnit()}`;
 }
 
-/** `22.0 ft/s · 15.0 mph`: the speed in the chosen unit and in miles per hour. */
+/**
+ * `22.0 ft/s · 15.0 mph` becomes just the mph in the feet system; in metric
+ * the speed is shown in the chosen m/s with the mph companion beside it.
+ */
 export function speedWithMphText(ms, digits = 1) {
-  return `${speedText(ms, digits)} · ${fixed(Number(ms) * MPH_PER_MS, 1)} mph`;
+  const label = speedText(ms, digits);
+  return speedUnit() === 'mph'
+    ? label
+    : `${label} · ${fixed(Number(ms) * MPH_PER_MS, 1)} mph`;
 }
 
 /** `1.2 km` or `640 m`; in feet `2100 ft` or `1.2 mi`. */

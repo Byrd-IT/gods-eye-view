@@ -71,6 +71,7 @@ import { minShutterDenominator, SHUTTER_DENOMINATORS } from './speed.js';
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
 import { makeZip } from './zip.js';
 import { MPH_PER_MS } from './timing.js';
+import { getUnitSystem, normalizeUnitSystem } from './units.js';
 import { cameraChecklistLines } from './cameraSettings.js';
 import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
 import {
@@ -688,16 +689,23 @@ function overlapLine(plan, spacingM) {
   return text;
 }
 
-function speedLine(plan, capture) {
+function speedLine(plan, capture, system) {
+  const units = (ms) =>
+    system === 'ft'
+      ? `${fmt1(Number(ms) * MPH_PER_MS)} mph, ${fmt1(Number(ms))} m/s`
+      : `${fmt1(Number(ms))} m/s, ${fmt1(Number(ms) * MPH_PER_MS)} mph`;
   const flown = Number(plan.speedMs);
   const requested = Number(plan.options?.speedMs);
   if (!(flown > 0)) return 'Speed: unknown';
-  const text = `Speed: ${fmt1(flown)} m/s (${fmt1(flown * MPH_PER_MS)} mph)`;
+  const text =
+    system === 'ft'
+      ? `Speed: ${fmt1(flown * MPH_PER_MS)} mph (${fmt1(flown)} m/s)`
+      : `Speed: ${fmt1(flown)} m/s (${fmt1(flown * MPH_PER_MS)} mph)`;
   if (capture !== 'stop' && Math.abs(requested - flown) < 1e-6) {
     return `${text} (requested; not slowed to the camera or blur limit)`;
   }
   if (requested - flown > 1e-6) {
-    return `${text} (requested ${fmt1(requested)} m/s, ${fmt1(requested * MPH_PER_MS)} mph; lowered so the camera can keep up)`;
+    return `${text} (requested ${units(requested)}; lowered so the camera can keep up)`;
   }
   return text;
 }
@@ -990,7 +998,7 @@ function readmeChecklist(plan) {
 }
 
 /** One block per mission file: the settings the pilot has to see before flying. */
-function fileReadmeLines(result) {
+function fileReadmeLines(result, system) {
   const { plan, missions } = result;
   const capture = captureOf(plan);
   const marked = distanceTriggerMarked(plan);
@@ -1007,7 +1015,7 @@ function fileReadmeLines(result) {
     lines.push(
       `  Height: ${fmt1(plan.options?.aglM)} m above ground (requested)`,
     );
-    lines.push(`  ${speedLine(plan, capture)}`);
+    lines.push(`  ${speedLine(plan, capture, system)}`);
     lines.push(
       '  Every waypoint states the plan speed and its own gimbal pitch, so a resumed file does not depend on an earlier waypoint. Not verified in DJI Fly.',
     );
@@ -1042,6 +1050,10 @@ export function kmzFileName(index, total, when = new Date(), jobName = '') {
 
 /** The text file that rides in the ZIP of all missions. */
 export function readmeText(result, when = new Date(), opts = {}) {
+  // Display units for the pilot's notes only: chosen system, falling back to
+  // the module state the panel keeps (and the feet default elsewhere). Nothing
+  // in the KML/WPML the aircraft reads goes through this; those stay m/s.
+  const unitSystem = normalizeUnitSystem(opts.unitSystem ?? getUnitSystem());
   const { plan, missions, totals, warnings } = result;
   const t = plan.takeoff;
   const capture = captureOf(plan);
@@ -1062,7 +1074,7 @@ export function readmeText(result, when = new Date(), opts = {}) {
     ...missions.map((m, i) => missionSummaryLine(m, i, capture, marked)),
     photoTotalsLine(totals, capture, marked),
     '',
-    ...fileReadmeLines(result),
+    ...fileReadmeLines(result, unitSystem),
     '',
     ...readmeChecklist(plan),
     '',
@@ -1223,6 +1235,7 @@ export function bundleEntries(result, opts = {}) {
     name: 'README.txt',
     data: readmeText(result, when, {
       controllerIds: opts.controllerIds,
+      unitSystem: opts.unitSystem,
       labelFlights,
     }),
   });

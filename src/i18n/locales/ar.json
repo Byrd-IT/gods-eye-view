@@ -3284,7 +3284,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "وضع الارتفاع هو {found}؛ مهمات DJI Fly تستخدم relativeToStartPoint",
   "A waypoint has no height": "نقطة طريق بلا ارتفاع",
   "Heights {min} to {max} m are outside 0 to {limit} m": "الارتفاعات من {min} إلى {max} m خارج النطاق 0 إلى {limit} m",
-  "A waypoint speed is missing, zero or above {max} m/s": "سرعة نقطة طريق مفقودة أو صفر أو أعلى من {max} m/s",
   "Waypoint {index} faces a point of interest that is not set": "نقطة الطريق {index} تتجه إلى نقطة اهتمام غير معيَّنة",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "مجموعات الإجراءات ليست في وضع parallel (يكتب DJI Fly parallel)",
   "Action group numbers do not start at 1 and rise": "أرقام مجموعات الإجراءات لا تبدأ من 1 وتتصاعد",
@@ -3393,7 +3392,6 @@
   "Close the Drone Flight Plan and clear it from the globe": "إغلاق خطة طيران الطائرة المسيّرة وإزالتها من الكرة",
   "Units": "الوحدات",
   "M": "M",
-  "Show feet and ft/s. The mission file always stays in metres": "عرض الأقدام و ft/s. يبقى ملف المهمة دائمًا بالأمتار.",
   "Show metres and m/s. The mission file always stays in metres": "عرض الأمتار و m/s. يبقى ملف المهمة دائمًا بالأمتار.",
   "Aircraft & camera": "الطائرة والكاميرا",
   "Shots": "اللقطات",
@@ -4197,5 +4195,7 @@
   "Loading 3D model...": "جارٍ تحميل النموذج ثلاثي الأبعاد...",
   "The 3D model could not be loaded": "تعذّر تحميل النموذج ثلاثي الأبعاد",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "الطائرات العسكرية فقط (نسخة مسجّلة)"
+  "Military aircraft only (recorded copy)": "الطائرات العسكرية فقط (نسخة مسجّلة)",
+  "Show feet and mph. The mission file always stays in metres": "عرض الأقدام و ميل/ساعة (mph). يبقى ملف المهمة دائمًا بالأمتار.",
+  "A waypoint speed is missing, zero or above {max}": "سرعة نقطة طريق مفقودة أو صفر أو أعلى من {max}"
 }

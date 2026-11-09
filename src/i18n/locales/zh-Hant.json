@@ -2933,7 +2933,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "高度模式為 {found}；DJI Fly 任務使用 relativeToStartPoint",
   "A waypoint has no height": "有航點沒有高度",
   "Heights {min} to {max} m are outside 0 to {limit} m": "高度 {min} 至 {max} m 超出 0 至 {limit} m",
-  "A waypoint speed is missing, zero or above {max} m/s": "有航點速度缺失、為零或高於 {max} m/s",
   "Waypoint {index} faces a point of interest that is not set": "航點 {index} 朝向一個未設置的興趣點",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "動作組不在 parallel 模式（DJI Fly 寫入的是 parallel）",
   "Action group numbers do not start at 1 and rise": "動作組編號不是從 1 開始遞增",
@@ -3036,7 +3035,6 @@
   "Close the Drone Flight Plan and clear it from the globe": "關閉無人機飛行計劃並從地球上清除",
   "Units": "單位",
   "M": "M",
-  "Show feet and ft/s. The mission file always stays in metres": "顯示英尺和 ft/s。任務文件始終使用米",
   "Show metres and m/s. The mission file always stays in metres": "顯示米和 m/s。任務文件始終使用米",
   "Aircraft & camera": "飛行器與相機",
   "Shots": "拍攝",
@@ -3777,5 +3775,7 @@
   "Loading 3D model...": "正在載入 3D 模型...",
   "The 3D model could not be loaded": "無法載入 3D 模型",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "僅限軍用飛機（已記錄副本）"
+  "Military aircraft only (recorded copy)": "僅限軍用飛機（已記錄副本）",
+  "Show feet and mph. The mission file always stays in metres": "顯示英尺和英里/小時（mph）。任務文件始終使用米",
+  "A waypoint speed is missing, zero or above {max}": "有航點速度缺失、為零或高於 {max}"
 }

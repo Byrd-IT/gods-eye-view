@@ -2925,7 +2925,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "高度モードは{found}です。DJI FlyのミッションはrelativeToStartPointを使います",
   "A waypoint has no height": "ウェイポイントに高度がありません",
   "Heights {min} to {max} m are outside 0 to {limit} m": "高度{min}から{max} mは0から{limit} mの範囲外です",
-  "A waypoint speed is missing, zero or above {max} m/s": "ウェイポイント速度がないか、ゼロか、{max} m/sを超えています",
   "Waypoint {index} faces a point of interest that is not set": "ウェイポイント{index}が、未設定の関心点を向いています",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "アクショングループがparallelモードではありません（DJI Flyはparallelを書き込みます）",
   "Action group numbers do not start at 1 and rise": "アクショングループ番号が1から始まって増えていません",
@@ -3028,7 +3027,6 @@
   "Close the Drone Flight Plan and clear it from the globe": "ドローン飛行計画を閉じて地球から消す",
   "Units": "単位",
   "M": "M",
-  "Show feet and ft/s. The mission file always stays in metres": "フィートとft/sを表示します。ミッションファイルは常にメートルのままです",
   "Show metres and m/s. The mission file always stays in metres": "メートルとm/sを表示します。ミッションファイルは常にメートルのままです",
   "Aircraft & camera": "機体とカメラ",
   "Shots": "撮影",
@@ -3777,5 +3775,7 @@
   "Loading 3D model...": "3Dモデルを読み込み中...",
   "The 3D model could not be loaded": "3Dモデルを読み込めませんでした",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "軍用機のみ（記録されたコピー）"
+  "Military aircraft only (recorded copy)": "軍用機のみ（記録されたコピー）",
+  "Show feet and mph. The mission file always stays in metres": "フィートとマイル毎時（mph）を表示します。ミッションファイルは常にメートルのままです",
+  "A waypoint speed is missing, zero or above {max}": "ウェイポイント速度がないか、ゼロか、{max}を超えています"
 }

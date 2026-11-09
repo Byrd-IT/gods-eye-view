@@ -27,7 +27,13 @@ import { downtownPayload, okResponse } from './buildingFixtures.mjs';
 import { createDronePlanVoice } from './dronePlanVoice.js';
 import { readPlan, serializePlan } from './planDoc.js';
 import { getPreset } from './presets.js';
-import { assembleMissions, footprint, planFlight, spacing, writtenSpacingM } from './planner.js';
+import {
+  assembleMissions,
+  footprint,
+  planFlight,
+  spacing,
+  writtenSpacingM,
+} from './planner.js';
 import { BATTERY_PAUSE_SOURCE, batteryPauseEstimate } from './preview.js';
 import { batteryBreaks } from './batteryBreaks.js';
 import { readmeText } from './wpml.js';
@@ -35,7 +41,12 @@ import {
   clearOverlaySource,
   getWorldOverlayDiagnostics,
 } from '../../overlays/worldOverlay.js';
-import { SHUTTER_DENOMINATORS, speedLimits } from './speed.js';
+import {
+  SHUTTER_DENOMINATORS,
+  MIN_PLAN_SPEED_MS,
+  speedLimits,
+} from './speed.js';
+import { speedMphToMs } from './units.js';
 import { metersPerDegree } from './geo.js';
 import { MAX_OBSTACLES } from './obstacles.js';
 import { readZip } from './zip.js';
@@ -2609,17 +2620,15 @@ test('units: feet by default, the ft/m switch changes every shown length and spe
     w.control(label).parentNode.children.find((n) => n.tagName === 'OUTPUT')
       .textContent;
   assert.equal(out('Height above ground'), '262 ft');
-  // The speed readout also gives miles per hour, so 16 ft/s is not read as mph.
+  // In feet the speed readout is mph, the pilot's road-speed unit.
   const speedNow = w.handle.getState().options.speedMs;
-  assert.equal(
-    out('Speed'),
-    `${(speedNow * 3.28084).toFixed(1)} ft/s · ${((speedNow * 3600) / 1609.344).toFixed(1)} mph`,
-  );
+  const mphNow = (speedNow * 3600) / 1609.344;
+  assert.equal(out('Speed'), `${mphNow.toFixed(1)} mph`);
   assert.equal(w.control('Height above ground').max, '1500');
   assert.equal(w.control('Height above ground').step, '10');
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
-  assert.match(w.stats().Speed, /ft\/s$/);
+  assert.match(w.stats().Speed, / mph$/);
   assert.match(w.stats().Route, / (ft|mi)$/);
   unitBtn(w, 'm').click();
   assert.equal(unitBtn(w, 'm').getAttribute('aria-pressed'), 'true');
@@ -2668,7 +2677,7 @@ test('units: what is typed or slid in feet is stored in metres', async () => {
   const speed = w.control('Speed');
   speed.value = '10';
   speed.dispatch('input');
-  assert.equal(o().speedMs, 3.048);
+  assert.equal(o().speedMs, 4.47); // 10 mph, to the mm/s
   const radius = w.control('Orbit radius');
   radius.value = '100';
   radius.dispatch('input');
@@ -2687,6 +2696,65 @@ test('units: what is typed or slid in feet is stored in metres', async () => {
   assert.equal(w.handle.getState().check.halfWidthM, 15.24);
   // Back in the controls the same numbers are shown in feet.
   assert.equal(w.control('Orbit heights').value, '130, 260');
+  w.handle.destroy();
+});
+
+test('speed: in feet the slider is mph with a 0.1 step and legal endpoints', async () => {
+  const w = setup({ storage: memoryStorage() });
+  const speed = w.control('Speed');
+  assert.equal(speed.step, '0.1');
+  assert.equal(speed.min, '0.3');
+  assert.equal(speed.max, '33.5');
+  // Both endpoints must read back as valid internal speeds.
+  assert.ok(
+    speedMphToMs(Number(speed.min)) >= MIN_PLAN_SPEED_MS,
+    'the mph minimum is not below the plan minimum',
+  );
+  assert.ok(
+    speedMphToMs(Number(speed.max)) <= 15,
+    'the mph maximum is not above the plan maximum',
+  );
+  // A 0.1 mph step is a small, usable nudge; 0.3 mph is legal (0.134 m/s).
+  speed.value = '0.3';
+  speed.dispatch('input');
+  assert.ok(
+    w.handle.getState().options.speedMs >= MIN_PLAN_SPEED_MS,
+    'the smallest mph step is a legal plan speed',
+  );
+  // And the readout agrees with the slider.
+  speed.value = '10';
+  speed.dispatch('input');
+  assert.match(w.control('Speed').parentNode.textContent, /10\.0 mph(?!\s*·)/);
+  w.handle.destroy();
+});
+
+test('speed: in metres the slider keeps the original m/s range and step', async () => {
+  const w = setup({ storage: memoryStorage({ 'gev.dronePlan.units': 'm' }) });
+  const speed = w.control('Speed');
+  assert.equal(speed.min, String(MIN_PLAN_SPEED_MS));
+  assert.equal(speed.max, '15');
+  assert.equal(speed.step, '0.1');
+  speed.value = '10';
+  speed.dispatch('input');
+  assert.equal(w.handle.getState().options.speedMs, 10);
+  w.handle.destroy();
+});
+
+test('speed: the units hint names mph in feet and m/s in metres', async () => {
+  const w = setup({ storage: memoryStorage() });
+  assert.equal(
+    unitBtn(w, 'ft').getAttribute('title'),
+    'Show feet and mph. The mission file always stays in metres',
+  );
+  assert.equal(
+    unitBtn(w, 'm').getAttribute('title'),
+    'Show metres and m/s. The mission file always stays in metres',
+  );
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  // A plan readout hint: the seconds line speaks mph in feet.
+  const seconds = w.stats().Speed ?? '';
+  assert.equal(seconds.match(/ft\/s/), null);
   w.handle.destroy();
 });
 
@@ -4021,7 +4089,10 @@ test('a forged imported plan cannot hide the Mini 5 Pro unproven notice', async 
     /real-world proven/i,
   );
   assert.equal(
-    Object.hasOwn(serializePlan(w.handle.getState(), {}).options, 'intervalTriggerProven'),
+    Object.hasOwn(
+      serializePlan(w.handle.getState(), {}).options,
+      'intervalTriggerProven',
+    ),
     false,
   );
   const result = w.handle.getState().result;
@@ -4042,7 +4113,10 @@ test('voice and applyOptions cannot hide the Mini 5 Pro unproven notice', async 
   assert.equal(w.handle.applyOptions({ intervalTriggerProven: 'yes' }), true);
   assert.equal(w.handle.getState().options.intervalTriggerProven, false);
   assert.ok(captureRole(w, 'capture-unproven'));
-  assert.equal(w.handle.applyOptions({ intervalTriggerProven: true, speedMs: 6 }), true);
+  assert.equal(
+    w.handle.applyOptions({ intervalTriggerProven: true, speedMs: 6 }),
+    true,
+  );
   assert.equal(w.handle.getState().options.speedMs, 6);
   assert.equal(w.handle.getState().options.intervalTriggerProven, false);
   assert.ok(captureRole(w, 'capture-unproven'));
@@ -4055,7 +4129,10 @@ test('voice and applyOptions cannot hide the Mini 5 Pro unproven notice', async 
   assert.equal(onlyFlag.ok, false);
   assert.equal(w.handle.getState().options.intervalTriggerProven, false);
   assert.ok(captureRole(w, 'capture-unproven'));
-  const spoken = await voice.options({ intervalTriggerProven: true, speedMs: 7 });
+  const spoken = await voice.options({
+    intervalTriggerProven: true,
+    speedMs: 7,
+  });
   assert.equal(spoken.ok, true);
   assert.equal(w.handle.getState().options.speedMs, 7);
   assert.equal(w.handle.getState().options.intervalTriggerProven, false);
@@ -4065,7 +4142,10 @@ test('voice and applyOptions cannot hide the Mini 5 Pro unproven notice', async 
     /NOT proven on the Mini 5 Pro/,
   );
   assert.equal(
-    Object.hasOwn(serializePlan(w.handle.getState(), {}).options, 'intervalTriggerProven'),
+    Object.hasOwn(
+      serializePlan(w.handle.getState(), {}).options,
+      'intervalTriggerProven',
+    ),
     false,
   );
   w.handle.destroy();
@@ -4207,7 +4287,10 @@ function realContinuousPlan() {
     photoSpacingM: 25,
   });
   assert.equal(plan.error, undefined);
-  assert.ok(plan.legs.length > 1, 'the fixture has survey lines to turn between');
+  assert.ok(
+    plan.legs.length > 1,
+    'the fixture has survey lines to turn between',
+  );
   const ids = plan.legs.flatMap((leg) => leg.waypoints.map((w) => w.id));
   const built = assembleMissions(plan, {
     known: true,
@@ -4399,7 +4482,10 @@ test('a continuous plan restores usable minutes and does not say markers are mis
   assert.equal(result.plan.options.usableBatteryMin, 8);
   const readout = captureRole(w, 'capture-readout');
   assert.doesNotMatch(readout.textContent, /not a marker/i);
-  assert.match(readout.textContent, /Each extra survey line in a battery adds 3 seconds/);
+  assert.match(
+    readout.textContent,
+    /Each extra survey line in a battery adds 3 seconds/,
+  );
   assert.match(
     readout.textContent,
     /clearance check is for the planned route only/,
@@ -4556,7 +4642,10 @@ test('a custom camera minimum drives warnings, save/load and the planned speed l
   assert.match(note(), /derived\/unverified/);
   assert.equal(w.control('Camera minimum interval (s)').value, '');
   assert.equal(
-    Object.hasOwn(serializePlan(w.handle.getState(), {}).options, 'minPhotoIntervalS'),
+    Object.hasOwn(
+      serializePlan(w.handle.getState(), {}).options,
+      'minPhotoIntervalS',
+    ),
     false,
   );
   pick(w, 'Capture mode', 'distance');
@@ -4723,14 +4812,21 @@ test('timing: typing an interval shows the resulting front overlap at once and p
   assert.equal(plan.options.timedIntervalS, 7);
   assert.ok(plan.spacing.photoM > 0);
   assert.equal(w.handle.getResult().missions[0].legs[0].photoSpacingM, spacing);
-  assert.equal(plan.speedMs, 3.2, 'the speed is never changed to fit the interval');
+  assert.equal(
+    plan.speedMs,
+    3.2,
+    'the speed is never changed to fit the interval',
+  );
   w.handle.destroy();
 });
 
 test('timing: 5, 7 and 10 are quick-fill examples; CLEAR removes the interval; any positive number works', async () => {
   const w = await timedWorld();
   const chips = w.find((n) => n.getAttribute('data-role') === 'timing-chip');
-  assert.deepEqual(chips.map((c) => c.getAttribute('data-seconds')), ['5', '7', '10']);
+  assert.deepEqual(
+    chips.map((c) => c.getAttribute('data-seconds')),
+    ['5', '7', '10'],
+  );
   chips[1].click();
   assert.equal(w.handle.getState().options.timedIntervalS, 7);
   assert.equal(w.control(INTERVAL).value, '7');
@@ -4779,9 +4875,14 @@ test('timing: an interval that is too long for the wanted overlap says so and of
   const fitMs = Number(fit.getAttribute('data-speed-ms'));
   assert.ok(fitMs > 0 && fitMs < o.speedMs);
   assert.equal(o.speedMs, 3.2, 'nothing changed the speed');
-  w.find((n) => n.getAttribute('data-action') === 'timing-use-speed')[0].click();
+  w.find(
+    (n) => n.getAttribute('data-action') === 'timing-use-speed',
+  )[0].click();
   assert.equal(w.handle.getState().options.speedMs, fitMs);
-  assert.equal(captureRole(w, 'timing-result').getAttribute('data-state'), 'meets');
+  assert.equal(
+    captureRole(w, 'timing-result').getAttribute('data-state'),
+    'meets',
+  );
   assert.equal(captureRole(w, 'timing-fit').hidden, true);
   w.handle.destroy();
 });
@@ -4797,7 +4898,11 @@ test('timing: an interval under the camera minimum is flagged and the overlap is
   assert.equal(note.getAttribute('data-tone'), 'bad');
   assert.match(note.textContent, /theoretical/);
   assert.equal(note.hidden, false);
-  assert.equal(insideDetails(note), false, 'an important warning is not folded away');
+  assert.equal(
+    insideDetails(note),
+    false,
+    'an important warning is not folded away',
+  );
   w.handle.destroy();
 });
 
@@ -4807,7 +4912,9 @@ test('timing: outside Timed shot the interval is not asked for, and one click sw
   await w.handle.replan();
   assert.equal(captureRole(w, 'timing-timed').hidden, true);
   assert.equal(captureRole(w, 'timing-recommended').hidden, false);
-  w.find((n) => n.getAttribute('data-action') === 'timing-use-timed')[0].click();
+  w.find(
+    (n) => n.getAttribute('data-action') === 'timing-use-timed',
+  )[0].click();
   const o = w.handle.getState().options;
   assert.equal(o.captureMode, 'timed');
   assert.equal(w.control('Capture mode').value, 'timed');
@@ -4898,15 +5005,31 @@ test('timing: Plan all rows still show when the single plan has incomplete terra
   o.captureMode = 'timed';
   o.timedIntervalS = 7;
   await w.handle.replan();
-  assert.equal(w.handle.getResult().terrainComplete, false, 'the fixture really is incomplete');
+  assert.equal(
+    w.handle.getResult().terrainComplete,
+    false,
+    'the fixture really is incomplete',
+  );
   await w.handle.planSuite();
   const passes = w.handle.getState().suite.passes.filter((p) => p.result?.plan);
   const complete = passes.filter((p) => p.result.terrainComplete !== false);
-  assert.ok(complete.length >= 1, 'the fixture leaves a pass with complete terrain');
-  assert.equal(captureRole(w, 'timing-terrain').hidden, false, 'the single plan is unknown');
+  assert.ok(
+    complete.length >= 1,
+    'the fixture leaves a pass with complete terrain',
+  );
+  assert.equal(
+    captureRole(w, 'timing-terrain').hidden,
+    false,
+    'the single plan is unknown',
+  );
   assert.equal(captureRole(w, 'timing-result').hidden, true);
-  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
-  assert.equal(rows.length, passes.filter((p) => p.result.plan.options.pattern !== 'orbit').length);
+  const rows = w.find(
+    (n) => n.getAttribute('data-role') === 'timing-suite-row',
+  );
+  assert.equal(
+    rows.length,
+    passes.filter((p) => p.result.plan.options.pattern !== 'orbit').length,
+  );
   const known = rows.filter((r) => r.getAttribute('data-unknown') !== 'true');
   assert.ok(known.length >= 1, 'a complete pass keeps its own overlap row');
   for (const r of known) assert.match(r.textContent, /% front/);
@@ -4926,8 +5049,13 @@ test('timing: Plan all rows still show when the single plan figures cannot be wo
   const input = w.control(INTERVAL);
   input.value = '7.5';
   input.dispatch('input');
-  assert.match(captureRole(w, 'timing-recommended-note').textContent, /Cannot be calculated/);
-  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  assert.match(
+    captureRole(w, 'timing-recommended-note').textContent,
+    /Cannot be calculated/,
+  );
+  const rows = w.find(
+    (n) => n.getAttribute('data-role') === 'timing-suite-row',
+  );
   assert.ok(rows.length >= 3, 'each pass keeps its own row');
   w.handle.destroy();
 });
@@ -4942,18 +5070,39 @@ test('timing: Plan all rows show when the single pattern is Orbit, and nothing i
   await w.handle.replan();
   await w.handle.planSuite();
   assert.equal(w.handle.getState().options.pattern, 'orbit');
-  assert.equal(captureRole(w, 'timing-recommended').hidden, true, 'the single plan has no survey figure');
-  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  assert.equal(
+    captureRole(w, 'timing-recommended').hidden,
+    true,
+    'the single plan has no survey figure',
+  );
+  const rows = w.find(
+    (n) => n.getAttribute('data-role') === 'timing-suite-row',
+  );
   assert.ok(rows.length >= 3, 'the grid and oblique passes keep their rows');
   for (const r of rows) assert.match(r.textContent, /% front/);
   // Each row is the 7 s the pass was planned with, worked out from that pass.
-  for (const p of w.handle.getState().suite.passes.filter((x) => x.result?.plan && x.result.plan.options.pattern !== 'orbit')) {
+  for (const p of w.handle
+    .getState()
+    .suite.passes.filter(
+      (x) => x.result?.plan && x.result.plan.options.pattern !== 'orbit',
+    )) {
     const row = rows.find((r) => r.getAttribute('data-pass') === String(p.id));
     assert.ok(row, `${p.id} has a row`);
-    const want = (1 - writtenSpacingM(p.result.plan.speedMs * 7) / p.result.plan.footprint.alongM) * 100;
-    assert.ok(Math.abs(Number(row.getAttribute('data-front')) - want) < 1e-6, `${p.id}: ${row.getAttribute('data-front')} vs ${want}`);
+    const want =
+      (1 -
+        writtenSpacingM(p.result.plan.speedMs * 7) /
+          p.result.plan.footprint.alongM) *
+      100;
+    assert.ok(
+      Math.abs(Number(row.getAttribute('data-front')) - want) < 1e-6,
+      `${p.id}: ${row.getAttribute('data-front')} vs ${want}`,
+    );
   }
-  assert.equal(captureRole(w, 'timing-suite-stale'), undefined, 'a fresh PLAN ALL is not stale');
+  assert.equal(
+    captureRole(w, 'timing-suite-stale'),
+    undefined,
+    'a fresh PLAN ALL is not stale',
+  );
   w.handle.destroy();
 });
 
@@ -4965,18 +5114,32 @@ test('timing: after the interval changes the Plan all rows keep the planned inte
   o.timedIntervalS = 7;
   await w.handle.replan();
   await w.handle.planSuite();
-  const rowsNow = () => w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
-  const before = rowsNow().map((r) => [r.getAttribute('data-pass'), r.getAttribute('data-front'), r.textContent]);
+  const rowsNow = () =>
+    w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  const before = rowsNow().map((r) => [
+    r.getAttribute('data-pass'),
+    r.getAttribute('data-front'),
+    r.textContent,
+  ]);
   assert.ok(before.length >= 3);
   assert.equal(captureRole(w, 'timing-suite-stale'), undefined);
-  const planned = w.handle.getState().suite.passes.filter((p) => p.result?.plan && p.result.plan.options.pattern !== 'orbit');
-  for (const p of planned) assert.equal(p.result.plan.options.timedIntervalS, 7);
+  const planned = w.handle
+    .getState()
+    .suite.passes.filter(
+      (p) => p.result?.plan && p.result.plan.options.pattern !== 'orbit',
+    );
+  for (const p of planned)
+    assert.equal(p.result.plan.options.timedIntervalS, 7);
   // The field moves on; the suite (README spacing, station counts) did not.
   const input = w.control(INTERVAL);
   input.value = '11';
   input.dispatch('input');
   assert.equal(w.handle.getState().options.timedIntervalS, 11);
-  const after = rowsNow().map((r) => [r.getAttribute('data-pass'), r.getAttribute('data-front'), r.textContent]);
+  const after = rowsNow().map((r) => [
+    r.getAttribute('data-pass'),
+    r.getAttribute('data-front'),
+    r.textContent,
+  ]);
   assert.deepEqual(after, before, 'rows still describe the 7 s plan');
   const stale = captureRole(w, 'timing-suite-stale');
   assert.ok(stale, 'the stale note shows');
@@ -4990,7 +5153,11 @@ test('timing: after the interval changes the Plan all rows keep the planned inte
   const fresh = rowsNow();
   assert.ok(fresh.length >= 3);
   assert.equal(captureRole(w, 'timing-suite-stale'), undefined);
-  assert.notDeepEqual(fresh.map((r) => r.getAttribute('data-front')), before.map((b) => b[1]), 'the new interval gives new figures');
+  assert.notDeepEqual(
+    fresh.map((r) => r.getAttribute('data-front')),
+    before.map((b) => b[1]),
+    'the new interval gives new figures',
+  );
   w.handle.destroy();
 });
 
@@ -4998,10 +5165,12 @@ const mphForTest = (mph) => (mph * 1609.344) / 3600;
 
 test('timing: 15 and 16 mph show as that in the speed readout, in feet and in metres', () => {
   for (const [system, unit] of [
-    ['ft', /22\.0 ft\/s · 15\.0 mph/],
+    ['ft', /15\.0 mph/],
     ['m', /6\.7 m\/s · 15\.0 mph/],
   ]) {
-    const w = setup({ storage: memoryStorage({ 'gev.dronePlan.units': system }) });
+    const w = setup({
+      storage: memoryStorage({ 'gev.dronePlan.units': system }),
+    });
     w.handle.applyOptions({ speedMs: mphForTest(15) });
     assert.match(w.control('Speed').parentNode.textContent, unit);
     w.handle.applyOptions({ speedMs: mphForTest(16) });
@@ -5037,7 +5206,10 @@ test('timing: the whole wordy readout is folded into Details; important warnings
     assert.ok(insideDetails(node), `${role} is in Details`);
   }
   // Still in the readout text, so nothing is lost.
-  assert.match(captureRole(w, 'capture-readout').textContent, /along the track/);
+  assert.match(
+    captureRole(w, 'capture-readout').textContent,
+    /along the track/,
+  );
   for (const role of ['capture-unproven', 'capture-interval-warn']) {
     const node = captureRole(w, role);
     assert.ok(node, role);
@@ -5098,15 +5270,26 @@ test('timing: with incomplete terrain the interval and the overlap are unknown, 
   o.captureMode = 'timed';
   o.timedIntervalS = 7;
   await w.handle.replan();
-  assert.equal(w.handle.getResult().terrainComplete, false, 'the fixture really is incomplete');
+  assert.equal(
+    w.handle.getResult().terrainComplete,
+    false,
+    'the fixture really is incomplete',
+  );
   const note = captureRole(w, 'timing-terrain');
   assert.equal(note.hidden, false);
   assert.match(note.textContent, /not known/);
   const rec = captureRole(w, 'timing-recommended');
   assert.equal(rec.getAttribute('data-seconds'), null, 'no interval figure');
   assert.equal(captureRole(w, 'timing-recommended-value').textContent, '–');
-  assert.equal(captureRole(w, 'timing-result').hidden, true, 'no overlap figure');
-  assert.equal(captureRole(w, 'timing-result').getAttribute('data-front'), null);
+  assert.equal(
+    captureRole(w, 'timing-result').hidden,
+    true,
+    'no overlap figure',
+  );
+  assert.equal(
+    captureRole(w, 'timing-result').getAttribute('data-front'),
+    null,
+  );
   assert.equal(captureRole(w, 'timing-fit').hidden, true);
   // Complete terrain brings the figures back.
   complete = true;
@@ -5120,12 +5303,19 @@ test('timing: with incomplete terrain the interval and the overlap are unknown, 
 
 test('timing: a fixed photo spacing that a chosen Timed-shot interval overrides says so', async () => {
   const w = await timedWorld({ photoSpacingM: 25 });
-  assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, true, 'no interval yet: the fixed distance is used');
+  assert.equal(
+    captureRole(w, 'timing-spacing-ignored').hidden,
+    true,
+    'no interval yet: the fixed distance is used',
+  );
   const input = w.control(INTERVAL);
   input.value = '7';
   input.dispatch('input');
   assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, false);
-  assert.match(captureRole(w, 'timing-spacing-ignored').textContent, /not used/);
+  assert.match(
+    captureRole(w, 'timing-spacing-ignored').textContent,
+    /not used/,
+  );
   w.handle.destroy();
 });
 
@@ -5137,10 +5327,15 @@ test('timing: Plan all passes gives each pass its own overlap for the one interv
   o.timedIntervalS = 7;
   await w.handle.replan();
   await w.handle.planSuite();
-  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
+  const rows = w.find(
+    (n) => n.getAttribute('data-role') === 'timing-suite-row',
+  );
   assert.ok(rows.length >= 3, 'nadir and two oblique passes');
   const fronts = rows.map((r) => Number(r.getAttribute('data-front')));
-  assert.ok(new Set(fronts.map((f) => Math.round(f))).size > 1, 'the passes differ');
+  assert.ok(
+    new Set(fronts.map((f) => Math.round(f))).size > 1,
+    'the passes differ',
+  );
   assert.match(captureRole(w, 'timing-suite').textContent, /own overlap/);
   for (const r of rows) assert.match(r.textContent, /% front/);
   w.handle.destroy();
@@ -5162,12 +5357,19 @@ test('timing: Plan all passes shows unknown, not an overlap, for a pass with inc
   const input = w.control(INTERVAL);
   input.value = '7.5';
   input.dispatch('input');
-  const rows = w.find((n) => n.getAttribute('data-role') === 'timing-suite-row');
-  const bad = rows.find((r) => r.getAttribute('data-pass') === String(victim.id));
+  const rows = w.find(
+    (n) => n.getAttribute('data-role') === 'timing-suite-row',
+  );
+  const bad = rows.find(
+    (r) => r.getAttribute('data-pass') === String(victim.id),
+  );
   assert.ok(bad, 'the incomplete pass still has a row');
   assert.equal(bad.getAttribute('data-unknown'), 'true');
   assert.equal(bad.getAttribute('data-front'), null, 'no overlap figure');
-  assert.match(bad.textContent, /terrain heights incomplete, overlap not known/);
+  assert.match(
+    bad.textContent,
+    /terrain heights incomplete, overlap not known/,
+  );
   assert.doesNotMatch(bad.textContent, /% front/);
   const others = rows.filter((r) => r !== bad);
   assert.ok(others.length >= 2);
@@ -5215,6 +5417,10 @@ test('timing: the capture readout figures follow the interval, not a stale spaci
   const readout = captureRole(w, 'capture-readout');
   const spacing = writtenSpacingM(o.speedMs * 7);
   assert.equal(Number(readout.getAttribute('data-photo-m')), spacing);
-  assert.ok(Math.abs(Number(readout.getAttribute('data-seconds')) - spacing / o.speedMs) < 1e-9);
+  assert.ok(
+    Math.abs(
+      Number(readout.getAttribute('data-seconds')) - spacing / o.speedMs,
+    ) < 1e-9,
+  );
   w.handle.destroy();
 });

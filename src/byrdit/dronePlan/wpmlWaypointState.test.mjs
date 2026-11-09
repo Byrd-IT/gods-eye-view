@@ -27,6 +27,7 @@ import { parseXml } from './wpmlCompare.mjs';
 import { metersPerDegree } from './geo.js';
 import { CENTRE, boxAround } from './buildingFixtures.mjs';
 import { mphToMs, msToMph } from './timing.js';
+import { getUnitSystem, setUnitSystem } from './units.js';
 
 const find = (node, name) => node.children.find((c) => c.name === name);
 const findAll = (node, name) => node.children.filter((c) => c.name === name);
@@ -78,7 +79,8 @@ function readMarks(xml) {
 
 const sigOf = (g, a) =>
   `${g.start}-${g.end}:${g.trigger}:${g.param ?? ''}:${a.func}:${a.pitch ?? ''}`;
-const actionsOf = (m) => m.groups.flatMap((g) => g.actions.map((a) => sigOf(g, a)));
+const actionsOf = (m) =>
+  m.groups.flatMap((g) => g.actions.map((a) => sigOf(g, a)));
 const rotatesAt = (m) =>
   m.groups.flatMap((g) =>
     g.start === m.index && g.end === m.index && g.trigger === 'reachPoint'
@@ -136,7 +138,11 @@ const SCENARIOS = [
     boxAround(400, 300),
     { maxWaypoints: 50 },
   ],
-  ['orbit', mbox, { pattern: 'orbit', orbitRadiusM: 50, orbitHeightsM: [30, 60] }],
+  [
+    'orbit',
+    mbox,
+    { pattern: 'orbit', orbitRadiusM: 50, orbitHeightsM: [30, 60] },
+  ],
 ];
 
 for (const [name, box, options] of SCENARIOS) {
@@ -152,13 +158,20 @@ for (const [name, box, options] of SCENARIOS) {
         waypoints += 1;
         assert.equal(m.speed, speed, `${name} wp ${k} speed`);
         const rotates = rotatesAt(m);
-        assert.ok(rotates.length >= 1, `${name} wp ${k} has its own gimbalRotate`);
+        assert.ok(
+          rotates.length >= 1,
+          `${name} wp ${k} has its own gimbalRotate`,
+        );
         for (const r of rotates) {
           assert.equal(r.rotateMode, 'absoluteAngle');
           assert.equal(r.pitchEnable, '1');
           assert.equal(r.yawEnable, '0', 'pitch only: no yaw');
           assert.equal(r.rollEnable, '0', 'pitch only: no roll');
-          assert.equal(r.pitch, m.pitchParam, `${name} wp ${k} rotate = waypoint pitch`);
+          assert.equal(
+            r.pitch,
+            m.pitchParam,
+            `${name} wp ${k} rotate = waypoint pitch`,
+          );
         }
       });
     }
@@ -170,16 +183,26 @@ for (const [name, box, options] of SCENARIOS) {
   test(`${name}: only gimbal rotates are added; photos, stops, turns, speed and heading are unchanged`, () => {
     const result = built(box, options);
     for (const mission of result.missions) {
-      const now = readMarks(buildMissionFiles(mission, result.plan).waylinesWpml);
+      const now = readMarks(
+        buildMissionFiles(mission, result.plan).waylinesWpml,
+      );
       const before = readMarks(
         buildMissionFiles(mission, result.plan, {
           explicitWaypointGimbal: false,
         }).waylinesWpml,
       );
-      assert.equal(now.length, before.length, 'no new waypoint, so no new stop');
+      assert.equal(
+        now.length,
+        before.length,
+        'no new waypoint, so no new stop',
+      );
       now.forEach((m, k) => {
         const b = before[k];
-        assert.equal(m.rest, b.rest, `wp ${k}: turn, speed, heading, straight line, pitch param unchanged`);
+        assert.equal(
+          m.rest,
+          b.rest,
+          `wp ${k}: turn, speed, heading, straight line, pitch param unchanged`,
+        );
         // Every action that was there is still there, exactly once; the
         // extras are gimbalRotate actions and nothing else.
         const left = [...actionsOf(m)];
@@ -193,9 +216,17 @@ for (const [name, box, options] of SCENARIOS) {
           `wp ${k}: unexpected extra ${left.join(', ')}`,
         );
         assert.ok(left.length <= 1, `wp ${k}: at most one added rotate`);
-        const photos = (list) => list.filter((s) => s.includes(':takePhoto:')).length;
-        assert.equal(photos(actionsOf(m)), photos(actionsOf(b)), `wp ${k}: photos`);
-        assert.ok(photos(actionsOf(m)) <= 1, `wp ${k}: never two photos at one waypoint`);
+        const photos = (list) =>
+          list.filter((s) => s.includes(':takePhoto:')).length;
+        assert.equal(
+          photos(actionsOf(m)),
+          photos(actionsOf(b)),
+          `wp ${k}: photos`,
+        );
+        assert.ok(
+          photos(actionsOf(m)) <= 1,
+          `wp ${k}: never two photos at one waypoint`,
+        );
       });
     }
   });
@@ -203,7 +234,9 @@ for (const [name, box, options] of SCENARIOS) {
 
 test('a photo waypoint holds the rotate and the photo in one ordered group, rotate first', () => {
   const result = built(mbox, { pattern: 'double', tiltPitchDeg: -60 });
-  const marks = readMarks(buildMissionFiles(result.missions[0], result.plan).waylinesWpml);
+  const marks = readMarks(
+    buildMissionFiles(result.missions[0], result.plan).waylinesWpml,
+  );
   let seen = 0;
   for (const m of marks) {
     for (const g of m.groups) {
@@ -226,7 +259,9 @@ test('timed capture still writes no photo action, distance still one group per l
   const marks = readMarks(
     buildMissionFiles(distance.missions[0], distance.plan).waylinesWpml,
   );
-  const groups = marks.flatMap((m) => m.groups).filter((g) => g.trigger === 'multipleDistance');
+  const groups = marks
+    .flatMap((m) => m.groups)
+    .filter((g) => g.trigger === 'multipleDistance');
   assert.equal(groups.length, distance.missions[0].legs.length);
 });
 
@@ -234,16 +269,28 @@ test('action ids are unique across the file and group ids are unique inside a wa
   for (const [name, box, options] of SCENARIOS) {
     const result = built(box, options);
     for (const mission of result.missions) {
-      const marks = readMarks(buildMissionFiles(mission, result.plan).waylinesWpml);
-      const ids = marks.flatMap((m) => m.groups.flatMap((g) => g.actions.map((a) => a.id)));
+      const marks = readMarks(
+        buildMissionFiles(mission, result.plan).waylinesWpml,
+      );
+      const ids = marks.flatMap((m) =>
+        m.groups.flatMap((g) => g.actions.map((a) => a.id)),
+      );
       assert.equal(new Set(ids).size, ids.length, `${name}: action ids`);
       for (const m of marks) {
         // Ids rise in file order inside a waypoint, so the order the file
         // lists the actions is the order they were numbered in.
         const own = m.groups.flatMap((g) => g.actions.map((a) => Number(a.id)));
-        assert.deepEqual(own, [...own].sort((a, b) => a - b), `${name} wp ${m.index}: ids rise`);
+        assert.deepEqual(
+          own,
+          [...own].sort((a, b) => a - b),
+          `${name} wp ${m.index}: ids rise`,
+        );
         const gids = m.groups.map((g) => g.id);
-        assert.equal(new Set(gids).size, gids.length, `${name} wp ${m.index}: group ids`);
+        assert.equal(
+          new Set(gids).size,
+          gids.length,
+          `${name} wp ${m.index}: group ids`,
+        );
         assert.ok(gids.every((g) => g >= 1));
       }
     }
@@ -252,13 +299,19 @@ test('action ids are unique across the file and group ids are unique inside a wa
 
 test('a gradual tilt between legs still ends on the pitch the next waypoint states', () => {
   const result = built(mbox, { pattern: 'double', tiltPitchDeg: -60 });
-  const marks = readMarks(buildMissionFiles(result.missions[0], result.plan).waylinesWpml);
+  const marks = readMarks(
+    buildMissionFiles(result.missions[0], result.plan).waylinesWpml,
+  );
   for (const m of marks) {
     for (const g of m.groups) {
       for (const a of g.actions) {
         if (a.func !== 'gimbalEvenlyRotate') continue;
         const target = marks.find((x) => x.index === g.end);
-        assert.equal(a.pitch, target.pitchParam, 'the tilt target is the next waypoint pitch');
+        assert.equal(
+          a.pitch,
+          target.pitchParam,
+          'the tilt target is the next waypoint pitch',
+        );
         assert.equal(rotatesAt(target)[0].pitch, target.pitchParam);
       }
     }
@@ -272,7 +325,9 @@ test('per-pass angles are kept: nadir is -90, a 60 deg oblique pass is -60, a 45
     [{ pattern: 'double', tiltPitchDeg: -45 }, '-45'],
   ]) {
     const result = built(mbox, options);
-    const marks = readMarks(buildMissionFiles(result.missions[0], result.plan).waylinesWpml);
+    const marks = readMarks(
+      buildMissionFiles(result.missions[0], result.plan).waylinesWpml,
+    );
     assert.ok(
       marks.every((m) => rotatesAt(m).every((r) => r.pitch === pitch)),
       `pitch ${pitch}`,
@@ -297,7 +352,9 @@ test('ring stops: the inward waypoint holds the ring pitch and the outward waypo
     presetId: 'dji-mini-4-pro',
     orbitTargets: [target],
   });
-  const marks = readMarks(buildMissionFiles(result.missions[0], result.plan).waylinesWpml);
+  const marks = readMarks(
+    buildMissionFiles(result.missions[0], result.plan).waylinesWpml,
+  );
   const pitches = new Set();
   for (const m of marks) {
     const own = rotatesAt(m);
@@ -305,19 +362,37 @@ test('ring stops: the inward waypoint holds the ring pitch and the outward waypo
     assert.equal(own[0].pitch, m.pitchParam);
     pitches.add(own[0].pitch);
   }
-  assert.ok(pitches.size >= 2, 'inward ring pitch and outward pitch are both written');
-  const photos = marks.map((m) => actionsOf(m).filter((s) => s.includes(':takePhoto:')).length);
-  assert.ok(photos.every((n) => n === 1), 'one photo per ring waypoint, none added');
+  assert.ok(
+    pitches.size >= 2,
+    'inward ring pitch and outward pitch are both written',
+  );
+  const photos = marks.map(
+    (m) => actionsOf(m).filter((s) => s.includes(':takePhoto:')).length,
+  );
+  assert.ok(
+    photos.every((n) => n === 1),
+    'one photo per ring waypoint, none added',
+  );
 });
 
 test('a look-at path writes each waypoint own pitch, not one pitch for the whole path', () => {
   const m = metersPerDegree(CENTRE.lat);
-  const at = (n, e) => ({ lon: CENTRE.lon + e / m.lon, lat: CENTRE.lat + n / m.lat });
+  const at = (n, e) => ({
+    lon: CENTRE.lon + e / m.lon,
+    lat: CENTRE.lat + n / m.lat,
+  });
   const result = built(boxAround(300, 300), {
     pattern: 'orbit',
     presetId: 'dji-mini-4-pro',
     orbitTargets: [
-      { id: 't1', ...at(0, 0), label: 'Hall', source: 'custom', active: true, heightM: 4 },
+      {
+        id: 't1',
+        ...at(0, 0),
+        label: 'Hall',
+        source: 'custom',
+        active: true,
+        heightM: 4,
+      },
     ],
     lookAtPaths: [
       {
@@ -330,7 +405,9 @@ test('a look-at path writes each waypoint own pitch, not one pitch for the whole
       },
     ],
   });
-  const marks = readMarks(buildMissionFiles(result.missions[0], result.plan).waylinesWpml);
+  const marks = readMarks(
+    buildMissionFiles(result.missions[0], result.plan).waylinesWpml,
+  );
   assert.ok(marks.length > 3);
   for (const mark of marks) {
     for (const r of rotatesAt(mark)) assert.equal(r.pitch, mark.pitchParam);
@@ -340,27 +417,45 @@ test('a look-at path writes each waypoint own pitch, not one pitch for the whole
 });
 
 test('template.kml is unchanged and no global gimbal or speed element is added', () => {
-  const result = built(mbox, { captureMode: 'timed', speedMs: 4, timedIntervalS: 7 });
-  const now = buildMissionFiles(result.missions[0], result.plan, { createdMs: 1 });
+  const result = built(mbox, {
+    captureMode: 'timed',
+    speedMs: 4,
+    timedIntervalS: 7,
+  });
+  const now = buildMissionFiles(result.missions[0], result.plan, {
+    createdMs: 1,
+  });
   const before = buildMissionFiles(result.missions[0], result.plan, {
     createdMs: 1,
     explicitWaypointGimbal: false,
   });
   assert.equal(now.templateKml, before.templateKml);
   for (const xml of [now.templateKml, now.waylinesWpml]) {
-    assert.doesNotMatch(xml, /globalWaypoint|gimbalPitchMode|useGlobalSpeed|startActionGroup/);
+    assert.doesNotMatch(
+      xml,
+      /globalWaypoint|gimbalPitchMode|useGlobalSpeed|startActionGroup/,
+    );
   }
   assert.match(now.waylinesWpml, /<wpml:autoFlightSpeed>2\.5</);
 });
 
 test('a battery-split file and a resumed second file each open with speed and pitch of their own', () => {
-  const result = built(boxAround(400, 300), { batteryMin: 5, maxWaypoints: 200 });
+  const result = built(boxAround(400, 300), {
+    batteryMin: 5,
+    maxWaypoints: 200,
+  });
   assert.ok(result.missions.length > 1, 'split into several files');
   for (const mission of result.missions) {
-    const marks = readMarks(buildMissionFiles(mission, result.plan).waylinesWpml);
+    const marks = readMarks(
+      buildMissionFiles(mission, result.plan).waylinesWpml,
+    );
     assert.equal(marks[0].speed, speedText(result.plan.speedMs));
     assert.ok(rotatesAt(marks[0]).length >= 1);
-    assert.equal(rotatesAt(marks.at(-1)).length >= 1, true, 'and the last waypoint too');
+    assert.equal(
+      rotatesAt(marks.at(-1)).length >= 1,
+      true,
+      'and the last waypoint too',
+    );
   }
 });
 
@@ -379,9 +474,17 @@ test('requested 15 and 16 mph reach the file as 6.7 and 7.2 m/s on every waypoin
         speedMs: mphToMs(mph),
       });
       assert.equal(result.plan.speedMs, mphToMs(mph), 'no silent reduction');
-      const marks = readMarks(buildMissionFiles(result.missions[0], result.plan).waylinesWpml);
-      assert.ok(marks.every((m) => m.speed === text), `${mph} mph ${captureMode}`);
-      assert.ok(Math.abs(msToMph(Number(text)) - mph) < 0.15, 'file speed within 0.15 mph');
+      const marks = readMarks(
+        buildMissionFiles(result.missions[0], result.plan).waylinesWpml,
+      );
+      assert.ok(
+        marks.every((m) => m.speed === text),
+        `${mph} mph ${captureMode}`,
+      );
+      assert.ok(
+        Math.abs(msToMph(Number(text)) - mph) < 0.15,
+        'file speed within 0.15 mph',
+      );
     }
   }
 });
@@ -392,7 +495,7 @@ test('the README gives the plan speed in m/s and mph, and says what each waypoin
     speedMs: mphToMs(15),
     photoSpacingM: 25,
   });
-  const readme = readmeText(result);
+  const readme = readmeText(result, new Date(), { unitSystem: 'm' });
   assert.match(readme, /Speed: 6\.7 m\/s \(15\.0 mph\)/);
   assert.match(
     readme,
@@ -401,11 +504,59 @@ test('the README gives the plan speed in m/s and mph, and says what each waypoin
   assert.match(readme, /not verified in DJI Fly/i);
 });
 
+test('the README speed leads with the chosen unit: mph in feet, m/s in metric', () => {
+  const result = built(mbox, {
+    captureMode: 'timed',
+    speedMs: mphToMs(15),
+    photoSpacingM: 25,
+  });
+  // Feet system (the panel default): mph first, m/s next to it.
+  assert.match(
+    readmeText(result, new Date(), { unitSystem: 'ft' }),
+    /Speed: 15\.0 mph \(6\.7 m\/s\)/,
+  );
+  // Metric: m/s first, mph next to it. Both units stay in the line either way.
+  assert.match(
+    readmeText(result, new Date(), { unitSystem: 'm' }),
+    /Speed: 6\.7 m\/s \(15\.0 mph\)/,
+  );
+  // No explicit choice falls back to the module's current system (set by the
+  // panel; its default here is feet).
+  const was = getUnitSystem();
+  setUnitSystem('m');
+  try {
+    assert.match(readmeText(result), /Speed: 6\.7 m\/s \(15\.0 mph\)/);
+    setUnitSystem('ft');
+    assert.match(readmeText(result), /Speed: 15\.0 mph \(6\.7 m\/s\)/);
+  } finally {
+    setUnitSystem(was);
+  }
+});
+
+test('the requested-but-lowered speed follows the chosen unit order too', () => {
+  // A plan that wanted 8.0 m/s but whose speed was lowered to 6.7 m/s.
+  const result = built(mbox, {
+    captureMode: 'timed',
+    speedMs: mphToMs(15),
+    photoSpacingM: 25,
+  });
+  result.plan.options.speedMs = 8;
+  for (const [system, pattern] of [
+    ['ft', /requested 17\.9 mph, 8\.0 m\/s; lowered/],
+    ['m', /requested 8\.0 m\/s, 17\.9 mph; lowered/],
+  ]) {
+    const readme = readmeText(result, new Date(), { unitSystem: system });
+    assert.match(readme, /lowered so the camera can keep up/);
+    assert.match(readme, pattern);
+  }
+});
+
 test('an unusable plan speed stops the export instead of writing NaN or 0', () => {
   const result = built(mbox, {});
   for (const bad of [0, -1, NaN, undefined, null, 'x']) {
     assert.throws(
-      () => buildMissionFiles(result.missions[0], { ...result.plan, speedMs: bad }),
+      () =>
+        buildMissionFiles(result.missions[0], { ...result.plan, speedMs: bad }),
       /plan speed/i,
       String(bad),
     );

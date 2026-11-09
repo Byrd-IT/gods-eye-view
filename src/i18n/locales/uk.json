@@ -3135,7 +3135,6 @@
   "Height mode is {found}; DJI Fly missions use relativeToStartPoint": "Режим висоти — {found}; місії DJI Fly використовують relativeToStartPoint",
   "A waypoint has no height": "Точка маршруту не має висоти",
   "Heights {min} to {max} m are outside 0 to {limit} m": "Висоти від {min} до {max} m поза межами від 0 до {limit} m",
-  "A waypoint speed is missing, zero or above {max} m/s": "Швидкість точки маршруту відсутня, нульова або вища за {max} m/s",
   "Waypoint {index} faces a point of interest that is not set": "Точка маршруту {index} дивиться на точку інтересу, яку не задано",
   "Action groups are not in parallel mode (DJI Fly writes parallel)": "Групи дій не в режимі parallel (DJI Fly записує parallel)",
   "Action group numbers do not start at 1 and rise": "Номери груп дій не починаються з 1 і не зростають",
@@ -3238,7 +3237,6 @@
   "Close the Drone Flight Plan and clear it from the globe": "Закрити план польоту безпілотника і прибрати його з глобуса",
   "Units": "Одиниці",
   "M": "M",
-  "Show feet and ft/s. The mission file always stays in metres": "Показувати фути і ft/s. Файл місії завжди лишається в метрах",
   "Show metres and m/s. The mission file always stays in metres": "Показувати метри і m/s. Файл місії завжди лишається в метрах",
   "Aircraft & camera": "Апарат і камера",
   "Shots": "Кадри",
@@ -4029,5 +4027,7 @@
   "Loading 3D model...": "Завантаження 3D-моделі...",
   "The 3D model could not be loaded": "Не вдалося завантажити 3D-модель",
   "Byrd Ranch builds": "Byrd Ranch builds",
-  "Military aircraft only (recorded copy)": "Лише військові літаки (записана копія)"
+  "Military aircraft only (recorded copy)": "Лише військові літаки (записана копія)",
+  "Show feet and mph. The mission file always stays in metres": "Показувати фути і милі на годину (mph). Файл місії завжди лишається в метрах",
+  "A waypoint speed is missing, zero or above {max}": "Швидкість точки маршруту відсутня, нульова або вища за {max}"
 }
