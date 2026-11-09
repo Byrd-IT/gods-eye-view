@@ -524,13 +524,13 @@ test('phone: many phone layers together still write nothing shared; the last des
   schedulerUntouched(f, 'after both destroyed');
 });
 
-test('phone can be allowed off: setPhoneMode(false) lifts the gate pause and restores the desktop-like SSE; re-enabling goes coarse again', async () => {
+test('phone can be allowed off: setPhoneMode(false) releases pressure and REBUILDS a clean desktop build (ungated, desktop cache); re-enabling rebuilds through the gate', async () => {
   const f = fake();
   const g = gateSpy();
   const { timers, tick } = timersOf();
   const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
   await layer.load();
-  const tileset = f.calls.added[0];
+  const phoneTileset = f.calls.added[0];
   layer.heapProbe = () => ({
     used: Math.ceil(HEAP_MAX * PHONE_LIMITS.heapPressureFraction),
     limit: HEAP_MAX,
@@ -541,26 +541,52 @@ test('phone can be allowed off: setPhoneMode(false) lifts the gate pause and res
 
   assert.equal(layer.phoneActive, true);
   layer.setPhoneMode(false);
+  await layer._loading; // the desktop rebuild
   assert.equal(layer.phoneActive, false);
   assert.equal(layer._pressed, false, 'pressure released');
-  assert.equal(layer._gate.paused, false, 'no stranding pause across modes');
-  assert.equal(tileset.show, true, 'drawn again');
   assert.equal(
-    tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.fineError,
-    'desktop quality restored',
+    phoneTileset.destroyed,
+    true,
+    'the gated phone build was torn down',
   );
+  const desktopTileset = f.calls.added[1];
+  assert.equal(
+    desktopTileset.url,
+    entry3d().url,
+    'the desktop rebuild is plain: no gate on its chain',
+  );
+  assert.equal(layer._gate, null, 'no gate on the desktop build');
+  const opts = f.calls.options[1];
+  assert.equal(opts.cacheBytes, DESKTOP_CACHE_BYTES, 'desktop cache restored');
+  assert.equal(
+    opts.maximumCacheOverflowBytes,
+    DESKTOP_CACHE_OVERFLOW_BYTES,
+    'desktop overflow restored',
+  );
+  assert.equal(
+    layer.tileset.maximumScreenSpaceError,
+    PHONE_LIMITS.fineError,
+    'desktop SSE restored',
+  );
+  assert.equal(desktopTileset.show, true, 'drawn');
   schedulerUntouched(f, 'phone mode off');
 
-  layer.setPhoneMode(true);
+  layer.setPhoneMode(true); // a desktop build has no gate: rebuild again
+  await layer._loading;
   assert.equal(layer.phoneActive, true);
+  assert.equal(f.calls.added.length, 3, 'third build through the gate');
   assert.equal(
-    tileset.maximumScreenSpaceError,
+    f.calls.added[2].url.__odmGated,
+    true,
+    're-enabling rebuilds through the gate',
+  );
+  assert.equal(f.calls.options[2].cacheBytes, 64 * MiB, 'phone cache again');
+  assert.equal(
+    f.calls.options[2].maximumScreenSpaceError,
     PHONE_LIMITS.initialError,
     'coarse again until it settles',
   );
-  tileset.tilesLoaded = true;
-  assert.equal(tileset.show, true, 'no pressure just from re-enabling');
+  assert.equal(layer._gate.paused, false, 'no pressure just from re-enabling');
   layer.destroy();
 });
 
@@ -745,6 +771,259 @@ test('desktop: Fly to never changes quality', () => {
   );
 });
 
+// ---------------------------------------------------------------------------
+// In-flight mode toggles: a mode switch that lands while a load is in flight
+// must still take effect. The cache budget, gate presence and SSE are fixed
+// at fromUrl() and cannot be adopted in place, so the drift resolver at the
+// end of load() rebuilds the tileset for the mode that is actually active.
+// ---------------------------------------------------------------------------
+
+// A fake that defers only the FIRST fromUrl() until released (a drift
+// rebuild call passes straight through, so the layer can settle).
+const deferredFake = (f) => {
+  const fromUrl = f.Cesium.Cesium3DTileset.fromUrl;
+  let release = null;
+  let deferred = 0;
+  f.Cesium.Cesium3DTileset.fromUrl = (url, opts) =>
+    deferred++ === 0
+      ? new Promise((res) => {
+          release = () => res(fromUrl(url, opts));
+        })
+      : fromUrl(url, opts);
+  return () => {
+    const r = release;
+    release = null;
+    r?.();
+  };
+};
+
+test('setPhoneMode(true) during an in-flight desktop load ends with a gated phone build — the drift is rebuilt, not stranded', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const layer = new Odm3dLayer({
+    Cesium: f.Cesium,
+    viewer: f.viewer,
+    entry: entry3d(),
+    requestGateFactory: g.factory,
+  });
+  const release = deferredFake(f);
+  const p = layer.load(); // the desktop build
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  layer.setPhoneMode(true); // mid-flight toggle ON
+  release();
+  await p;
+  await layer._loading; // the drift rebuild (pre-fix: never happens)
+  assert.equal(f.calls.tilesets.length, 2, 'a second tileset was built');
+  assert.equal(
+    f.calls.tilesets[0].destroyed,
+    true,
+    'the ungated desktop build was torn down',
+  );
+  const opts = f.calls.options[1];
+  assert.equal(
+    f.calls.tilesets[1].url.__odmGated,
+    true,
+    'the rebuilt tileset fetches through the gate',
+  );
+  assert.equal(opts.cacheBytes, 64 * MiB, 'phone cache budget applies');
+  assert.equal(opts.maximumCacheOverflowBytes, 0);
+  assert.equal(opts.maximumScreenSpaceError, PHONE_LIMITS.initialError);
+  assert.equal(layer._gate?.paused, false);
+  assert.equal(layer.tileset, f.calls.tilesets[1]);
+  assert.equal(layer.status, 'ready');
+  assert.equal(layer.phoneActive, true);
+  schedulerUntouched(f, 'drift rebuild phone');
+  layer.destroy();
+});
+
+test('setPhoneMode(false) during an in-flight phone load ends with a clean desktop build — ungated, desktop cache, desktop SSE', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const layer = new Odm3dLayer({
+    Cesium: f.Cesium,
+    viewer: f.viewer,
+    entry: entry3d(),
+    phoneMode: true,
+    requestGateFactory: g.factory,
+  });
+  const release = deferredFake(f);
+  const p = layer.load(); // the phone build
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  layer.setPhoneMode(false); // mid-flight toggle OFF
+  release();
+  await p;
+  await layer._loading; // the drift rebuild (pre-fix: never happens)
+  assert.equal(f.calls.tilesets.length, 2, 'a second tileset was built');
+  assert.equal(f.calls.tilesets[0].destroyed, true, 'phone build torn down');
+  const second = f.calls.tilesets[1];
+  assert.equal(
+    second.url,
+    entry3d().url,
+    'the rebuilt desktop tileset is plain (no gate left)',
+  );
+  const opts = f.calls.options[1];
+  assert.equal(opts.cacheBytes, DESKTOP_CACHE_BYTES, 'desktop cache restored');
+  assert.equal(opts.maximumCacheOverflowBytes, DESKTOP_CACHE_OVERFLOW_BYTES);
+  assert.equal(opts.maximumScreenSpaceError, DESKTOP_SSE, 'desktop SSE');
+  assert.equal(layer._gate, null, 'no gate on the desktop build');
+  assert.equal(second.destroyed, false);
+  assert.equal(layer.status, 'ready');
+  assert.equal(layer.phoneActive, false);
+  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true, 'gate destroyed');
+  schedulerUntouched(f, 'drift rebuild desktop');
+  layer.destroy();
+});
+
+test('rapid toggles during an in-flight load settle to the final mode with exactly one rebuild', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const layer = new Odm3dLayer({
+    Cesium: f.Cesium,
+    viewer: f.viewer,
+    entry: entry3d(),
+    requestGateFactory: g.factory,
+  });
+  const release = deferredFake(f);
+  const p = layer.load();
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  layer.setPhoneMode(true);
+  layer.setPhoneMode(false);
+  layer.setPhoneMode(true);
+  layer.setPhoneMode(false);
+  layer.setPhoneMode(true);
+  release();
+  await p;
+  await layer._loading;
+  assert.equal(f.calls.tilesets.length, 2, 'one rebuild, not five');
+  assert.equal(layer.phoneActive, true, 'the final wins');
+  assert.equal(layer.tileset, f.calls.tilesets[1]);
+  assert.equal(f.calls.tilesets[1].url.__odmGated, true);
+  assert.equal(f.calls.options[1].cacheBytes, 64 * MiB);
+  assert.equal(layer.status, 'ready');
+  layer.destroy();
+});
+
+test('destroy during an in-flight load with a pending drift: no post-destroy rebuild, no timers, gate dead', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const { timers, map } = timersOf();
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
+  const release = deferredFake(f);
+  const p = layer.load();
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  layer.setPhoneMode(false); // mid-flight toggle OFF: a pending drift exists
+  layer.destroy();
+  try {
+    release();
+    await p;
+  } catch {
+    /* a load that already failed or was cancelled is fine here */
+  }
+  assert.equal(f.calls.tilesets?.length, 1, 'no post-destroy rebuild');
+  assert.equal(f.calls.tilesets[0].destroyed, true, 'the build was destroyed');
+  assert.equal(map.size, 0, 'no timers left');
+  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true, 'gate destroyed');
+  assert.equal(layer._gate, null);
+  layer.setPhoneMode(false); // inert after destroy
+  layer.setPhoneMode(true);
+});
+
+// ---------------------------------------------------------------------------
+// Pressure policy: the gate must NEVER reopen while a pressure signal sits
+// above its release threshold. An idle press above the release threshold is
+// a stall: it holds (surfaced, not hidden) until the signal itself falls
+// (Cesium eviction or GC on its own schedule), and the monitor keeps ticking
+// at 4 Hz so a genuine fall releases on the next tick — no busy loop.
+// ---------------------------------------------------------------------------
+
+test('phone: the gate never reopens while heap pressure is above the release threshold, even when idle, and the stall state is surfaced', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const { timers, map, tick } = timersOf();
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
+  await layer.load();
+  const tileset = f.calls.added[0];
+  let used = Math.ceil(HEAP_MAX * 0.95);
+  layer.heapProbe = () => ({ used, limit: HEAP_MAX });
+  tileset.tilesLoaded = true;
+  tileset.report(0, 0);
+  tick();
+  assert.equal(layer._pressed, true, 'heap at 95% = pressed');
+  assert.equal(layer._gate.paused, true, 'the gate closed');
+  for (let i = 0; i < 40; i++) tick(); // 40 idle ticks must NOT reopen
+  assert.equal(
+    layer._gate.paused,
+    true,
+    'the gate stays closed while the heap is above the release threshold',
+  );
+  assert.equal(layer._pressed, true, 'still pressed: no violation');
+  assert.equal(layer.pressurePaused, true, 'the pause state is surfaced');
+  assert.equal(layer.pressureStalled, true, 'the stall state is surfaced');
+  assert.equal(map.size, 1, 'exactly one monitor (no busy loop)');
+  const s = layer.pressureSummary();
+  assert.equal(s.gatePaused, true);
+  assert.ok(s.heapRatio >= PHONE_LIMITS.heapResumeFraction);
+
+  used = Math.ceil(HEAP_MAX * (PHONE_LIMITS.heapResumeFraction - 0.05));
+  tick(); // the heap genuinely fell: one tick releases
+  assert.equal(layer._pressed, false, 'released on genuine recovery');
+  assert.equal(layer._gate.paused, false, 'the gate reopens');
+  assert.equal(layer.pressureStalled, false);
+  schedulerUntouched(f, 'heap stall hold');
+  layer.destroy();
+});
+
+test('phone: a tile-count press above its release threshold holds while idle (no two-tick release), holds the pause, and releases only when the count falls', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const { timers, map, tick } = timersOf();
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
+  await layer.load();
+  const tileset = f.calls.added[0];
+  tileset.statistics.numberOfTilesWithContentReady =
+    PHONE_LIMITS.loadedTileCap + 50;
+  tileset.tilesLoaded = true;
+  tileset.report(0, 0);
+  tick();
+  assert.equal(layer._pressed, true, 'count over the cap = pressed');
+  assert.equal(layer._gate.paused, true);
+  for (let i = 0; i < 40; i++) tick();
+  assert.equal(layer._gate.paused, true, 'idle does NOT lift the pause');
+  assert.equal(layer._pressed, true);
+  assert.equal(layer.pressureStalled, true, 'the stall is surfaced');
+  assert.equal(
+    tileset.maximumScreenSpaceError,
+    PHONE_LIMITS.initialError,
+    'nothing coarsens: the pause IS the gate',
+  );
+  assert.equal(tileset.show, true, 'the tileset stays visible');
+
+  // Cesium eviction on its own schedule moves the count below the resume line:
+  tileset.statistics.numberOfTilesWithContentReady = Math.round(
+    PHONE_LIMITS.loadedTileCap * PHONE_LIMITS.resumeFraction,
+  );
+  tick();
+  assert.equal(layer._pressed, false, 'released when the count actually falls');
+  assert.equal(layer._gate.paused, false, 'the gate reopened under the cap');
+  schedulerUntouched(f, 'tile-count stall hold');
+  layer.destroy();
+});
+
+test('pressurePaused and pressureSummary describe a calm layer (no false stall)', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const layer = phoneLayer(f, { requestGateFactory: g.factory });
+  await layer.load();
+  assert.equal(layer.pressurePaused, false);
+  assert.equal(layer.pressureStalled, false);
+  const s = layer.pressureSummary();
+  assert.equal(s.pressed, false);
+  assert.equal(s.gatePaused, false);
+  assert.equal(s.stalled, false);
+  schedulerUntouched(f, 'calm summary');
+  layer.destroy();
+});
+
 // A desktop build's resource chain was fixed at fromUrl() WITHOUT the gate,
 // and its cache budget is the desktop one. Neither can be adopted in place,
 // so setPhoneMode(true) after a desktop load must rebuild the tileset
@@ -802,55 +1081,4 @@ test('setPhoneMode(true) after a desktop load rebuilds the tileset through the g
   assert.equal(g.log.some((e) => e[0] === 'destroyed'), true);
 });
 
-// The loaded-tile release threshold can simply never be reached: Cesium
-// evicts on its own schedule, and a pressed gate stops NEW loads, so a count
-// above the resume line can sit there with nothing waiting. Pre-fix the
-// pause stays engaged forever (a permanent stall); post-fix an idle press
-// releases, and any new demand re-presses under the same thresholds.
-test('phone: an idle pressed tileset is released after two quiet ticks — a load-cap pause above its release threshold cannot strand forever', async () => {
-  const f = fake();
-  const g = gateSpy();
-  const { timers, map, tick } = timersOf();
-  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
-  await layer.load();
-  const tileset = f.calls.added[0];
-  tileset.statistics.numberOfTilesWithContentReady =
-    PHONE_LIMITS.loadedTileCap + 1;
-  tileset.tilesLoaded = true;
-  tileset.report(4, 0); // the tileset is busy while the press engages
-  tick();
-  assert.equal(layer._pressed, true, 'over the load cap = pressed');
-  assert.equal(layer._gate.paused, true, 'the gate closed');
-  tileset.report(0, 0); // nothing pending; the count will not move
-
-  tick();
-  assert.equal(
-    layer._gate.paused,
-    true,
-    'one idle tick is not enough: a pause is not lifted on a whim',
-  );
-  tick();
-  assert.equal(
-    layer._pressed,
-    false,
-    'two quiet ticks (nothing in flight, queued or pending) release',
-  );
-  assert.equal(layer._gate.paused, false, 'the gate reopens');
-  // The pressure is still real while the count is over the cap: the next
-  // report re-presses, and the settle pass runs again between releases —
-  // the pause never locks permanently again.
-  let sawOpen = false;
-  for (let i = 0; i < 12 && sawOpen === false; i++) {
-    tileset.report(0, 0);
-    tick();
-    sawOpen = layer._gate.paused === false;
-  }
-  assert.equal(sawOpen, true, 'the pause never locks permanently again');
-  assert.equal(
-    tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.phoneFineError,
-    'refinement is reachable again: the stall path unstrands quality',
-  );
-  schedulerUntouched(f, 'stalled press');
-  layer.destroy();
-});
+// (superseded stall-release test removed)
