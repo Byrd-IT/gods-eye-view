@@ -76,8 +76,6 @@ export function attachOverlays({
       viewer,
       entry,
       sampleTerrain: terrainSampler(Cesium, viewer),
-      // The constructor build path needs it before the tileset is created.
-      phoneMode,
     }),
 }) {
   const scene = viewer.scene;

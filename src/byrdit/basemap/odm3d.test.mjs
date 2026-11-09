@@ -592,7 +592,7 @@ function event() {
   };
 }
 
-function setup3d({ session = { tileset: null } } = {}) {
+function setup3d({ session = { tileset: null }, realFactory = false } = {}) {
   const made = [];
   const { Cesium, viewer, calls } = fake3dCesium();
   viewer.imageryLayers = {
@@ -630,7 +630,7 @@ function setup3d({ session = { tileset: null } } = {}) {
     heightOf: () => 3000,
     viewOf: () => ({ viewBounds: [-95.2, 32.6, -95.1, 32.7], lat: 32.69 }),
     createProvider: (entry) => ({ entry }),
-    create3d: (entry) => {
+    create3d: realFactory ? undefined : (entry) => {
       const calls = [];
       const layer = {
         status: 'ready',
@@ -654,6 +654,14 @@ function setup3d({ session = { tileset: null } } = {}) {
   });
   return { detach, controller, made, panel, session, stackCalls, calls };
 }
+
+test('attachOverlays: default ODM factory creates a model on enable', async () => {
+  const { detach, calls } = setup3d({ realFactory: true });
+  detach.setEnabled(THREE_D.id, true);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(calls.tilesets.length, 1);
+  detach();
+});
 
 test('attachOverlays: a 3D build is OFF until toggled, then loads once with the default 90 ft cut and the chosen opacity', async () => {
   const { detach, made } = setup3d();
