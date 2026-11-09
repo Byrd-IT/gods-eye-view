@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { planFlight, assembleMissions } from './planner.js';
-import { buildKmz } from './wpml.js';
+import { buildKmz, buildBundleZip } from './wpml.js';
+import { readZip } from './zip.js';
 import { getUnitSystem, setUnitSystem } from './units.js';
 
 // Generated from live base d150eb41765c8fc5204245748d8eb7724429de81 with
@@ -37,6 +38,29 @@ test('speed display units do not change the baseline mission KMZ bytes', () => {
         createHash('sha256').update(bytes).digest('hex'),
         '4f6a90aab1047daaca63b7758dc07616d7dfdf22e9c2c04bbed9a9163ca9c86a',
       );
+    }
+    const options = {
+      when: new Date('2026-01-01T12:00:00Z'),
+      createdMs: 1767268800000,
+    };
+    const bundles = ['ft', 'm'].map((unitSystem) =>
+      readZip(buildBundleZip(result, { ...options, unitSystem })),
+    );
+    const decoder = new TextDecoder();
+    assert.match(
+      decoder.decode(bundles[0].get('README.txt')),
+      /Speed: 15\.0 mph/,
+    );
+    assert.match(
+      decoder.decode(bundles[1].get('README.txt')),
+      /Speed: 6\.7 m\/s/,
+    );
+    const feetReadme = decoder.decode(bundles[0].get('README.txt'));
+    assert.match(feetReadme, /above the camera limit of 11\.2 mph/);
+    assert.doesNotMatch(feetReadme, /speed-exceeds-camera-limit \{/);
+    for (const [name, bytes] of bundles[0]) {
+      if (name.endsWith('.kmz'))
+        assert.deepEqual(bytes, bundles[1].get(name), name);
     }
   } finally {
     setUnitSystem(previous);

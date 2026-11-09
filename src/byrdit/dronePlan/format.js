@@ -24,8 +24,8 @@ export function heightText(metres) {
 }
 
 /** `15.0 mph` (feet) or `5.0 m/s` (metric): internal speeds stay m/s. */
-export function speedText(ms, digits = 1) {
-  return `${fixed(speedFromMs(ms), digits)} ${speedUnit()}`;
+export function speedText(ms, digits = 1, system) {
+  return `${fixed(speedFromMs(ms, system), digits)} ${speedUnit(system)}`;
 }
 
 /**
@@ -91,7 +91,7 @@ export function warningTone(code) {
 }
 
 /** The sentence for one warning object `{ code, params }`. */
-export function warningText(warning) {
+export function warningText(warning, system) {
   const p = warning.params ?? {};
   switch (warning.code) {
     case 'agl-capped':
@@ -105,28 +105,34 @@ export function warningText(warning) {
     case 'speed-camera-limited':
       return t(
         'Speed lowered from {requested} to {limited} so the camera can keep up with the photo spacing',
-        { requested: speedText(p.requested), limited: speedText(p.limited) },
+        {
+          requested: speedText(p.requested, 1, system),
+          limited: speedText(p.limited, 1, system),
+        },
       );
     case 'speed-blur-limited':
       return t(
         'Speed lowered from {requested} to {limited} so photos stay sharp at a 1/{shutter} s shutter',
         {
-          requested: speedText(p.requested),
-          limited: speedText(p.limited),
+          requested: speedText(p.requested, 1, system),
+          limited: speedText(p.limited, 1, system),
           shutter: fixed(p.shutter),
         },
       );
     case 'speed-exceeds-camera-limit':
       return t(
         'Speed stays at {requested}, above the camera limit of {limited}. The plan does not slow down, so photos can be missed. Slow down or widen the spacing',
-        { requested: speedText(p.requested), limited: speedText(p.limited) },
+        {
+          requested: speedText(p.requested, 1, system),
+          limited: speedText(p.limited, 1, system),
+        },
       );
     case 'speed-exceeds-blur-limit':
       return t(
         'Speed stays at {requested}, above the blur limit of {limited} at a 1/{shutter} s shutter. The plan does not slow down, so photos can blur. Slow down or use a faster shutter',
         {
-          requested: speedText(p.requested),
-          limited: speedText(p.limited),
+          requested: speedText(p.requested, 1, system),
+          limited: speedText(p.limited, 1, system),
           shutter: fixed(p.shutter),
         },
       );
@@ -138,7 +144,10 @@ export function warningText(warning) {
     case 'speed-below-minimum':
       return t(
         'This camera cannot keep up even at {min} with these settings (limit {limit}): lower the overlap or fly higher',
-        { min: speedText(p.minMs), limit: speedText(p.limitMs, 2) },
+        {
+          min: speedText(p.minMs, 1, system),
+          limit: speedText(p.limitMs, 2, system),
+        },
       );
     case 'vlos':
       return t(

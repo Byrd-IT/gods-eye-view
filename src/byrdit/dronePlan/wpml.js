@@ -72,6 +72,7 @@ import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
 import { makeZip } from './zip.js';
 import { MPH_PER_MS } from './timing.js';
 import { getUnitSystem, normalizeUnitSystem } from './units.js';
+import { warningText as pilotWarningText } from './format.js';
 import { cameraChecklistLines } from './cameraSettings.js';
 import { hasOutwardShot, splitOutwardShots } from './shotWaypoints.js';
 import {
@@ -1122,8 +1123,17 @@ export function readmeText(result, when = new Date(), opts = {}) {
   ];
   if (warnings.length) {
     lines.push('', 'Warnings:');
-    for (const w of warnings)
-      lines.push(`  - ${w.code} ${JSON.stringify(w.params)}`);
+    for (const w of warnings) {
+      const speedWarning =
+        typeof w.code === 'string' && w.code.startsWith('speed-')
+          ? pilotWarningText(w, unitSystem)
+          : '';
+      lines.push(
+        speedWarning
+          ? `  - ${speedWarning}`
+          : `  - ${w.code} ${JSON.stringify(w.params)}`,
+      );
+    }
   }
   const jobs = result.jobs ?? [];
   if (jobs.length) {
