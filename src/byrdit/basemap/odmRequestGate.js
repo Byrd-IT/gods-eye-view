@@ -131,13 +131,23 @@ export class OdmRequestGate {
         entry.reject(OdmRequestGate.cancelledError());
         continue;
       }
-      this._begin(entry);
+      // A scheduler refusal re-queues the entry IN FRONT of the rest: the
+      // while loop must NOT immediately retry it (the scheduler has not
+      // changed inside this synchronous call, so retrying is the same
+      // refusal again — pre-fix that refilled entry went straight back
+      // through _begin, an unbounded synchronous hot loop). Break out and
+      // let the retry happen on requestCompletedEvent's pump, exactly the
+      // signal the refusal is waiting for.
+      if (this._begin(entry) === false) break;
     }
   }
 
   /**
    * Hand one request to Cesium (which may start or refuse it) and book a slot
    * from hand-over until it settles.
+   * @returns {boolean} false only when the underlying scheduler refused the
+   *   request and the entry went back into the queue (pump() ends its pass);
+   *   true when the entry found any terminal path or was handed over.
    * @private
    */
   _begin(entry) {
@@ -149,7 +159,7 @@ export class OdmRequestGate {
       this.inFlight--;
       this.pump();
       entry.reject(error);
-      return;
+      return true;
     }
     if (promise === undefined) {
       // The underlying scheduler had a full cap of its own: return the slot
@@ -158,7 +168,7 @@ export class OdmRequestGate {
       // retries when the scheduler has room, never hot-looping.
       this.inFlight--;
       this._queue.unshift(entry);
-      return;
+      return false;
     }
     Promise.resolve(promise).then(
       (value) => {
@@ -172,6 +182,7 @@ export class OdmRequestGate {
         entry.reject(error);
       },
     );
+    return true;
   }
 
   /** Teardown: nothing queued may start; in-flight requests settle alone. */

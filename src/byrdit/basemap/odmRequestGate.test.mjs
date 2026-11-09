@@ -391,7 +391,44 @@ test('OdmRequestGate unit behavior: cap, ordering, refuse-requeue and destroy', 
   await assert.rejects(() => queued, { isCancelledRequest: true });
   assert.equal(dying.destroyed, true);
   await started;
-  assert.rejects(() =>
+  await assert.rejects(() =>
     dying.run(mk('n'), {}, baseFetch).then(() => new Error('must not run')),
   );
+});
+
+test('scheduler refusals never hot-loop the pump: the re-queued entry is retried on the NEXT trigger, not in the same pass', async () => {
+  const gate = new OdmRequestGate({ maxInFlight: 4 });
+  let attempts = 0;
+  // The underlying scheduler is full for a while: everything comes back
+  // `undefined` until it finally frees capacity, exactly as
+  // Resource._makeRequest refuses at its per-server cap.
+  const fetch = () => {
+    attempts++;
+    if (attempts <= 5) return undefined; // 5 synchronous refusals
+    return Promise.resolve('ok');
+  };
+  const pending = [1, 2, 3].map(() =>
+    gate
+      .run({ request: { priorityFunction: () => 1, cancelled: false } }, {}, fetch)
+      .then(
+        () => 'done',
+        (e) => `err:${e.message}`,
+      ),
+  );
+  // Pre-fix this line never returns: pump() shifts the entry, _begin()
+  // book-keeps the refusal straight back to the front of the SAME queue and
+  // the SAME while loop retries it, an unbounded synchronous spin. Post-fix
+  // the pass ends on the first refusal and nothing is started or lost.
+  assert.equal(gate.inFlight, 0, 'a refusal booked no slot');
+  assert.equal(gate.queued, 3, 'all three entries wait, in order');
+  assert.ok(
+    attempts <= 6,
+    `no hot loop: one attempt per entry per pass, got ${attempts}`,
+  );
+  // The scheduler frees up: requestCompletedEvent's pump starts them (each
+  // pass starts what it can; refusals still end their pass, retried later).
+  for (let i = 0; gate.queued > 0 && i < 20; i++) gate.pump();
+  assert.deepEqual(await Promise.all(pending), ['done', 'done', 'done']);
+  assert.equal(gate.inFlight, 0);
+  assert.equal(gate.queued, 0);
 });

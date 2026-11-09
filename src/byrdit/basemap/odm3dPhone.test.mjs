@@ -744,3 +744,113 @@ test('desktop: Fly to never changes quality', () => {
     'desktop SSE untouched by Fly to',
   );
 });
+
+// A desktop build's resource chain was fixed at fromUrl() WITHOUT the gate,
+// and its cache budget is the desktop one. Neither can be adopted in place,
+// so setPhoneMode(true) after a desktop load must rebuild the tileset
+// through the gate — pre-fix it only rewrote the SSE and the phone kept
+// loading ungated on the desktop chain with the desktop cache.
+test('setPhoneMode(true) after a desktop load rebuilds the tileset through the gate with the phone cache', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const layer = new Odm3dLayer({
+    Cesium: f.Cesium,
+    viewer: f.viewer,
+    entry: entry3d(),
+    requestGateFactory: g.factory,
+  });
+  await layer.load();
+  const desktopTileset = f.calls.added[0];
+  assert.equal(
+    desktopTileset.url,
+    entry3d().url,
+    'the desktop build is ungated, as designed',
+  );
+  assert.equal(g.log.some((e) => e[0] === 'created'), false);
+
+  layer.setPhoneMode(true);
+  await layer._loading; // the rebuild load
+  assert.equal(
+    f.calls.tilesets?.length,
+    2,
+    'a second tileset was built (pre-fix: still one)',
+  );
+  assert.equal(
+    desktopTileset.destroyed,
+    true,
+    'the ungated desktop build was torn down',
+  );
+  const phoneTileset = f.calls.added[1];
+  assert.equal(
+    phoneTileset.url.__odmGated,
+    true,
+    'the rebuilt tileset fetches through the gate',
+  );
+  const opts = f.calls.options[1];
+  assert.equal(opts.cacheBytes, 64 * MiB, 'the phone cache budget applies');
+  assert.equal(opts.maximumCacheOverflowBytes, 0, 'no overflow');
+  assert.equal(opts.maximumScreenSpaceError, PHONE_LIMITS.initialError);
+  assert.equal(
+    layer._gate?.paused,
+    false,
+    'the layer carries a real, open gate',
+  );
+  assert.equal(layer.tileset, phoneTileset);
+  assert.equal(layer.status, 'ready');
+  schedulerUntouched(f, 'desktop -> phone rebuild');
+  layer.destroy();
+  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true);
+});
+
+// The loaded-tile release threshold can simply never be reached: Cesium
+// evicts on its own schedule, and a pressed gate stops NEW loads, so a count
+// above the resume line can sit there with nothing waiting. Pre-fix the
+// pause stays engaged forever (a permanent stall); post-fix an idle press
+// releases, and any new demand re-presses under the same thresholds.
+test('phone: an idle pressed tileset is released after two quiet ticks — a load-cap pause above its release threshold cannot strand forever', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const { timers, map, tick } = timersOf();
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
+  await layer.load();
+  const tileset = f.calls.added[0];
+  tileset.statistics.numberOfTilesWithContentReady =
+    PHONE_LIMITS.loadedTileCap + 1;
+  tileset.tilesLoaded = true;
+  tileset.report(4, 0); // the tileset is busy while the press engages
+  tick();
+  assert.equal(layer._pressed, true, 'over the load cap = pressed');
+  assert.equal(layer._gate.paused, true, 'the gate closed');
+  tileset.report(0, 0); // nothing pending; the count will not move
+
+  tick();
+  assert.equal(
+    layer._gate.paused,
+    true,
+    'one idle tick is not enough: a pause is not lifted on a whim',
+  );
+  tick();
+  assert.equal(
+    layer._pressed,
+    false,
+    'two quiet ticks (nothing in flight, queued or pending) release',
+  );
+  assert.equal(layer._gate.paused, false, 'the gate reopens');
+  // The pressure is still real while the count is over the cap: the next
+  // report re-presses, and the settle pass runs again between releases —
+  // the pause never locks permanently again.
+  let sawOpen = false;
+  for (let i = 0; i < 12 && sawOpen === false; i++) {
+    tileset.report(0, 0);
+    tick();
+    sawOpen = layer._gate.paused === false;
+  }
+  assert.equal(sawOpen, true, 'the pause never locks permanently again');
+  assert.equal(
+    tileset.maximumScreenSpaceError,
+    PHONE_LIMITS.phoneFineError,
+    'refinement is reachable again: the stall path unstrands quality',
+  );
+  schedulerUntouched(f, 'stalled press');
+  layer.destroy();
+});

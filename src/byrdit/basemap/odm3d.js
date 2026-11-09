@@ -256,6 +256,7 @@ export class Odm3dLayer {
     this._heapRatio = null;
     this._pressed = false;
     this._refined = false;
+    this._stalled = 0;
   }
 
   get ready() {
@@ -341,6 +342,7 @@ export class Odm3dLayer {
         this._heapRatio = null;
         this._pressed = false;
         this._refined = false;
+        this._stalled = 0;
         this.status = this.destroyed ? 'idle' : 'failed';
         this.error = String(error?.message ?? error).slice(0, 120);
       }
@@ -357,6 +359,11 @@ export class Odm3dLayer {
       if (this.destroyed || !tileset) return this._stopPump();
       this.viewer.scene.requestRender?.();
       if (this.phoneActive) this._probePressure();
+      // A pressed-but-idle tileset must not stay pressed forever: no signal
+      // of ours can force Cesium to unload tiles, so the release threshold
+      // can be unreachable while nothing new is loading. The stall check is
+      // the way such a pause ever lifts (see it for the exact rule).
+      if (this._pressed) this._checkStalledRelease();
       this._settled = tileset.tilesLoaded === true ? this._settled + 1 : 0;
       if (this._settled >= 3 && !this._pressed) {
         // Coarse first on a phone; refine once everything has settled. A
@@ -458,12 +465,52 @@ export class Odm3dLayer {
       // Stop NEW loads on this tileset; started requests drain, queued ones
       // wait and can be cancelled by Cesium's own out-of-view path.
       this._gate?.setPaused(true);
+      // The stall release (an idle press above its release threshold) runs
+      // on the monitor tick: a press that arrives while the pump was
+      // stopped after an earlier settle pass must restart it, or the pause
+      // could hold forever with nothing ticking underneath it.
+      this._pump(); // no-op when the monitor is already running
     } else {
       this._gate?.setPaused(false); // queued work resumes under the cap
       // Finish the coarse -> fine pass if the monitor is not already on it
       // (a release that arrived between settle ticks still gets its refine).
       this._pump();
     }
+  }
+
+  /**
+   * Loaded-tile and heap pressure that sits above its RELEASE threshold with
+   * nothing in flight, nothing queued and nothing pending is a stuck press:
+   * Cesium evicts (and so moves the loaded count) on its own schedule, so a
+   * pause held "until the count falls" can simply never see it fall. The
+   * pause exists to stop NEW loads; with nothing waiting to load there is
+   * no load to stop, so holding it can only strand the tileset coarse
+   * (and the gate closed) forever. Two consecutive idle ticks (>= ~500ms
+   * of quiet) release the pause; if the pressure is still real the next
+   * actual demand re-presses immediately and the cap holds again per wave.
+   */
+  _checkStalledRelease() {
+    if (!this.phoneActive || this.destroyed || !this.tileset) {
+      this._stalled = 0;
+      return;
+    }
+    const gateIdle =
+      !this._gate ||
+      ((this._gate.inFlight ?? 0) === 0 && (this._gate.queued ?? 0) === 0);
+    const idle =
+      gateIdle && this._queued === 0 && this.tileset.tilesLoaded === true;
+    if (!idle) {
+      this._stalled = 0;
+      return;
+    }
+    this._stalled++;
+    if (this._stalled < 2) return;
+    this._stalled = 0;
+    this._pressed = false;
+    this._gate?.setPaused(false);
+    // Settle/refine pass restarts with the released pump (the tick loop is
+    // what called us; the release lets the settle pass reach its refine).
+    this._pump();
   }
 
   /** The single place the tileset's visibility is decided from. */
@@ -493,7 +540,18 @@ export class Odm3dLayer {
     return true;
   }
 
-  /** Allow phone mode off (and back on): releases pressure and quality. */
+  /**
+   * Allow phone mode off (and back on): releases pressure and quality.
+   * Phone ON with a tileset that was loaded as a desktop build: that
+   * tileset's resource chain was fixed at fromUrl() WITHOUT the gate, and
+   * its cache budget is the desktop one — neither can be adopted in place.
+   * The build is torn down and loaded again through the gate (exactly what
+   * load() does on a phone), so the phone guarantees are real, not
+   * cosmetic. Phone OFF keeps the running tileset (the gate pause is
+   * lifted and the desktop SSE restored); the gate stays on that
+   * tileset's private chain until it is replaced — per-tileset only, it
+   * writes nothing shared.
+   */
   setPhoneMode(enabled) {
     const on = enabled === true;
     if (on === this.phoneActive) return;
@@ -501,9 +559,19 @@ export class Odm3dLayer {
     this._pressed = false;
     this._refined = false;
     this._queued = 0;
+    this._stalled = 0;
     this._heapRatio = null;
     this._gate?.setPaused(false); // no stranded pause across a mode switch
     if (this.tileset && !this.destroyed) {
+      if (on && !this._gate) {
+        // A desktop build has no gate on its resource chain: recreate the
+        // tileset through the gate with the phone cache budget.
+        this._releaseTileset();
+        this._loading = null;
+        this.status = 'idle';
+        this.load(); // async rebuild; the old build fades out first
+        return;
+      }
       this.tileset.maximumScreenSpaceError = on
         ? this.phoneLimits.initialError
         : this.phoneLimits.fineError;
