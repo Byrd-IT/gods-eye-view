@@ -450,7 +450,10 @@ export function createCollectorBridge({
     if (stale) {
       // never point Stale-Since into the future (review)
       headers['X-Feed-Stale-Since'] = String(
-        Math.max(0, Math.min(cache.lastOkAt + staleThresholdMs(target.cadenceMs), t)),
+        Math.max(
+          0,
+          Math.min(cache.lastOkAt + staleThresholdMs(target.cadenceMs), t),
+        ),
       );
       headers['X-Feed-Reason'] = degraded ?? reason;
     }
@@ -647,7 +650,8 @@ export function createCollectorBridge({
             }
             try {
               const answer = await esFallback.read(url);
-              if (answer) return serveEs(req, res, answer, target, pausedReason);
+              if (answer)
+                return serveEs(req, res, answer, target, pausedReason);
             } catch {
               /* ES unavailable: existing behaviour below, never the upstream */
             }
