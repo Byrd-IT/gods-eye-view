@@ -1,8 +1,10 @@
 /**
  * ES-only fallback for /api/flights (owner-approved Option 1).
  *
- * When the collector (GET /v1/latest/aircraft-opensky, POST view lease) AND
- * the bridge's per-view last-good copy are unavailable, the bridge may serve
+ * When a live collector answer is not usable (the collector (GET
+ * /v1/latest/aircraft-opensky, POST view lease) is unreachable, or answers
+ * with the paused relay's empty body, or the bridge's per-view last-good
+ * copy is empty or too old), the bridge may serve
  * a bounded read of the recorded OpenSky history index instead of the 503:
  *
  *  - Reader key ONLY (createHistoryEsClient refuses any other key), fixed
@@ -184,28 +186,45 @@ export function createFlightsEsFallback({
   /** A failure is logged at most once a minute (review; HistoryApi parity). */
   let lastFailureLog = 0;
 
-  /** Allowlist of this module's own fixed `reason` values. A reason that
-   * is not one of these is never trusted for the log: an error may carry
-   * arbitrary upstream input (a URL, a key) in even a seemingly internal
-   * reason, so anything unknown logs as the fixed message below. */
+  /** Allowlist of this module's own and the shared ES client's fixed
+   * `reason` values. A reason that is not one of these is never trusted
+   * for the log: an error may carry arbitrary upstream input (a URL, a
+   * key) in even a seemingly internal reason, so anything unknown logs as
+   * the fixed message below. `es_<status>` is matched by a bounded
+   * pattern instead, because the client raises one per HTTP status. */
   const LOGGABLE_REASONS = new Set([
     'flights_read_limit',
     'flights_read_deadline',
-    'flights_read_aborted',
     'flights_es_unavailable',
+    'es_timeout',
+    'es_network',
+    'es_body_too_large',
+    'es_partial',
+    'es_pit',
+    'es_bad_json',
+    'not_reader_key',
+    'index_denied',
+    'filter_path_denied',
   ]);
+
+  function loggableReason(error) {
+    if (!(error instanceof HistoryUnavailableError)) return 'flights_es_error';
+    const reason = error.reason;
+    if (
+      typeof reason !== 'string' ||
+      (!LOGGABLE_REASONS.has(reason) && !/^es_\d{3}$/.test(reason))
+    ) {
+      return 'flights_es_error';
+    }
+    return reason;
+  }
 
   function logFailure(error) {
     if (typeof log !== 'function') return;
     const t = now();
     if (t - lastFailureLog < 60_000) return;
     lastFailureLog = t;
-    const reason =
-      error instanceof HistoryUnavailableError &&
-      typeof error.reason === 'string' &&
-      LOGGABLE_REASONS.has(error.reason)
-        ? error.reason
-        : 'flights_es_error';
+    const reason = loggableReason(error);
     try {
       log(`[gev-history bridge] flights ES fallback unavailable (${reason})`);
     } catch {
@@ -254,10 +273,26 @@ export function createFlightsEsFallback({
       // fail closed on the deadline as well; the read's own failure (if
       // it lands later) is swallowed by the settlement above so nothing
       // becomes an unhandled rejection.
-      logFailure(error);
-      throw new HistoryUnavailableError(
-        error === timedOut ? 'flights_read_deadline' : 'flights_es_unavailable',
-      );
+      // Log ONCE, after wrapping: the logged reason is the one the caller
+      // sees. A fixed, allowlisted client reason (es_timeout, es_500, ...)
+      // is preserved so operators can tell an outage apart; anything with
+      // a non-allowlisted reason (an error may carry arbitrary upstream
+      // input in one) is wrapped to the fixed generic reason.
+      if (error === timedOut) {
+        const wrapped = new HistoryUnavailableError('flights_read_deadline');
+        logFailure(wrapped);
+        throw wrapped;
+      }
+      if (
+        error instanceof HistoryUnavailableError &&
+        loggableReason(error) !== 'flights_es_error'
+      ) {
+        logFailure(error);
+        throw error;
+      }
+      const wrapped = new HistoryUnavailableError('flights_es_error');
+      logFailure(wrapped);
+      throw wrapped;
     } finally {
       clearTimeout(deadline);
     }
@@ -342,7 +377,14 @@ export function createFlightsEsFallback({
           },
         )
         .catch((error) => {
-          logFailure(error);
+          // Log ONCE, after wrapping: the wrapped reason is what the
+          // caller sees, and the rate limiter then covers this same
+          // failure for the next 60 s.
+          logFailure(
+            error instanceof HistoryUnavailableError
+              ? error
+              : new HistoryUnavailableError('flights_es_unavailable'),
+          );
           throw error instanceof HistoryUnavailableError
             ? error
             : new HistoryUnavailableError('flights_es_unavailable');
@@ -372,6 +414,9 @@ export function flightsEsFallbackFromEnv(
   return createFlightsEsFallback({
     es,
     ...(now ? { now } : {}),
-    ...(log ? { log } : {}),
+    // Production parity with the bridge (createCollectorBridge): when the
+    // plugin wiring injects no logger (the vite.config.js paths never do),
+    // failures are still logged — to console.warn, not dropped silently.
+    log: typeof log === 'function' ? log : (line) => console.warn(line),
   });
 }

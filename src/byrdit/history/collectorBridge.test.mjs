@@ -817,7 +817,7 @@ test('flag-off flights: paused empty response retains original cache behavior', 
     'STALE',
     'the paused envelope is not answered from the cache as data',
   );
-  assert.equal(calls.length, 2, 'the empty body was never cached');
+  assert.equal(calls.length, 2, 'each poll fetched the collector again (not served from the cache as data)');
 
   state.phase = 'down';
   const down = await call(handler, flightsUrl('tab-flagoff'));

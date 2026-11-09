@@ -248,8 +248,9 @@ async function deadPort() {
   return 'http://127.0.0.1:9';
 }
 
-/** Small ES stand-in answering the two endpoints the client may call. */
-async function startEs(t, docs) {
+/** Small ES stand-in answering the two endpoints the client may call.
+ * With `fail`, _search answers that status/body instead (never the docs). */
+async function startEs(t, docs, fail = null) {
   const calls = [];
   const server = http.createServer((req, res) => {
     const chunks = [];
@@ -268,6 +269,11 @@ async function startEs(t, docs) {
         return;
       }
       if (/^\/gev-history-aircraft-opensky\/_search/.test(req.url)) {
+        if (fail) {
+          res.writeHead(fail.status ?? 500, { 'Content-Type': 'application/json' });
+          res.end(fail.body ?? '');
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(esSearchHits(docs)));
         return;
@@ -287,12 +293,13 @@ async function startEs(t, docs) {
   return { url: `http://127.0.0.1:${server.address().port}`, stop, calls };
 }
 
-function chain(env, now) {
+function chain(env, now, log = () => {}, { omitLog = false } = {}) {
   const stack = [];
   const server = {
     middlewares: { use: (route, handler) => stack.push({ route, handler }) },
   };
-  for (const plugin of historyPlugins({ env, now, log: () => {} }))
+  const pluginsInput = { env, now, ...(omitLog ? {} : { log }) };
+  for (const plugin of historyPlugins(pluginsInput))
     plugin.configureServer?.(server);
   return async (path, method = 'GET') => {
     let done;
@@ -910,9 +917,101 @@ test('reader: only fixed allowlist reasons are logged; a secret in error.reason 
   );
 });
 
+/* Round 2 followup (P2/P3): production wiring never injects a log, so the
+ * fallback's once-a-minute failure logging must survive that: the plugin's
+ * ES fallback logs to console.warn with a fixed allowlisted reason only,
+ * whether or not a test logger was injected. */
+
+test('PLUGIN: no injected log -> failures are still logged once a minute through real historyPlugins wiring (console.warn), with a fixed reason and no leak', async (t) => {
+  const collector = await deadPort();
+  // synthetic secret riding in the ES 500 body: it must never appear in a log
+  const secret = `SYNTH-${Date.now().toString(36)}-SHOULD-NEVER-LOG`;
+  const es = await startEs(
+    t,
+    [doc()],
+    { status: 500, body: JSON.stringify({ error: { reason: secret } }) },
+  );
+  const warned = [];
+  t.mock.method(console, 'warn', (line) => warned.push(String(line)));
+  blockUpstream(t, [es.url]);
+  let nowMs = VIEW_MS;
+  // omitLog: historyPlugins({ env, now }) — the exact production call shape
+  const get = chain(envFor(collector, es.url), () => nowMs, undefined, {
+    omitLog: true,
+  });
+  const r1 = await get(`/api/flights?view=${VIEW}&vsid=tab-fffffff1`);
+  assert.equal(r1.statusCode, 503, 'an ES failure still fails closed');
+  const r2 = await get(`/api/flights?view=1,46,11,56&vsid=tab-fffffff2`);
+  assert.equal(r2.statusCode, 503);
+  const read = (line) => /^\[gev-history bridge\] flights ES fallback/.test(line);
+  let fallbackLines = warned.filter(read);
+  assert.equal(fallbackLines.length, 1, 'one log line in the rate-limit window');
+  nowMs += 61_000;
+  const r3 = await get(`/api/flights?view=2,47,12,57&vsid=tab-fffffff3`);
+  assert.equal(r3.statusCode, 503);
+  fallbackLines = warned.filter(read);
+  assert.equal(
+    fallbackLines.length,
+    2,
+    'the next failure is logged once the window passed',
+  );
+  for (const line of fallbackLines) {
+    assert.match(
+      line,
+      /flights ES fallback unavailable \((es_500|flights_es_error)\)/,
+      `fixed message only: ${line}`,
+    );
+    assert.ok(!line.includes(secret), `leak: ${line}`);
+    assert.ok(!line.includes('SHOULD-NEVER-LOG'), `leak: ${line}`);
+  }
+});
+
+test('reader: fixed ES client reasons are logged; a non-allowlisted HistoryUnavailableError reason logs the generic message', async () => {
+  let nowMs = VIEW_MS;
+  const lines = [];
+  let thrown = null;
+  const es = {
+    async search() {
+      throw thrown;
+    },
+  };
+  const reader = createFlightsEsFallback({
+    es,
+    now: () => nowMs,
+    log: (line) => lines.push(line),
+  });
+  thrown = new HistoryUnavailableError('es_503');
+  await assert.rejects(
+    reader.read(makeUrl(`/api/flights?view=${VIEW}`)),
+    /unavailable/,
+  );
+  nowMs += 61_000;
+  thrown = new HistoryUnavailableError('arbitrary-PAYLOAD-riding-along');
+  await assert.rejects(
+    reader.read(makeUrl(`/api/flights?view=1,46,11,56`)),
+    /unavailable/,
+  );
+  assert.equal(lines.length, 2, 'one line per rate-limit window');
+  assert.match(
+    lines[0],
+    /unavailable \(es_503\)/,
+    'the allowlisted fixed client reason is logged',
+  );
+  assert.equal(
+    lines[1].includes('arbitrary-PAYLOAD-riding-along'),
+    false,
+    `leak: ${lines[1]}`,
+  );
+  assert.match(
+    lines[1],
+    /unavailable \(flights_es_error\)/,
+    'a non-allowlisted reason logs the fixed generic message',
+  );
+});
+
 /** A fake honouring the collapse request's time, bbox and keyword partition. */
 function rangedFakeEs(docs) {
-  const state = { calls: 0 };
+   const state = { calls: 0 };
   const calls = [];
   const search = async (index, body) => {
     state.calls += 1;
