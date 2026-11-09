@@ -591,12 +591,16 @@ export function createCollectorBridge({
     }
     const key = target.collectorFeed;
     /**
-     * Review: the cached copy qualifies only when it is worth showing
-     * before ES is asked: not an empty states envelope (never useful data)
-     * and not older than the fallback's lookback (a copy that would report
-     * as cleared while recorded positions exist in the last 15 minutes).
-     * A usable copy wins straight away; otherwise ES is asked once, and an
-     * old or empty copy is still the answer when ES has nothing left.
+     * Review: when the ES fallback is configured, the cached copy
+     * qualifies only when it is worth showing before ES is asked: not an
+     * empty states envelope (never useful data) and not older than the
+     * fallback's lookback (a copy that would report as cleared while
+     * recorded positions exist in the last 15 minutes). A usable copy
+     * wins straight away; otherwise ES is asked once, and an old or
+     * empty copy is still the answer when ES has nothing left.
+     * Flag-off and other feeds strictly keep the plain last-good rule:
+     * the empty-states and lookback qualifications are ES-fallback
+     * reasoning and never leak into a reader-less bridge.
      */
     const usableCopy = (entry) => {
       if (!entry) return false;
@@ -623,7 +627,12 @@ export function createCollectorBridge({
     }
     const fallback = async (reason) => {
       const entry = cacheGet(key, cacheKeyOf(url));
-      if (usableCopy(entry)) return serveCache(req, res, reason, target, entry);
+      // The qualification above (empty states, lookback) is ES-fallback
+      // reasoning: a reader-less bridge (flag-off or another feed) keeps
+      // the plain last-good rule, byte for byte.
+      if (esFallback ? usableCopy(entry) : entry) {
+        return serveCache(req, res, reason, target, entry);
+      }
       const esServed = await tryServeEs();
       if (esServed) return;
       if (entry) return serveCache(req, res, reason, target, entry);
@@ -659,39 +668,40 @@ export function createCollectorBridge({
         }
         // Review (t_9e0ff678): a paused collector's empty 200 is not data. A
         // useful per-view copy is preferred (marked STALE, the paused reason
-        // preserved), then the ES fallback; with neither, the paused answer
-        // itself is relayed unchanged — and never cached, so a paused empty
-        // body can never show false green or shadow the ES fallback later.
-        if (esFallback) {
-          const pausedReason = pausedEmptyReason(result);
-          if (pausedReason) {
-            const entry = cacheGet(key, cacheKeyOf(url));
-            // Review: the same qualification as the down path — a useful,
-            // not-too-old copy wins, then ES, then an old copy if it has
-            // one, else the paused answer relayed unchanged
-            if (usableCopy(entry)) {
-              return serveCache(
-                req,
-                res,
-                'collector_down',
-                target,
-                entry,
-                pausedReason,
-              );
-            }
-            if (await tryServeEs(pausedReason)) return;
-            if (entry) {
-              return serveCache(
-                req,
-                res,
-                'collector_down',
-                target,
-                entry,
-                pausedReason,
-              );
-            }
-            return finishPaused(req, res, target, headers, result);
+        // preserved), then the ES fallback if configured; with neither, the
+        // paused answer itself is relayed unchanged — and never cached, so
+        // a paused empty body can never show false green or shadow the ES
+        // fallback later. The never-cached rule is about the collector's
+        // answer, so it applies with and without the ES reader; non-flights
+        // feeds are untouched because the paused reason is OpenSky-only.
+        const pausedReason = pausedEmptyReason(result);
+        if (pausedReason) {
+          const entry = cacheGet(key, cacheKeyOf(url));
+          // Review: the same qualification as the down path — a useful,
+          // not-too-old copy wins, then ES, then an old copy if it has
+          // one, else the paused answer relayed unchanged
+          if (esFallback ? usableCopy(entry) : entry) {
+            return serveCache(
+              req,
+              res,
+              'collector_down',
+              target,
+              entry,
+              pausedReason,
+            );
           }
+          if (await tryServeEs(pausedReason)) return;
+          if (entry) {
+            return serveCache(
+              req,
+              res,
+              'collector_down',
+              target,
+              entry,
+              pausedReason,
+            );
+          }
+          return finishPaused(req, res, target, headers, result);
         }
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);

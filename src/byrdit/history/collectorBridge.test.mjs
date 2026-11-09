@@ -792,3 +792,63 @@ test('collector down with a fresh useful copy: ES is not asked (unchanged prefer
   assert.equal(down.headers['x-feed-bridge'], 'cache');
   assert.equal(down.headers['x-feed-reason'], 'collector_down');
 });
+
+// Round 2 self-review regression (t_9e0ff678): the flights invariants of
+// the paused-empty 200 apply without the ES reader too; no other feed's
+// behaviour may change with it.
+test('flag-off flights (no ES fallback): a paused empty 200 is never cached and never served as data later', async () => {
+  const state = { phase: 'paused' };
+  const { fetchImpl, calls } = fakeCollectors(flightsCollector(state));
+  const handler = createCollectorBridge({
+    name: 'flights',
+    urls: ['http://s4:4180'],
+    fetchImpl,
+    now: () => T0 + 1_000,
+    log: () => {},
+    // the ES reader absent: GEV_BRIDGE_FLIGHTS_ES_FALLBACK off
+  });
+  const first = await call(handler, flightsUrl('tab-flagoff'));
+  assert.equal(first.statusCode, 200, 'the paused answer is relayed as before');
+  assert.equal(first.headers['x-feed-bridge'], 'collector');
+  assert.equal(text(first.body).trim(), FLIGHTS_EMPTY_PAUSED.trim());
+  assert.equal(calls.length, 1);
+
+  const second = await call(handler, flightsUrl('tab-flagoff'));
+  assert.equal(
+    second.headers['x-feed-cache'],
+    'STALE',
+    'the paused envelope is not answered from the cache as data',
+  );
+  assert.equal(calls.length, 2, 'the empty body was never cached');
+
+  state.phase = 'down';
+  const down = await call(handler, flightsUrl('tab-flagoff'));
+  assert.equal(
+    down.statusCode,
+    503,
+    'after the collector stops there is no false live snapshot',
+  );
+  assert.equal(down.headers['x-feed-cache'], undefined);
+  assert.equal(down.headers['x-feed-bridge'], 'none');
+});
+
+test('flag-off flights (no ES fallback): a paused 200 WITH states is still a real snapshot, cached as before', async () => {
+  const state = { phase: 'good' };
+  const { fetchImpl, calls } = fakeCollectors(flightsCollector(state));
+  const handler = createCollectorBridge({
+    name: 'flights',
+    urls: ['http://s4:4180'],
+    fetchImpl,
+    now: () => T0 + 1_000,
+    log: () => {},
+  });
+  const first = await call(handler, flightsUrl('tab-flagoff2'));
+  assert.equal(first.headers['x-feed-bridge'], 'collector');
+  assert.equal(first.headers['x-feed-cache'], 'HIT');
+  assert.equal(calls.length, 1);
+  state.phase = 'down';
+  const down = await call(handler, flightsUrl('tab-flagoff2'));
+  assert.equal(down.statusCode, 200, 'the real snapshot is served from cache');
+  assert.equal(down.headers['x-feed-bridge'], 'cache');
+  assert.equal(text(down.body), FLIGHTS_GOOD);
+});

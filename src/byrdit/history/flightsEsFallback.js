@@ -184,14 +184,26 @@ export function createFlightsEsFallback({
   /** A failure is logged at most once a minute (review; HistoryApi parity). */
   let lastFailureLog = 0;
 
+  /** Allowlist of this module's own fixed `reason` values. A reason that
+   * is not one of these is never trusted for the log: an error may carry
+   * arbitrary upstream input (a URL, a key) in even a seemingly internal
+   * reason, so anything unknown logs as the fixed message below. */
+  const LOGGABLE_REASONS = new Set([
+    'flights_read_limit',
+    'flights_read_deadline',
+    'flights_read_aborted',
+    'flights_es_unavailable',
+  ]);
+
   function logFailure(error) {
     if (typeof log !== 'function') return;
     const t = now();
     if (t - lastFailureLog < 60_000) return;
     lastFailureLog = t;
-    // a short internal reason only: an error message may carry a URL or key
     const reason =
-      error instanceof HistoryUnavailableError && error.reason
+      error instanceof HistoryUnavailableError &&
+      typeof error.reason === 'string' &&
+      LOGGABLE_REASONS.has(error.reason)
         ? error.reason
         : 'flights_es_error';
     try {
@@ -207,7 +219,21 @@ export function createFlightsEsFallback({
     }
     activeReads += 1;
     let deadline = null;
-    const read = readEs(bbox, requestT);
+    // review: the deadline answers the caller but does NOT free the slot:
+    // the underlying read keeps real ES requests in flight until it
+    // settles (or its own ES client timeouts land), so the slot must stay
+    // occupied for exactly that long or the cap does not cap anything.
+    let aborted = false;
+    const read = readEs(bbox, requestT, () => aborted).then(
+      (answer) => {
+        activeReads -= 1;
+        return answer;
+      },
+      (error) => {
+        activeReads -= 1;
+        throw error;
+      },
+    );
     const timedOut = Symbol('deadline');
     try {
       return await Promise.race([
@@ -215,25 +241,29 @@ export function createFlightsEsFallback({
         new Promise((_, reject) => {
           // NOT unref'd: the deadline must fire even on an otherwise idle
           // loop, or a stuck read would hang the poll forever
-          deadline = setTimeout(() => reject(timedOut), readDeadlineMs);
+          deadline = setTimeout(() => {
+            // review: the deadline also stops the underlying read from
+            // making further query waves; what is already in flight
+            // still counts against the slot until it settles
+            aborted = true;
+            reject(timedOut);
+          }, readDeadlineMs);
         }),
       ]);
     } catch (error) {
-      // fail closed on the deadline as well; the read's own failure (if it
-      // lands later) is swallowed here so nothing becomes an unhandled
-      // rejection.
-      read.catch(() => {});
+      // fail closed on the deadline as well; the read's own failure (if
+      // it lands later) is swallowed by the settlement above so nothing
+      // becomes an unhandled rejection.
       logFailure(error);
       throw new HistoryUnavailableError(
         error === timedOut ? 'flights_read_deadline' : 'flights_es_unavailable',
       );
     } finally {
       clearTimeout(deadline);
-      activeReads -= 1;
     }
   }
 
-  async function readEs(bbox, requestT) {
+  async function readEs(bbox, requestT, isAborted = null) {
     const from = requestT - lookbackMs;
     const read = await latestPerKey(es, HISTORY_INDICES.opensky, {
       filter: [rangeMs(from, requestT), viewBoxClause(bbox)],
@@ -245,6 +275,10 @@ export function createFlightsEsFallback({
       // review: the fallback is one of many consumers; it gets a small
       // slice and is marked truncated when it cannot finish within it
       maxQueries,
+      // review: once the read's deadline has passed, no further query
+      // waves may go out (isAborted is checked between waves and work
+      // items; what is already in flight still settles)
+      isAborted,
     });
     let latest = null; // epoch ms of the newest doc, the STALE header anchor
     const states = [];

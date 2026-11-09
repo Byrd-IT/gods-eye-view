@@ -14,6 +14,7 @@ import {
   createFlightsEsFallback,
 } from './flightsEsFallback.js';
 import { COLLAPSE_MAX_QUERIES } from './historyCollapse.js';
+import { HistoryUnavailableError } from './historyEs.js';
 import { feedDisplayState } from './staleness.js';
 import { historyPlugins } from './index.js';
 
@@ -774,6 +775,139 @@ test('reader: ES failures are logged at most once a minute, without leaking deta
     assert.ok(!line.includes('secret-key-should-never-log'), `leak: ${line}`);
     assert.ok(!line.includes('boom'), `error message leaked: ${line}`);
   }
+});
+
+/* Round 2 self-review regressions (t_9e0ff678):
+ * the deadline must not free the slot while the underlying ES work is
+ * still running, the underlying read must stop issuing query waves after
+ * the deadline, and the failure log must take reasons from a fixed
+ * allowlist only.
+ */
+
+test('reader: the deadline does not free the ES slot while the underlying read is still in flight', async () => {
+  // every es.search call hangs until its gate is resolved
+  const gates = [];
+  const resolved = Symbol('done');
+  const es = {
+    async search() {
+      return new Promise((resolve) => gates.push((page) => resolve(page)));
+    },
+  };
+  const reader = createFlightsEsFallback({
+    es,
+    now: () => VIEW_MS,
+    readDeadlineMs: 40,
+  });
+  const a = reader.read(makeUrl(`/api/flights?view=0,45,10,55`));
+  const b = reader.read(makeUrl(`/api/flights?view=1,46,11,56`));
+  await Promise.all([
+    assert.rejects(a, /deadline|unavailable/, 'the deadline responds timely'),
+    assert.rejects(b, /deadline|unavailable/),
+  ]);
+  // the two probe searches are STILL in flight (hanging): the deadline
+  // answered the caller but freed nothing
+  const third = reader.read(makeUrl(`/api/flights?view=2,47,12,57`));
+  // pre-fix: the slot was already freed at the deadline, so this read
+  // would run ES work (and hang on a fresh gate) instead of failing closed
+  const verdict = await Promise.race([
+    third.then(
+      () => 'ok',
+      (error) => error?.reason ?? String(error),
+    ),
+    new Promise((r) => setTimeout(() => r(resolved), 250)),
+  ]);
+  assert.equal(verdict, 'flights_read_limit');
+  // now release the hanging ES work; the underlying reads settle (each
+  // still-aborted read discards any further waves) and the slots free
+  for (let round = 0; round < 4; round += 1) {
+    for (const gate of [...gates]) gate(esSearchHits([doc()]));
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  const fourth = reader.read(makeUrl(`/api/flights?view=3,48,13,58`));
+  for (let round = 0; round < 4; round += 1) {
+    for (const gate of [...gates]) gate(esSearchHits([doc()]));
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.ok(
+    await fourth,
+    'the cap is free again once the underlying ES work settles',
+  );
+});
+
+test('reader: after the deadline fires, the underlying read issues no further query waves', async () => {
+  // probe (1 call) + fanout (8 calls): the deadline fires while the fanout
+  // wave is in flight, so with the fix the sub-partition wave never starts
+  const docs = Array.from({ length: 90_000 }, (_, i) =>
+    doc({ icao24: String(i).padStart(6, '0'), ts: VIEW_MS - 10_000 }),
+  );
+  const fake = rangedFakeEs(docs);
+  const baseSearch = fake.search;
+  let count = 0;
+  const es = {
+    async search(index, body) {
+      const probe = count === 0;
+      count += 1;
+      if (!probe) await new Promise((r) => setTimeout(r, 30));
+      return baseSearch(index, body);
+    },
+  };
+  const reader = createFlightsEsFallback({
+    es,
+    now: () => VIEW_MS,
+    readDeadlineMs: 20,
+  });
+  const read = reader.read(makeUrl(`/api/flights?view=${VIEW}`));
+  await assert.rejects(read, /deadline|unavailable/, 'the deadline responds timely');
+  // let the underlying read settle whatever it still has in flight
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(
+    fake.calls.length <= 9,
+    `ES work never exceeds one probe plus one fanout wave after the deadline: ${fake.calls.length} calls`,
+  );
+});
+
+test('reader: only fixed allowlist reasons are logged; a secret in error.reason never reaches the log', async () => {
+  let nowMs = VIEW_MS;
+  const lines = [];
+  /** A synthetic exception class whose `reason` carries a secret. */
+  class SecretUnavailable extends Error {
+    constructor(reason) {
+      super('history_unavailable');
+      this.reason = reason;
+    }
+  }
+  let thrower = null;
+  const es = {
+    async search() {
+      throw thrower;
+    },
+  };
+  const reader = createFlightsEsFallback({
+    es,
+    now: () => nowMs,
+    log: (line) => lines.push(line),
+  });
+  thrower = new HistoryUnavailableError('SECRET-TOKEN-IN-REASON');
+  await assert.rejects(
+    reader.read(makeUrl(`/api/flights?view=${VIEW}`)),
+    /unavailable/,
+  );
+  nowMs += 61_000;
+  thrower = new SecretUnavailable('SECRET-CLASS-REASON');
+  await assert.rejects(
+    reader.read(makeUrl(`/api/flights?view=1,46,11,56`)),
+    /unavailable/,
+  );
+  assert.equal(lines.length, 2, 'one log line per rate limit window');
+  for (const line of lines) {
+    assert.ok(!line.includes('SECRET-TOKEN-IN-REASON'), `leak: ${line}`);
+    assert.ok(!line.includes('SECRET-CLASS-REASON'), `leak: ${line}`);
+    assert.ok(!line.includes('SECRET'), `leak: ${line}`);
+  }
+  assert.ok(
+    lines.every((line) => line.includes('flights_es_error')),
+    `fixed message only: ${JSON.stringify(lines)}`,
+  );
 });
 
 /** A fake honouring the collapse request's time, bbox and keyword partition. */

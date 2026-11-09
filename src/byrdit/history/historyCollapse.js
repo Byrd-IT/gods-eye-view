@@ -373,6 +373,10 @@ function partitionFilter(field, { lo, hi }) {
  *   (createCutMemo().lane(key)); read to start, written after a complete
  *   answer
  * @param {number} [options.partDocs] docs per learned partition
+ * @param {() => boolean} [options.isAborted] called between waves and
+ *   work items; when it turns true, no further queries are made and the
+ *   read fails (the caller's deadline has passed: the in-flight requests
+ *   still settle, but nothing new goes out)
  * @returns {Promise<{hits: object[], truncated: boolean, queries: number}>}
  */
 export async function latestPerKey(
@@ -392,8 +396,11 @@ export async function latestPerKey(
     docValues = null,
     memo = null,
     partDocs = COLLAPSE_PART_DOCS,
+    isAborted = null,
   },
 ) {
+  const abort = () =>
+    typeof isAborted === 'function' ? isAborted() === true : false;
   const cuts = Array.isArray(memo?.cuts) ? memo.cuts : null;
   let queue = cuts ? rangesFromCuts(cuts) : [{ lo: null, hi: null, probe }];
   const hits = [];
@@ -467,6 +474,11 @@ export async function latestPerKey(
   // waves: every partition of a wave runs (bounded concurrency); the
   // sub-ranges of full partitions form the next wave
   while (queue.length) {
+    if (abort()) {
+      // the caller's deadline passed: nothing new goes out, and the
+      // partial answer is discarded (the read fails)
+      throw new Error('flights_collapse_aborted');
+    }
     let wave = queue;
     queue = [];
     if (queries + wave.length > maxQueries) {
@@ -476,7 +488,10 @@ export async function latestPerKey(
     }
     let at = 0;
     const worker = async () => {
-      while (at < wave.length) await run(wave[at++], queue);
+      while (at < wave.length) {
+        if (abort()) return;
+        await run(wave[at++], queue);
+      }
     };
     await Promise.all(
       Array.from(
