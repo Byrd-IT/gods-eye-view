@@ -3159,6 +3159,7 @@ export function initDronePlan({
     setUnitSystem(system);
     writeUnitSystem(unitStorage, system);
     ui.applyUnitRanges();
+    library?.refreshUnits();
     // Rebuild the obstacle list even while a height box has focus.
     obstacleTyping = false;
     render();

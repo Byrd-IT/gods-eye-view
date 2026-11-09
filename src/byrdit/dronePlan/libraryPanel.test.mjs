@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { warningText } from './libraryPanel.js';
+import { warningText, displayLegacySpeedNotes } from './libraryPanel.js';
 import { setUnitSystem, speedUnit, DEFAULT_UNIT_SYSTEM } from './units.js';
 
 test.afterEach(() => setUnitSystem(DEFAULT_UNIT_SYSTEM));
@@ -18,6 +18,20 @@ test('the DJI speed-limit warning shows m/s in the metric system', () => {
   assert.equal(speedUnit(), 'm/s');
   const text = warningText({ code: 'speed-range', args: { max: 15 } });
   assert.match(text, /15\.0 m\/s/);
+});
+
+test('legacy automatically generated notes show mph without changing other text', () => {
+  const old =
+    'Pilot note: 5 m/s.\nPlanned by GEV: 5 waypoints, 5 photos, 1 mission, speed 3.00 m/s.';
+  assert.equal(
+    displayLegacySpeedNotes(old, 'ft'),
+    'Pilot note: 5 m/s.\nPlanned by GEV: 5 waypoints, 5 photos, 1 mission, speed 6.71 mph (3.00 m/s).',
+  );
+  assert.equal(displayLegacySpeedNotes(old, 'm'), old);
+  assert.equal(
+    displayLegacySpeedNotes('Free-form speed 3.00 m/s.'),
+    'Free-form speed 3.00 m/s.',
+  );
 });
 
 test('other DJI findings keep their sentences', () => {

@@ -23,6 +23,19 @@ import { createLibraryClient } from './libraryClient.js';
 import { cheatSheetHtml, cheatSheetText } from './cheatSheet.js';
 import { flightCode } from './missionLabel.js';
 import { speedText } from './format.js';
+import { MPH_PER_MS } from './timing.js';
+import { getUnitSystem } from './units.js';
+
+/** Present old generated seed notes with mph; do not rewrite the stored note. */
+export function displayLegacySpeedNotes(notes, system = getUnitSystem()) {
+  const text = String(notes ?? '');
+  if (system !== 'ft') return text;
+  return text.replace(
+    /(^|\n)(Planned by GEV: [^\n]*, speed )(\d+(?:\.\d+)?) m\/s\./g,
+    (_, start, prefix, ms) =>
+      `${start}${prefix}${(Number(ms) * MPH_PER_MS).toFixed(2)} mph (${ms} m/s).`,
+  );
+}
 
 const COLORS = [
   '#ff9f1c',
@@ -316,18 +329,22 @@ export function mountLibrary({
     attrs: { 'data-role': 'library-findings', 'aria-live': 'polite' },
   });
 
+  let originalNotes = '';
+  let displayedNotes = '';
   const details = () => ({
     name: f.name.value.trim(),
     site: f.site.value.trim(),
     customer: f.customer.value.trim(),
-    notes: f.notes.value,
+    notes: f.notes.value === displayedNotes ? originalNotes : f.notes.value,
     status: f.status.value,
   });
   const setDetails = (d = {}) => {
     f.name.value = d.name ?? '';
     f.site.value = d.site ?? '';
     f.customer.value = d.customer ?? '';
-    f.notes.value = d.notes ?? '';
+    originalNotes = d.notes ?? '';
+    displayedNotes = displayLegacySpeedNotes(originalNotes);
+    f.notes.value = displayedNotes;
     f.status.value = d.status ?? 'planned';
   };
   /** One line per flight; a flight with no id is a blank line (kept, not dropped). */
@@ -943,7 +960,16 @@ export function mountLibrary({
   renderNote();
   init();
 
+  function refreshUnits() {
+    if (f.notes.value === displayedNotes) {
+      displayedNotes = displayLegacySpeedNotes(originalNotes);
+      f.notes.value = displayedNotes;
+    }
+    renderFindings();
+  }
+
   return {
+    refreshUnits,
     refresh,
     importBytes,
     checkExport,

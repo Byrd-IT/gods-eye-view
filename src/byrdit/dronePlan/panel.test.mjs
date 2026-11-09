@@ -2432,6 +2432,41 @@ const field = (w, name) =>
   w.find((n) => n.getAttribute?.('data-field') === name)[0];
 const rows = (w) => w.find((n) => n.getAttribute?.('data-plan'));
 
+test('legacy generated notes are displayed in mph without rewriting saved notes', async () => {
+  const srv = await server();
+  try {
+    const client = srv.clientFor('alice');
+    const w = setup({ libraryClient: client });
+    await settleUi();
+    w.handle.setBox(boxM(400, 200));
+    await w.handle.replan();
+    const original =
+      'Planned by GEV: 5 waypoints, 5 photos, 1 mission, speed 3.00 m/s.';
+    field(w, 'name').value = 'Legacy';
+    field(w, 'notes').value = original;
+    btn(w, 'library-save')[0].click();
+    await settleUi();
+    const id = rows(w)[0].getAttribute('data-plan');
+    const w2 = setup({ libraryClient: client });
+    await settleUi();
+    btn(w2, 'plan-open')[0].click();
+    await settleUi();
+    unitBtn(w2, 'ft').click();
+    assert.match(field(w2, 'notes').value, /6\.71 mph \(3\.00 m\/s\)/);
+    unitBtn(w2, 'm').click();
+    assert.equal(field(w2, 'notes').value, original);
+    unitBtn(w2, 'ft').click();
+    assert.match(field(w2, 'notes').value, /6\.71 mph \(3\.00 m\/s\)/);
+    btn(w2, 'library-save')[0].click();
+    await settleUi();
+    assert.equal((await client.open(id)).meta.notes, original);
+    w2.handle.destroy();
+    w.handle.destroy();
+  } finally {
+    await srv.close();
+  }
+});
+
 test('save, list, reopen, rename, version restore, trash and restore through the panel', async () => {
   const srv = await server();
   try {
