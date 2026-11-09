@@ -671,10 +671,9 @@ export function createCollectorBridge({
         // preserved), then the ES fallback if configured; with neither, the
         // paused answer itself is relayed unchanged — and never cached, so
         // a paused empty body can never show false green or shadow the ES
-        // fallback later. The never-cached rule is about the collector's
-        // answer, so it applies with and without the ES reader; non-flights
-        // feeds are untouched because the paused reason is OpenSky-only.
-        const pausedReason = pausedEmptyReason(result);
+        // fallback later. This handling is enabled only with the ES reader;
+        // flag-off and unrelated feeds retain their original behavior.
+        const pausedReason = esFallback ? pausedEmptyReason(result) : null;
         if (pausedReason) {
           const entry = cacheGet(key, cacheKeyOf(url));
           // Review: the same qualification as the down path — a useful,

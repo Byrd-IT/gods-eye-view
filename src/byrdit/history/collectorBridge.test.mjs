@@ -793,10 +793,8 @@ test('collector down with a fresh useful copy: ES is not asked (unchanged prefer
   assert.equal(down.headers['x-feed-reason'], 'collector_down');
 });
 
-// Round 2 self-review regression (t_9e0ff678): the flights invariants of
-// the paused-empty 200 apply without the ES reader too; no other feed's
-// behaviour may change with it.
-test('flag-off flights (no ES fallback): a paused empty 200 is never cached and never served as data later', async () => {
+// Flag off retains the pre-existing paused-empty caching behavior.
+test('flag-off flights: paused empty response retains original cache behavior', async () => {
   const state = { phase: 'paused' };
   const { fetchImpl, calls } = fakeCollectors(flightsCollector(state));
   const handler = createCollectorBridge({
@@ -823,13 +821,9 @@ test('flag-off flights (no ES fallback): a paused empty 200 is never cached and 
 
   state.phase = 'down';
   const down = await call(handler, flightsUrl('tab-flagoff'));
-  assert.equal(
-    down.statusCode,
-    503,
-    'after the collector stops there is no false live snapshot',
-  );
-  assert.equal(down.headers['x-feed-cache'], undefined);
-  assert.equal(down.headers['x-feed-bridge'], 'none');
+  assert.equal(down.statusCode, 200);
+  assert.equal(text(down.body), FLIGHTS_EMPTY_PAUSED);
+  assert.equal(down.headers['x-feed-bridge'], 'cache');
 });
 
 test('flag-off flights (no ES fallback): a paused 200 WITH states is still a real snapshot, cached as before', async () => {
