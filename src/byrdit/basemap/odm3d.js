@@ -249,7 +249,8 @@ export class Odm3dLayer {
     // factory (what the real page runs) — a gate it cannot produce must fail
     // the phone load, whereas an explicitly injected factory stays
     // dependency-injectable (tests, fakes).
-    this._defaultGateFactory = requestGateFactory === createOdmRequestGateResource;
+    this._defaultGateFactory =
+      requestGateFactory === createOdmRequestGateResource;
     this._gate = null;
     this.gateError = null; // what the gate creation fell over on, or null
     this.alignedM = 0;
@@ -323,7 +324,7 @@ export class Odm3dLayer {
     if (this.destroyed) return;
     if (this._loading) return this._loading;
     this.status = 'loading';
-    this._loading = (async () => {
+    const attempt = (async () => {
       try {
         // Record which mode this build is for and reset the pressure state:
         // a mode toggle while this very await is in flight must still land
@@ -335,6 +336,9 @@ export class Odm3dLayer {
         this._queued = 0;
         this._heapRatio = null;
         this.gateError = null;
+        // A retry (this same call after an earlier failed load) must not
+        // surface the previous attempt's error as if it were current.
+        this.error = null;
         const { Cesium, viewer, entry } = this;
         // Phones fetch through a per-tileset gate (request cap + pressure
         // pause) carried on the tileset's own Resource chain — never via
@@ -451,7 +455,18 @@ export class Odm3dLayer {
         this.error = String(error?.message ?? error).slice(0, 120);
       }
     })();
-    return this._loading;
+    // A failure INSIDE this IIFE (the fail-closed phone gate throws before
+    // its first await) runs the catch before the assignment below, so the
+    // catch alone cannot leave `this._loading` null: the dead attempt would
+    // be mistaken for a build in flight forever (setPhoneMode would refuse
+    // to retry a failed phone load and load() would keep returning the
+    // settled failure). Clear the bookkeeping here, exactly when this
+    // attempt is no longer the live build.
+    attempt.finally?.(() => {
+      if (this._loading === attempt) this._loading = null;
+    });
+    this._loading = attempt;
+    return attempt;
   }
 
   /** Request frames every 250 ms until the tileset reports loaded 3 times. */
@@ -548,6 +563,13 @@ export class Odm3dLayer {
   _syncPressure() {
     if (!this.phoneActive || this.destroyed || !this.tileset) return;
     const f = this.phoneLimits;
+    // Every sync must act on a heap reading taken NOW, never on the last
+    // tick's: the pump (the only routine prober) stops once a load has
+    // settled, so after an idle stretch a sync triggered from elsewhere
+    // (loadProgress, a camera move restart) would otherwise press or hold
+    // the pause on a heap that may have moved long ago.
+    const freshHeap = this._heapUsage();
+    if (freshHeap !== null) this._heapRatio = freshHeap;
     const { resumeFraction } = f;
     const hOver =
       this._heapRatio !== null &&
@@ -639,6 +661,16 @@ export class Odm3dLayer {
       // A build is in flight for the other mode: do not mutate the options
       // of a build that has already started. The drift resolver at the end
       // of load() rebuilds for this mode (cleared again if it toggles back).
+      return;
+    }
+    if (!this.tileset && this.status === 'failed') {
+      // Nothing is built and nothing is under way: the last load failed
+      // (e.g. a failed phone gate) and must not stay failed at the OLD
+      // mode with a stale gateError. Retry safely for the mode that is
+      // now active — load() itself clears the stale gate error and
+      // pressure state, and a failure there is handled by its own catch.
+      this.status = 'idle';
+      this.load();
       return;
     }
     if (this.tileset) {
