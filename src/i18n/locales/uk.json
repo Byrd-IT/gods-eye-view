@@ -4353,5 +4353,8 @@
   "No {source} imagery near {place}": "Немає знімків {source} поблизу {place}",
   "{reason} (filters on: {filters})": "{reason} (увімкнено фільтри: {filters})",
   "Phone mode": "Режим телефону",
-  "Phone mode: softer model to save memory": "Режим телефону: спрощена модель для економії пам'яті"
+  "Phone mode: softer model to save memory": "Режим телефону: спрощена модель для економії пам'яті",
+  "Paused under memory pressure: no new 3D tile loads": "Пауза через брак пам'яті: нові завантаження 3D-тайлів зупинено",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Застій через брак пам'яті: нічого не завантажується, очікування звільнення пам'яті",
+  "The 3D model request gate could not be created": "Не вдалося створити шлюз запитів 3D-моделі"
 }

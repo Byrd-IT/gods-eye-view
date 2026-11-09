@@ -4533,5 +4533,8 @@
   "No {source} imagery near {place}": "لا توجد صور {source} قرب {place}",
   "{reason} (filters on: {filters})": "{reason} (المرشحات المفعّلة: {filters})",
   "Phone mode": "وضع الهاتف",
-  "Phone mode: softer model to save memory": "وضع الهاتف: نموذج أخف لحفظ الذاكرة"
+  "Phone mode: softer model to save memory": "وضع الهاتف: نموذج أخف لحفظ الذاكرة",
+  "Paused under memory pressure: no new 3D tile loads": "متوقف بسبب ضغط الذاكرة: لا تحميلات جديدة لبلاطات ثلاثية الأبعاد",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "متعثر بسبب ضغط الذاكرة: لا شيء يُحمَّل، بانتظار تحرر الذاكرة",
+  "The 3D model request gate could not be created": "تعذّر إنشاء بوابة طلبات النموذج ثلاثي الأبعاد"
 }

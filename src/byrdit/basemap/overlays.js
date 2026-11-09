@@ -233,13 +233,36 @@ export function attachOverlays({
             phoneMode,
             status: models.get(entry.id)?.status ?? 'idle',
             alignedM: models.get(entry.id)?.alignedM ?? 0,
+            // Phone pressure, surfaced from the layer every refresh: the
+            // panel can show a paused / stalled build instead of one that
+            // merely stopped making progress, and the gate failure the
+            // layer recorded in place of an unspecific load error.
+            pressurePaused: models.get(entry.id)?.pressurePaused ?? false,
+            pressureStalled: models.get(entry.id)?.pressureStalled ?? false,
+            gateError: models.get(entry.id)?.gateError ?? null,
           }
         : {}),
     })),
   });
 
+  // The 3D rows' transient state (loading done, pressure paused/stalled,
+  // gate errors) changes on the layers' own pump ticks, which request
+  // frames but carry no other signal a controller/camera subscription would
+  // see. Remember what the rows last said; the preUpdate hook re-evaluates
+  // when a layer's state moved on (a few fields over a handful of models,
+  // no re-render of anything else).
+  let lastModelState = '';
+  const modelState = () =>
+    [...models.entries()]
+      .map(
+        ([id, m]) =>
+          `${id}:${m?.status}|${m?.pressurePaused}|${m?.pressureStalled}|${m?.gateError ?? ''}`,
+      )
+      .join(';');
+
   function evaluate() {
     if (detached) return;
+    lastModelState = modelState();
     if (!openShown() || googleShown()) {
       removeAll();
       setCredits(new Set());
@@ -375,9 +398,19 @@ export function attachOverlays({
     removers.push(
       scene.preUpdate.addEventListener(() => {
         const shown = googleShown();
-        if (shown === googleWasShown) return;
-        googleWasShown = shown;
-        evaluate();
+        if (shown !== googleWasShown) {
+          googleWasShown = shown;
+          evaluate();
+          return;
+        }
+        // A 3D build's pressure / gate state moved (it flips on the layer's
+        // own pump tick and asks for frames): re-evaluate so the panel row
+        // follows without waiting for a camera move or stack change.
+        const state = modelState();
+        if (state !== lastModelState) {
+          lastModelState = state;
+          evaluate();
+        }
       }),
     );
   evaluate();

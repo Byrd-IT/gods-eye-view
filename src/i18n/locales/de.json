@@ -4173,5 +4173,8 @@
   "No {source} imagery near {place}": "Keine Bilder von {source} in der Nähe von {place}",
   "{reason} (filters on: {filters})": "{reason} (aktive Filter: {filters})",
   "Phone mode": "Telefonmodus",
-  "Phone mode: softer model to save memory": "Telefonmodus: weniger detailliertes Modell, um Speicher zu sparen"
+  "Phone mode: softer model to save memory": "Telefonmodus: weniger detailliertes Modell, um Speicher zu sparen",
+  "Paused under memory pressure: no new 3D tile loads": "Angehalten wegen Speicherdruck: keine neuen 3D-Kachel-Ladevorgänge",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Stillstand wegen Speicherdruck: nichts lädt, auf freien Speicher warten",
+  "The 3D model request gate could not be created": "Die Anfrage-Sperre des 3D-Modells konnte nicht erstellt werden"
 }

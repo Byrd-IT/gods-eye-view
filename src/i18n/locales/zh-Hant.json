@@ -4083,5 +4083,8 @@
   "No {source} imagery near {place}": "{place} 附近沒有 {source} 影像",
   "{reason} (filters on: {filters})": "{reason}（已開啟篩選：{filters}）",
   "Phone mode": "手機模式",
-  "Phone mode: softer model to save memory": "手機模式：降低模型精細度以節省記憶體"
+  "Phone mode: softer model to save memory": "手機模式：降低模型精細度以節省記憶體",
+  "Paused under memory pressure: no new 3D tile loads": "因記憶體壓力暫停：不再載入新的 3D 瓦片",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "因記憶體壓力停滯：沒有正在載入的內容，等待記憶體釋放",
+  "The 3D model request gate could not be created": "無法建立 3D 模型請求閘門"
 }

@@ -311,7 +311,7 @@ test('desktop keeps its cache budget explicitly: 256 MiB with 256 MiB overflow, 
 test('phone: coarse first within the owner band, 64MiB cache with no overflow, then refines inside the owner band once settled', async () => {
   const f = fake();
   const { timers, map, tick } = timersOf();
-  const layer = phoneLayer(f, { timers });
+  const layer = phoneLayer(f, { timers, requestGateFactory: gateSpy().factory });
   await layer.load();
   const tileset = f.calls.added[0];
   assert.equal(f.calls.sse[0], PHONE_LIMITS.initialError, 'coarse initial SSE');
@@ -497,7 +497,7 @@ test('phone: pressure pauses during load, keeps the queue draining, ready show w
 test('phone: many phone layers together still write nothing shared; the last destroy leaves Cesium defaults', async () => {
   const f = fake();
   const { timers, tick } = timersOf();
-  const layer = phoneLayer(f, { timers });
+  const layer = phoneLayer(f, { timers, requestGateFactory: gateSpy().factory });
   await layer.load();
   const tileset = f.calls.added[0];
   tileset.tilesLoaded = true;
@@ -698,7 +698,7 @@ test('phone: destroy under pressure stops the pump, kills the gate, removes the 
 test('phone: Fly to coarsens a ready, refined layer back to the initial SSE and lets it refine again after settling', async () => {
   const f = fake();
   const { timers, tick, map } = timersOf();
-  const layer = phoneLayer(f, { timers });
+  const layer = phoneLayer(f, { timers, requestGateFactory: gateSpy().factory });
   await layer.load();
   const tileset = f.calls.added[0];
   // The bounding-sphere flight path Cesium really takes; a spy camera.
@@ -1082,3 +1082,74 @@ test('setPhoneMode(true) after a desktop load rebuilds the tileset through the g
 });
 
 // (superseded stall-release test removed)
+
+// ------------------------------------------------- gate fail-closed on phone
+
+// A phone build without its gate is ungated, unmanaged load pressure: the
+// DEFAULT factory failing is a load failure, not a silent fallback.
+test('phone: the default gate factory failing fails the load closed (no ungated tileset)', async () => {
+  const f = fake();
+  const { timers } = timersOf();
+  // A fake Cesium has no Resource class, so `createOdmRequestGateResource`
+  // (the layer's DEFAULT factory) cannot create a gate: the load must not
+  // fall back to the plain URL.
+  const layer = new Odm3dLayer({
+    Cesium: f.Cesium,
+    viewer: f.viewer,
+    entry: entry3d(),
+    phoneMode: true,
+    timers,
+  });
+  await layer.load();
+  assert.equal(layer.status, 'failed', 'fail closed: status failed');
+  assert.match(
+    String(layer.error),
+    /gate/i,
+    'the failure names the request gate',
+  );
+  assert.ok(layer.gateError, 'the gate failure is recorded for the panel');
+  assert.equal(layer.tileset, null, 'no tileset was built ungated');
+  assert.equal(f.calls.added.length, 0, 'nothing entered the scene');
+  assert.equal(
+    f.calls.tilesets?.length ?? 0,
+    0,
+    'Cesium3DTileset.fromUrl was never reached',
+  );
+  layer.destroy();
+});
+
+test('phone: an INJECTED gate factory stays dependency-injectable (may be fake)', async () => {
+  // An explicitly injected factory returns no gate: the layer keeps the test
+  // fallback behaviour and only records what happened.
+  const f = fake();
+  const { timers } = timersOf();
+  const layer = new Odm3dLayer({
+    Cesium: f.Cesium,
+    viewer: f.viewer,
+    entry: entry3d(),
+    phoneMode: true,
+    timers,
+    requestGateFactory: () => null,
+  });
+  await layer.load();
+  assert.equal(layer.status, 'ready', 'an injected fake factory still loads');
+  assert.equal(f.calls.sse[0], PHONE_LIMITS.initialError);
+  layer.destroy();
+
+  // An injected factory that throws: same fallback, but the error is visible.
+  const f2 = fake();
+  const layer2 = new Odm3dLayer({
+    Cesium: f2.Cesium,
+    viewer: f2.viewer,
+    entry: entry3d(),
+    phoneMode: true,
+    timers,
+    requestGateFactory: () => {
+      throw new Error('injected factory exploded');
+    },
+  });
+  await layer2.load();
+  assert.equal(layer2.status, 'ready');
+  assert.equal(layer2.gateError, 'the gate factory threw');
+  layer2.destroy();
+});

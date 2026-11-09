@@ -10,6 +10,8 @@ import { normalizeOverlays } from './overlaysConfig.js';
 import { OVERLAYS_PUBLISH } from './fixtures/overlays.mjs';
 import { attachOverlays } from './overlays.js';
 import { createOverlaysPanel } from './overlaysPanel.js';
+import { DEFAULT_LOCALE } from '../../i18n/locale.js';
+import { setLocale } from '../../i18n/index.js';
 import { BYRDIT_OPEN_STACK_ID } from './stack.js';
 
 const THREE_D = {
@@ -146,7 +148,7 @@ function setup({ createdPhone } = {}) {
     },
   });
   const row3d = () => detach.state().layers.find((l) => l.id === THREE_D.id);
-  return { detach, models, row3d };
+  return { detach, models, row3d, viewer };
 }
 
 test('attachOverlays: enabling a 3D build applies phone mode BEFORE the tileset is created', async () => {
@@ -401,4 +403,70 @@ test('panel: the loading note wins over the phone note until the model settles',
   });
   const note = panel.element.find((n) => /gev-ov-3d-note/.test(n.className))[0];
   assert.match(note.textContent, /Loading/);
+});
+
+// -------------------------------------------------- paused / stalled / gate
+
+function viewerPreUpdate(viewer) {
+  viewer.scene.preUpdate.raise();
+}
+
+test('attachOverlays: a 3D row carries the model pressure state (paused, stalled, gate error)', async () => {
+  const { detach, models, row3d, viewer } = setup();
+  detach.setEnabled(THREE_D.id, true);
+  await models[0]._loading?.catch?.(() => {});
+  assert.equal(row3d().pressurePaused, false);
+  assert.equal(row3d().pressureStalled, false);
+  assert.equal(row3d().gateError, null);
+  // The layer's own pump tick flips its pressure state; the panel must show
+  // it after the next preUpdate without any other change.
+  models[0].pressurePaused = true;
+  models[0].pressureStalled = true;
+  viewerPreUpdate(viewer);
+  assert.equal(row3d().pressureStalled, true, 'stall surfaced dynamically');
+  models[0].gateError = 'The 3D request gate could not be created';
+  models[0].pressurePaused = false;
+  models[0].pressureStalled = false;
+  viewerPreUpdate(viewer);
+  assert.match(row3d().gateError, /gate could not be created/);
+});
+
+test('panel: the note names paused and stalled pressure and gate failures, translated at update', async () => {
+  const mk = (extra) => ({ ...stateThreeD(true).layers[1], ...extra });
+  const panel = createOverlaysPanel({
+    container: new Node('div'),
+    doc: fakeDoc(),
+    state: { layers: [mk({ pressurePaused: true, pressureStalled: false })] },
+    onEnabled() {},
+    onOpacity() {},
+  });
+  const note = () =>
+    panel.element.find((n) => /gev-ov-3d-note/.test(n.className))[0];
+  assert.match(note().textContent, /Paused under memory pressure/i);
+
+  // A stalled pause says so distinctly; the panel re-renders from the state.
+  panel.update({
+    layers: [mk({ pressurePaused: true, pressureStalled: true })],
+  });
+  assert.match(note().textContent, /Stalled/i);
+  panel.update({ layers: [mk({ status: 'failed', gateError: 'gate boom' })] });
+  assert.match(note().textContent, /gate/i);
+  panel.update({
+    layers: [mk({ status: 'failed', gateError: null })],
+  });
+  assert.match(note().textContent, /could not be loaded/);
+  panel.update({ layers: [stateThreeD(false).layers[1]] });
+  assert.equal(note().textContent, '');
+
+  // Translation happens NOW (at update), not at module import: importing
+  // while English, then switching, the same update path re-translates.
+  setLocale('ru');
+  panel.update({ layers: [mk({ pressurePaused: true })] });
+  const ru = note().textContent;
+  setLocale(DEFAULT_LOCALE);
+  panel.update({ layers: [mk({ pressurePaused: true })] });
+  const en = note().textContent;
+  assert.notEqual(ru, en, 'locale switch re-translates at update time');
+  assert.match(en, /Paused under memory pressure/i);
+  assert.notEqual(ru, '', 'ru catalog carries the paused note');
 });

@@ -4353,5 +4353,8 @@
   "No {source} imagery near {place}": "Нет снимков {source} рядом с {place}",
   "{reason} (filters on: {filters})": "{reason} (включены фильтры: {filters})",
   "Phone mode": "Режим телефона",
-  "Phone mode: softer model to save memory": "Режим телефона: упрощённая модель для экономии памяти"
+  "Phone mode: softer model to save memory": "Режим телефона: упрощённая модель для экономии памяти",
+  "Paused under memory pressure: no new 3D tile loads": "Пауза из-за нехватки памяти: новые загрузки 3D-тайлов остановлены",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Застой из-за нехватки памяти: нечего загружать, ожидание освобождения памяти",
+  "The 3D model request gate could not be created": "Не удалось создать шлюз запросов 3D-модели"
 }

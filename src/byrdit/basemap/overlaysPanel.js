@@ -27,15 +27,30 @@ const DEFAULT_OPEN_GROUPS = Object.freeze(['lakes', 'byrd-ranch']);
 // shared tokens; raise/lower are the shared .data-toggle-chip (chipGroup.js)
 // and the opacity range is the shared .gev-quantitative-slider (ui/slider.js).
 
-/** What a 3D row says while its model loads or when it did not load. */
-function loadNote(status) {
-  if (status === 'loading') return t('Loading 3D model...');
-  if (status === 'failed') return t('The 3D model could not be loaded');
-  return '';
+/**
+ * The note for a 3D row, composed and TRANSLATED at update/update-render
+ * time — never at module import, or a page that switches locale would keep
+ * the import-time wording for the session's lifetime. Priority: the
+ * transient load state, then the request-gate failure (a specific failure
+ * beats the generic one), then the phone pressure pause, then the steady
+ * phone-mode note.
+ */
+function noteText(layer) {
+  if (layer.status === 'loading') return t('Loading 3D model...');
+  // A specific gate failure beats the generic one...
+  if (layer.gateError)
+    return t('The 3D model request gate could not be created');
+  if (layer.status === 'failed') return t('The 3D model could not be loaded');
+  // ...and the pressure pause says what is actually happening.
+  if (layer.pressurePaused) {
+    return layer.pressureStalled
+      ? t(
+          'Stalled under memory pressure: nothing loading, waiting for memory to free up',
+        )
+      : t('Paused under memory pressure: no new 3D tile loads');
+  }
+  return layer.phoneMode ? t('Phone mode: softer model to save memory') : '';
 }
-
-/** What a 3D row says while phone mode (softer model to save memory) runs. */
-const phoneNote = t('Phone mode: softer model to save memory');
 
 function el(doc, tag, parent, { text, cls, attrs } = {}) {
   const node = doc.createElement(tag);
@@ -221,7 +236,9 @@ export function createOverlaysPanel({
         attrs: {
           type: 'button',
           'aria-pressed': 'false',
-          title: phoneNote,
+          // The wording is re-set on every update() below (translation at
+          // render time, so a locale switch re-translates).
+          title: '',
         },
       });
       phone.addEventListener('click', () =>
@@ -371,11 +388,11 @@ export function createOverlaysPanel({
               'aria-pressed',
               String(Boolean(layer.phoneMode)),
             );
+            // Translated at update time: a locale switch re-words the chip.
+            row.phone.setAttribute('title', t('Phone mode: softer model to save memory'));
           }
-          // The load outcome is transient; the phone mode note stays while
-          // the softer model is in force.
-          row.note.textContent =
-            loadNote(layer.status) || (layer.phoneMode ? phoneNote : '');
+          // The note is composed and translated NOW, in this render pass.
+          row.note.textContent = noteText(layer);
         }
         if (nextOrder.length === rows.size) {
           row.up.disabled = index === 0;

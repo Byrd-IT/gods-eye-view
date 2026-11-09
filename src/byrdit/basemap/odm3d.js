@@ -245,7 +245,13 @@ export class Odm3dLayer {
     this.status = 'idle'; // idle | loading | ready | failed
     /** Per-tileset request gate (phone only): cap + pressure pause. */
     this.requestGateFactory = requestGateFactory;
+    // Fail-closed marker: `true` only when the layer runs the DEFAULT gate
+    // factory (what the real page runs) — a gate it cannot produce must fail
+    // the phone load, whereas an explicitly injected factory stays
+    // dependency-injectable (tests, fakes).
+    this._defaultGateFactory = requestGateFactory === createOdmRequestGateResource;
     this._gate = null;
+    this.gateError = null; // what the gate creation fell over on, or null
     this.alignedM = 0;
     this.cutFt = null;
     this.opacity = 1;
@@ -328,22 +334,46 @@ export class Odm3dLayer {
         this._refined = false;
         this._queued = 0;
         this._heapRatio = null;
+        this.gateError = null;
         const { Cesium, viewer, entry } = this;
         // Phones fetch through a per-tileset gate (request cap + pressure
         // pause) carried on the tileset's own Resource chain — never via
-        // shared scheduler state. A fake Cesium (or one without Resource)
-        // yields a null gate and the plain URL; the desktop URL is never
-        // wrapped: desktop behaviour is byte-for-byte what it was.
+        // shared scheduler state.
+        // The DEFAULT factory (createOdmRequestGateResource, what the real
+        // page runs) must actually produce a gate: a phone tileset without
+        // its gate is ungated, unmanaged load pressure, so a default gate
+        // that cannot be created FAILS THE LOAD CLOSED. This shell's error
+        // (this.error / gateError, surfaced in the panel) says so, and
+        // Cesium3DTileset.fromUrl() is never reached for the plain URL.
+        // An explicitly INJECTED factory stays dependency-injectable: tests
+        // may hand over a fake factory (or a Cesium without Resource) and
+        // keep the load-without-gate fallback; whatever came out is
+        // recorded in `gateError` for the panel.
         let tilesetUrl = entry.url;
         if (this.phoneActive) {
+          let bundle = null;
+          let gateFailure = null;
           try {
-            const gateBundle = this.requestGateFactory(Cesium, entry.url, {
+            bundle = this.requestGateFactory(Cesium, entry.url, {
               maxInFlight: this.phoneLimits.inFlightCap,
             });
-            this._gate = gateBundle?.gate ?? null;
-            if (gateBundle) tilesetUrl = gateBundle.resource;
+            if (!bundle?.gate) {
+              gateFailure = 'the factory produced no gate';
+            }
           } catch {
-            this._gate = null; // a broken gate falls back to the plain URL
+            gateFailure = 'the gate factory threw';
+          }
+          this.gateError = gateFailure && !bundle?.gate ? gateFailure : null;
+          if (bundle) {
+            this._gate = bundle.gate ?? null;
+            tilesetUrl = bundle.resource;
+          } else {
+            this._gate = null;
+          }
+          if (this._gate === null && this._defaultGateFactory) {
+            throw new Error(
+              `the ODM phone request gate could not be created (${gateFailure ?? 'no gate'}) — refusing an ungated phone load`,
+            );
           }
         }
         const tileset = await Cesium.Cesium3DTileset.fromUrl(tilesetUrl, {

@@ -4083,5 +4083,8 @@
   "No {source} imagery near {place}": "{place}の近くに{source}の画像はありません",
   "{reason} (filters on: {filters})": "{reason}（有効なフィルター: {filters}）",
   "Phone mode": "電話モード",
-  "Phone mode: softer model to save memory": "電話モード：メモリーを節約するため簡易モデル"
+  "Phone mode: softer model to save memory": "電話モード：メモリーを節約するため簡易モデル",
+  "Paused under memory pressure: no new 3D tile loads": "メモリ圧力のため一時停止: 新しい 3D タイルの読み込みは行いません",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "メモリ圧力で停滞中: 読み込み対象はなく、メモリの解放を待っています",
+  "The 3D model request gate could not be created": "3D モデルのリクエストゲートを作成できませんでした"
 }
