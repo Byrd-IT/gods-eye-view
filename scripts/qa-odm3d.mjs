@@ -33,7 +33,7 @@ const browser = await puppeteer.launch({
   headless: "new",
   ...(process.env.PUPPETEER_EXECUTABLE_PATH ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH } : {}),
   args: ["--use-gl=angle", "--use-angle=swiftshader", "--no-sandbox", "--enable-unsafe-swiftshader"],
-  protocolTimeout: 600000,
+  protocolTimeout: 900000,
 });
 const page = await browser.newPage();
 await page.setViewport({ width: 1280, height: 800 });
@@ -180,7 +180,7 @@ const probe = () =>
 const shot = async (name) => {
   if (process.env.QA_SHORT) return; // checks only, no pictures (software GL is slow)
   // wait (<= 60 s) until every tile this view asks for has loaded
-  for (let i = 0; i < 12; i += 1) {
+  for (let i = 0; i < 18; i += 1) {
     await page.evaluate(() => window.__godsEyeView.viewer.scene.requestRender?.());
     await sleep(5000);
     if ((await probe())?.tilesLoaded) break;
