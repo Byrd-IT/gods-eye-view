@@ -27,12 +27,13 @@ const MIB = 1024 * 1024;
 /**
  * Phone mode: what changes when the layer runs on a phone.
  *   - the tileset loads coarse (a slow start within the owner-approved band)
- *     and refines to the desktop SSE once it has settled (a quick usable
- *     layer, full quality afterwards);
+ *     and refines to the sharpest SSE in the owner band once it has settled
+ *     (a quick usable layer, band-wide quality afterwards). Phone mode never
+ *     leaves 64-96; the desktop SSE is restored only when phone mode is off.
  *   - the tileset runs on a 64 MiB cache with no overflow: under memory
  *     pressure Cesium spills, and spilled tiles reload — a phone is better
  *     off holding a smaller set steady;
- *   - tile downloading stops under any of three pressures and new requests
+ *   - NEW tile request downloading pauses under any of three pressures and
  *     resume only when every one of them has sunk under its hysteresis
  *     threshold (engaging above the cap, releasing below the resume line):
  *       * queued work: pending + processing requests reported by
@@ -40,13 +41,19 @@ const MIB = 1024 * 1024;
  *       * heap: used/limit JS heap ratio from Chrome's performance.memory
  *         (or an injected `heapProbe` in tests),
  *       * loaded tiles: `tileset.statistics.numberOfTilesWithContentReady`.
- *     The stop is a `show = false` gate: with `preloadWhenHidden` false (the
- *     default) a hidden tileset requests nothing new, while requests already
- *     in flight finish draining. The frame pump keeps ticking while pressed,
+ *     The stop is the RequestScheduler's per-origin override, not a show
+ *     gate: pressed, `requestsByServer[<key>]` goes to 0 (Cesium's own
+ *     throttleByServer path — a refused request is deferred and the tile is
+ *     retried later; requests already in flight keep draining). Never
+ *     `show = false` for pressure: Cesium 1.138's updateForPass returns
+ *     before the tile queue when show is false, which strands pending work,
+ *     loadProgress and the gate's own release path. With show kept true the
+ *     update keeps running and the queue keeps reporting throughout. The
+ *     frame pump keeps ticking while pressed,
  *     so a pressed tileset always wakes up again: every release path
  *     (loadProgress event, monitor tick) re-evaluates through the same
  *     `_syncPressure` — there is no await, lock or promise anywhere between
- *     the pressure signal and the show gate, so a deadlock is not reachable.
+ *     the pressure signal and the pause, so a deadlock is not reachable.
  *
  * The `cacheBytes`/`maximumCacheOverflowBytes` pair is the tile *cache*
  * budget, not a hard cap on the process: decoded GPU/upload buffers and other
@@ -71,6 +78,10 @@ export const PHONE_COARSE_QUERY = '(pointer: coarse)';
 export const PHONE_LIMITS = {
   initialError: 80, // coarse first (owner band 64-96)
   fineError: DESKTOP_SSE,
+  // Refined phone quality: the sharpest edge of the owner band. Phone mode
+  // never leaves 64-96 while it is on; `fineError` returns only when phone
+  // mode is switched off.
+  phoneFineError: 64,
   cacheBytes: 64 * MIB,
   cacheOverflowBytes: 0,
   inFlightCap: 24,
@@ -88,11 +99,76 @@ export const PHONE_LIMITS = {
 // exception during teardown cannot restore twice.
 let schedulerRefs = 0;
 let schedulerSaved = null;
+// Per-key reference count over pauses made by `pauseSchedulerRequests`, plus
+// the value to restore when the last pause for that key releases. Set and
+// cleared only while the key is throttled by a live phone layer.
+let schedulerPaused = new Map(); // serverKey -> { refs, cap }
 
 /** The scheduler's server key for this page's origin (<host:port>), or null. */
 export function schedulerServerKey() {
   const host = globalThis.location?.host;
-  return typeof host === 'string' && host !== '' ? host : null;
+  if (typeof host !== 'string' || host === '') return null;
+  if (host.includes(':')) return host;
+  // Mirrors Cesium's getServerKey: default port appended when the authority
+  // carries none (443 for https, 80 otherwise).
+  const port = globalThis.location?.protocol === 'https:' ? '443' : '80';
+  return `${host}:${port}`;
+}
+
+/** A pre-existing per-server override is never raised by the phone cap. */
+function phoneCapFor(current) {
+  return typeof current === 'number' && Number.isFinite(current)
+    ? Math.min(current, PHONE_LIMITS.schedulerRequestsPerServer)
+    : PHONE_LIMITS.schedulerRequestsPerServer;
+}
+
+/**
+ * Pause NEW tile requests for one origin by setting the scheduler's
+ * per-server override to 0: `serverHasOpenSlots` then never opens a slot for
+ * that server (`throttleByServer: true` on every 3D tile request), while
+ * requests already in flight keep finishing. This is Cesium's own throttle
+ * path, read against 1.138 source — a throttled request is deferred
+ * (`RequestScheduler.request` returns undefined) and the tile's content
+ * state reverts, so nothing is lost and the tile is retried later.
+ *
+ * Reference-counted per key. Only legal under a live phone throttle for a
+ * key the throttle actually applied (it never touches a key or a global
+ * default we do not hold), so the pause tightens only that origin. The last
+ * release restores the key to the phone throttle's cap, and the throttle's
+ * own release below restores the exact original state.
+ */
+export function pauseSchedulerRequests(scheduler, serverKey = null) {
+  if (
+    !scheduler ||
+    serverKey == null ||
+    !schedulerSaved?.keys.has(serverKey) ||
+    schedulerRefs === 0
+  ) {
+    return () => {};
+  }
+  const map = scheduler.requestsByServer;
+  if (!map) return () => {};
+  let entry = schedulerPaused.get(serverKey);
+  if (!entry) {
+    entry = {
+      refs: 0,
+      cap: schedulerSaved.keys.get(serverKey)?.applied,
+    };
+    schedulerPaused.set(serverKey, entry);
+    map[serverKey] = 0;
+  }
+  entry.refs += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    entry.refs -= 1;
+    if (entry.refs > 0 || !schedulerPaused.has(serverKey)) return;
+    schedulerPaused.delete(serverKey);
+    // Restore the phone cap, not the pause: only the throttle's full release
+    // (which also clears any leftover pause) returns the exact original.
+    if (entry.cap !== undefined) map[serverKey] = entry.cap;
+  };
 }
 
 /**
@@ -117,17 +193,23 @@ export function acquireSchedulerThrottle(scheduler, serverKey = null) {
   if (serverKey != null) {
     // Per-server cap: scoped to the server the tiles arrive from.
     if (!schedulerSaved.keys.has(serverKey)) {
-      const map = scheduler.requestsByServer ?? (scheduler.requestsByServer = {});
+      const map =
+        scheduler.requestsByServer ?? (scheduler.requestsByServer = {});
+      const existed = Object.prototype.hasOwnProperty.call(map, serverKey);
+      const applied = phoneCapFor(existed ? map[serverKey] : undefined);
       schedulerSaved.keys.set(serverKey, {
-        existed: Object.prototype.hasOwnProperty.call(map, serverKey),
+        existed,
         value: map[serverKey],
+        applied,
       });
-      map[serverKey] = PHONE_LIMITS.schedulerRequestsPerServer;
+      map[serverKey] = applied;
     }
   } else if (schedulerRefs === 0) {
     // No host readable (unusual): throttle the global per-server default.
     schedulerSaved.fallback = true;
-    scheduler.maximumRequestsPerServer = PHONE_LIMITS.schedulerRequestsPerServer;
+    scheduler.maximumRequestsPerServer = phoneCapFor(
+      scheduler.maximumRequestsPerServer,
+    );
   }
   schedulerRefs += 1;
   let released = false;
@@ -141,6 +223,7 @@ export function acquireSchedulerThrottle(scheduler, serverKey = null) {
         scheduler.maximumRequestsPerServer = saved.maximumRequestsPerServer;
       }
       for (const [key, snap] of saved.keys) {
+        if (schedulerPaused.has(key)) schedulerPaused.delete(key);
         if (snap.existed) scheduler.requestsByServer[key] = snap.value;
         else delete scheduler.requestsByServer[key];
       }
@@ -175,7 +258,8 @@ export function isPhoneView(matchMedia) {
  */
 export function isPhoneEnvironment() {
   const win = globalThis.window;
-  const query = typeof win?.matchMedia === 'function' ? win.matchMedia.bind(win) : null;
+  const query =
+    typeof win?.matchMedia === 'function' ? win.matchMedia.bind(win) : null;
   const deviceMemory = globalThis.navigator?.deviceMemory;
   return matchesPhoneProfile(query, deviceMemory);
 }
@@ -464,6 +548,25 @@ export class Odm3dLayer {
     this._syncPressure();
   }
 
+  /** Press: pause new requests per origin. Release handled in _syncPressure. */
+  _applyPause() {
+    if (this._pressed && !this._pauseRelease) {
+      this._pauseRelease = pauseSchedulerRequests(
+        this.Cesium.RequestScheduler,
+        schedulerServerKey(),
+      );
+    }
+  }
+
+  _removePause() {
+    try {
+      this._pauseRelease?.();
+    } catch {
+      /* a pause release is idempotent; be defensive anyway */
+    }
+    this._pauseRelease = null;
+  }
+
   /**
    * The phone gate, the single funnel for all pressure signals. Pressing
    * takes any one signal over its engage threshold; releasing requires the
@@ -496,7 +599,9 @@ export class Odm3dLayer {
     const pressed = qOver || hOver || tOver;
     if (pressed === this._pressed) return;
     this._pressed = pressed;
-    this._syncShow();
+    // The pause is the gate; the tileset itself never hides under pressure.
+    if (pressed) this._applyPause();
+    else this._removePause();
     if (!pressed) {
       if (!this._refined && this.status === 'ready') this._refine();
       this._pump(); // finish the coarse -> fine pass
@@ -506,7 +611,11 @@ export class Odm3dLayer {
   /** The single place the tileset's visibility is decided from. */
   _syncShow() {
     if (!this.tileset || this.destroyed) return;
-    const drawn = this.status === 'ready' && !this._pressed;
+    // show=false must never be a pressure stop: Cesium's updateForPass
+    // (1.138) returns before the tile queue with show false, which strands
+    // pending work and loadProgress. Pressure pauses requests on the
+    // scheduler instead; the tileset only hides while it is not ready.
+    const drawn = this.status === 'ready';
     if (this.tileset.show !== drawn) {
       this.tileset.show = drawn;
       this.viewer.scene.requestRender?.();
@@ -517,10 +626,10 @@ export class Odm3dLayer {
   _refine() {
     const tileset = this.tileset;
     if (!tileset || !this.phoneActive) return false;
-    if (tileset.maximumScreenSpaceError === this.phoneLimits.fineError) {
+    if (tileset.maximumScreenSpaceError === this.phoneLimits.phoneFineError) {
       return false;
     }
-    tileset.maximumScreenSpaceError = this.phoneLimits.fineError;
+    tileset.maximumScreenSpaceError = this.phoneLimits.phoneFineError;
     this.viewer.scene.requestRender?.();
     return true;
   }
@@ -532,6 +641,7 @@ export class Odm3dLayer {
     this.phoneActive = on;
     this._pressed = false;
     this._refined = false;
+    this._removePause();
     if (!on) this._queued = 0;
     if (!on) {
       this._heapRatio = null;
@@ -719,6 +829,7 @@ export class Odm3dLayer {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this._removePause();
     this._releaseTileset();
     this._releaseThrottle();
   }
