@@ -4793,6 +4793,25 @@ test('timing: the recommended interval is the wanted spacing over the speed, in 
   w.handle.destroy();
 });
 
+test('timing hints and shutter table use mph after switching to feet', async () => {
+  const w = await timedWorld();
+  unitBtn(w, 'ft').click();
+  const input = w.control(INTERVAL);
+  input.value = '7';
+  input.dispatch('input');
+  for (const role of [
+    'timing-recommended-note',
+    'timing-result',
+    'capture-readout',
+    'capture-shutter-table',
+  ]) {
+    const text = captureRole(w, role).textContent;
+    assert.match(text, /mph/, role);
+    assert.doesNotMatch(text, /ft\/s|m\/s/, role);
+  }
+  w.handle.destroy();
+});
+
 test('timing: typing an interval shows the resulting front overlap at once and plans with it', async () => {
   const w = await timedWorld();
   const input = w.control(INTERVAL);
