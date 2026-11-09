@@ -493,12 +493,18 @@ test('paused collector 200 (empty states): the ES fallback answers, the paused r
   );
 });
 
-test('paused 200 empty states with ES unavailable: existing behaviour, and the useful per-view copy is not overwritten by the empty body', async () => {
+// ---- fix t_9e0ff678: paused empty is never cached; a useful per-view copy
+// marked STALE with the paused reason wins, then ES, else the paused 200
+// unchanged ----
+
+test('paused 200 empty, useful per-view copy exists, ES unavailable: the cached copy is served STALE with the paused reason', async () => {
   const state = { phase: 'good' };
   const { fetchImpl } = fakeCollectors(flightsCollector(state));
+  const esReads = [];
   const { handler, advance } = flightsBridge({
     fetchImpl,
-    esRead: async () => {
+    esRead: async (url) => {
+      esReads.push(String(url));
       throw new Error('es down');
     },
   });
@@ -511,11 +517,31 @@ test('paused 200 empty states with ES unavailable: existing behaviour, and the u
   const paused = await call(handler, flightsUrl('tab-paused2'));
   assert.equal(paused.statusCode, 200);
   assert.equal(
+    text(paused.body),
+    FLIGHTS_GOOD,
+    'the useful cached copy is served, not the empty paused envelope',
+  );
+  assert.equal(paused.headers['x-feed-bridge'], 'cache');
+  assert.equal(
+    paused.headers['x-feed-cache'],
+    'STALE',
+    'the degraded layer is marked STALE even on a fresh copy',
+  );
+  assert.equal(
     paused.headers['x-feed-reason'],
     'opensky_paused_until=01:23',
-    'the paused 200 itself is relayed when ES is unavailable',
+    'the paused reason is preserved',
   );
-  assert.equal(paused.headers['x-feed-bridge'], 'collector');
+  assert.equal(
+    paused.headers['x-feed-stale-since'],
+    String(T0 + 2_000),
+    'stale-since never points into the future (a fresh copy clamps to the clock)',
+  );
+  assert.ok(
+    Number(paused.headers['x-feed-grey-until']) >
+      Number(paused.headers['x-feed-stale-since']),
+  );
+  assert.equal(esReads.length, 0, 'ES is not asked when a useful copy exists');
   advance(1_000);
 
   state.phase = 'down';
@@ -525,10 +551,79 @@ test('paused 200 empty states with ES unavailable: existing behaviour, and the u
   assert.equal(
     text(down.body),
     FLIGHTS_GOOD,
-    'the last-good copy is still the GOOD body, not the empty paused one',
+    'the last-good copy is still the GOOD body',
   );
   assert.equal(down.headers['x-feed-reason'], 'collector_down');
 });
+
+test('paused 200 empty with no useful copy (paused->down then ES): the paused empty body is never cached, ES answers afterwards', async () => {
+  const state = { phase: 'paused' };
+  let esPhase = 'down';
+  const { fetchImpl } = fakeCollectors(flightsCollector(state));
+  const { handler, advance } = flightsBridge({
+    fetchImpl,
+    esRead: async () => {
+      if (esPhase === 'down') throw new Error('es down');
+      return {
+        body: FLIGHTS_ES,
+        lastOkAt: T0,
+        coverage: 'recorded history ES fallback (15 min)',
+        truncated: false,
+      };
+    },
+  });
+  const paused = await call(handler, flightsUrl('tab-paused4'));
+  assert.equal(paused.statusCode, 200);
+  assert.equal(
+    text(paused.body),
+    FLIGHTS_EMPTY_PAUSED,
+    'the paused 200 itself is relayed when there is neither a copy nor ES',
+  );
+  assert.equal(paused.headers['x-feed-bridge'], 'collector');
+  advance(1_000);
+
+  state.phase = 'down';
+  esPhase = 'up';
+  advance(200_000);
+  const down = await call(handler, flightsUrl('tab-paused4'));
+  assert.equal(down.statusCode, 200);
+  assert.equal(
+    text(down.body),
+    FLIGHTS_ES,
+    'the ES fallback answers once the collector is down: the paused empty body was never cached',
+  );
+  assert.equal(down.headers['x-feed-bridge'], 'es-fallback');
+  assert.equal(down.headers['x-feed-cache'], 'STALE');
+  assert.equal(
+    down.headers['x-feed-last-ok'],
+    String(T0),
+    'the ES answer never advertises a future last-ok',
+  );
+});
+
+test('no false live: a paused empty body is never served from the cache as HIT after the collector stops', async () => {
+  const state = { phase: 'paused' };
+  const { fetchImpl } = fakeCollectors(flightsCollector(state));
+  const { handler, advance } = flightsBridge({
+    fetchImpl,
+    esRead: async () => {
+      throw new Error('es down');
+    },
+  });
+  const paused = await call(handler, flightsUrl('tab-paused5'));
+  assert.equal(paused.statusCode, 200);
+  advance(1_000);
+
+  state.phase = 'down';
+  advance(200_000);
+  const down = await call(handler, flightsUrl('tab-paused5'));
+  assert.equal(down.statusCode, 503, 'no snapshot: the empty envelope is not data');
+  assert.notEqual(text(down.body), FLIGHTS_EMPTY_PAUSED);
+  assert.equal(down.headers['x-feed-bridge'], 'none');
+  assert.equal(down.headers['x-feed-reason'], 'collector_down');
+});
+
+// ---- review: a paused collector's empty 200 must not shadow the ES fallback ----
 
 test('a paused 200 WITH states is a real snapshot: relayed and cached as before', async () => {
   const pausedWithStates = () =>

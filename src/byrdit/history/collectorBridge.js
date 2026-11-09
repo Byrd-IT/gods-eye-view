@@ -376,21 +376,27 @@ export function createCollectorBridge({
   }
 
   /**
-   * Review: relay the collector's paused 200 (existing behaviour) without
-   * letting its EMPTY envelope overwrite a view's useful last-good copy —
-   * a copy is only admitted for a view that has none.
+   * An envelope with zero states (the paused body): not useful data.
    */
-  function finishPaused(req, res, url, key, target, headers, result) {
-    if (!cacheGet(key, cacheKeyOf(url))) {
-      const lastOk = epoch(headers['X-Feed-Last-OK']);
-      const age = epoch(headers['X-Feed-Age-Ms']);
-      cacheSet(key, cacheKeyOf(url), {
-        body: result.body,
-        contentType: headers['Content-Type'] ?? 'application/json',
-        lastOkAt: lastOk ?? now() - (age ?? 0),
-      });
+  function emptyFlightStates(body) {
+    try {
+      const parsed = JSON.parse(new TextDecoder('utf8').decode(body));
+      return Array.isArray(parsed.states) && parsed.states.length === 0;
+    } catch {
+      return false;
     }
-    transition(key, 'collector');
+  }
+
+  /**
+   * Review: relay the collector's paused 200 (existing behaviour). The
+   * paused body is an EMPTY states envelope — HTTP-clean but not data —
+   * so it is NEVER cached: a paused empty copy would later be served as
+   * last-good data (a false green with no snapshot behind it — the empty
+   * pause cannot be told apart from real data in the last-good map) and
+   * would shadow the ES fallback.
+   */
+  function finishPaused(req, res, target, headers, result) {
+    transition(target.collectorFeed, 'collector');
     send(req, res, 200, decorate(headers, target), result.body);
   }
 
@@ -423,12 +429,15 @@ export function createCollectorBridge({
     return feed.decorate ? feed.decorate(headers, target) : headers;
   }
 
-  function serveCache(req, res, reason, target, cache) {
+  function serveCache(req, res, reason, target, cache, degraded = null) {
     const key = target.collectorFeed;
     touch(caches, key);
     const t = now();
     const age = Math.max(0, t - cache.lastOkAt);
-    const stale = age > staleThresholdMs(target.cadenceMs);
+    // `degraded` (t_9e0ff678, paused collector): the layer cannot improve
+    // while the collector is paused, so even a fresh copy is marked STALE
+    // and the degraded reason (e.g. opensky_paused_until=..) is preserved.
+    const stale = degraded !== null || age > staleThresholdMs(target.cadenceMs);
     const headers = {
       'Content-Type': cache.contentType,
       'Cache-Control': 'no-store',
@@ -439,12 +448,13 @@ export function createCollectorBridge({
       'X-Feed-Bridge': 'cache',
     };
     if (stale) {
+      // never point Stale-Since into the future (review)
       headers['X-Feed-Stale-Since'] = String(
-        cache.lastOkAt + staleThresholdMs(target.cadenceMs),
+        Math.max(0, Math.min(cache.lastOkAt + staleThresholdMs(target.cadenceMs), t)),
       );
-      headers['X-Feed-Reason'] = reason;
+      headers['X-Feed-Reason'] = degraded ?? reason;
     }
-    transition(key, 'cache', reason);
+    transition(key, 'cache', degraded ?? reason);
     send(req, res, 200, decorate(withGrey(headers), target), cache.body);
   }
 
@@ -616,18 +626,33 @@ export function createCollectorBridge({
           send(req, res, 200, decorate(headers, target), result.body);
           return;
         }
-        // Review: a paused collector's empty 200 is not data. With the ES
-        // fallback present it is asked FIRST; the paused answer itself is
-        // relayed, and an empty body never evicts useful last-good data.
-        if (esFallback && pausedEmptyReason(result)) {
-          const reason = pausedEmptyReason(result);
-          try {
-            const answer = await esFallback.read(url);
-            if (answer) return serveEs(req, res, answer, target, reason);
-          } catch {
-            /* ES unavailable: existing behaviour below, never the upstream */
+        // Review (t_9e0ff678): a paused collector's empty 200 is not data. A
+        // useful per-view copy is preferred (marked STALE, the paused reason
+        // preserved), then the ES fallback; with neither, the paused answer
+        // itself is relayed unchanged — and never cached, so a paused empty
+        // body can never show false green or shadow the ES fallback later.
+        if (esFallback) {
+          const pausedReason = pausedEmptyReason(result);
+          if (pausedReason) {
+            const entry = cacheGet(key, cacheKeyOf(url));
+            if (entry && !emptyFlightStates(entry.body)) {
+              return serveCache(
+                req,
+                res,
+                'collector_down',
+                target,
+                entry,
+                pausedReason,
+              );
+            }
+            try {
+              const answer = await esFallback.read(url);
+              if (answer) return serveEs(req, res, answer, target, pausedReason);
+            } catch {
+              /* ES unavailable: existing behaviour below, never the upstream */
+            }
+            return finishPaused(req, res, target, headers, result);
           }
-          return finishPaused(req, res, url, key, target, headers, result);
         }
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
