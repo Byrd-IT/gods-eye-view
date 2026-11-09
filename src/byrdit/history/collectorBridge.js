@@ -1,3 +1,5 @@
+import { TRANSIT_FEED_REGISTRY } from '../../data/transitFeeds.js';
+import { GBFS_CITY_REGISTRY } from '../../layers/bikeshare/registry.js';
 import { BRIDGE_FEEDS, enabledBridgeFeeds } from './feeds.js';
 import { flightsEsFallbackFromEnv } from './flightsEsFallback.js';
 import { createTransitTrails } from './feedsC.js';
@@ -108,13 +110,20 @@ const CANONICAL = Object.freeze({
 
 // Collector metadata is untrusted even on successful responses.  Keep the
 // formats bounded and consistent with the collector's documented output.
+const SOURCE_LABELS = new Set([
+  ...Object.values(BRIDGE_FEEDS).map((feed) => feed.source),
+  ...TRANSIT_FEED_REGISTRY.map((feed) => `GTFS-RT ${feed.name}`),
+  ...GBFS_CITY_REGISTRY.map((city) => `GBFS ${city.provider}`),
+]);
+
 const METADATA_FORMATS = Object.freeze({
   'x-feed-source': /^[a-z0-9][a-z0-9 .\/()-]{0,63}$/i,
   'x-feed-cache': /^(?:HIT|MISS|STALE)$/,
   'x-feed-age-ms': /^[0-9]{1,15}$/,
   'x-feed-last-ok': /^[0-9]{1,15}$/,
   'x-feed-stale-since': /^[0-9]{1,15}$/,
-  'x-feed-reason': /^[a-z0-9_=:.-]{1,64}$/i,
+  'x-feed-reason':
+    /^(?:no_snapshot|upstream_error|halted|incomplete_coverage|system_down|collector_down|bridge_error|opensky_paused_until=(?:[01][0-9]|2[0-3]):[0-5][0-9])$/,
   'x-collector-role': /^(?:active|standby)$/,
   'x-flight-coverage':
     /^OpenSky viewport tiles \([0-9]{1,5}\)(?:, cached areas only|, incomplete: (?:100|[0-9]{1,2})% of the view)?$/,
@@ -124,7 +133,10 @@ function validMetadata(key, value) {
   const format = METADATA_FORMATS[key];
   return (
     !format ||
-    (typeof value === 'string' && !/[\r\n]/.test(value) && format.test(value))
+    (typeof value === 'string' &&
+      !/[\r\n]/.test(value) &&
+      format.test(value) &&
+      (key !== 'x-feed-source' || SOURCE_LABELS.has(value)))
   );
 }
 

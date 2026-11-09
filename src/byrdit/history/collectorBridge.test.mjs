@@ -860,6 +860,7 @@ test('drops invalid relayed collector metadata on success and relayed error stat
   ];
   const invalid = [
     'Bearer secret_ABC123',
+    'SyntheticSecretABC123',
     'https://user:pass@host',
     'x'.repeat(200),
     'bad\r\nInjected: yes',
