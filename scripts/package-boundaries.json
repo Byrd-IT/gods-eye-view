@@ -251,6 +251,7 @@
       "src/byrdit/history/historySlicesB12c.js",
       "src/byrdit/history/historySlicesAirGnss.js",
       "src/byrdit/history/historySlicesWater.js",
+      "src/byrdit/esLive/esLive.js",
       "src/data/transitFeeds.js",
       "src/data/rioRouteNames.js",
       "src/data/gbfsSource.js",

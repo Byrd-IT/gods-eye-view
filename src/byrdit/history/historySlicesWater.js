@@ -203,6 +203,10 @@ export function createWaterSlices({
     return firstPending;
   }
 
+  // no NWIS reader (GEV_ES_LIVE_WATER=1): the adapter must not tell users that
+  // USGS is asked on request
+  const recordedOnly = reader ? {} : { 'X-History-Recorded-Only': '1' };
+
   async function sliceRecorded({ t, bbox, maxRows, windowMs }, first) {
     await esTurn();
     let json;
@@ -287,6 +291,7 @@ export function createWaterSlices({
         'X-History-Rows': String(kept.length),
         'X-History-Window-Ms': String(windowMs),
         'X-History-Source': 'recorded',
+        ...recordedOnly,
         'X-History-Recording-Start': isoOf(first),
         ...(truncated ? { 'X-History-Truncated': '1' } : {}),
         ...(kept.length ? {} : { 'X-History-Gap': '1' }),
@@ -314,6 +319,7 @@ export function createWaterSlices({
       if (first !== null)
         return notRecorded('before_recording_start', {
           'X-History-Recording-Start': isoOf(first),
+          ...recordedOnly,
         });
       throw new Error('no water reader');
     }

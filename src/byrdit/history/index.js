@@ -1,6 +1,7 @@
 import { collectorBridgePlugin } from './collectorBridge.js';
 import { enabledBridgeFeeds } from './feeds.js';
 import { historyApiEnabled, historyApiPlugin } from './historyApi.js';
+import { esLivePlugins } from '../esLive/esLive.js';
 
 /**
  * Byrd-IT history plugins (gev-history DESIGN 4.1). Spread FIRST into the
@@ -22,7 +23,10 @@ import { historyApiEnabled, historyApiPlugin } from './historyApi.js';
 export function historyPlugins(options = {}) {
   const env = options.env ?? globalThis.process?.env ?? {};
   const { historyApi, ...bridgeOptions } = options;
-  const plugins = [];
+  // card t_a829441f: GEV_ES_LIVE_* serve feeds from our ES copy. First, so a
+  // flagged /api/gnss-integrity is answered before the adsb.lol proxy. No
+  // plugin at all while every flag is off.
+  const plugins = [...esLivePlugins({ env })];
   if (enabledBridgeFeeds(env).length)
     plugins.push(collectorBridgePlugin({ ...bridgeOptions, env }));
   if (historyApiEnabled(env))
@@ -30,6 +34,12 @@ export function historyPlugins(options = {}) {
   return plugins;
 }
 
+export {
+  ES_LIVE_FEEDS,
+  enabledEsLive,
+  esLivePlugins,
+  esLiveWaterOnly,
+} from '../esLive/esLive.js';
 export {
   collectorBridgePlugin,
   createCollectorBridge,

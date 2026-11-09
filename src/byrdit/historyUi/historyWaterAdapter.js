@@ -38,6 +38,11 @@ export const WATER_NOTE_CHIP =
   'Rivers are read from USGS on request (about the last 120 days)';
 export const WATER_RECORDED_CHIP =
   'Rivers are from our own USGS recording (older times are read from USGS on request)';
+/** GEV_ES_LIVE_WATER=1: our recording only, USGS is never asked. */
+export const WATER_RECORDED_ONLY_CHIP =
+  'Rivers are from our own USGS recording only (nothing is read from USGS on request)';
+export const WATER_BEFORE_RECORDING_CHIP =
+  'HISTORY none at this time: before our USGS recording starts';
 export const WATER_TOO_OLD_CHIP =
   'HISTORY none at this time: USGS answers for about the last 120 days only';
 
@@ -79,12 +84,21 @@ function adaptWater(answers, { url }) {
       : a.body.features.filter((f) => inTile(f, box));
   const reason = a.headers?.['x-history-empty-reason'] ?? null;
   const recorded = a.headers?.['x-history-source'] === 'recorded';
+  const recordedOnly = a.headers?.['x-history-recorded-only'] === '1';
   const chip =
     reason === 'before_recording_start'
-      ? { state: HISTORY_EMPTY_STATE, text: WATER_TOO_OLD_CHIP, reason }
+      ? {
+          state: HISTORY_EMPTY_STATE,
+          text: recordedOnly ? WATER_BEFORE_RECORDING_CHIP : WATER_TOO_OLD_CHIP,
+          reason,
+        }
       : {
           state: HISTORY_NOTE_STATE,
-          text: recorded ? WATER_RECORDED_CHIP : WATER_NOTE_CHIP,
+          text: recordedOnly
+            ? WATER_RECORDED_ONLY_CHIP
+            : recorded
+              ? WATER_RECORDED_CHIP
+              : WATER_NOTE_CHIP,
           reason: null,
         };
   const headers = passHeaders(answers);

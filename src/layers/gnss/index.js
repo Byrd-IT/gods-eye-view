@@ -89,6 +89,7 @@ export function createGnssIntegrityLayer({
   let _lastUpdate = null;
   let _lastError = null;
   let _stale = false;
+  let _population = null;
   let _manager = null;
   let _cameraTimer = null;
   let _backgroundRefresh = null;
@@ -330,6 +331,7 @@ export function createGnssIntegrityLayer({
         _cells = binGnssCells(_observations);
         render();
         _stale = snapshot.stale === true;
+        _population = snapshot.population ?? null;
         _lastUpdate = at - snapshot.ageMs;
         _lastError = null;
         _retryAt = 0;
@@ -383,6 +385,7 @@ export function createGnssIntegrityLayer({
       _lastUpdate = null;
       _lastError = null;
       _stale = false;
+      _population = null;
       _coverage = null;
       _retryAt = 0;
       _failureCount = 0;
@@ -398,6 +401,9 @@ export function createGnssIntegrityLayer({
             'Regional sample · 250 nm radius · cells from visited views over {minutes} min',
             { minutes: formatNumber(provenance.window.minutes) },
           ) +
+          (_population === 'military-aircraft'
+            ? ` · ${t('Military aircraft only (recorded copy)')}`
+            : '') +
           (_lastError && _retryAt
             ? ` · ${translateFeedError(_lastError)} · ${
                 _retryAt <= 8640000000000000
@@ -444,6 +450,7 @@ export function createGnssIntegrityLayer({
           ? Math.max(0, Math.ceil((_retryAt - now()) / 1000))
           : null,
         stale: _stale,
+        population: _population,
         provenance,
         coverage: _coverage,
         // Load-bearing: without an explicit boolean, layerFeedState reads the

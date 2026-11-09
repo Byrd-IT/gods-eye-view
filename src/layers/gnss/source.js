@@ -75,6 +75,11 @@ export function createAdsbGnssSource({
         stale: payload.stale === true,
         classifier:
           typeof payload.classifier === 'string' ? payload.classifier : null,
+        // who the rows describe (the recorded copy: 'military-aircraft');
+        // absent = everyone
+        ...(typeof payload.population === 'string'
+          ? { population: payload.population }
+          : {}),
       };
     },
   };

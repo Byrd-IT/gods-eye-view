@@ -2,6 +2,11 @@ import { createStandaloneApplication } from './standalone/application.js';
 import { describeError } from './standalone/errors.js';
 import { fetchGoogleKey, fetchIonCredential } from './byrdit/serverKeys.js';
 import { t } from './i18n/index.js';
+import { installEsLiveFetch } from './byrdit/esLive/clientRedirect.js';
+
+// GEV_ES_LIVE_*: send the USGS quake and ECCC air-quality requests to this
+// server (our Elasticsearch copy). First, so the history router wraps it.
+installEsLiveFetch();
 
 // No third-party key is injected into this bundle. Cesium ion and Mapillary
 // credentials stay on the server (server/byrdit/keyIsolation); the browser only

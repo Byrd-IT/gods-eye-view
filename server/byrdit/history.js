@@ -4,6 +4,7 @@ import { isAllowedHost } from '../../build/allowedHosts.js';
 import { normalizeProxyAddress, trustedClientAddress } from './trustedProxy.js';
 import {
   enabledBridgeFeeds,
+  esLiveWaterOnly,
   historyPlugins as browserSafeHistoryPlugins,
   parseCollectorUrls,
 } from '../../src/byrdit/history/index.js';
@@ -63,10 +64,19 @@ export function historyPlugins(options = {}) {
       windReader: createWindHistoryReader(),
       weatherTimes,
       // t_7a4c6a57: USGS river gauges at a past time, on demand (nothing stored)
-      waterReader: createWaterHistoryReader({ env }),
+      waterReader: waterReaderFor(env),
       ...options.historyApi,
     },
   });
+}
+
+/**
+ * The NWIS reader for times our recorded copy does not cover; none while
+ * GEV_ES_LIVE_WATER=1 (card t_a829441f: the slider reads Elasticsearch only).
+ * @param {Record<string, string|undefined>} env
+ */
+export function waterReaderFor(env) {
+  return esLiveWaterOnly(env) ? null : createWaterHistoryReader({ env });
 }
 
 /**
