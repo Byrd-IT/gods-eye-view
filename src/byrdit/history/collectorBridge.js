@@ -110,6 +110,8 @@ const CANONICAL = Object.freeze({
 
 // Collector metadata is untrusted even on successful responses.  Keep the
 // formats bounded and consistent with the collector's documented output.
+// Keep these labels aligned with collector src/feeds/transit.js and
+// src/feeds/gbfs.js; unknown labels are dropped rather than echoed.
 const SOURCE_LABELS = new Set([
   ...Object.values(BRIDGE_FEEDS).map((feed) => feed.source),
   ...TRANSIT_FEED_REGISTRY.map((feed) => `GTFS-RT ${feed.name}`),

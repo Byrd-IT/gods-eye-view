@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { TRANSIT_FEED_REGISTRY } from '../../data/transitFeeds.js';
+import { GBFS_CITY_REGISTRY } from '../../layers/bikeshare/registry.js';
 import assert from 'node:assert/strict';
 import {
   bridgeConfigFromEnv,
@@ -880,7 +882,7 @@ test('drops invalid relayed collector metadata on success and relayed error stat
       assert.equal(res.statusCode, status);
       for (const name of names)
         assert.equal(res.headers[name], undefined, `${status} ${name}`);
-      assert.ok(!JSON.stringify(lines).includes(value));
+      assert.ok(!lines.join('\n').includes(value));
     }
   }
 });
@@ -935,4 +937,66 @@ test('accepts registered international source labels', async () => {
   });
   const res = await call(bridge(fetchImpl).handler);
   assert.equal(res.headers['x-feed-source'], value);
+});
+
+test('non-relayed error reasons never expose synthetic secrets in logs or fallback', async () => {
+  for (const seeded of [false, true]) {
+    for (const [value, distinctive] of [
+      ['SyntheticSecret_ABC123', 'SyntheticSecret'],
+      ['token=abc:1', 'token=abc'],
+      ['invalid\r\nInjected-Unique', 'Injected-Unique'],
+    ]) {
+      let good = seeded;
+      const fetchImpl = async () => {
+        if (good) return collectorOk();
+        return {
+          status: 503,
+          arrayBuffer: async () => Buffer.from('{}'),
+          headers: { get: (key) => (key === 'x-feed-reason' ? value : null) },
+        };
+      };
+      const { handler, lines, advance } = bridge(fetchImpl);
+      if (seeded) {
+        await call(handler);
+        good = false;
+        advance(901_000);
+      }
+      const res = await call(handler);
+      assert.equal(res.headers['x-feed-reason'], 'collector_down');
+      assert.equal(res.statusCode, seeded ? 200 : 503);
+      assert.ok(!lines.join('\n').includes(value));
+      assert.ok(!lines.join('\n').includes(distinctive));
+    }
+  }
+});
+
+test('all registered source labels and collector formats are accepted', async () => {
+  const sources = [
+    ...Object.values(BRIDGE_FEEDS).map((x) => x.source),
+    ...TRANSIT_FEED_REGISTRY.map((x) => `GTFS-RT ${x.name}`),
+    ...GBFS_CITY_REGISTRY.map((x) => `GBFS ${x.provider}`),
+  ];
+  const cases = [
+    ...sources.map((value) => ['x-feed-source', value]),
+    ...['HIT', 'MISS', 'STALE'].map((value) => ['x-feed-cache', value]),
+    ...['active', 'standby'].map((value) => ['x-collector-role', value]),
+    ...[
+      'no_snapshot',
+      'upstream_error',
+      'halted',
+      'incomplete_coverage',
+      'opensky_paused_until=23:59',
+    ].map((value) => ['x-feed-reason', value]),
+    ...[
+      'OpenSky viewport tiles (1)',
+      'OpenSky viewport tiles (1), cached areas only',
+      'OpenSky viewport tiles (1), incomplete: 37% of the view',
+    ].map((value) => ['x-flight-coverage', value]),
+  ];
+  for (const [name, value] of cases) {
+    const fetchImpl = async () =>
+      new Response('{}', { status: 200, headers: { [name]: value } });
+    const res = await call(bridge(fetchImpl).handler);
+    assert.equal(res.headers[name], value, `${name}: ${value}`);
+  }
 });
