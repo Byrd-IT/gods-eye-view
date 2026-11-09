@@ -54,11 +54,13 @@ import {
  * cleared on the server clock (staleness.js feedDisplayState).
  *
  * Approved Option 1 (`flightsEsFallback.js`): the flights feed can pass an
- * injected ES-only reader. It is asked ONLY after the collector and the
- * per-view last-good copy are both unavailable; its answer is served marked
- * STALE + grey with X-Flight-Coverage naming the fallback. A reader failure
- * or a null answer keeps the normal 503 no-snapshot — no fall-through, the
- * upstream plugins are never reached.
+ * injected ES-only reader. It is asked when the collector is down (no
+ * answer) or when its answer would otherwise be served without data — a
+ * paused empty envelope or a cache copy that is empty or older than the
+ * fallback's lookback; its answer is served marked STALE + grey with
+ * X-Flight-Coverage naming the fallback, an old copy is still served when
+ * ES has nothing. A reader failure or a null answer keeps the normal 503
+ * no-snapshot — no fall-through, the upstream plugins are never reached.
  *
  * Every feed is OFF unless GEV_BRIDGE_<FEED>=1 (rollback flag). With every
  * flag off the plugin installs no middleware: behaviour is byte-identical to
@@ -184,8 +186,9 @@ export function createCollectorBridge({
   /**
    * Approved Option 1 (flights): ES-only fallback reader
    * (createFlightsEsFallback). read(url) -> {body, lastOkAt, coverage,
-   * truncated} | null; only asked when the collector and the per-view
-   * last-good copy are both unavailable.
+   * truncated} | null with .lookbackMs; asked when the collector is down
+   * or its answer would not be data (paused empty, empty/over-lookback
+   * cached copy).
    */
   esFallback = null,
 }) {
@@ -587,18 +590,43 @@ export function createCollectorBridge({
       return;
     }
     const key = target.collectorFeed;
+    /**
+     * Review: the cached copy qualifies only when it is worth showing
+     * before ES is asked: not an empty states envelope (never useful data)
+     * and not older than the fallback's lookback (a copy that would report
+     * as cleared while recorded positions exist in the last 15 minutes).
+     * A usable copy wins straight away; otherwise ES is asked once, and an
+     * old or empty copy is still the answer when ES has nothing left.
+     */
+    const usableCopy = (entry) => {
+      if (!entry) return false;
+      if (emptyFlightStates(entry.body)) return false;
+      const lookbackMs = esFallback?.lookbackMs;
+      if (typeof lookbackMs === 'number' && lookbackMs > 0) {
+        return now() - entry.lastOkAt <= lookbackMs;
+      }
+      return true;
+    };
+    /** Ask the ES fallback once; true when its answer was served. */
+    async function tryServeEs(reason) {
+      if (!esFallback) return false;
+      try {
+        const answer = await esFallback.read(url);
+        if (answer) {
+          serveEs(req, res, answer, target, reason);
+          return true;
+        }
+      } catch {
+        /* ES unavailable or throttled: below, never the upstream plugin */
+      }
+      return false;
+    }
     const fallback = async (reason) => {
       const entry = cacheGet(key, cacheKeyOf(url));
+      if (usableCopy(entry)) return serveCache(req, res, reason, target, entry);
+      const esServed = await tryServeEs();
+      if (esServed) return;
       if (entry) return serveCache(req, res, reason, target, entry);
-      // Approved Option 1 (flights): ES-only fallback, still never next().
-      if (esFallback) {
-        try {
-          const answer = await esFallback.read(url);
-          if (answer) return serveEs(req, res, answer, target);
-        } catch {
-          /* ES unavailable: the 503 below, never the upstream plugin */
-        }
-      }
       serveNone(req, res, reason, target);
     };
     try {
@@ -638,7 +666,10 @@ export function createCollectorBridge({
           const pausedReason = pausedEmptyReason(result);
           if (pausedReason) {
             const entry = cacheGet(key, cacheKeyOf(url));
-            if (entry && !emptyFlightStates(entry.body)) {
+            // Review: the same qualification as the down path — a useful,
+            // not-too-old copy wins, then ES, then an old copy if it has
+            // one, else the paused answer relayed unchanged
+            if (usableCopy(entry)) {
               return serveCache(
                 req,
                 res,
@@ -648,12 +679,16 @@ export function createCollectorBridge({
                 pausedReason,
               );
             }
-            try {
-              const answer = await esFallback.read(url);
-              if (answer)
-                return serveEs(req, res, answer, target, pausedReason);
-            } catch {
-              /* ES unavailable: existing behaviour below, never the upstream */
+            if (await tryServeEs(pausedReason)) return;
+            if (entry) {
+              return serveCache(
+                req,
+                res,
+                'collector_down',
+                target,
+                entry,
+                pausedReason,
+              );
             }
             return finishPaused(req, res, target, headers, result);
           }

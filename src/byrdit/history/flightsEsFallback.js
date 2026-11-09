@@ -12,7 +12,7 @@
  *  - A valid viewport (`view=w,s,e,n`, parseFlightView) is required; a
  *    request without one is not answered from ES.
  *  - Newest recorded position per aircraft (collapse on icao24,
- *    historyCollapse.latestPerKey), capped at FLIGHTS_FALLBACK_MAX_ROWS.
+ *    historyCollapse.latestPerKey), capped at FLIGHTS_ES_FALLBACK_MAX_ROWS.
  *  - The answer is the live envelope itself, {time, states} with OpenSky
  *    18-field state vectors (openSkyState), so the existing flights
  *    renderer and OpenSky parsers read it unchanged.
@@ -31,6 +31,18 @@
  *  - Failure never falls through: the reader throws, the bridge serves its
  *    normal 503 no-snapshot, and the upstream OpenSky / adsb.lol plugins
  *    are never reached.
+ *  - Review: the ES load the fallback may place is bounded globally, not
+ *    just per view: at most FLIGHTS_ES_FALLBACK_MAX_CONCURRENT_READS reads
+ *    are in flight across every viewport at once (a further read fails
+ *    closed — the bridge then serves the collector's paused relay or 503;
+ *    the collector path itself is never blocked or queued); one read runs
+ *    at most FLIGHTS_ES_FALLBACK_MAX_QUERIES collapse requests (far below
+ *    the COLLAPSE_MAX_QUERIES default of latestPerKey) and has a finite
+ *    FLIGHTS_ES_FALLBACK_READ_DEADLINE_MS deadline. A failed read is
+ *    cached for FLIGHTS_ES_FALLBACK_FAILURE_CACHE_MS so an outage is not
+ *    retried on every poll, and failures are logged at most once a minute
+ *    with a short reason only (never an error message: a URL or a key
+ *    could ride along in one).
  *
  * Off unless GEV_BRIDGE_FLIGHTS_ES_FALLBACK=1 together with the reader key
  * settings the /api/history routes already use (GEV_HISTORY_ES_URL,
@@ -43,6 +55,7 @@
 import { COLLAPSE_FANOUT, latestPerKey } from './historyCollapse.js';
 import {
   HISTORY_INDICES,
+  HistoryUnavailableError,
   createHistoryEsClient,
   esConfigFromEnv,
 } from './historyEs.js';
@@ -60,6 +73,14 @@ export const FLIGHTS_ES_FALLBACK_CACHE_MS = 30_000;
 export const FLIGHTS_ES_FALLBACK_CACHE_MAX_ENTRIES = 64;
 /** A negative answer (no recent rows) is reused from memory for this long. */
 export const FLIGHTS_ES_FALLBACK_NEGATIVE_CACHE_MS = 10_000;
+/** Most collapse requests ONE read may make (review: below COLLAPSE_MAX_QUERIES). */
+export const FLIGHTS_ES_FALLBACK_MAX_QUERIES = 24;
+/** Most ES reads in flight at once across EVERY viewport (review; fail closed). */
+export const FLIGHTS_ES_FALLBACK_MAX_CONCURRENT_READS = 2;
+/** A whole read (probe + partitions) is deadlined at this. */
+export const FLIGHTS_ES_FALLBACK_READ_DEADLINE_MS = 8_000;
+/** An ES failure is remembered for this long (no retry storm; review). */
+export const FLIGHTS_ES_FALLBACK_FAILURE_CACHE_MS = 10_000;
 /** Rollback / opt-in flag (GEV convention: default OFF). */
 export const FLIGHTS_ES_FALLBACK_FLAG = 'GEV_BRIDGE_FLIGHTS_ES_FALLBACK';
 
@@ -104,6 +125,11 @@ export function createFlightsEsFallback({
   cacheMs = FLIGHTS_ES_FALLBACK_CACHE_MS,
   cacheMaxEntries = FLIGHTS_ES_FALLBACK_CACHE_MAX_ENTRIES,
   negativeMs = FLIGHTS_ES_FALLBACK_NEGATIVE_CACHE_MS,
+  maxQueries = FLIGHTS_ES_FALLBACK_MAX_QUERIES,
+  maxConcurrentReads = FLIGHTS_ES_FALLBACK_MAX_CONCURRENT_READS,
+  readDeadlineMs = FLIGHTS_ES_FALLBACK_READ_DEADLINE_MS,
+  failureMs = FLIGHTS_ES_FALLBACK_FAILURE_CACHE_MS,
+  log = null,
 } = {}) {
   /**
    * Per-view in-memory answers (w,s,e,n -> {expiresAt, answer}). A bounded
@@ -130,8 +156,82 @@ export function createFlightsEsFallback({
       over -= 1;
     }
   }
+  /** Recent ES failures, key -> {expiresAt, error}: bounded like `cache`. */
+  const failures = new Map();
+
+  function cacheSetFailure(key, error, ttlMs) {
+    if (!(ttlMs > 0)) return;
+    failures.delete(key);
+    failures.set(key, { expiresAt: now() + ttlMs, error });
+    for (const [k, entry] of failures) {
+      if (entry.expiresAt <= now()) failures.delete(k);
+    }
+    let over = failures.size - Math.max(1, cacheMaxEntries);
+    for (const k of failures.keys()) {
+      if (over <= 0) break;
+      failures.delete(k);
+      over -= 1;
+    }
+  }
   /** Same-view reads in flight share one ES read. */
   const inflight = new Map();
+  /**
+   * Review: the GLOBAL number of ES reads in flight, across every viewport
+   * (same-view reads already share one). A read past this fails closed: the
+   * bridge serves the paused relay or 503 — the collector path is untouched.
+   */
+  let activeReads = 0;
+  /** A failure is logged at most once a minute (review; HistoryApi parity). */
+  let lastFailureLog = 0;
+
+  function logFailure(error) {
+    if (typeof log !== 'function') return;
+    const t = now();
+    if (t - lastFailureLog < 60_000) return;
+    lastFailureLog = t;
+    // a short internal reason only: an error message may carry a URL or key
+    const reason =
+      error instanceof HistoryUnavailableError && error.reason
+        ? error.reason
+        : 'flights_es_error';
+    try {
+      log(`[gev-history bridge] flights ES fallback unavailable (${reason})`);
+    } catch {
+      /* a broken logger must not break the fail-closed path */
+    }
+  }
+
+  async function readEsBounded(bbox, requestT) {
+    if (activeReads >= maxConcurrentReads) {
+      throw new HistoryUnavailableError('flights_read_limit');
+    }
+    activeReads += 1;
+    let deadline = null;
+    const read = readEs(bbox, requestT);
+    const timedOut = Symbol('deadline');
+    try {
+      return await Promise.race([
+        read,
+        new Promise((_, reject) => {
+          // NOT unref'd: the deadline must fire even on an otherwise idle
+          // loop, or a stuck read would hang the poll forever
+          deadline = setTimeout(() => reject(timedOut), readDeadlineMs);
+        }),
+      ]);
+    } catch (error) {
+      // fail closed on the deadline as well; the read's own failure (if it
+      // lands later) is swallowed here so nothing becomes an unhandled
+      // rejection.
+      read.catch(() => {});
+      logFailure(error);
+      throw new HistoryUnavailableError(
+        error === timedOut ? 'flights_read_deadline' : 'flights_es_unavailable',
+      );
+    } finally {
+      clearTimeout(deadline);
+      activeReads -= 1;
+    }
+  }
 
   async function readEs(bbox, requestT) {
     const from = requestT - lookbackMs;
@@ -142,6 +242,9 @@ export function createFlightsEsFallback({
       docValues: AIRCRAFT_STATE_DOC_VALUES,
       probe: true,
       concurrency: COLLAPSE_FANOUT,
+      // review: the fallback is one of many consumers; it gets a small
+      // slice and is marked truncated when it cannot finish within it
+      maxQueries,
     });
     let latest = null; // epoch ms of the newest doc, the STALE header anchor
     const states = [];
@@ -181,36 +284,57 @@ export function createFlightsEsFallback({
       cache.set(key, cached);
       return cached.answer;
     }
+    const failed = failures.get(key);
+    if (failed && t < failed.expiresAt) {
+      // review: an outage is retried only after `failureMs`, not on
+      // every poll — fail closed again from memory
+      logFailure(failed.error);
+      throw new HistoryUnavailableError('flights_es_unavailable');
+    }
     let pending = inflight.get(key);
     if (!pending) {
-      pending = readEs(bbox, t)
+      pending = readEsBounded(bbox, t)
+        .then(
+          (answer) => {
+            inflight.delete(key);
+            failures.delete(key);
+            cacheSet(key, answer, answer ? cacheMs : negativeMs);
+            return answer;
+          },
+          (error) => {
+            inflight.delete(key);
+            cacheSetFailure(key, error, failureMs);
+            throw error;
+          },
+        )
         .catch((error) => {
-          inflight.delete(key);
-          throw error;
-        })
-        .then((answer) => {
-          inflight.delete(key);
-          cacheSet(key, answer, answer ? cacheMs : negativeMs);
-          return answer;
+          logFailure(error);
+          throw error instanceof HistoryUnavailableError
+            ? error
+            : new HistoryUnavailableError('flights_es_unavailable');
         });
       inflight.set(key, pending);
     }
     return pending;
   }
 
-  return { read };
+  return { read, lookbackMs };
 }
 
 /**
  * The bridge's injected `esFallback` reader from the environment (the real
  * plugin initialization path), or null: not configured.
  */
-export function flightsEsFallbackFromEnv(env = {}, { now, fetchImpl } = {}) {
+export function flightsEsFallbackFromEnv(env = {}, { now, fetchImpl, log } = {}) {
   const config = flightsEsFallbackConfigFromEnv(env);
   if (!config) return null;
   const es = createHistoryEsClient({
     ...config.es,
     ...(fetchImpl ? { fetchImpl } : {}),
   });
-  return createFlightsEsFallback({ es, ...(now ? { now } : {}) });
+  return createFlightsEsFallback({
+    es,
+    ...(now ? { now } : {}),
+    ...(log ? { log } : {}),
+  });
 }

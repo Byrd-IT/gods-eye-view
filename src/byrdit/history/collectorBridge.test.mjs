@@ -396,6 +396,7 @@ const FLIGHTS_ES =
 function flightsBridge({
   fetchImpl,
   esRead = async () => null,
+  esLookback = 15 * 60_000,
   startAt = T0 + 1_000,
 } = {}) {
   let now = startAt;
@@ -405,9 +406,9 @@ function flightsBridge({
     fetchImpl,
     now: () => now,
     log: () => {},
-    esFallback: { read: esRead },
+    esFallback: { read: esRead, ...(esLookback ? { lookbackMs: esLookback } : {}) },
   });
-  return { handler, advance: (ms) => (now += ms) };
+  return { handler, advance: (ms) => (now += ms), now: () => now };
 }
 
 const pausedEmpty = () =>
@@ -657,4 +658,137 @@ test('a paused 200 WITH states is a real snapshot: relayed and cached as before'
     res.headers['x-feed-reason'],
     'opensky_paused_until=01:23',
   );
+});
+
+// ---- review: the collector-DOWN path qualifies the cached copy too ----
+
+const FLIGHTS_EMPTY_NO_REASON = () =>
+  new Response(FLIGHTS_EMPTY_PAUSED, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Feed-Source': 'OpenSky Network',
+      'X-Feed-Cache': 'HIT',
+      'X-Feed-Age-Ms': '1000',
+      'X-Feed-Last-OK': String(T0),
+    },
+  });
+
+test('collector down with an EMPTY cached copy: ES is asked first', async () => {
+  const state = { phase: 'empty' };
+  const collector = () => {
+    if (state.phase === 'empty') return FLIGHTS_EMPTY_NO_REASON();
+    return new Error('down');
+  };
+  const { fetchImpl } = fakeCollectors(collector);
+  const esReads = [];
+  const { handler, advance } = flightsBridge({
+    fetchImpl,
+    esRead: async (url) => {
+      esReads.push(String(url));
+      return {
+        body: FLIGHTS_ES,
+        lastOkAt: T0,
+        coverage: 'recorded history ES fallback (15 min)',
+        truncated: false,
+      };
+    },
+  });
+  const primed = await call(handler, flightsUrl('tab-down1'));
+  assert.equal(primed.statusCode, 200);
+  advance(1_000);
+
+  state.phase = 'down';
+  advance(100_000);
+  const down = await call(handler, flightsUrl('tab-down1'));
+  assert.equal(esReads.length, 1, 'the empty copy does not shadow ES');
+  assert.equal(down.statusCode, 200);
+  assert.equal(text(down.body), FLIGHTS_ES, 'the ES answer is served');
+  assert.equal(down.headers['x-feed-bridge'], 'es-fallback');
+});
+
+test('collector down with an EMPTY cached copy and ES silent: the old copy is still the answer', async () => {
+  const state = { phase: 'empty' };
+  const collector = () => {
+    if (state.phase === 'empty') return FLIGHTS_EMPTY_NO_REASON();
+    return new Error('down');
+  };
+  const { fetchImpl } = fakeCollectors(collector);
+  const { handler, advance } = flightsBridge({
+    fetchImpl,
+    esRead: async () => null,
+  });
+  await call(handler, flightsUrl('tab-down2'));
+  advance(1_000);
+  state.phase = 'down';
+  advance(100_000);
+  const down = await call(handler, flightsUrl('tab-down2'));
+  assert.equal(down.statusCode, 200);
+  assert.equal(text(down.body), FLIGHTS_EMPTY_PAUSED, 'the old copy is preserved');
+  assert.equal(down.headers['x-feed-bridge'], 'cache');
+});
+
+test('collector down with a TOO-OLD copy: recent ES wins, a failed ES falls back to the copy', async () => {
+  // the copy is older than the fallback's 15 min lookback, so recorded
+  // positions could show what it would report as cleared
+  const state = { phase: 'good' };
+  const { fetchImpl } = fakeCollectors(flightsCollector(state));
+  const esReads = [];
+  const esUp = { up: true };
+  const { handler, advance } = flightsBridge({
+    fetchImpl,
+    esRead: async (url) => {
+      esReads.push(String(url));
+      if (esUp.up) {
+        return {
+          body: FLIGHTS_ES,
+          lastOkAt: T0,
+          coverage: 'recorded history ES fallback (15 min)',
+          truncated: false,
+        };
+      }
+      throw new Error('es down');
+    },
+  });
+  const primed = await call(handler, flightsUrl('tab-down3'));
+  assert.equal(primed.statusCode, 200);
+  advance(20 * 60_000); // older than the 15 min lookback
+  state.phase = 'down';
+
+  const first = await call(handler, flightsUrl('tab-down3'));
+  assert.equal(esReads.length, 1, 'a too-old copy asks ES first');
+  assert.equal(first.headers['x-feed-bridge'], 'es-fallback');
+  assert.equal(text(first.body), FLIGHTS_ES);
+
+  esUp.up = false;
+  advance(60_000);
+  const second = await call(handler, flightsUrl('tab-down3'));
+  assert.equal(
+    text(second.body),
+    FLIGHTS_GOOD,
+    'with ES down, the too-old copy is still served',
+  );
+  assert.equal(second.headers['x-feed-bridge'], 'cache');
+});
+
+test('collector down with a fresh useful copy: ES is not asked (unchanged preference)', async () => {
+  const state = { phase: 'good' };
+  const { fetchImpl } = fakeCollectors(flightsCollector(state));
+  const esReads = [];
+  const { handler, advance } = flightsBridge({
+    fetchImpl,
+    esRead: async (url) => {
+      esReads.push(String(url));
+      throw new Error('should not be read');
+    },
+  });
+  await call(handler, flightsUrl('tab-down4'));
+  advance(1_000);
+  state.phase = 'down';
+  advance(200_000); // stale (> 3 x 45 s) but well inside the 15 min lookback
+  const down = await call(handler, flightsUrl('tab-down4'));
+  assert.equal(esReads.length, 0, 'a fresh useful copy wins straight away');
+  assert.equal(text(down.body), FLIGHTS_GOOD);
+  assert.equal(down.headers['x-feed-bridge'], 'cache');
+  assert.equal(down.headers['x-feed-reason'], 'collector_down');
 });

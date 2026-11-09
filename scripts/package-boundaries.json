@@ -232,6 +232,7 @@
     "modules": [
       "src/byrdit/history/index.js",
       "src/byrdit/history/collectorBridge.js",
+      "src/byrdit/history/flightsEsFallback.js",
       "src/byrdit/history/feeds.js",
       "src/byrdit/history/flightView.js",
       "src/byrdit/history/staleness.js",
