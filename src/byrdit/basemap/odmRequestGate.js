@@ -218,7 +218,16 @@ export class OdmRequestGate {
 export function createOdmRequestGateResource(Cesium, url, options = {}) {
   const ResourceClass = Cesium?.Resource;
   if (typeof ResourceClass !== 'function') return null;
-  if (!/^https?:/.test(String(url))) return null;
+  // The deployed GEV tileset url is same-origin relative:
+  // /basemap/odm3d/<id>/tileset.json. A root-relative url (single leading
+  // slash, never '//', never any other scheme) can only resolve to THIS
+  // page's origin (browsers resolve it against document.baseURI), so it is
+  // exactly as safe as the absolute http(s) form and must be gated too —
+  // turning it away silently disabled the phone gate on the real page.
+  const text = String(url);
+  const httpish = /^https?:/i.test(text);
+  const rootRelative = /^\/(?!\/)/.test(text);
+  if (!httpish && !rootRelative) return null;
 
   const gate = new OdmRequestGate({ maxInFlight: options.maxInFlight });
 
