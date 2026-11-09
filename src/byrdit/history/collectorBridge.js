@@ -106,6 +106,28 @@ const CANONICAL = Object.freeze({
   'x-flight-coverage': 'X-Flight-Coverage',
 });
 
+// Collector metadata is untrusted even on successful responses.  Keep the
+// formats bounded and consistent with the collector's documented output.
+const METADATA_FORMATS = Object.freeze({
+  'x-feed-source': /^[a-z0-9][a-z0-9 .\/()-]{0,63}$/i,
+  'x-feed-cache': /^(?:HIT|MISS|STALE)$/,
+  'x-feed-age-ms': /^[0-9]{1,15}$/,
+  'x-feed-last-ok': /^[0-9]{1,15}$/,
+  'x-feed-stale-since': /^[0-9]{1,15}$/,
+  'x-feed-reason': /^[a-z0-9_=:.-]{1,64}$/i,
+  'x-collector-role': /^(?:active|standby)$/,
+  'x-flight-coverage':
+    /^OpenSky viewport tiles \([0-9]{1,5}\)(?:, cached areas only|, incomplete: (?:100|[0-9]{1,2})% of the view)?$/,
+});
+
+function validMetadata(key, value) {
+  const format = METADATA_FORMATS[key];
+  return (
+    !format ||
+    (typeof value === 'string' && !/[\r\n]/.test(value) && format.test(value))
+  );
+}
+
 /** Parse GEV_COLLECTOR_URLS (comma separated http(s) base URLs). */
 export function parseCollectorUrls(value) {
   const text = String(value ?? '').trim();
@@ -345,14 +367,15 @@ export function createCollectorBridge({
           const headers = {};
           for (const key of RELAYED_HEADERS) {
             const value = response.headers.get(key);
-            if (value !== null) headers[CANONICAL[key]] = value;
+            if (value !== null && validMetadata(key, value))
+              headers[CANONICAL[key]] = value;
           }
           return { ok: true, status: response.status, body, headers };
         }
         // Standby (503, no X-Feed-Reason) or an active collector with no
         // snapshot yet: keep its reason, try the next collector.
         const r = response.headers.get('x-feed-reason');
-        if (r && /^[a-z0-9_=:.-]{1,64}$/i.test(r)) reason = r;
+        if (r && validMetadata('x-feed-reason', r)) reason = r;
       } catch {
         /* unreachable / timeout: next collector */
       }

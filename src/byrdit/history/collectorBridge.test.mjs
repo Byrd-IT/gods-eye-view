@@ -846,3 +846,81 @@ test('flag-off flights (no ES fallback): a paused 200 WITH states is still a rea
   assert.equal(down.headers['x-feed-bridge'], 'cache');
   assert.equal(text(down.body), FLIGHTS_GOOD);
 });
+
+test('drops invalid relayed collector metadata on success and relayed error statuses', async () => {
+  const names = [
+    'x-feed-source',
+    'x-feed-cache',
+    'x-feed-age-ms',
+    'x-feed-last-ok',
+    'x-feed-stale-since',
+    'x-feed-reason',
+    'x-collector-role',
+    'x-flight-coverage',
+  ];
+  const invalid = [
+    'Bearer secret_ABC123',
+    'https://user:pass@host',
+    'x'.repeat(200),
+    'bad\r\nInjected: yes',
+  ];
+  for (const status of [200, 400]) {
+    for (const value of invalid) {
+      const fetchImpl = async () => ({
+        status,
+        arrayBuffer: async () => Buffer.from('{}'),
+        headers: { get: (key) => (names.includes(key) ? value : null) },
+      });
+      const { handler, lines } = bridge(
+        fetchImpl,
+        status === 400 ? { name: 'vesselsTrack' } : {},
+      );
+      const res = await call(handler, status === 400 ? '/track' : '/');
+      assert.equal(res.statusCode, status);
+      for (const name of names)
+        assert.equal(res.headers[name], undefined, `${status} ${name}`);
+      assert.ok(!JSON.stringify(lines).includes(value));
+    }
+  }
+});
+
+test('preserves real collector metadata and drops invalid individual formats', async () => {
+  const valid = {
+    'x-feed-source': 'OpenSky Network',
+    'x-feed-cache': 'STALE',
+    'x-feed-age-ms': '1000',
+    'x-feed-last-ok': '1791814776089',
+    'x-feed-stale-since': '1791814776090',
+    'x-feed-reason': 'opensky_paused_until=23:30',
+    'x-collector-role': 'active',
+    'x-flight-coverage': 'OpenSky viewport tiles (1), cached areas only',
+  };
+  const invalid = {
+    'x-feed-source': 'https://user:pass@host',
+    'x-feed-cache': 'INVALID',
+    'x-feed-age-ms': '-1',
+    'x-feed-last-ok': '12.5',
+    'x-feed-stale-since': '1\n',
+    'x-feed-reason': 'Bearer token',
+    'x-collector-role': 'primary',
+    'x-flight-coverage': 'OpenSky viewport tiles (1), malicious',
+  };
+  for (const [name, value] of Object.entries(valid)) {
+    const fetchImpl = async () => ({
+      status: 200,
+      arrayBuffer: async () => Buffer.from('{}'),
+      headers: { get: (key) => (key === name ? value : null) },
+    });
+    const res = await call(bridge(fetchImpl).handler);
+    assert.equal(res.headers[name], value, name);
+  }
+  for (const [name, value] of Object.entries(invalid)) {
+    const fetchImpl = async () => ({
+      status: 200,
+      arrayBuffer: async () => Buffer.from('{}'),
+      headers: { get: (key) => (key === name ? value : null) },
+    });
+    const res = await call(bridge(fetchImpl).handler);
+    assert.equal(res.headers[name], undefined, name);
+  }
+});
