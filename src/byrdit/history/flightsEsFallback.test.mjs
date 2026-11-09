@@ -6,6 +6,8 @@ import { once } from 'node:events';
 import {
   FLIGHTS_ES_FALLBACK_LOOKBACK_MS,
   FLIGHTS_ES_FALLBACK_MAX_ROWS,
+  FLIGHTS_ES_FALLBACK_CACHE_MAX_ENTRIES,
+  FLIGHTS_ES_FALLBACK_NEGATIVE_CACHE_MS,
   flightsEsFallbackConfigFromEnv,
   flightsEsFallbackFromEnv,
   createFlightsEsFallback,
@@ -457,3 +459,81 @@ function shortClock(epochMs) {
   const get = (type) => parts.find((p) => p.type === type)?.value ?? '';
   return `${get('hour')}:${get('minute')} ${get('timeZoneName')}`;
 }
+
+// ---- review: the per-view ES answer cache is a bounded LRU with expiry,
+// and negative answers are cached briefly so a stalled request cannot
+// hammer ES ----
+
+test('reader: the per-view cache is a bounded LRU (the least recently used view is evicted)', async () => {
+  const es = fakeEs([doc()]);
+  let nowMs = VIEW_MS;
+  const reader = createFlightsEsFallback({
+    es,
+    now: () => nowMs,
+    cacheMs: 60_000,
+    cacheMaxEntries: 2,
+  });
+  const read = async (view) => reader.read(makeUrl(`/api/flights?view=${view}`));
+  await read('0,45,10,55'); // V1
+  await read('1,46,11,56'); // V2
+  await read('2,47,12,57'); // V3 -> V1 evicted
+  const after = es.calls.length;
+  await read('0,45,10,55'); // V1: re-read (evicted)
+  assert.ok(es.calls.length > after, 'the evicted view is re-read from ES');
+  const afterV1 = es.calls.length;
+  await read('3,48,13,58'); // V4 -> V2 evicted
+  const perRead = es.calls.length - afterV1;
+  assert.equal(perRead >= 1, true, 'V4 was read from ES');
+  await read('3,48,13,58'); // V4 still cached
+  assert.equal(es.calls.length, afterV1 + perRead, 'fresh view stays cached');
+  await read('1,46,11,56'); // V2 evicted -> re-read
+  assert.ok(es.calls.length > afterV1 + 1, 'LRU order, not FIFO-all');
+});
+
+test('reader: cached answers expire (a slot older than cacheMs is not served)', async () => {
+  const es = fakeEs([doc()]);
+  let nowMs = VIEW_MS;
+  const reader = createFlightsEsFallback({
+    es,
+    now: () => nowMs,
+    cacheMs: 30_000,
+    cacheMaxEntries: 8,
+  });
+  await reader.read(makeUrl(`/api/flights?view=0,45,10,55`));
+  const after = es.calls.length;
+  nowMs += 31_000;
+  await reader.read(makeUrl(`/api/flights?view=0,45,10,55`));
+  assert.ok(es.calls.length > after, 'an expired answer is re-read, not served');
+});
+
+test('reader: a negative answer (no rows) is cached briefly, so a stalled request cannot hammer ES', async () => {
+  const es = fakeEs([]);
+  let nowMs = VIEW_MS;
+  const reader = createFlightsEsFallback({
+    es,
+    now: () => nowMs,
+    negativeMs: 10_000,
+  });
+  const view = '0,45,10,55';
+  assert.equal(
+    await reader.read(makeUrl(`/api/flights?view=${view}`)),
+    null,
+  );
+  const after = es.calls.length;
+  assert.equal(
+    await reader.read(makeUrl(`/api/flights?view=${view}`)),
+    null,
+    'the negative answer is served from memory',
+  );
+  assert.equal(es.calls.length, after, 'no second ES read within the window');
+  nowMs += 10_001;
+  await reader.read(makeUrl(`/api/flights?view=${view}`));
+  assert.ok(es.calls.length > after, 'the negative entry expires and is re-read');
+});
+
+test('reader: the bounded cache caps stay module-level defaults', () => {
+  assert.equal(typeof FLIGHTS_ES_FALLBACK_CACHE_MAX_ENTRIES, 'number');
+  assert.equal(FLIGHTS_ES_FALLBACK_CACHE_MAX_ENTRIES >= 16, true);
+  assert.equal(typeof FLIGHTS_ES_FALLBACK_NEGATIVE_CACHE_MS, 'number');
+  assert.equal(FLIGHTS_ES_FALLBACK_NEGATIVE_CACHE_MS >= 1_000, true);
+});

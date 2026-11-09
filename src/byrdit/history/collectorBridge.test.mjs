@@ -382,3 +382,184 @@ test('environment parsing', () => {
   assert.equal(d.timeoutMs, 2_000);
   assert.equal(d.greyMs, 3_600_000);
 });
+
+// ---- review: a paused collector's empty 200 must not shadow the ES fallback ----
+
+const FLIGHTS_VIEW = '-100,29,-95,33';
+const FLIGHTS_GOOD =
+  '{"time":1000,"states":[["a1b2c3",-97.5,30.2,1,null,0,0,0,false,0,null,0,null,null,null,"1200",false,0,null]]}';
+const FLIGHTS_EMPTY_PAUSED = '{"time":1000,"states":[]}';
+const FLIGHTS_ES =
+  '{"time":900,"states":[["def456",-96,30.5,0,null,0,0,0,false,0,null,0,null,null,null,"1200",false,0,null]]}';
+
+/** A flights feed bridge with a fake collector and an injected ES reader. */
+function flightsBridge({
+  fetchImpl,
+  esRead = async () => null,
+  startAt = T0 + 1_000,
+} = {}) {
+  let now = startAt;
+  const handler = createCollectorBridge({
+    name: 'flights',
+    urls: ['http://s4:4180'],
+    fetchImpl,
+    now: () => now,
+    log: () => {},
+    esFallback: { read: esRead },
+  });
+  return { handler, advance: (ms) => (now += ms) };
+}
+
+const pausedEmpty = () =>
+  new Response(FLIGHTS_EMPTY_PAUSED, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Feed-Source': 'OpenSky Network',
+      'X-Feed-Cache': 'STALE',
+      'X-Feed-Stale-Since': String(T0 - 10_000),
+      'X-Feed-Reason': 'opensky_paused_until=01:23',
+      'X-Flight-Coverage': 'OpenSky viewport tiles (0)',
+    },
+  });
+
+const flightsGood = () =>
+  new Response(FLIGHTS_GOOD, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Feed-Source': 'OpenSky Network',
+      'X-Feed-Cache': 'HIT',
+      'X-Feed-Age-Ms': '1000',
+      'X-Feed-Last-OK': String(T0),
+    },
+  });
+
+function flightsCollector(state) {
+  return () => {
+    if (state.phase === 'good') return flightsGood();
+    if (state.phase === 'paused') return pausedEmpty();
+    return new Error('down');
+  };
+}
+
+const flightsUrl = (tab) => `/?view=${FLIGHTS_VIEW}&vsid=${tab}`;
+
+test('paused collector 200 (empty states): the ES fallback answers, the paused reason is preserved, last-ok is clamped, and the empty body is not served', async () => {
+  const { fetchImpl, calls } = fakeCollectors(
+    flightsCollector({ phase: 'paused' }),
+  );
+  const esReads = [];
+  const { handler } = flightsBridge({
+    fetchImpl,
+    esRead: async (url) => {
+      esReads.push(String(url));
+      return {
+        body: FLIGHTS_ES,
+        // future timestamp: the bridge must not report a future last-ok
+        lastOkAt: T0 + 5_000_000,
+        coverage: 'recorded history ES fallback (15 min)',
+        truncated: false,
+      };
+    },
+  });
+  const res = await call(handler, flightsUrl('tab-paused1'));
+  assert.equal(res.statusCode, 200);
+  assert.ok(esReads.length >= 1, 'the ES reader was asked');
+  assert.equal(text(res.body), FLIGHTS_ES);
+  assert.equal(res.headers['x-feed-bridge'], 'es-fallback');
+  assert.equal(
+    res.headers['x-feed-reason'],
+    'opensky_paused_until=01:23',
+    'the actual paused reason is shown',
+  );
+  assert.equal(
+    res.headers['x-feed-last-ok'],
+    String(T0 + 1_000),
+    'last-ok is clamped to the server clock',
+  );
+  assert.equal(
+    res.headers['x-feed-stale-since'],
+    String(T0 + 1_000),
+    'stale-since is clamped with it',
+  );
+  assert.equal(
+    res.headers['x-flight-coverage'],
+    'recorded history ES fallback (15 min)',
+  );
+  assert.ok(
+    Number(res.headers['x-feed-grey-until']) >
+      Number(res.headers['x-feed-stale-since']),
+  );
+});
+
+test('paused 200 empty states with ES unavailable: existing behaviour, and the useful per-view copy is not overwritten by the empty body', async () => {
+  const state = { phase: 'good' };
+  const { fetchImpl } = fakeCollectors(flightsCollector(state));
+  const { handler, advance } = flightsBridge({
+    fetchImpl,
+    esRead: async () => {
+      throw new Error('es down');
+    },
+  });
+  const good = await call(handler, flightsUrl('tab-paused2'));
+  assert.equal(good.statusCode, 200);
+  assert.equal(text(good.body), FLIGHTS_GOOD, 'the good copy primes the view');
+  advance(1_000);
+
+  state.phase = 'paused';
+  const paused = await call(handler, flightsUrl('tab-paused2'));
+  assert.equal(paused.statusCode, 200);
+  assert.equal(
+    paused.headers['x-feed-reason'],
+    'opensky_paused_until=01:23',
+    'the paused 200 itself is relayed when ES is unavailable',
+  );
+  assert.equal(paused.headers['x-feed-bridge'], 'collector');
+  advance(1_000);
+
+  state.phase = 'down';
+  advance(200_000);
+  const down = await call(handler, flightsUrl('tab-paused2'));
+  assert.equal(down.statusCode, 200);
+  assert.equal(
+    text(down.body),
+    FLIGHTS_GOOD,
+    'the last-good copy is still the GOOD body, not the empty paused one',
+  );
+  assert.equal(down.headers['x-feed-reason'], 'collector_down');
+});
+
+test('a paused 200 WITH states is a real snapshot: relayed and cached as before', async () => {
+  const pausedWithStates = () =>
+    new Response(FLIGHTS_GOOD, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Feed-Source': 'OpenSky Network',
+        'X-Feed-Cache': 'STALE',
+        'X-Feed-Stale-Since': String(T0 - 10_000),
+        'X-Feed-Reason': 'opensky_paused_until=01:23',
+        'X-Feed-Last-OK': String(T0),
+        'X-Feed-Age-Ms': '1000',
+      },
+    });
+  const { fetchImpl } = fakeCollectors(pausedWithStates);
+  const esReads = [];
+  const { handler } = flightsBridge({
+    fetchImpl,
+    esRead: async (url) => {
+      esReads.push(String(url));
+      return null;
+    },
+  });
+  const res = await call(handler, flightsUrl('tab-paused3'));
+  assert.equal(res.statusCode, 200);
+  assert.equal(esReads.length, 0, 'a real snapshot is served, ES not asked');
+  assert.equal(text(res.body), FLIGHTS_GOOD);
+  assert.equal(res.headers['x-feed-bridge'], 'collector');
+  assert.equal(
+    res.headers['x-feed-reason'],
+    'opensky_paused_until=01:23',
+  );
+});

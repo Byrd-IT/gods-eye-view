@@ -22,7 +22,12 @@
  *    GREY chip "No data since HH:MM <tz>" without any client change.
  *  - A fresh-in-memory answer is preferred: one read per view per
  *    FLIGHTS_ES_FALLBACK_CACHE_MS; concurrent same-view reads share one
- *    read. Negative answers (no recent rows) are not cached.
+ *    read. The per-view map is a bounded LRU at
+ *    FLIGHTS_ES_FALLBACK_CACHE_MAX_ENTRIES slots whose entries expire
+ *    (review): a wandering viewport cannot grow it without bound.
+ *    Negative answers (no recent rows) are cached for the shorter
+ *    FLIGHTS_ES_FALLBACK_NEGATIVE_CACHE_MS, so a stalled request cannot
+ *    hammer ES either.
  *  - Failure never falls through: the reader throws, the bridge serves its
  *    normal 503 no-snapshot, and the upstream OpenSky / adsb.lol plugins
  *    are never reached.
@@ -36,7 +41,11 @@
  */
 
 import { COLLAPSE_FANOUT, latestPerKey } from './historyCollapse.js';
-import { HISTORY_INDICES, createHistoryEsClient, esConfigFromEnv } from './historyEs.js';
+import {
+  HISTORY_INDICES,
+  createHistoryEsClient,
+  esConfigFromEnv,
+} from './historyEs.js';
 import { AIRCRAFT_STATE_DOC_VALUES } from './historyService.js';
 import { openSkyState, docTimeMs } from './historyRows.js';
 import { parseFlightView } from './feeds.js';
@@ -47,6 +56,10 @@ export const FLIGHTS_ES_FALLBACK_LOOKBACK_MS = 15 * 60_000;
 export const FLIGHTS_ES_FALLBACK_MAX_ROWS = 5_000;
 /** A fresh answer is reused from memory for this long. */
 export const FLIGHTS_ES_FALLBACK_CACHE_MS = 30_000;
+/** Most per-view answers one reader keeps in memory (an LRU, oldest evicted). */
+export const FLIGHTS_ES_FALLBACK_CACHE_MAX_ENTRIES = 64;
+/** A negative answer (no recent rows) is reused from memory for this long. */
+export const FLIGHTS_ES_FALLBACK_NEGATIVE_CACHE_MS = 10_000;
 /** Rollback / opt-in flag (GEV convention: default OFF). */
 export const FLIGHTS_ES_FALLBACK_FLAG = 'GEV_BRIDGE_FLIGHTS_ES_FALLBACK';
 
@@ -89,9 +102,34 @@ export function createFlightsEsFallback({
   lookbackMs = FLIGHTS_ES_FALLBACK_LOOKBACK_MS,
   maxRows = FLIGHTS_ES_FALLBACK_MAX_ROWS,
   cacheMs = FLIGHTS_ES_FALLBACK_CACHE_MS,
+  cacheMaxEntries = FLIGHTS_ES_FALLBACK_CACHE_MAX_ENTRIES,
+  negativeMs = FLIGHTS_ES_FALLBACK_NEGATIVE_CACHE_MS,
 } = {}) {
-  /** Per-view in-memory answers (w,s,e,n -> {expiresAt, answer}). */
+  /**
+   * Per-view in-memory answers (w,s,e,n -> {expiresAt, answer}). A bounded
+   * LRU (review): the least recently used slot is evicted once
+   * `cacheMaxEntries` is exceeded, and expired slots are dropped on sight,
+   * so a wandering viewport can never grow the map without bound.
+   * Negative answers (no recent rows) get the shorter `negativeMs`.
+   */
   const cache = new Map();
+
+  function cacheSet(key, answer, ttlMs) {
+    if (!(ttlMs > 0)) return;
+    // re-insert = most recently used
+    cache.delete(key);
+    cache.set(key, { expiresAt: now() + ttlMs, answer });
+    // drop anything already expired, then the oldest slots over the cap
+    for (const [k, entry] of cache) {
+      if (entry.expiresAt <= now()) cache.delete(k);
+    }
+    let over = cache.size - Math.max(1, cacheMaxEntries);
+    for (const k of cache.keys()) {
+      if (over <= 0) break;
+      cache.delete(k);
+      over -= 1;
+    }
+  }
   /** Same-view reads in flight share one ES read. */
   const inflight = new Map();
 
@@ -118,7 +156,9 @@ export function createFlightsEsFallback({
     }
     if (!states.length || latest === null) return null;
     // determinism: newest first, then ICAO (partitions complete out of order)
-    states.sort((x, y) => y[3] - x[3] || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+    states.sort(
+      (x, y) => y[3] - x[3] || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0),
+    );
     const kept = states.slice(0, maxRows);
     const truncated = read.truncated || states.length > maxRows;
     return {
@@ -135,7 +175,12 @@ export function createFlightsEsFallback({
     const key = bbox.join(',');
     const t = now();
     const cached = cache.get(key);
-    if (cached && t < cached.expiresAt) return cached.answer;
+    if (cached && t < cached.expiresAt) {
+      // re-insert: the slot just served is the most recently used
+      cache.delete(key);
+      cache.set(key, cached);
+      return cached.answer;
+    }
     let pending = inflight.get(key);
     if (!pending) {
       pending = readEs(bbox, t)
@@ -145,8 +190,7 @@ export function createFlightsEsFallback({
         })
         .then((answer) => {
           inflight.delete(key);
-          if (answer)
-            cache.set(key, { expiresAt: now() + cacheMs, answer });
+          cacheSet(key, answer, answer ? cacheMs : negativeMs);
           return answer;
         });
       inflight.set(key, pending);
@@ -164,6 +208,9 @@ export function createFlightsEsFallback({
 export function flightsEsFallbackFromEnv(env = {}, { now, fetchImpl } = {}) {
   const config = flightsEsFallbackConfigFromEnv(env);
   if (!config) return null;
-  const es = createHistoryEsClient({ ...config.es, ...(fetchImpl ? { fetchImpl } : {}) });
+  const es = createHistoryEsClient({
+    ...config.es,
+    ...(fetchImpl ? { fetchImpl } : {}),
+  });
   return createFlightsEsFallback({ es, ...(now ? { now } : {}) });
 }

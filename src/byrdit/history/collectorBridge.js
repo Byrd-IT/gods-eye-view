@@ -375,6 +375,25 @@ export function createCollectorBridge({
     return feed.forwardQuery ? url.search : '';
   }
 
+  /**
+   * Review: relay the collector's paused 200 (existing behaviour) without
+   * letting its EMPTY envelope overwrite a view's useful last-good copy —
+   * a copy is only admitted for a view that has none.
+   */
+  function finishPaused(req, res, url, key, target, headers, result) {
+    if (!cacheGet(key, cacheKeyOf(url))) {
+      const lastOk = epoch(headers['X-Feed-Last-OK']);
+      const age = epoch(headers['X-Feed-Age-Ms']);
+      cacheSet(key, cacheKeyOf(url), {
+        body: result.body,
+        contentType: headers['Content-Type'] ?? 'application/json',
+        lastOkAt: lastOk ?? now() - (age ?? 0),
+      });
+    }
+    transition(key, 'collector');
+    send(req, res, 200, decorate(headers, target), result.body);
+  }
+
   function sharedRead(collectorFeed, search, lease = null) {
     const key = lease
       ? `${collectorFeed} view ${lease.sid} ${lease.bbox}`
@@ -448,11 +467,15 @@ export function createCollectorBridge({
 
   /**
    * Approved Option 1 (flights): a bounded ES read, always marked STALE +
-   * grey (Stale-Since = the newest position time): the collector is down, so
-   * the layer is degraded even when a recorded position is recent.
+   * grey with Stale-Since = the newest position time: the collector is
+   * down, so the layer is degraded even when a recorded position is
+   * recent. `reason` names why the layer is degraded (review: a paused
+   * collector keeps its actual reason, e.g. opensky_paused_until=.., so
+   * the chip still says "OpenSky paused until ...").
    */
-  function serveEs(req, res, answer, target) {
+  function serveEs(req, res, answer, target, reason = 'es_fallback') {
     const t = now();
+    // review: never advertise a future timestamp after the server clock
     const lastOkAt = Math.min(answer.lastOkAt, t);
     const age = Math.max(0, t - lastOkAt);
     const headers = {
@@ -461,14 +484,38 @@ export function createCollectorBridge({
       'X-Feed-Source': feed.source,
       'X-Feed-Cache': 'STALE',
       'X-Feed-Age-Ms': String(age),
-      'X-Feed-Last-OK': String(answer.lastOkAt),
+      'X-Feed-Last-OK': String(lastOkAt),
       'X-Feed-Stale-Since': String(lastOkAt),
-      'X-Feed-Reason': 'es_fallback',
+      'X-Feed-Reason': reason,
       'X-Feed-Bridge': 'es-fallback',
       'X-Flight-Coverage': answer.coverage,
     };
     transition(target.collectorFeed, 'es-fallback', 'es_fallback');
     send(req, res, 200, decorate(withGrey(headers), target), answer.body);
+  }
+
+  /** The OpenSky-budget pause reason, `opensky_paused_until=HH:MM`. */
+  const OPENSKY_PAUSED_REASON = /^opensky_paused_until=([0-9]{2}:[0-9]{2})$/;
+
+  /**
+   * Review: a paused collector (OpenSky budget exhausted) answers 200 with
+   * its own STALE headers and an EMPTY states envelope — HTTP-clean but not
+   * data. Returns the paused reason when `result` is such an answer, null
+   * when it is a real snapshot (a body that does not parse counts as real:
+   * collector bodies are relayed byte for byte, whatever they are).
+   */
+  function pausedEmptyReason(result) {
+    if (result.status !== 200) return null;
+    const reason = result.headers['X-Feed-Reason'];
+    if (!reason || !OPENSKY_PAUSED_REASON.test(reason)) return null;
+    try {
+      const parsed = JSON.parse(new TextDecoder('utf8').decode(result.body));
+      return Array.isArray(parsed.states) && parsed.states.length === 0
+        ? reason
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   return async function collectorBridge(req, res, next) {
@@ -568,6 +615,19 @@ export function createCollectorBridge({
           transition(key, 'collector');
           send(req, res, 200, decorate(headers, target), result.body);
           return;
+        }
+        // Review: a paused collector's empty 200 is not data. With the ES
+        // fallback present it is asked FIRST; the paused answer itself is
+        // relayed, and an empty body never evicts useful last-good data.
+        if (esFallback && pausedEmptyReason(result)) {
+          const reason = pausedEmptyReason(result);
+          try {
+            const answer = await esFallback.read(url);
+            if (answer) return serveEs(req, res, answer, target, reason);
+          } catch {
+            /* ES unavailable: existing behaviour below, never the upstream */
+          }
+          return finishPaused(req, res, url, key, target, headers, result);
         }
         const lastOk = epoch(headers['X-Feed-Last-OK']);
         const age = epoch(headers['X-Feed-Age-Ms']);
