@@ -2460,6 +2460,12 @@ test('legacy generated notes are displayed in mph without rewriting saved notes'
     btn(w2, 'library-save')[0].click();
     await settleUi();
     assert.equal((await client.open(id)).meta.notes, original);
+    field(w2, 'notes').value = 'My edited note';
+    unitBtn(w2, 'm').click();
+    assert.equal(field(w2, 'notes').value, 'My edited note');
+    btn(w2, 'library-save')[0].click();
+    await settleUi();
+    assert.equal((await client.open(id)).meta.notes, 'My edited note');
     w2.handle.destroy();
     w.handle.destroy();
   } finally {
