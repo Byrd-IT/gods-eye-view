@@ -359,7 +359,10 @@ export function createFlightsEsFallback({
  * The bridge's injected `esFallback` reader from the environment (the real
  * plugin initialization path), or null: not configured.
  */
-export function flightsEsFallbackFromEnv(env = {}, { now, fetchImpl, log } = {}) {
+export function flightsEsFallbackFromEnv(
+  env = {},
+  { now, fetchImpl, log } = {},
+) {
   const config = flightsEsFallbackConfigFromEnv(env);
   if (!config) return null;
   const es = createHistoryEsClient({
