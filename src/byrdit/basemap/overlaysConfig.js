@@ -4,6 +4,8 @@
  * (which the node-side proxy also loads) can use it.
  */
 
+import { withCanopyLow } from './canopyOptions.js';
+
 const URL_PATH =
   /^\/basemap\/overlay\/[a-z0-9][a-z0-9-]{0,31}\/\{z\}\/\{x\}\/\{y\}\.(?:webp|mvt)$/;
 const URL_3D = /^\/basemap\/odm3d\/[a-z0-9][a-z0-9-]{0,31}\/tileset\.json$/;
@@ -27,11 +29,11 @@ const finite = (v, lo, hi) =>
 /** The `model` block of a 3D layer (composed by overlaysProxy.js). */
 function normalizeModel(raw) {
   if (!finite(raw?.groundM, -500, 9000)) return null;
-  const options = (
-    Array.isArray(raw.canopyOptionsFt) ? raw.canopyOptionsFt : []
-  )
-    .filter((v) => finite(v, 10, 120))
-    .slice(0, 4);
+  const options = withCanopyLow(
+    (Array.isArray(raw.canopyOptionsFt) ? raw.canopyOptionsFt : [])
+      .filter((v) => finite(v, 10, 120))
+      .slice(0, 4),
+  );
   const def = options.includes(raw.canopyDefaultFt)
     ? raw.canopyDefaultFt
     : null;

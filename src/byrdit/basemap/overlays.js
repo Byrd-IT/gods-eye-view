@@ -7,9 +7,15 @@ import {
   zoomForHeight,
 } from './naip.js';
 import { createVectorOverlayProvider } from './overlaysVector.js';
-import { Odm3dLayer, terrainSampler } from './odm3d.js';
+// Namespace import so phone-mode wiring keeps working whether or not this
+// build already carries the odm3d phone-mode methods (they land together).
+import * as odm3d from './odm3d.js';
 
 export { normalizeOverlays } from './overlaysConfig.js';
+
+const { Odm3dLayer, terrainSampler } = odm3d;
+/** True on a phone: 3D builds start with softer tile caching to save memory. */
+const phoneDevice = odm3d.isPhoneEnvironment ?? (() => false);
 
 /**
  * Map overlay layers for the Byrd-IT Open stack (BASEMAP M2 follow-up):
@@ -70,6 +76,8 @@ export function attachOverlays({
       viewer,
       entry,
       sampleTerrain: terrainSampler(Cesium, viewer),
+      // The constructor build path needs it before the tileset is created.
+      phoneMode,
     }),
 }) {
   const scene = viewer.scene;
@@ -101,6 +109,11 @@ export function attachOverlays({
   let panel = null;
   const removers = [];
 
+  // One switch for every 3D build: device detection to start with, then the
+  // user's choice wins (the panel's Phone mode chip). setPhoneMode must reach
+  // a layer BEFORE its tileset is created, or the softer cache never applies.
+  let phoneMode = phoneDevice();
+
   const googleShown = () => session?.tileset?.show === true;
   const openShown = () => controller.getActiveId() === BYRDIT_OPEN_STACK_ID;
 
@@ -129,6 +142,8 @@ export function attachOverlays({
       model = create3d(entry);
       models.set(entry.id, model);
       created += 1;
+      // Applied before load(): the tileset is built with the phone cache.
+      model.setPhoneMode?.(phoneMode);
       model.setOpacity(s.opacity);
       model.setCut(s.canopyFt);
       // Loading is async; the panel re-reads the status when it is done.
@@ -138,6 +153,7 @@ export function attachOverlays({
     }
     model.setOpacity(s.opacity);
     model.setCut(s.canopyFt);
+    model.setPhoneMode?.(phoneMode);
   }
 
   function syncLayers() {
@@ -216,6 +232,7 @@ export function attachOverlays({
         ? {
             canopyFt: state.get(entry.id).canopyFt,
             canopyOptionsFt: entry.model.canopyOptionsFt,
+            phoneMode,
             status: models.get(entry.id)?.status ?? 'idle',
             alignedM: models.get(entry.id)?.alignedM ?? 0,
           }
@@ -283,6 +300,15 @@ export function attachOverlays({
       evaluate();
       return true;
     },
+    /** Phone cache for every 3D build; both directions re-apply at once. */
+    setPhoneMode(on) {
+      const entry = order.find((e) => e.kind === '3d');
+      if (!entry) return false;
+      phoneMode = Boolean(on);
+      for (const model of models.values()) model.setPhoneMode?.(phoneMode);
+      evaluate();
+      return true;
+    },
     /**
      * 3D builds: fly the camera to the build. Close in, the Auto map would
      * switch to Google 3D within seconds and take the model away, so Byrd-IT
@@ -339,6 +365,7 @@ export function attachOverlays({
       onOpacity: (id, value) => api.setOpacity(id, value),
       onMove: (id, direction) => api.moveLayer(id, direction),
       onCanopy: (id, feet) => api.setCanopy(id, feet),
+      onPhone: (id, on) => api.setPhoneMode(on),
       onFlyTo: (id) => api.flyTo(id),
     });
 

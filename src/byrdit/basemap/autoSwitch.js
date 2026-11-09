@@ -442,6 +442,18 @@ export function attachBasemapSwitching({
     { ...BASEMAP_AUTO_STACK, available: true, unavailableReason: null },
   ];
 
+  // The Auto chip lights while the machine is in auto mode. The mode lives
+  // in the machine (Auto is a mode, never an active stack id), so the state
+  // carries it for the chip presentation; the decoration is removed on detach.
+  const originalGetState = controller.getState.bind(controller);
+  const ownGetState = Object.hasOwn(controller, 'getState')
+    ? controller.getState
+    : null;
+  controller.getState = (...args) => ({
+    ...originalGetState(...args),
+    autoMode: machine.mode,
+  });
+
   const camera = viewer?.camera;
   if (camera?.moveEnd?.addEventListener) {
     removers.push(
@@ -472,6 +484,8 @@ export function attachBasemapSwitching({
     else delete controller.setStack;
     if (ownGetStacks) controller.getStacks = ownGetStacks;
     else delete controller.getStacks;
+    if (ownGetState) controller.getState = ownGetState;
+    else delete controller.getState;
   };
   detach.evaluate = evaluate;
   return detach;

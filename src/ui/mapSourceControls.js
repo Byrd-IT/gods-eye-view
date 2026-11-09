@@ -27,7 +27,7 @@ export function createMapSourceControls({
       stack.degradedReason.trim() !== '';
     const name = stack?.shortLabel || stack?.label || t('MAP');
     return {
-      chips: mapStackChipModels(stacks, state.activeId),
+      chips: mapStackChipModels(stacks, state.activeId, state.autoMode === 'auto'),
       status: {
         text:
           state.status === 'switching'

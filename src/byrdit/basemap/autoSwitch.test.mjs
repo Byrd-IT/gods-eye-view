@@ -37,6 +37,22 @@ test('hysteresis: ENTER <= 5,000 m, LEAVE >= 8,000 m', () => {
   assert.deepEqual(m.step(8_000), { action: 'OPEN' });
 });
 
+test('the controller state carries the auto mode for the Auto chip', async () => {
+  const w = world();
+  await w.start();
+  assert.equal(w.controller.getState().autoMode, 'auto', 'auto by default');
+  await w.pick('photoreal');
+  assert.equal(w.controller.getState().autoMode, 'google', 'pinned Google');
+  await w.pick('esri-imagery');
+  assert.equal(w.controller.getState().autoMode, 'other', 'another map');
+  w.detach();
+  assert.equal(
+    'autoMode' in w.controller.getState(),
+    false,
+    'the state decoration is removed on detach',
+  );
+});
+
 test('dwell: no automatic switch within 5 s of the last one', () => {
   let t = 0;
   const m = createSwitchMachine({ now: () => t });

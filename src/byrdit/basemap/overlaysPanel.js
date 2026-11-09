@@ -1,6 +1,7 @@
 import { t } from '../../i18n/index.js';
 import { ensureMapLayersCard } from './mapLayersCard.js';
 import { syncChipGroup } from '../../ui/chipGroup.js';
+import { withCanopyLow } from './canopyOptions.js';
 import { createSlider } from '../../ui/slider.js';
 import {
   ALL_OVERLAY_GROUPS,
@@ -33,6 +34,9 @@ function loadNote(status) {
   return '';
 }
 
+/** What a 3D row says while phone mode (softer model to save memory) runs. */
+const phoneNote = t('Phone mode: softer model to save memory');
+
 function el(doc, tag, parent, { text, cls, attrs } = {}) {
   const node = doc.createElement(tag);
   if (text != null) node.textContent = text;
@@ -55,6 +59,7 @@ export function createOverlaysPanel({
   onOpacity,
   onMove = () => {},
   onCanopy = () => {},
+  onPhone = () => {},
   onFlyTo = () => {},
   embedded = false,
   grouped = false,
@@ -199,6 +204,7 @@ export function createOverlaysPanel({
     // shortcut to fly to the model. Rows of flat layers have neither.
     let cut = null;
     let note = null;
+    let phone = null;
     if (layer.kind === '3d') {
       cut = el(doc, 'div', row, {
         cls: 'gev-ov-cut',
@@ -208,6 +214,19 @@ export function createOverlaysPanel({
         cls: 'gev-ov-3d-note',
         attrs: { role: 'status' },
       });
+      // A standalone toggle (not a canopy chip): the user's phone switch for
+      // the softer 3D model that saves memory, on desktop machines too.
+      phone = el(doc, 'button', row, {
+        cls: 'data-toggle-chip gev-ov-phone',
+        attrs: {
+          type: 'button',
+          'aria-pressed': 'false',
+          title: phoneNote,
+        },
+      });
+      phone.addEventListener('click', () =>
+        onPhone(layer.id, !rows.get(layer.id)?.layer?.phoneMode),
+      );
     }
     box.addEventListener('change', () =>
       onEnabled(layer.id, Boolean(box.checked)),
@@ -218,6 +237,7 @@ export function createOverlaysPanel({
     rows.set(layer.id, {
       cut,
       note,
+      phone,
       row,
       box,
       range,
@@ -293,6 +313,7 @@ export function createOverlaysPanel({
       next.layers.forEach((layer, index) => {
         const row = rows.get(layer.id);
         if (!row) return;
+        row.layer = layer;
         const pct = Math.round(layer.opacity * 100);
         row.on = Boolean(layer.enabled);
         row.box.checked = row.on;
@@ -309,7 +330,9 @@ export function createOverlaysPanel({
               active: feet === null,
               title: t('Show the whole model, tree tops included'),
             },
-            ...(layer.canopyOptionsFt ?? []).map((ft) => ({
+            // The 60 ft low cut is offered even when the state was built
+            // from an older config that still carried [90, 120] only.
+            ...withCanopyLow(layer.canopyOptionsFt ?? []).map((ft) => ({
               id: String(ft),
               label: t('Cut above {ft} ft', { ft }),
               active: feet === ft,
@@ -335,12 +358,24 @@ export function createOverlaysPanel({
             }
             if (button.dataset.bound === '1') continue;
             button.dataset.bound = '1';
+            // Toggles read the row's LATEST state (the closure's `layer` is
+            // the update that first bound the chip).
             button.addEventListener('click', () => {
               if (chip === 'fly') onFlyTo(layer.id);
               else onCanopy(layer.id, chip === 'off' ? null : Number(chip));
             });
           }
-          row.note.textContent = loadNote(layer.status);
+          if (row.phone) {
+            row.phone.textContent = t('Phone mode');
+            row.phone.setAttribute(
+              'aria-pressed',
+              String(Boolean(layer.phoneMode)),
+            );
+          }
+          // The load outcome is transient; the phone mode note stays while
+          // the softer model is in force.
+          row.note.textContent =
+            loadNote(layer.status) || (layer.phoneMode ? phoneNote : '');
         }
         if (nextOrder.length === rows.size) {
           row.up.disabled = index === 0;

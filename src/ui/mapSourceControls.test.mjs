@@ -73,8 +73,25 @@ function fixture() {
     active,
     change,
     emit,
+    // The raw controller state, so tests can decorate it (autoMode).
+    get state() {
+      return state;
+    },
   };
 }
+
+test('auto mode on: the Auto chip lights even though no auto stack is active', () => {
+  const f = fixture();
+  f.state.autoMode = 'auto';
+  f.emit();
+  assert.ok(f.chip('osm'));
+  f.sources.unshift({ id: 'basemap-auto', label: 'Auto', available: true });
+  f.controls.refresh();
+  assert.deepEqual(f.active(), ['basemap-auto', 'osm']);
+  f.state.autoMode = 'google';
+  f.emit();
+  assert.deepEqual(f.active(), ['osm']);
+});
 
 test('initial presentation uses actual state and retains unavailable chip semantics', () => {
   const f = fixture();

@@ -12,6 +12,7 @@
 
 import { keySetupRequirementEnvVars } from './keySetupCore.mjs';
 import { t } from './i18n/index.js';
+import { BASEMAP_AUTO_STACK_ID } from './byrdit/basemap/stack.js';
 
 export const PRESENTED_MAP_STACK_IDS = Object.freeze([
   'basemap-auto',
@@ -38,9 +39,11 @@ export const PRESENTED_MAP_STACK_IDS = Object.freeze([
  * (degraded)" with the reason as its tooltip.
  * @param {{id: string, label: string, available?: boolean, requiresIon?: boolean, unavailableReason?: string|null, degradedReason?: string|null}} stack - Stack descriptor from `getStacks()`.
  * @param {string|null} activeId - Currently active stack id.
+ * @param {boolean} [autoMode] - True while the basemap Auto mode is on: the
+ *   Auto chip lights then (it is a mode, never an active stack id).
  * @returns {{id: string, label: string, text: string, available: boolean, degraded: boolean, degradedHint: string, active: boolean, requiresIon: boolean, requirement: string, unavailableHint: string, title: string, ariaLabel: string|null}}
  */
-export function mapStackChipModel(stack, activeId) {
+export function mapStackChipModel(stack, activeId, autoMode = false) {
   const available = stack?.available !== false;
   const label = String(stack?.label ?? stack?.id ?? '');
   const requiresIon = stack?.requiresIon === true;
@@ -68,14 +71,18 @@ export function mapStackChipModel(stack, activeId) {
     });
   else if (degraded)
     ariaLabel = t('{label} degraded: {hint}', { label, hint: degradedHint });
+  const id = String(stack?.id ?? '');
+  const autoChip = id === BASEMAP_AUTO_STACK_ID;
   return {
-    id: String(stack?.id ?? ''),
+    id,
     label,
     text: degraded ? `${label} (degraded)` : label,
     available,
     degraded,
     degradedHint,
-    active: !!stack?.id && stack.id === activeId,
+    // Auto is a mode, not a stack: it lights while auto mode is on, the
+    // others by the really-active stack id.
+    active: autoChip ? autoMode === true : id !== '' && id === activeId,
     requiresIon,
     // Dropdown parity: unavailable options read "<label> · ion key". A chip has
     // no room for that, so an ion-backed stack gets a compact badge; every
@@ -90,14 +97,15 @@ export function mapStackChipModel(stack, activeId) {
 /**
  * @param {Array<object>} stacks - `MapStackController.getStacks()` output.
  * @param {string|null} activeId - Currently active stack id.
+ * @param {boolean} [autoMode] - True while the basemap Auto mode is on.
  * @returns {Array<object>} One chip model per approved presentation id, in
  *   `PRESENTED_MAP_STACK_IDS` order; unlisted stacks stay outside this presentation.
  */
-export function mapStackChipModels(stacks, activeId) {
+export function mapStackChipModels(stacks, activeId, autoMode = false) {
   const stacksById = new Map(
     (Array.isArray(stacks) ? stacks : []).map((stack) => [stack?.id, stack]),
   );
   return PRESENTED_MAP_STACK_IDS.map((id) => stacksById.get(id))
     .filter(Boolean)
-    .map((stack) => mapStackChipModel(stack, activeId));
+    .map((stack) => mapStackChipModel(stack, activeId, autoMode));
 }

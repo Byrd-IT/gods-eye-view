@@ -77,7 +77,7 @@ test('composeOverlays: a 3D build is offered with model facts only; archive and 
   assert.deepEqual(layer.model, {
     groundM: 112,
     heightOffsetM: 0,
-    canopyOptionsFt: [90, 120],
+    canopyOptionsFt: [60, 90, 120],
     canopyDefaultFt: 90,
   });
   assert.equal(layer.name, THREE_D.name);
@@ -115,12 +115,71 @@ test('composeOverlays: 3D entries without a usable ground height, with a wrong f
       canopy_default_ft: 500,
     }),
   ).browser.layers.find((l) => l.id === THREE_D.id);
-  assert.deepEqual(wide.model.canopyOptionsFt, [90, 120]);
+  assert.deepEqual(wide.model.canopyOptionsFt, [60, 90, 120]);
   assert.equal(
     wide.model.canopyDefaultFt,
     null,
     'default must be one of the options',
   );
+});
+
+test('composeOverlays: the 60 ft canopy option is offered alongside the 90 ft default and 120, whatever the manifest supplies', () => {
+  // The live manifests supply [90, 120]; 60 ft joins them, default stays 90.
+  const supplied = composeOverlays(
+    publish({ ...THREE_D, canopy_options_ft: [90, 120] }),
+  ).browser.layers.find((l) => l.id === THREE_D.id);
+  assert.deepEqual(supplied.model.canopyOptionsFt, [60, 90, 120]);
+  assert.equal(supplied.model.canopyDefaultFt, 90);
+
+  // A manifest without canopy options gets the built-in [90, 120] plus 60.
+  const bare = composeOverlays(
+    publish({
+      ...THREE_D,
+      canopy_options_ft: undefined,
+      canopy_default_ft: undefined,
+    }),
+  ).browser.layers.find((l) => l.id === THREE_D.id);
+  assert.deepEqual(bare.model.canopyOptionsFt, [60, 90, 120]);
+  assert.equal(bare.model.canopyDefaultFt, null);
+
+  // 60 must survive the 4-option cap whatever else the manifest offers.
+  const many = composeOverlays(
+    publish({
+      ...THREE_D,
+      canopy_options_ft: [40, 70, 100, 110],
+      canopy_default_ft: null,
+    }),
+  ).browser.layers.find((l) => l.id === THREE_D.id);
+  assert.ok(many.model.canopyOptionsFt.includes(60), '60 ft kept');
+  assert.ok(many.model.canopyOptionsFt.length <= 4);
+
+  // The browser round-trip keeps the 60 ft option and the default.
+  const round = normalizeOverlays(
+    composeOverlays(publish(THREE_D)).browser,
+  ).layers.find((l) => l.id === THREE_D.id);
+  assert.deepEqual(round.model.canopyOptionsFt, [60, 90, 120]);
+  assert.equal(round.model.canopyDefaultFt, 90);
+});
+
+test('normalizeOverlays: a browser block that skips the proxy still gains the 60 ft canopy option', () => {
+  const raw = composeOverlays(publish(THREE_D)).browser.layers.find(
+    (l) => l.id === THREE_D.id,
+  );
+  const back = normalizeOverlays({
+    available: true,
+    layers: [
+      {
+        ...raw,
+        model: {
+          ...raw.model,
+          canopyOptionsFt: [90, 120],
+          canopyDefaultFt: 90,
+        },
+      },
+    ],
+  }).layers.find((l) => l.id === THREE_D.id);
+  assert.deepEqual(back.model.canopyOptionsFt, [60, 90, 120]);
+  assert.equal(back.model.canopyDefaultFt, 90);
 });
 
 test('normalizeOverlays: a 3D layer needs its exact tileset url and a model block', () => {
@@ -602,7 +661,7 @@ test('attachOverlays: a 3D build is OFF until toggled, then loads once with the 
   const row = () => detach.state().layers.find((l) => l.id === THREE_D.id);
   assert.equal(row().kind, '3d');
   assert.equal(row().canopyFt, 90);
-  assert.deepEqual(row().canopyOptionsFt, [90, 120]);
+  assert.deepEqual(row().canopyOptionsFt, [60, 90, 120]);
   detach.setEnabled(THREE_D.id, true);
   assert.equal(made.length, 1);
   assert.deepEqual(
@@ -775,20 +834,21 @@ test('panel: a 3D row has Full model / Cut above 90 ft / Cut above 120 ft / Fly 
   const cuts = panel.element.find((n) => /gev-ov-cut/.test(n.className));
   assert.equal(cuts.length, 1, 'only the 3D row has the cut control');
   const chips = cuts[0].children;
+  // The panel offers 60 ft even when the state still carries [90, 120] only.
   assert.deepEqual(
     chips.map((c) => c.dataset.chipId),
-    ['off', '90', '120', 'fly'],
+    ['off', '60', '90', '120', 'fly'],
   );
   assert.deepEqual(
     chips.map((c) => c.attrs['aria-pressed']),
-    ['false', 'true', 'false', undefined],
+    ['false', 'false', 'true', 'false', undefined],
   );
-  assert.match(chips[1].textContent, /90 ft/);
+  assert.match(chips[2].textContent, /90 ft/);
   const note = panel.element.find((n) => /gev-ov-3d-note/.test(n.className))[0];
   assert.match(note.textContent, /Loading/);
-  chips[2].click();
-  chips[0].click();
   chips[3].click();
+  chips[0].click();
+  chips[4].click();
   assert.deepEqual(calls, [
     ['cut', THREE_D.id, 120],
     ['cut', THREE_D.id, null],
@@ -799,7 +859,7 @@ test('panel: a 3D row has Full model / Cut above 90 ft / Cut above 120 ft / Fly 
   });
   assert.deepEqual(
     cuts[0].children.map((c) => c.attrs['aria-pressed']),
-    ['false', 'false', 'true', undefined],
+    ['false', 'false', 'false', 'true', undefined],
   );
   assert.equal(note.textContent, '');
   panel.update({
@@ -810,13 +870,13 @@ test('panel: a 3D row has Full model / Cut above 90 ft / Cut above 120 ft / Fly 
     layers: [layers[0], { ...layers[1], enabled: false, status: 'idle' }],
   });
   assert.equal(
-    cuts[0].children[3].disabled,
+    cuts[0].children[4].disabled,
     true,
     'Fly to waits for the layer to be on',
   );
   panel.update({ layers });
-  assert.equal(cuts[0].children[3].disabled, false);
-  chips[2].click();
+  assert.equal(cuts[0].children[4].disabled, false);
+  chips[3].click();
   assert.equal(calls.length, 4, 'chips are bound once, not once per update');
 });
 

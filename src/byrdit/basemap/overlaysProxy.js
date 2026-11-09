@@ -32,6 +32,7 @@
  *                                       a tile can be about 100 MB)
  */
 import { layerCap } from './layerCap.js';
+import { CANOPY_DEFAULT_LOW_FT, withCanopyLow } from './canopyOptions.js';
 
 export const OVERLAY_TILE_ROUTE =
   /^\/basemap\/overlay\/([a-z0-9][a-z0-9-]{0,31})\/(\d{1,2})\/(\d{1,8})\/(\d{1,8})\.(webp|mvt)$/;
@@ -105,12 +106,11 @@ function tileset3d(raw) {
   const groundM = num(raw?.ground_m, -500, 9000);
   if (groundM === null) return null;
   const offset = num(raw?.height_offset_m, -300, 300);
-  const options = (
-    Array.isArray(raw?.canopy_options_ft) ? raw.canopy_options_ft : [90, 120]
-  )
-    .map((v) => num(v, 10, CANOPY_MAX_FT))
-    .filter((v) => v !== null)
-    .slice(0, 4);
+  const options = withCanopyLow(
+    (Array.isArray(raw?.canopy_options_ft) ? raw.canopy_options_ft : [90, 120])
+      .map((v) => num(v, 10, CANOPY_MAX_FT))
+      .filter((v) => v !== null),
+  );
   const def = raw?.canopy_default_ft;
   return {
     groundM,
