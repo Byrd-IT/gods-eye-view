@@ -143,7 +143,7 @@ const schedulerUntouched = (f, label) => {
   assert.deepEqual(s.requestsByServer, {}, `${label}: no per-origin override`);
 };
 
-test('PHONE_LIMITS meet the owner bar: 64-96 SSE, 64MiB cache with no overflow, per-tileset pressure gate', () => {
+test('PHONE_LIMITS meet the owner bar: 64-96 SSE, 64MiB cache, no overflow, a per-tileset request cap', () => {
   assert.ok(
     PHONE_LIMITS.initialError >= 64 && PHONE_LIMITS.initialError <= 96,
     `coarse phone SSE ${PHONE_LIMITS.initialError} must sit in 64-96`,
@@ -153,16 +153,13 @@ test('PHONE_LIMITS meet the owner bar: 64-96 SSE, 64MiB cache with no overflow, 
     `refined phone SSE ${PHONE_LIMITS.phoneFineError} must stay in 64-96`,
   );
   assert.ok(
-    PHONE_LIMITS.pressureError >= 64 && PHONE_LIMITS.pressureError <= 96,
-    `pressed phone SSE ${PHONE_LIMITS.pressureError} must stay in 64-96`,
-  );
-  assert.ok(
     PHONE_LIMITS.phoneFineError < PHONE_LIMITS.initialError,
     'refined quality is sharper than the coarse start',
   );
-  assert.ok(
-    PHONE_LIMITS.pressureError > PHONE_LIMITS.initialError,
-    'pressure coarsens further than the coarse start',
+  assert.equal(
+    PHONE_LIMITS.pressureError,
+    undefined,
+    'pressure never coarsens quality: the request pause is the gate',
   );
   assert.equal(
     PHONE_LIMITS.fineError,
@@ -232,6 +229,63 @@ const timersOf = () => {
 
 const heap = (used) => () => ({ used, limit: HEAP_MAX });
 
+// A gate factory the layer can be pointed at: it hands the layer a
+// distinguishable resource plus a gate whose pause/destroy calls are logged.
+const gateSpy = () => {
+  const log = [];
+  const factory = () => {
+    const gate = {
+      resource: { __odmGated: true },
+      paused: false,
+      destroyed: false,
+      setPaused(p) {
+        this.paused = p === true;
+        log.push(['setPaused', this.paused]);
+      },
+      destroy() {
+        this.destroyed = true;
+        log.push(['destroyed']);
+      },
+    };
+    log.push(['created', { resource: gate.resource }]);
+    return { resource: gate.resource, gate };
+  };
+  return { factory, log };
+};
+
+// The wiring: ONLY a phone tileset fetches through the gate, and it is the
+// tileset's own resource chain that carries the gate (never the scheduler).
+test('phone wraps the tileset fetch in a per-tileset request gate; desktop gets the plain url and no gate', async () => {
+  const f = fake();
+  const g = gateSpy();
+  const layer = phoneLayer(f, { requestGateFactory: g.factory });
+  await layer.load();
+  const tileset = f.calls.added[0];
+  assert.equal(tileset.url.__odmGated, true, 'phone fetches through the gate');
+  assert.equal(layer._gate.paused, false, 'calm gate is open');
+  schedulerUntouched(f, 'phone with gate');
+  layer.destroy();
+  assert.equal(layer._gate, null);
+
+  const d = fake();
+  const dg = gateSpy();
+  const desktop = new Odm3dLayer({
+    Cesium: d.Cesium,
+    viewer: d.viewer,
+    entry: entry3d(),
+    requestGateFactory: dg.factory,
+  });
+  await desktop.load();
+  const dtileset = d.calls.added[0];
+  assert.equal(
+    dtileset.url,
+    entry3d().url,
+    'desktop fetches the plain tileset json: behaviour unchanged',
+  );
+  assert.equal(dg.log.length, 0, 'the desktop never creates a gate');
+  desktop.destroy();
+});
+
 // Cesium 1.138 facts under test: fromUrl called with `undefined` cache
 // options adopts the engine's 512 MiB + 512 MiB defaults, so the desktop
 // budget is passed explicitly and equals what the tileset shipped with.
@@ -281,83 +335,63 @@ test('phone: coarse first within the owner band, 64MiB cache with no overflow, t
 
 // The pressure stop never hides the tileset: Cesium's Cesium3DTileset.update
 // exits before the tile queue when show is false, so pending work and
-// loadProgress would strand and a pressed gate could never release. The stop
-// COARSENES the tileset itself (maximumScreenSpaceError -> the band's upper
-// edge): Cesium's next update recomputes the wanted-tile set, so new
-// requests stop by demand, already-queued work drains, and the page origin's
-// other users (imagery, terrain, the buildings tileset — every
+// loadProgress would strand and a pressed gate could never release. The
+// stop PAUSES NEW LOADS on the tileset's own request gate instead (the
+// real request flow lives in odmRequestGate.test.mjs): started requests
+// drain, queued ones wait with their Cesium Request intact, and the page
+// origin's other users (imagery, terrain, the buildings tileset — every
 // throttleByServer requester in 1.138) are untouched: no shared scheduler
-// state is read or written.
+// state is read or written, and quality never coarsens with pressure.
 
-test('phone: pressure coarsens the tileset into the band edge, never hides it, and never touches the scheduler', async () => {
+test('phone: queued-work pressure alone can never press the gate — gate-queued requests never drain while paused, so a queue press would deadlock the release', async () => {
   const f = fake();
+  const g = gateSpy();
   const { timers, tick } = timersOf();
-  const layer = phoneLayer(f, { timers });
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
   await layer.load();
   const tileset = f.calls.added[0];
-  tileset.tilesLoaded = true;
   tick();
-  tick();
-  tick();
-  assert.equal(tileset.show, true, 'ready and unpressed = drawn');
+  tileset.report(PHONE_LIMITS.inFlightCap + 41, 0);
+  assert.equal(layer._pressed, false, 'queue overload never presses');
   assert.equal(
-    tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.phoneFineError,
-    'settled: refined to 64',
-  );
-
-  tileset.report(PHONE_LIMITS.inFlightCap + 1, 0);
-  assert.equal(layer._pressed, true, 'over cap = pressure engaged');
-  assert.equal(
-    tileset.show,
-    true,
-    'never hidden: a hidden tileset would strand its queue',
+    layer._gate.paused,
+    false,
+    'and so never pauses the gate: the cap already bounds in-flight work',
   );
   assert.equal(
     tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.pressureError,
-    'coarsened to the band edge, still inside 64-96',
+    PHONE_LIMITS.initialError,
+    'quality never coarsens from pressure',
   );
-
-  tileset.report(PHONE_LIMITS.inFlightCap, 0);
-  assert.equal(layer._pressed, true, 'at the cap is still pressure');
-
-  tileset.report(
-    Math.round(PHONE_LIMITS.inFlightCap * PHONE_LIMITS.resumeFraction),
-    0,
-  );
-  assert.equal(layer._pressed, false, 'hysteresis release under the threshold');
-  assert.equal(
-    tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.phoneFineError,
-    'released back to the settled quality',
-  );
-  schedulerUntouched(f, 'pressed and released');
+  schedulerUntouched(f, 'queue overload without a press');
   layer.destroy();
 });
 
-test('phone: heap pressure coarsens, drops when the heap recovers — hysteresis, no deadlock even with pending work', async () => {
+test('phone: heap pressure pauses new loads on the tileset gate and lifts on recovery — hysteresis, no deadlock even with pending work', async () => {
   const f = fake();
+  const g = gateSpy();
   const { timers, map, tick } = timersOf();
   let used = Math.ceil(HEAP_MAX * PHONE_LIMITS.heapPressureFraction);
   const layer = phoneLayer(f, {
     timers,
     heapProbe: () => ({ used, limit: HEAP_MAX }),
+    requestGateFactory: g.factory,
   });
   await layer.load();
   const tileset = f.calls.added[0];
   tileset.tilesLoaded = true;
   tick();
   assert.equal(layer._pressed, true, 'heap at the pressure line = pressed');
+  assert.equal(layer._gate.paused, true, 'the gate closed: no new loads start');
   assert.equal(
     tileset.show,
     true,
-    'still visible and still updating: only demand coarsens',
+    'still visible and still updating',
   );
   assert.equal(
     tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.pressureError,
-    'coarsened to the band edge',
+    PHONE_LIMITS.initialError,
+    'quality untouched by pressure (still unrefined here)',
   );
   assert.equal(map.size > 0, true, 'monitor stays alive while pressed');
 
@@ -376,19 +410,23 @@ test('phone: heap pressure coarsens, drops when the heap recovers — hysteresis
     false,
     'heap recovered + queue under resume = released',
   );
+  assert.equal(layer._gate.paused, false, 'the gate reopens on release');
+  tick();
+  tick(); // three settled ticks refine the release
   assert.equal(
     tileset.maximumScreenSpaceError,
     PHONE_LIMITS.phoneFineError,
-    'settled quality back after release',
+    'refined quality back after release and the settle pass',
   );
   schedulerUntouched(f, 'heap pressure');
   layer.destroy();
 });
 
-test('phone: loaded-tile pressure coarsens and recovers under hysteresis', async () => {
+test('phone: loaded-tile pressure pauses the gate and recovers under hysteresis', async () => {
   const f = fake();
+  const g = gateSpy();
   const { timers, tick } = timersOf();
-  const layer = phoneLayer(f, { timers });
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
   await layer.load();
   const tileset = f.calls.added[0];
   tileset.tilesLoaded = true;
@@ -396,11 +434,12 @@ test('phone: loaded-tile pressure coarsens and recovers under hysteresis', async
     PHONE_LIMITS.loadedTileCap + 1;
   tick();
   assert.equal(layer._pressed, true, 'too many loaded tiles = pressure');
+  assert.equal(layer._gate.paused, true, 'gate closed while tile count is over');
   assert.equal(tileset.show, true, 'never hidden');
   assert.equal(
     tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.pressureError,
-    'coarsened inside the band',
+    PHONE_LIMITS.initialError,
+    'quality untouched',
   );
 
   tileset.statistics.numberOfTilesWithContentReady = Math.round(
@@ -408,37 +447,49 @@ test('phone: loaded-tile pressure coarsens and recovers under hysteresis', async
   );
   tileset.report(0, 0);
   assert.equal(layer._pressed, false, 'under the resume threshold = released');
+  assert.equal(layer._gate.paused, false, 'gate reopens');
+  tileset.tilesLoaded = true;
+  tick();
+  tick(); // three settled ticks refine the release
   assert.equal(
     tileset.maximumScreenSpaceError,
     PHONE_LIMITS.phoneFineError,
-    'refined back after release',
+    'refined after the settle pass post-release',
   );
   schedulerUntouched(f, 'loaded-tile pressure');
   layer.destroy();
 });
 
-test('phone: pressure coarsens during load, keeps the queue draining, ready show wins once calm', async () => {
+test('phone: pressure pauses during load, keeps the queue draining, ready show wins once calm', async () => {
   const f = fake();
   const { timers, map, tick } = timersOf();
-  const layer = phoneLayer(f, { timers });
+  const g = gateSpy();
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
   await layer.load();
   const tileset = f.calls.added[0];
-  tileset.report(PHONE_LIMITS.inFlightCap + 5, 2);
+
+  layer.heapProbe = () => ({
+    used: Math.ceil(HEAP_MAX * PHONE_LIMITS.heapPressureFraction),
+    limit: HEAP_MAX,
+  });
+  tick();
   assert.equal(layer._pressed, true, 'pressure engages even before ready');
+  assert.equal(layer._gate.paused, true, 'gate closed while still loading');
   assert.equal(
     tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.pressureError,
-    'coarsened while loading, too',
+    PHONE_LIMITS.initialError,
+    'quality untouched while loading',
   );
   tileset.tilesLoaded = true;
   tileset.report(0, 0);
+  layer.heapProbe = () => ({ used: HEAP_MAX * 0.5, limit: HEAP_MAX });
   for (let i = 0; i < 3; i++) tick();
   assert.equal(layer.status, 'ready');
   assert.equal(tileset.show, true, 'ready + calm = drawn, one code path');
   assert.equal(
-    tileset.maximumScreenSpaceError < PHONE_LIMITS.pressureError,
-    true,
-    'quality restored after release',
+    layer._gate.paused,
+    false,
+    'gate reopened once calm',
   );
   layer.destroy();
 });
@@ -454,16 +505,18 @@ test('phone: many phone layers together still write nothing shared; the last des
 
   const f2 = fake();
   f2.Cesium.RequestScheduler = f.Cesium.RequestScheduler;
-  const layer2 = phoneLayer(f2, { timers });
+  const g2 = gateSpy();
+  const layer2 = phoneLayer(f2, { timers, requestGateFactory: g2.factory });
   await layer2.load();
   const tileset2 = f2.calls.added[0];
-  tileset2.report(PHONE_LIMITS.inFlightCap + 1, 0); // layer2 pressed
+  layer2.heapProbe = () => ({
+    used: Math.ceil(HEAP_MAX * PHONE_LIMITS.heapPressureFraction),
+    limit: HEAP_MAX,
+  });
+  tick(); // layer2 pressed by heap, layer1 calm
   assert.equal(layer2._pressed, true);
-  assert.equal(
-    tileset2.maximumScreenSpaceError,
-    PHONE_LIMITS.pressureError,
-    'the pressed tileset coarsens; nothing shared changes',
-  );
+  assert.equal(layer2._gate.paused, true, 'the pressed layer pauses its OWN gate');
+  assert.equal(layer._pressed, false, 'the calm layer is not pressed');
   schedulerUntouched(f, 'two phone layers, one pressed');
 
   layer.destroy();
@@ -471,24 +524,26 @@ test('phone: many phone layers together still write nothing shared; the last des
   schedulerUntouched(f, 'after both destroyed');
 });
 
-test('phone can be allowed off: setPhoneMode(false) releases pressure and restores the desktop-like SSE; re-enabling goes coarse again', async () => {
+test('phone can be allowed off: setPhoneMode(false) lifts the gate pause and restores the desktop-like SSE; re-enabling goes coarse again', async () => {
   const f = fake();
+  const g = gateSpy();
   const { timers, tick } = timersOf();
-  const layer = phoneLayer(f, { timers });
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
   await layer.load();
   const tileset = f.calls.added[0];
-  tileset.report(PHONE_LIMITS.inFlightCap + 1, 0);
+  layer.heapProbe = () => ({
+    used: Math.ceil(HEAP_MAX * PHONE_LIMITS.heapPressureFraction),
+    limit: HEAP_MAX,
+  });
+  tick();
   assert.equal(layer._pressed, true, 'pressed');
-  assert.equal(
-    tileset.maximumScreenSpaceError,
-    PHONE_LIMITS.pressureError,
-    'coarsened',
-  );
+  assert.equal(layer._gate.paused, true, 'paused');
 
   assert.equal(layer.phoneActive, true);
   layer.setPhoneMode(false);
   assert.equal(layer.phoneActive, false);
   assert.equal(layer._pressed, false, 'pressure released');
+  assert.equal(layer._gate.paused, false, 'no stranding pause across modes');
   assert.equal(tileset.show, true, 'drawn again');
   assert.equal(
     tileset.maximumScreenSpaceError,
@@ -519,11 +574,14 @@ test('setPhoneMode on a failed layer changes nothing shared and cannot strand pr
       throw new Error('origin unavailable');
     },
   };
-  const layer = phoneLayer(boom, {});
+  const g = gateSpy();
+  const layer = phoneLayer(boom, { requestGateFactory: g.factory });
   await layer.load();
   assert.equal(layer.status, 'failed');
   assert.equal(layer._pressed, false, 'no pressure state survives the failure');
   assert.equal(layer.tileset, null);
+  assert.equal(layer._gate, null, 'the failed layer holds no gate');
+  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true, 'gate destroyed');
   assert.equal(layer.setPhoneMode(false) === undefined, true);
   layer.setPhoneMode(true);
   assert.equal(layer.phoneActive, true);
@@ -584,20 +642,29 @@ test('manual phoneMode values: explicit false beats a phone-shaped matchMedia', 
   forcedLayer.destroy();
 });
 
-test('phone: destroy during pressure stops the pump, removes the tileset; nothing left running, nothing shared left behind', async () => {
+test('phone: destroy under pressure stops the pump, kills the gate, removes the tileset; nothing left running, nothing shared left behind', async () => {
   const f = fake();
-  const { timers, map } = timersOf();
-  const layer = phoneLayer(f, { timers });
+  const g = gateSpy();
+  const { timers, map, tick } = timersOf();
+  const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
   await layer.load();
   const tileset = f.calls.added[0];
-  tileset.report(PHONE_LIMITS.inFlightCap + 1, 0);
+  layer.heapProbe = () => ({
+    used: Math.ceil(HEAP_MAX * PHONE_LIMITS.heapPressureFraction),
+    limit: HEAP_MAX,
+  });
+  tick();
   assert.equal(layer._pressed, true);
+  assert.equal(layer._gate.paused, true);
   layer.destroy();
   assert.equal(f.calls.removed[0], tileset);
   assert.equal(tileset.destroyed, true);
   assert.equal(map.size, 0, 'no timers left');
+  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true, 'gate destroyed');
+  assert.equal(layer._gate, null, 'no gate left behind');
   assert.equal(layer._pressed, true, 'flag is inert after destroy');
-  tileset.report(0, 0);
+  layer.heapProbe = () => ({ used: 0, limit: HEAP_MAX });
+  tick();
   assert.equal(f.calls.removed.length, 1, 'no revival after destroy');
   schedulerUntouched(f, 'destroy while pressed');
 });

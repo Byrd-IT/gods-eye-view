@@ -18,6 +18,8 @@
  *     the full model.
  */
 
+import { createOdmRequestGateResource } from './odmRequestGate.js';
+
 export const FT_TO_M = 0.3048;
 const MIB = 1024 * 1024;
 const MAX_ALIGN_M = 300;
@@ -37,41 +39,48 @@ export const DESKTOP_CACHE_OVERFLOW_BYTES = 256 * MIB;
  *   - the tileset runs on a 64 MiB cache with no overflow: under memory
  *     pressure Cesium spills, and spilled tiles reload — a phone is better
  *     off holding a smaller set steady;
- *   - under any of three pressures the tileset COARSENS to the band's
- *     upper edge instead of pausing requests:
- *       * queued work: pending + processing requests reported by
- *         `tileset.loadProgress`,
+ *   - every request this tileset makes is gated per tileset: a concurrency
+ *     cap (inFlightCap simultaneous requests, counting from hand-over into
+ *     Cesium's scheduler to completion) plus a pressure pause that starts
+ *     NO new loads while engaged. The mechanism is the Cesium-supported
+ *     Resource-subclass hook (the same one IonResource uses, see
+ *     odmRequestGate.js): only this tileset's own derived fetch chain passes
+ *     through it, so the shared RequestScheduler is never written and
+ *     nothing else on the page origin is affected.
+ *   - pressure does NOT coarsen anything and the pause IS the gate: under
  *       * heap: used/limit JS heap ratio from Chrome's performance.memory
- *         (or an injected `heapProbe` in tests),
- *       * loaded tiles: `tileset.statistics.numberOfTilesWithContentReady`.
- *     Release requires every signal back under its (lower) resume
- *     threshold, then quality returns. A coarser SSE is a per-tileset
- *     signal: Cesium's next update recomputes the wanted-tile set, so new
- *     requests stop, already-queued work drains, and NOTHING on the page's
- *     origin is touched. The scheduler pause is deliberately absent: 1.138's
- *     `requestsByServer[origin] = 0` refuses every `throttleByServer`
- *     request on the origin (Cesium3DTile.js, ImageryLayer.js,
- *     GlobeSurfaceTile.js, CesiumTerrainProvider.js), which would also
- *     strand the app's unrelated same-origin loaders: the optional
- *     `/basemap/...` buildings tileset, same-origin imagery and terrain.
+ *         (or an injected `heapProbe` in tests), or
+ *       * loaded tiles: `tileset.statistics.numberOfTilesWithContentReady`,
+ *     no new request starts; already-started requests drain, and queued
+ *     requests wait (their Request objects live on, so Cesium's own
+ *     out-of-view cancellation clears stale ones). Release requires every
+ *     signal back under its (lower) resume threshold, then fetching
+ *     resumes under the same cap. The queued-work count from
+ *     `tileset.loadProgress` is monitored but is deliberately NOT a
+ *     press trigger any more: with a gate, requests waiting in the gate
+ *     appear in Cesium's pending count and do not drain while the pause is
+ *     held, so a queue-signal press could never release — pressing on it
+ *     would deadlock the release path. The cap itself already bounds the
+ *     in-flight work the queue signal used to catch.
+ *     Quality is never a pressure lever (no SSE coarsening on press, no
+ *     restoration on release); the owner band 64-96 is only traversed by
+ *     the coarse(80) -> refined(64) settle pass and the Fly-to coarsening.
  *     Never `show = false` for pressure: Cesium 1.138's updateForPass
  *     returns before the tile queue when show is false, which strands
  *     pending work, loadProgress and the gate's own release path. With show
- *     kept true the update keeps running and the queue keeps reporting.
- *     The frame pump keeps ticking while pressed, so a pressed tileset
- *     always wakes up again: every release path (loadProgress event,
- *     monitor tick) re-evaluates through the same `_syncPressure` — there
- *     is no await, lock or promise anywhere between the pressure signal
- *     and the coarsening, so a deadlock is not reachable.
+ *     kept true the update keeps running, the queue keeps reporting, and
+ *     the pump keeps ticking — every press and release path re-evaluates
+ *     through the same `_syncPressure` with no await, lock or promise
+ *     pause, so a deadlock is not reachable.
  *   - the process-wide RequestScheduler is never written: desktop Cesium
  *     defaults (`maximumRequestsPerServer`, `requestsByServer`) stay as
  *     Cesium ships them, for phones too; the per-tileset cache, SSE and
  *     the gate below are the whole story.
  *
- * The `cacheBytes`/`maximumCacheOverflowBytes` pair is the tile *cache*
+ *   - the `cacheBytes`/`maximumCacheOverflowBytes` pair is the tile *cache*
  * budget, not a hard cap on the process: decoded GPU/upload buffers and other
  * features' use of the process are outside it. What stops runaway memory here
- * is the pressure gate (three signals above), which keeps the cache itself
+ * is the pressure gate (the two signals above), which keeps the cache itself
  * from ever spilling.
  */
 export const PHONE_MEDIA_QUERY = '(max-width: 820px)';
@@ -90,11 +99,6 @@ export const PHONE_LIMITS = {
   heapPressureFraction: 0.9, // used >= 90% of the JS heap = stop new requests
   heapResumeFraction: 0.8, // ... release again < 80% (hysteresis)
   loadedTileCap: 400,
-  // Pressed quality: the coarse edge of the owner band. A pressed tileset
-  // coarsens here so its next update wants fewer tiles; released, it
-  // returns to the quality it had (initialError, or phoneFineError once
-  // settled).
-  pressureError: 96,
 };
 
 /**
@@ -219,6 +223,7 @@ export class Odm3dLayer {
     deviceMemory = globalThis.navigator?.deviceMemory,
     heapProbe = null, // () => ({ used, limit }); default: performance.memory
     phoneLimits = PHONE_LIMITS,
+    requestGateFactory = createOdmRequestGateResource, // per-tileset request cap
   }) {
     this.timers = timers;
     this._pumpTimer = null;
@@ -238,6 +243,9 @@ export class Odm3dLayer {
         : phoneMode === true;
     this.tileset = null;
     this.status = 'idle'; // idle | loading | ready | failed
+    /** Per-tileset request gate (phone only): cap + pressure pause. */
+    this.requestGateFactory = requestGateFactory;
+    this._gate = null;
     this.alignedM = 0;
     this.cutFt = null;
     this.opacity = 1;
@@ -261,7 +269,24 @@ export class Odm3dLayer {
     this._loading = (async () => {
       try {
         const { Cesium, viewer, entry } = this;
-        const tileset = await Cesium.Cesium3DTileset.fromUrl(entry.url, {
+        // Phones fetch through a per-tileset gate (request cap + pressure
+        // pause) carried on the tileset's own Resource chain — never via
+        // shared scheduler state. A fake Cesium (or one without Resource)
+        // yields a null gate and the plain URL; the desktop URL is never
+        // wrapped: desktop behaviour is byte-for-byte what it was.
+        let tilesetUrl = entry.url;
+        if (this.phoneActive) {
+          try {
+            const gateBundle = this.requestGateFactory(Cesium, entry.url, {
+              maxInFlight: this.phoneLimits.inFlightCap,
+            });
+            this._gate = gateBundle?.gate ?? null;
+            if (gateBundle) tilesetUrl = gateBundle.resource;
+          } catch {
+            this._gate = null; // a broken gate falls back to the plain URL
+          }
+        }
+        const tileset = await Cesium.Cesium3DTileset.fromUrl(tilesetUrl, {
           // Photo meshes are heavy: stay coarse until the camera is close.
           // A phone starts even coarser and refines down after settling.
           maximumScreenSpaceError: this.phoneActive
@@ -308,8 +333,9 @@ export class Odm3dLayer {
         viewer.scene.requestRender?.();
       } catch (error) {
         // Nothing half-loaded may keep drawing, requesting frames or gate
-        // state behind: drop the tileset/pump/listeners AND the pressure
-        // state (a failed tileset can never settle or release the gate).
+        // state behind: drop the tileset/pump/listeners, the request gate
+        // AND the pressure state (a failed tileset can never settle or
+        // release the gate).
         this._releaseTileset();
         this._queued = 0;
         this._heapRatio = null;
@@ -396,14 +422,14 @@ export class Odm3dLayer {
   }
 
   /**
-   * The phone gate, the single funnel for all pressure signals. Pressing
-   * takes any one signal over its engage threshold; releasing requires the
-   * queue AND heap AND loaded tiles all back under their resume thresholds.
-   * The press is per-tileset coarsening (`pressureError`, still inside the
-   * owner band): Cesium's next update recomputes the wanted-tile set, so
-   * new requests stop by demand, already-queued work drains, and the page
-   * origin's other users (imagery, terrain, the buildings tileset) are
-   * untouched — no scheduler state is consulted or written. Synchronous
+   * The phone gate, the single funnel for the pressure signals. Pressing
+   * takes a signal (heap or loaded tiles) over its engage threshold;
+   * releasing requires both back under their resume thresholds. The press
+   * is a real per-tileset request pause: the tileset's own gate stops
+   * handing over or starting any new request, started requests drain, and
+   * the page origin's other users (imagery, terrain, the buildings
+   * tileset) are untouched — no scheduler state is consulted or written,
+   * and quality never coarsens with pressure. Synchronous
    * against the show gate — no awaits — so a deadlock is not reachable, and
    * the pump restarts on release (releases arrive via a loadProgress event
    * or the still-running monitor tick).
@@ -411,10 +437,7 @@ export class Odm3dLayer {
   _syncPressure() {
     if (!this.phoneActive || this.destroyed || !this.tileset) return;
     const f = this.phoneLimits;
-    const { inFlightCap, resumeFraction } = f;
-    const qOver =
-      this._queued >
-      (this._pressed ? Math.round(inFlightCap * resumeFraction) : inFlightCap);
+    const { resumeFraction } = f;
     const hOver =
       this._heapRatio !== null &&
       (this._pressed
@@ -428,25 +451,18 @@ export class Odm3dLayer {
         (this._pressed
           ? Math.round(f.loadedTileCap * resumeFraction)
           : f.loadedTileCap);
-    const pressed = qOver || hOver || tOver;
+    const pressed = hOver || tOver;
     if (pressed === this._pressed) return;
     this._pressed = pressed;
-    // The coarsening is the gate; the tileset itself never hides under
-    // pressure and the RequestScheduler is never touched.
-    const tileset = this.tileset;
     if (pressed) {
-      if (tileset.maximumScreenSpaceError < f.pressureError) {
-        // Coarsen to the band's edge; never fine-tune a coarser value down.
-        tileset.maximumScreenSpaceError = f.pressureError;
-        this.viewer.scene.requestRender?.();
-      }
+      // Stop NEW loads on this tileset; started requests drain, queued ones
+      // wait and can be cancelled by Cesium's own out-of-view path.
+      this._gate?.setPaused(true);
     } else {
-      // Back to the quality we had: refined if settled, else the coarse start.
-      tileset.maximumScreenSpaceError = this._refined
-        ? f.phoneFineError
-        : f.initialError;
-      if (!this._refined && this.status === 'ready') this._refine();
-      this._pump(); // finish the coarse -> fine pass
+      this._gate?.setPaused(false); // queued work resumes under the cap
+      // Finish the coarse -> fine pass if the monitor is not already on it
+      // (a release that arrived between settle ticks still gets its refine).
+      this._pump();
     }
   }
 
@@ -455,8 +471,9 @@ export class Odm3dLayer {
     if (!this.tileset || this.destroyed) return;
     // show=false must never be a pressure stop: Cesium's updateForPass
     // (1.138) returns before the tile queue with show false, which strands
-    // pending work and loadProgress. Pressure pauses requests on the
-    // scheduler instead; the tileset only hides while it is not ready.
+    // pending work and loadProgress. Pressure pauses new LOADS through the
+    // tileset's own request gate instead; the tileset only hides while it
+    // is not ready.
     const drawn = this.status === 'ready';
     if (this.tileset.show !== drawn) {
       this.tileset.show = drawn;
@@ -485,6 +502,7 @@ export class Odm3dLayer {
     this._refined = false;
     this._queued = 0;
     this._heapRatio = null;
+    this._gate?.setPaused(false); // no stranded pause across a mode switch
     if (this.tileset && !this.destroyed) {
       this.tileset.maximumScreenSpaceError = on
         ? this.phoneLimits.initialError
@@ -639,6 +657,14 @@ export class Odm3dLayer {
   /** Stop the frame pump, drop the listeners, take the tileset out of the scene. */
   _releaseTileset() {
     this._stopPump();
+    // The request gate dies with the tileset: queued (never started)
+    // requests are rejected, the scheduler event subscription is detached.
+    try {
+      this._gate?.destroy();
+    } catch {
+      /* a broken gate cannot hold up teardown */
+    }
+    this._gate = null;
     for (const off of this._offs) {
       try {
         off?.();
