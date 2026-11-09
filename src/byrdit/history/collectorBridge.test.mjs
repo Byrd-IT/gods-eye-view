@@ -925,3 +925,14 @@ test('preserves real collector metadata and drops invalid individual formats', a
     assert.equal(res.headers[name], undefined, name);
   }
 });
+
+test('accepts registered international source labels', async () => {
+  const value = 'GBFS Bike Itaú';
+  const fetchImpl = async () => ({
+    status: 200,
+    arrayBuffer: async () => Buffer.from('{}'),
+    headers: { get: (key) => (key === 'x-feed-source' ? value : null) },
+  });
+  const res = await call(bridge(fetchImpl).handler);
+  assert.equal(res.headers['x-feed-source'], value);
+});

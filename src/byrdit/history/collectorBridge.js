@@ -117,7 +117,7 @@ const SOURCE_LABELS = new Set([
 ]);
 
 const METADATA_FORMATS = Object.freeze({
-  'x-feed-source': /^[a-z0-9][a-z0-9 .\/()-]{0,63}$/i,
+  'x-feed-source': /^[\p{L}0-9][\p{L}0-9 .\/()_-]{0,63}$/u,
   'x-feed-cache': /^(?:HIT|MISS|STALE)$/,
   'x-feed-age-ms': /^[0-9]{1,15}$/,
   'x-feed-last-ok': /^[0-9]{1,15}$/,
