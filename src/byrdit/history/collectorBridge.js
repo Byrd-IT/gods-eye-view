@@ -1,4 +1,5 @@
 import { BRIDGE_FEEDS, enabledBridgeFeeds } from './feeds.js';
+import { flightsEsFallbackFromEnv } from './flightsEsFallback.js';
 import { createTransitTrails } from './feedsC.js';
 import { createWeatherImagery } from './weatherImagery.js';
 import {
@@ -51,6 +52,13 @@ import {
  * Owner N5: the server never clears a layer. It adds X-Feed-Grey-Until
  * (X-Feed-Stale-Since + GEV_STALE_GREY_MS) so the client decides grey vs
  * cleared on the server clock (staleness.js feedDisplayState).
+ *
+ * Approved Option 1 (`flightsEsFallback.js`): the flights feed can pass an
+ * injected ES-only reader. It is asked ONLY after the collector and the
+ * per-view last-good copy are both unavailable; its answer is served marked
+ * STALE + grey with X-Flight-Coverage naming the fallback. A reader failure
+ * or a null answer keeps the normal 503 no-snapshot — no fall-through, the
+ * upstream plugins are never reached.
  *
  * Every feed is OFF unless GEV_BRIDGE_<FEED>=1 (rollback flag). With every
  * flag off the plugin installs no middleware: behaviour is byte-identical to
@@ -173,6 +181,13 @@ export function createCollectorBridge({
   weatherServing,
   now = () => Date.now(),
   log = (line) => console.warn(line),
+  /**
+   * Approved Option 1 (flights): ES-only fallback reader
+   * (createFlightsEsFallback). read(url) -> {body, lastOkAt, coverage,
+   * truncated} | null; only asked when the collector and the per-view
+   * last-good copy are both unavailable.
+   */
+  esFallback = null,
 }) {
   const feed = BRIDGE_FEEDS[name];
   if (!feed) throw new Error(`unknown bridge feed: ${name}`);
@@ -431,6 +446,31 @@ export function createCollectorBridge({
     );
   }
 
+  /**
+   * Approved Option 1 (flights): a bounded ES read, always marked STALE +
+   * grey (Stale-Since = the newest position time): the collector is down, so
+   * the layer is degraded even when a recorded position is recent.
+   */
+  function serveEs(req, res, answer, target) {
+    const t = now();
+    const lastOkAt = Math.min(answer.lastOkAt, t);
+    const age = Math.max(0, t - lastOkAt);
+    const headers = {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      'X-Feed-Source': feed.source,
+      'X-Feed-Cache': 'STALE',
+      'X-Feed-Age-Ms': String(age),
+      'X-Feed-Last-OK': String(answer.lastOkAt),
+      'X-Feed-Stale-Since': String(lastOkAt),
+      'X-Feed-Reason': 'es_fallback',
+      'X-Feed-Bridge': 'es-fallback',
+      'X-Flight-Coverage': answer.coverage,
+    };
+    transition(target.collectorFeed, 'es-fallback', 'es_fallback');
+    send(req, res, 200, decorate(withGrey(headers), target), answer.body);
+  }
+
   return async function collectorBridge(req, res, next) {
     let url;
     try {
@@ -487,10 +527,19 @@ export function createCollectorBridge({
       return;
     }
     const key = target.collectorFeed;
-    const fallback = (reason) => {
+    const fallback = async (reason) => {
       const entry = cacheGet(key, cacheKeyOf(url));
-      if (entry) serveCache(req, res, reason, target, entry);
-      else serveNone(req, res, reason, target);
+      if (entry) return serveCache(req, res, reason, target, entry);
+      // Approved Option 1 (flights): ES-only fallback, still never next().
+      if (esFallback) {
+        try {
+          const answer = await esFallback.read(url);
+          if (answer) return serveEs(req, res, answer, target);
+        } catch {
+          /* ES unavailable: the 503 below, never the upstream plugin */
+        }
+      }
+      serveNone(req, res, reason, target);
     };
     try {
       const lease = feed.viewLease ? feed.viewLease(url) : null;
@@ -533,14 +582,14 @@ export function createCollectorBridge({
         send(req, res, 200, decorate(headers, target), result.body);
         return;
       }
-      fallback(result.reason);
+      await fallback(result.reason);
     } catch {
       // Never fall through to the upstream plugin, whatever failed here.
       if (res.headersSent) {
         res.end();
         return;
       }
-      fallback('bridge_error');
+      await fallback('bridge_error');
     }
   };
 }
@@ -604,6 +653,9 @@ export function collectorBridgePlugin({
   log,
 } = {}) {
   const config = bridgeConfigFromEnv(env);
+  // Approved Option 1 (flights): the ES-only reader when its flag + reader
+  // key are set; feeds without feed.esFallback never receive it.
+  const flightsFallback = flightsEsFallbackFromEnv(env, { now, log });
   const install = (server) => {
     /** Terminal routes already mounted in this install (one middleware each). */
     const terminalMounted = new Set();
@@ -619,6 +671,7 @@ export function collectorBridgePlugin({
         weatherServing,
         now,
         log,
+        esFallback: BRIDGE_FEEDS[name].esFallback ? flightsFallback : undefined,
       });
     for (const name of config.feeds) {
       const { route, terminal } = BRIDGE_FEEDS[name];

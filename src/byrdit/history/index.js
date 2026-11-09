@@ -60,6 +60,11 @@ export {
   normalizeViewBox,
 } from './flightView.js';
 export {
+  createFlightsEsFallback,
+  flightsEsFallbackConfigFromEnv,
+  flightsEsFallbackFromEnv,
+} from './flightsEsFallback.js';
+export {
   createHistoryApi,
   historyApiEnabled,
   historyApiPlugin,

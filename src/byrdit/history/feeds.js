@@ -279,6 +279,10 @@ export const BRIDGE_FEEDS = Object.freeze({
     viewLease: flightViewLease,
     cacheKey: flightsCacheKey,
     cacheEntries: 8,
+    // Approved Option 1: the ES-only fallback (flightsEsFallback.js) when
+    // the collector AND the per-view copy are unavailable; off unless
+    // GEV_BRIDGE_FLIGHTS_ES_FALLBACK=1 with the reader-key ES settings.
+    esFallback: true,
   }),
 });
 
