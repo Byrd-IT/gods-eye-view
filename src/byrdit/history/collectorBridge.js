@@ -113,6 +113,9 @@ const CANONICAL = Object.freeze({
 // Keep these labels aligned with collector src/feeds/transit.js and
 // src/feeds/gbfs.js; unknown labels are dropped rather than echoed.
 const SOURCE_LABELS = new Set([
+  // collector.js answers the static transit catalog (/v1/latest/transit-feeds)
+  // with this fixed label.
+  'collector registry',
   ...Object.values(BRIDGE_FEEDS).map((feed) => feed.source),
   ...TRANSIT_FEED_REGISTRY.map((feed) => `GTFS-RT ${feed.name}`),
   ...GBFS_CITY_REGISTRY.map((city) => `GBFS ${city.provider}`),

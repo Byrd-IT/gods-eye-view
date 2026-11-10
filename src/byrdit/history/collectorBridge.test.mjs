@@ -972,6 +972,7 @@ test('non-relayed error reasons never expose synthetic secrets in logs or fallba
 
 test('all registered source labels and collector formats are accepted', async () => {
   const sources = [
+    'collector registry',
     ...Object.values(BRIDGE_FEEDS).map((x) => x.source),
     ...TRANSIT_FEED_REGISTRY.map((x) => `GTFS-RT ${x.name}`),
     ...GBFS_CITY_REGISTRY.map((x) => `GBFS ${x.provider}`),
