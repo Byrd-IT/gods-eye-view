@@ -68,6 +68,7 @@ import {
   onKeyDown,
   onSceneDoubleClick,
   routeSceneDoubleClick,
+  routeTouchDoubleTap,
 } from './cockpitInput.js';
 import * as Cesium from 'cesium';
 
@@ -217,6 +218,8 @@ export class CockpitViewController {
     this._listen(this.entry, 'click', () => this.enter());
     // Double-clicking the followed track is a third way in.
     this._listenerRemovers.push(routeSceneDoubleClick.call(this));
+    // A touch screen has no double-click: a double-tap on it is the fourth.
+    this._listenerRemovers.push(routeTouchDoubleTap.call(this));
     // The readout's entry renders inside the Intel HUD, which may mount after
     // this controller, so its clicks are delegated.
     this._listen(document, 'click', (event) => {
@@ -426,8 +429,8 @@ export class CockpitViewController {
   onKeyDown(event) {
     return onKeyDown.call(this, event);
   }
-  onSceneDoubleClick(position) {
-    return onSceneDoubleClick.call(this, position);
+  onSceneDoubleClick(position, options) {
+    return onSceneDoubleClick.call(this, position, options);
   }
 
   handleSignalClick(event) {
