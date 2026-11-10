@@ -19,6 +19,14 @@ export const SUBJECT_TOUCH_RADIUS_PX = 44;
 /** A tap is a press that stays put and ends quickly. */
 export const TOUCH_TAP_MAX_TRAVEL_PX = 10;
 export const TOUCH_TAP_MAX_MS = 400;
+/**
+ * Some touch devices (Android Chrome, touch laptops) also send `dblclick`
+ * after the double-tap. It must not reach Cesium's stock handler, which
+ * untracks the aircraft the Cockpit has just entered on.
+ */
+export const TOUCH_ENTRY_DBLCLICK_GUARD_MS = 700;
+/** A press with no matching release for this long is discarded. */
+export const TOUCH_PRESS_STALE_MS = 2000;
 
 /**
  * Whether a double-click landed on the followed track's mark.
@@ -103,6 +111,12 @@ export function routeSceneDoubleClick() {
   const stock = handler.getInputAction?.(type) ?? null;
   const routed = (event) => {
     if (this.onSceneDoubleClick(event?.position)) return;
+    // The dblclick that follows a touch double-tap which just entered.
+    if (
+      Number.isFinite(this._touchEnteredAt) &&
+      performance.now() - this._touchEnteredAt <= TOUCH_ENTRY_DBLCLICK_GUARD_MS
+    )
+      return;
     stock?.(event);
   };
   handler.setInputAction(routed, type);
@@ -150,9 +164,13 @@ export function routeTouchDoubleTap(now = () => performance.now()) {
   };
   const onDown = (event) => {
     if (event.pointerType !== 'touch') return;
+    const at = now();
+    // A release that never reached the canvas must not hold the route shut.
+    for (const [id, press] of pressed)
+      if (at - press.at > TOUCH_PRESS_STALE_MS) pressed.delete(id);
     // A second finger makes it a pinch or a pan, never a tap pair.
     if (pressed.size > 0) lastTap = null;
-    pressed.set(event.pointerId, { ...local(event), at: now(), travel: 0 });
+    pressed.set(event.pointerId, { ...local(event), at, travel: 0 });
   };
   const onMove = (event) => {
     const press = pressed.get(event.pointerId);
@@ -183,7 +201,8 @@ export function routeTouchDoubleTap(now = () => performance.now()) {
     const doubled = isTouchDoubleTap(lastTap, tap);
     lastTap = doubled ? null : tap;
     if (!doubled) return;
-    this.onSceneDoubleClick(tap, { radiusPx: SUBJECT_TOUCH_RADIUS_PX });
+    if (this.onSceneDoubleClick(tap, { radiusPx: SUBJECT_TOUCH_RADIUS_PX }))
+      this._touchEnteredAt = performance.now();
   };
   const onCancel = (event) => {
     pressed.delete(event.pointerId);
