@@ -12,7 +12,6 @@
 
 import { keySetupRequirementEnvVars } from './keySetupCore.mjs';
 import { t } from './i18n/index.js';
-import { BASEMAP_AUTO_STACK_ID } from './byrdit/basemap/stack.js';
 
 export const PRESENTED_MAP_STACK_IDS = Object.freeze([
   'basemap-auto',
@@ -72,7 +71,7 @@ export function mapStackChipModel(stack, activeId, autoMode = false) {
   else if (degraded)
     ariaLabel = t('{label} degraded: {hint}', { label, hint: degradedHint });
   const id = String(stack?.id ?? '');
-  const autoChip = id === BASEMAP_AUTO_STACK_ID;
+  const autoChip = id === 'basemap-auto';
   return {
     id,
     label,
