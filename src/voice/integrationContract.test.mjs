@@ -716,15 +716,17 @@ test('without an operator Overpass the prompt never offers place search', () => 
 test('the Realtime prompt stays within its size budget', () => {
   // Byrd-IT fork: characters the fork adds on top of upstream's ceiling (the
   // same constant is inlined in pointAndAsk.test.mjs). 11_358 -> 11_500: the
-  // control_droneplan timedIntervalS option (about 130 chars).
+  // control_droneplan timedIntervalS option (about 130 chars). Upstream raised
+  // its own ceiling 55,500 -> 56,500 for show_street_level (aa95c2c2); the fork
+  // allowance stays 11,500 on top (measured 67,157 default, under 68,000).
   const BYRDIT_FORK_PROMPT_CHARS = 11_500;
-  // Instructions plus tool schemas, in characters, under the same 55,500
+  // Instructions plus tool schemas, in characters, under the same 56,500
   // ceiling as the deixis prompt lint. Voice geometry adds resolve_area,
   // find_imagery and the analyst area scopes (osm_query only with an
-  // operator Overpass).
+  // operator Overpass); show_street_level adds its tool and routing rule.
   const size = (overpass) =>
     realtimeInstructions(undefined, { overpass }).length +
     JSON.stringify(realtimeTools({ overpass })).length;
-  assert.ok(size(false) <= 55_500 + BYRDIT_FORK_PROMPT_CHARS, `default prompt ${size(false)} chars`);
-  assert.ok(size(true) <= 55_500 + BYRDIT_FORK_PROMPT_CHARS, `with Overpass ${size(true)} chars`);
+  assert.ok(size(false) <= 56_500 + BYRDIT_FORK_PROMPT_CHARS, `default prompt ${size(false)} chars`);
+  assert.ok(size(true) <= 56_500 + BYRDIT_FORK_PROMPT_CHARS, `with Overpass ${size(true)} chars`);
 });

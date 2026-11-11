@@ -343,23 +343,15 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
     tool('annotate_map').annotations.items.properties.target.description,
     /"pointer"/,
   );
-  // Budget: the whole Realtime prompt (instructions + tools), measured in
-  // characters. It was 56,308 after the area/imagery/OSM merge; stating each
-  // policy once (WHERE precedence, AREAS routing, AFTER TOOLS speech) brought
-  // it to 51,646. Voice geometry (resolve_area, find_imagery, osm_query and
-  // the analyst area scopes) raised the ceiling to 55,500; tightening the
-  // AREAS rule and the area tool descriptions left it at 55,103 as measured
-  // below (every tool, osm_query included); main's Sea Marks and Ski Pistes
-  // layers bring it to 55,210, and the tilt pitchDeg argument (with its -45
-  // default) and main's cockpit entry rule to 55,339. integrationContract's
-  // Overpass prompt is the tightest, at 55,499 (1 under). A new tool or rule
-  // has to fit under this ceiling.
+  // Budget: the whole Realtime prompt (instructions + every tool, osm_query
+  // included), in characters. Every session pays for it in latency and cost,
+  // so a new tool or rule has to fit under this ceiling or earn a raise.
   const size = instructions.length + JSON.stringify(GEV_REALTIME_TOOLS).length;
-  // Byrd-IT fork: upstream's 55,500 ceiling plus the fork's additions (USGS
+  // Byrd-IT fork: upstream (aa95c2c2) 56,500 ceiling plus the fork's additions (USGS
   // water layers, byrdit-open/basemap-auto stacks, the control_history,
   // control_sky, control_imagery and control_droneplan tools with their routing
   // and speaking rules: 11,358 characters, as pinned before the 73c14ac7 merge).
-  assert.ok(size <= 55_500 + 11_500, `prompt size ${size}`);
+  assert.ok(size <= 56_500 + 11_500, `prompt size ${size}`);
 });
 
 test('after-tool speech allows returned items to answer requested lists and rankings', () => {

@@ -80,7 +80,10 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Timed-shot interval, any number above 0 up to 3600, no floor in the
     // schema beyond the handler's rule); status reports speedMph, captureMode
     // and the same.
-    '194f99660091562fedcd3dd1cb5b5391dc7dc644040016c240aef0aaba7e6963',
+    // aa95c2c2: show_street_level (query, latitude, longitude, provider, referent;
+    // no pattern or other Unicode-property construct) adds exactly one tool; the
+    // pin before it, 194f9966..., is reproduced when that tool is left out.
+    'e2f28fc8e38ce38f1e3a51d1c6f67574f5d6ead9704a1e67610d0761ff0628cb',
   );
 });
 
@@ -181,6 +184,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'resolve_area',
         'find_imagery',
         'osm_query',
+        'show_street_level',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by
