@@ -158,7 +158,8 @@ export class OdmRequestGate {
       promise = entry.baseFetch(entry.resource, entry.options);
     } catch (error) {
       this.inFlight--;
-      this.pump();
+      // The caller's pump continues iteratively; recursive pump here can
+      // overflow the stack on a burst of synchronous request failures.
       entry.reject(error);
       return true;
     }

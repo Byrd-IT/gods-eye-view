@@ -428,6 +428,24 @@ test('OdmRequestGate unit behavior: cap, ordering, refuse-requeue and destroy', 
   );
 });
 
+test('synchronous request failures drain a large queue without recursive pumping', async () => {
+  const gate = new OdmRequestGate({ maxInFlight: 1 });
+  gate.setPaused(true);
+  const failure = () => {
+    throw new Error('synthetic failure');
+  };
+  const pending = Array.from({ length: 6000 }, () =>
+    gate.run({ request: { cancelled: false } }, {}, failure),
+  );
+  const settled = Promise.allSettled(pending);
+  gate.setPaused(false);
+  const results = await settled;
+  assert.equal(results.length, 6000);
+  assert.ok(results.every((result) => result.status === 'rejected'));
+  assert.equal(gate.queued, 0);
+  gate.destroy();
+});
+
 test('scheduler refusals never hot-loop the pump: the re-queued entry is retried on the NEXT trigger, not in the same pass', async () => {
   const gate = new OdmRequestGate({ maxInFlight: 4 });
   let attempts = 0;
