@@ -193,6 +193,8 @@ export class OdmRequestGate {
     const queued = this._queue;
     this._queue = [];
     for (const entry of queued) {
+      // Cesium identifies cancellation from the Request, not this error.
+      if (entry.request) entry.request.cancelled = true;
       entry.reject(OdmRequestGate.cancelledError());
     }
     this._detachCompletedEvent?.();

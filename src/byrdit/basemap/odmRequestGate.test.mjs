@@ -386,9 +386,11 @@ test('OdmRequestGate unit behavior: cap, ordering, refuse-requeue and destroy', 
   // Destroy rejects everything queued and refuses to start more.
   const dying = new OdmRequestGate({ maxInFlight: 1 });
   const started = Promise.resolve(dying.run(mk('k'), {}, baseFetch));
-  const queued = dying.run(mk('m'), {}, baseFetch);
+  const queuedResource = mk('m');
+  const queued = dying.run(queuedResource, {}, baseFetch);
   dying.destroy();
   await assert.rejects(() => queued, { isCancelledRequest: true });
+  assert.equal(queuedResource.request.cancelled, true, 'Cesium sees queued teardown as cancellation');
   assert.equal(dying.destroyed, true);
   await started;
   await assert.rejects(() =>
