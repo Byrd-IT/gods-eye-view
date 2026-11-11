@@ -25,10 +25,16 @@
  * (at most one per minute per route), even when the proxy marks it a replay: an
  * outage must read as failed polls, not as a gap.
  */
+import { gunzipSync } from 'node:zlib';
+
 export const SKIP = Symbol('history-tee-skip');
 export const FAILED = Symbol('history-tee-failed');
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
+// A gzip stream starts with these two bytes. Some providers (the OpenSky
+// snapshot cache) hand a pre-compressed body to writeHead({...}), which
+// res.getHeader() cannot see, so the body is checked as well as the header.
+const GZIP_MAGIC = Buffer.from([0x1f, 0x8b]);
 const MAX_REMEMBERED_ROUTES = 128;
 const FAILURE_EVERY_MS = 60_000;
 
@@ -74,7 +80,7 @@ export function createHistoryTee({
     recorder.tapFailure(route.feed, { t: Number.isSafeInteger(t) ? t : now });
   }
 
-  function handleResponse(route, context, routeKey, chunks, res) {
+  function handleResponse(route, context, routeKey, chunks, res, encoded) {
     const status = res.statusCode;
     if (route.observe && status !== 200) return;
     if (status === 429 || status >= 500) {
@@ -86,9 +92,15 @@ export function createHistoryTee({
     // is copied and parsed.
     if (route.isReplay?.(res)) return;
     const key = route.dedupeKey?.(context, { res }) ?? routeKey;
-    const body = Buffer.concat(chunks);
+    let body = Buffer.concat(chunks);
     let parsed;
     try {
+      // Upstream compresses cached snapshots for clients that accept gzip; the
+      // recorder reads the plain payload (bounded by the same body cap). Any
+      // other encoding is not read.
+      const gzipped = body.subarray(0, 2).equals(GZIP_MAGIC);
+      if (encoded && encoded !== 'identity' && !gzipped) return;
+      if (gzipped) body = gunzipSync(body, { maxOutputLength: maxBodyBytes });
       const text = body.toString('utf8');
       parsed = route.parse === 'text' ? text : JSON.parse(text);
     } catch {
@@ -189,8 +201,8 @@ export function createHistoryTee({
         setImmediate(() => {
           try {
             const encoded = res.getHeader?.('content-encoding');
-            if (overflow || (encoded && encoded !== 'identity')) return;
-            handleResponse(route, context, key, chunks, res);
+            if (overflow) return;
+            handleResponse(route, context, key, chunks, res, encoded);
           } catch {
             // History must never change what a client gets, and the error text
             // can hold payload content, so nothing is logged here.

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { gzipSync } from 'node:zlib';
 import { createHistoryTee, FAILED, SKIP } from './tee.js';
 import { request } from './feedFixtures/http.mjs';
 
@@ -134,6 +135,51 @@ describe('history tee', () => {
       res.setHeader('Content-Encoding', 'gzip');
       res.writeHead(200);
       res.end('{"a":1}');
+    });
+    assert.equal(recorder.calls.length, 0);
+  });
+
+  it('records a gzip body (upstream compresses the cached OpenSky snapshot) and passes the bytes through', async () => {
+    const recorder = recorderStub();
+    const tee = createHistoryTee({ recorder, routes: [route()] });
+    const gz = gzipSync(Buffer.from(JSON.stringify({ a: [1, 2] })));
+    // The header goes through writeHead(obj), which res.getHeader() cannot see,
+    // exactly as server/providers/aircraft/opensky.js sends it.
+    await request(tee, '/api/x', (req, res) => {
+      res.writeHead(200, { 'Content-Encoding': 'gzip' });
+      res.end(gz);
+    });
+    assert.deepEqual(
+      recorder.calls.map((c) => c.kind),
+      ['tap'],
+    );
+    assert.deepEqual(recorder.calls[0].payload, { a: [1, 2] });
+  });
+
+  it('records a gzip body announced through setHeader too', async () => {
+    const recorder = recorderStub();
+    const tee = createHistoryTee({ recorder, routes: [route()] });
+    const gz = gzipSync(Buffer.from('{"b":3}'));
+    await request(tee, '/api/x', (req, res) => {
+      res.setHeader('Content-Encoding', 'gzip');
+      res.writeHead(200);
+      res.end(gz);
+    });
+    assert.deepEqual(recorder.calls[0]?.payload, { b: 3 });
+  });
+
+  it('does not inflate past the body cap (a small gzip that expands is skipped)', async () => {
+    const recorder = recorderStub();
+    const tee = createHistoryTee({
+      recorder,
+      routes: [route()],
+      maxBodyBytes: 4096,
+    });
+    const gz = gzipSync(Buffer.from(JSON.stringify({ a: 'x'.repeat(100000) })));
+    assert.ok(gz.length < 4096);
+    await request(tee, '/api/x', (req, res) => {
+      res.writeHead(200, { 'Content-Encoding': 'gzip' });
+      res.end(gz);
     });
     assert.equal(recorder.calls.length, 0);
   });
