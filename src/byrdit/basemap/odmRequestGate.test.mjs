@@ -419,8 +419,12 @@ test('OdmRequestGate unit behavior: cap, ordering, refuse-requeue and destroy', 
   );
   assert.equal(dying.destroyed, true);
   await started;
-  await assert.rejects(() =>
-    dying.run(mk('n'), {}, baseFetch).then(() => new Error('must not run')),
+  const afterDestroy = mk('n');
+  await assert.rejects(() => dying.run(afterDestroy, {}, baseFetch));
+  assert.equal(
+    afterDestroy.request.cancelled,
+    true,
+    'late requests are cancelled for Cesium too',
   );
 });
 

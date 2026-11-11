@@ -82,6 +82,7 @@ export class OdmRequestGate {
       this.destroyed ||
       (request !== undefined && request.cancelled === true)
     ) {
+      if (request) request.cancelled = true;
       return Promise.reject(OdmRequestGate.cancelledError());
     }
     return new Promise((resolve, reject) => {
