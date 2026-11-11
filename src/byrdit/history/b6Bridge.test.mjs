@@ -578,7 +578,10 @@ test('R1: GEV_BRIDGE_FIRMS off leaves every /api/firms path to firmsProxy (uncha
   });
   assert.equal(plugins.length, 1);
   const request = chain([...plugins, firmsProxy()]);
-  // the area poll path: firmsProxy tries all four sources (network mocked)
+  // the area poll path: firmsProxy tries every source it polls (network
+  // mocked). Upstream dropped VIIRS_SNPP_NRT (NASA stopped delivering Suomi
+  // NPP on 2026-11-02), so firmsProxy asks 3 sources: NOAA-20, NOAA-21, MODIS.
+  const FIRMS_POLLED_SOURCES = 3;
   for (const [method, path] of [
     ['GET', '/api/firms'],
     ['GET', '/api/firms/x'],
@@ -588,7 +591,11 @@ test('R1: GEV_BRIDGE_FIRMS off leaves every /api/firms path to firmsProxy (uncha
     const r = await request(path, method);
     assert.equal(r.statusCode, 502, `${method} ${path}`);
     assert.equal(r.headers['x-feed-bridge'], undefined);
-    assert.deepEqual(blocked, Array(4).fill(FIRMS_ORIGIN), `${method} ${path}`);
+    assert.deepEqual(
+      blocked,
+      Array(FIRMS_POLLED_SOURCES).fill(FIRMS_ORIGIN),
+      `${method} ${path}`,
+    );
   }
   blocked.length = 0;
   const status = await request('/api/firms/status');

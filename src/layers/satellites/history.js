@@ -29,8 +29,14 @@ export function createHistory({ state: layerState, parts = null }) {
 
   const noradOf = (satrec) => noradIdFromSatnum(satrec.satnum);
 
-  /** The tracked satellite's dot is drawn by its entity (tracking.js). */
-  const drawnByPoint = (id) => id !== layerState._trackedNorad;
+  /**
+   * Whether a satellite's point shows: its dot is drawn by its entity when it
+   * is tracked (tracking.js), and a hidden class stays hidden. `parts` may lack
+   * the controls (tests), where every class shows.
+   */
+  const drawnByPoint = (id) =>
+    id !== layerState._trackedNorad &&
+    parts?.controls?._classVisible?.(id) !== false;
 
   /** ids with no recorded element set at the history time (never drawn) */
   const hidden = () => (layerState._historyHidden ??= new Set());

@@ -55,6 +55,11 @@ export function applyOrbitPathAlpha(path, factor) {
 /**
  * Who and what a catalog entry is: class, COSPAR id, TLE, owner, operator.
  * Fixed for the entry's life, so it is worked out once and kept on it.
+ *
+ * Byrd-IT fork: the catalog is fed by GP CSV, which has no TLE lines, so `tle`
+ * stays null for those entries (no TLE card) and the COSPAR id is the GP
+ * OBJECT_ID the catalog keeps as `cosparId`. A catalog entry that does carry
+ * `line1`/`line2` still gets both.
  * @param {number} noradId
  * @param {object} sat Catalog entry.
  */
@@ -66,7 +71,8 @@ function satelliteIdentity(noradId, sat) {
   const epochMs = tleEpochMs(sat.satrec);
   const identity = Object.freeze({
     satelliteClass,
-    cosparId: sat.satcat?.cosparId || cosparIdFromTleLine1(sat.line1),
+    cosparId:
+      sat.satcat?.cosparId || sat.cosparId || cosparIdFromTleLine1(sat.line1),
     tle:
       sat.line1 && sat.line2 && epochMs !== null
         ? Object.freeze({ line1: sat.line1, line2: sat.line2, epochMs })

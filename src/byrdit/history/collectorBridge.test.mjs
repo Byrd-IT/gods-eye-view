@@ -995,8 +995,15 @@ test('all registered source labels and collector formats are accepted', async ()
     ].map((value) => ['x-flight-coverage', value]),
   ];
   for (const [name, value] of cases) {
-    const fetchImpl = async () =>
-      new Response('{}', { status: 200, headers: { [name]: value } });
+    // A plain object, not `new Response(...)`: the fetch Headers class only
+    // takes ByteString values (code points <= 255), so it cannot carry a
+    // registered label with a character like the n-acute of "Poznań" or the
+    // s-comma of "Iași". The bridge must still accept every catalog label.
+    const fetchImpl = async () => ({
+      status: 200,
+      arrayBuffer: async () => Buffer.from('{}'),
+      headers: { get: (key) => (key === name ? value : null) },
+    });
     const res = await call(bridge(fetchImpl).handler);
     assert.equal(res.headers[name], value, `${name}: ${value}`);
   }

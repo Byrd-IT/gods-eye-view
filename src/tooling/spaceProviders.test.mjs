@@ -449,11 +449,20 @@ test('SATCAT is proxied per core group for a day, separately from TLEs, and serv
   assert.equal(stale.headers['x-satcat-cache'], 'STALE-ERROR');
 });
 
-test('a SATCAT failure never holds off the TLEs, but CelesTrak throttling holds off both', async (t) => {
+test('a SATCAT failure halts every CelesTrak request, reported once, with no timed cooldown', async (t) => {
+  // Byrd-IT fork: upstream's test said a bad SATCAT answer never holds off the
+  // TLE refresh and only a 429 holds off both, for a Retry-After window. The
+  // fork has no timed cooldown: CelesTrak's usage policy is stop-and-report,
+  // so ANY failed request (SATCAT included) latches ONE halt that covers every
+  // feed until an operator deletes celestrak-HALT.json.
   isolateDisk(t);
-  t.mock.method(console, 'warn', () => {});
-  const tle =
-    'ISS (ZARYA)\n1 25544U 98067A   24001.00000000  .00016717  00000-0  10270-3 0  9001\n2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.50000000    04\n';
+  const disk = haltableDisk(t);
+  const warnings = [];
+  t.mock.method(console, 'warn', (line) => warnings.push(String(line)));
+  t.mock.method(console, 'error', () => {});
+  t.mock.method(console, 'info', () => {});
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   let satcatAnswer = () => new Response('<html>not csv</html>');
   const fetched = [];
   t.mock.method(globalThis, 'fetch', async (url) => {
@@ -461,26 +470,71 @@ test('a SATCAT failure never holds off the TLEs, but CelesTrak throttling holds 
     fetched.push(parsed.pathname);
     return parsed.pathname.startsWith('/satcat/')
       ? satcatAnswer()
-      : new Response(tle);
+      : new Response(GP_CSV);
   });
+  const haltFile = () =>
+    [...disk].find(([file]) => /celestrak-HALT\.json$/.test(file))?.[1];
+  const haltReports = () =>
+    warnings.filter((line) => line.includes('ALL CelesTrak requests HALTED'));
   const request = install(celestrakProxy());
-  assert.equal((await request('/api/celestrak-satcat', '/sar')).status, 502);
-  const starlink = await request('/api/celestrak', '/starlink');
-  assert.equal(starlink.status, 200, 'the TLE feed is not cooling down');
-  assert.equal(starlink.body, tle);
+  assert.equal(haltFile(), undefined, 'no halt before a failure');
 
-  // A 429 is CelesTrak throttling this client: every feed waits it out.
+  // A SATCAT answer that is not SATCAT CSV is a failure like any other.
+  const failed = await request('/api/celestrak-satcat', '/sar');
+  assert.equal(failed.status, 502);
+  assert.equal(failed.headers['x-satcat-cache'], 'NONE');
+  assert.deepEqual(fetched, ['/satcat/records.php']);
+  const latch = JSON.parse(haltFile());
+  assert.equal(latch.halted, true);
+  assert.equal(latch.group, 'satcat-sar');
+  assert.equal(latch.reason, 'upstream request failed');
+  assert.match(latch.body, /not csv/);
+  assert.equal(haltReports().length, 1, 'reported once');
+
+  // Unlike upstream, the TLE feed is held off too (any group, either feed).
+  const starlink = await request('/api/celestrak', '/starlink');
+  assert.equal(starlink.status, 503);
+  assert.equal(starlink.headers['x-tle-cache'], 'HALTED');
+  const other = await request('/api/celestrak-satcat', '/visual');
+  assert.equal(other.status, 503);
+  assert.equal(other.headers['x-satcat-cache'], 'HALTED');
+  assert.deepEqual(fetched, ['/satcat/records.php'], 'nothing went upstream');
+
+  // No timed cooldown: the halt does not expire by itself.
+  now += 7 * 24 * 3600_000;
+  assert.equal((await request('/api/celestrak', '/geo')).status, 503);
+  assert.equal(fetched.length, 1, 'still halted a week later');
+  assert.equal(haltReports().length, 1, 'still reported once');
+
+  // An operator clears the latch: both feeds are asked again at once.
+  disk.delete(
+    [...disk.keys()].find((file) => /celestrak-HALT\.json$/.test(file)),
+  );
+  const fresh = await request('/api/celestrak', '/starlink');
+  assert.equal(fresh.status, 200);
+  assert.equal(fresh.headers['x-tle-cache'], 'MISS');
+  assert.equal(fresh.body, GP_CSV);
+  assert.equal(fetched.length, 2);
+
+  // A 429 (throttling) halts the same way: its Retry-After is not a timer.
   satcatAnswer = () =>
     new Response('slow down', {
       status: 429,
       headers: { 'Retry-After': '120' },
     });
-  const throttled = install(celestrakProxy());
-  await throttled('/api/celestrak-satcat', '/visual');
+  const throttled = await request('/api/celestrak-satcat', '/visual');
+  assert.equal(throttled.status, 502);
+  assert.equal(JSON.parse(haltFile()).reason, 'HTTP 429');
+  assert.equal(haltReports().length, 2, 'the new halt is reported once');
   const before = fetched.length;
-  const held = await throttled('/api/celestrak', '/geo');
-  assert.equal(held.status, 502);
-  assert.equal(fetched.length, before, 'nothing went upstream');
+  assert.equal((await request('/api/celestrak', '/geo')).status, 503);
+  now += 121_000;
+  assert.equal((await request('/api/celestrak', '/geo')).status, 503);
+  assert.equal(
+    fetched.length,
+    before,
+    'nothing went upstream after Retry-After',
+  );
 });
 
 test('CelesTrak admits a same-origin request behind the documented reverse proxy and refuses foreign origins', async (t) => {

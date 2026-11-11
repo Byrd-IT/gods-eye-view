@@ -167,3 +167,17 @@ test('satellites history: the followed satellite stays followed when its set exi
   assert.equal(cleared.length, 0, 'its set exists: still followed');
   assert.equal(state._trackedNorad, 25544);
 });
+
+test('satellites history: a satellite of a hidden class stays hidden when its set is applied and when LIVE restores', async () => {
+  const mk = make(() => csv(row(25544, '2025-03-01T12:00:00.000000', 10), row(99999, '2025-03-01T12:00:00.000000', 20)));
+  const { state } = mk;
+  const hiddenClass = new Set([99999]);
+  const h = createHistory({ state, parts: { controls: { _classVisible: (id) => !hiddenClass.has(id) } } });
+  state._points.get(99999).show = false; // controls.js hid its class
+  await h.methods.setHistoryTime(Date.parse('2025-03-01T13:00:00Z'));
+  assert.equal(state._points.get(25544).show, true);
+  assert.equal(state._points.get(99999).show, false, 'has a set at that time, but its class is hidden');
+  await h.methods.setHistoryTime(null);
+  assert.equal(state._points.get(25544).show, true);
+  assert.equal(state._points.get(99999).show, false, 'LIVE restores class visibility, not just the tracked rule');
+});

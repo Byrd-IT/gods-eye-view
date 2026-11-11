@@ -24,18 +24,25 @@ import { ISS_NORAD } from './policy.js';
 const COMPANION = 25545;
 const GPS = 32711;
 
+const GP_HEADER =
+  'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,ECCENTRICITY,INCLINATION,RA_OF_ASC_NODE,ARG_OF_PERICENTER,MEAN_ANOMALY,EPHEMERIS_TYPE,CLASSIFICATION_TYPE,NORAD_CAT_ID,ELEMENT_SET_NO,REV_AT_EPOCH,BSTAR,MEAN_MOTION_DOT,MEAN_MOTION_DDOT';
+
+// Byrd-IT fork: the CelesTrak proxy serves GP CSV (OMM columns), not TLE, so
+// the same owned element set is served as one GP CSV row.
 function tle(name, id, motion = '15.48899044', inclination = ' 51.6326') {
-  // Owned synthetic element sets; never live requests. The station pair
-  // share elements, so the companion is docked to the ISS.
-  return `${name}\n1 ${id}U 98067A   26289.78971908  .00007803  00000+0  15012-3 0  9995\n2 ${id} ${inclination}  58.3278 0006748 271.9059  88.1156 ${motion}590607`;
+  return `${name},1998-067A,2026-10-16T18:57:11.428512,${motion.trim()},.0006748,${inclination.trim()},58.3278,271.9059,88.1156,0,U,${id},999,59060,.15012E-3,.7803E-4,0`;
 }
 
 const GROUP_TEXT = {
   stations: [
+    GP_HEADER,
     tle('ISS (ZARYA)', ISS_NORAD),
     tle('PROGRESS-MS 31', COMPANION),
-  ].join('\n'),
-  'gps-ops': tle('GPS FIXTURE', GPS, ' 2.00563000', ' 55.0000'),
+  ].join('\r\n'),
+  'gps-ops': [
+    GP_HEADER,
+    tle('GPS FIXTURE', GPS, ' 2.00563000', ' 55.0000'),
+  ].join('\r\n'),
 };
 
 /** Whether the tracked entity draws its dot (an unset show is shown). */
@@ -245,14 +252,8 @@ test('the subject says what it is, which TLE it flies, and who owns and runs it'
   const iss = f.methods.getCockpitSubject();
   assert.equal(iss.satelliteClass, 'stations');
   assert.equal(iss.cosparId, '1998-067A');
-  assert.match(iss.tle.line1, /^1 25544U/);
-  assert.match(iss.tle.line2, /^2 25544 /);
-  // Day 289.789… of 2026.
-  assert.ok(
-    Math.abs(
-      iss.tle.epochMs - (Date.UTC(2026, 0, 1) + 288.78971908 * 86_400_000),
-    ) < 1000,
-  );
+  // Byrd-IT fork: GP CSV carries no TLE lines, so there is no TLE to show.
+  assert.equal(iss.tle, null);
   assert.deepEqual(
     iss.owner,
     { countryCode: null, label: 'Multinational' },
@@ -271,7 +272,7 @@ test('the subject says what it is, which TLE it flies, and who owns and runs it'
   assert.equal(
     gps.cosparId,
     '1998-067A',
-    'from TLE line 1 when SATCAT has none',
+    'from the GP OBJECT_ID when SATCAT has none',
   );
   assert.deepEqual(gps.owner, { countryCode: 'US', label: 'United States' });
   assert.equal(gps.operator, null);

@@ -805,6 +805,10 @@ test('satellites time of propagation: the layer propagates to the WALL clock, so
   const state = {
     _catalog: new Map([[25544, { name: 'ISS', satrec, group: 'stations' }]]),
     _points: new Map([[25544, point]]),
+    // upstream's world clock reader (worldTimeFor('satellites')); with no
+    // History time set (_historyMs unset) and the clock unscrubbed it is the
+    // wall clock, which the mocked Date below moves.
+    now: () => Date.now(),
   };
   const parts = {};
   parts.orbits = createOrbits({ state, services: {}, parts, source: {} });
@@ -839,12 +843,18 @@ test('satellites time of propagation: the layer propagates to the WALL clock, so
   const source = createSatelliteSource({
     fetchImpl: (...a) => env.win.fetch(...a),
   });
-  for (const g of [...CATALOG_GROUPS.map((x) => x.path), 'starlink']) {
+  // every catalog group (upstream added more: resource, weather, planet, sar,
+  // science) plus the dense Starlink shell is asked once, all live
+  const groupPaths = [...CATALOG_GROUPS.map((x) => x.path), 'starlink'];
+  for (const g of groupPaths) {
     const r = await source.readGroup(g);
     assert.equal(r.ok, true, g);
   }
   assert.equal(env.srv.asked.length, 0, 'no gp slice asked');
-  assert.equal(env.live.filter((u) => u.includes('/api/celestrak/')).length, 7);
+  assert.equal(
+    env.live.filter((u) => u.includes('/api/celestrak/')).length,
+    groupPaths.length,
+  );
   const [chip] = chipOf(env, 'satellites');
   assert.equal(chip.chip, LIVE_CHIP);
 });

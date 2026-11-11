@@ -55,7 +55,13 @@ function osState(icao24, { lon, lat, t }) {
   ];
 }
 
-/** A B10 track answer ending 2 min before `to` (two sources, one gap). */
+/**
+ * A B10 track answer ending 2 min before `to` (two sources, two recorded
+ * gaps). Both gaps are over History's 10 min TRACK_GAP_MS (so the chip lists
+ * them) and under the layer's 48 min TRAIL_CONTINUITY_MAX_GAP_MS
+ * (src/data/trailContinuity.js): a longer gap lifts the pen, so the recorded
+ * points would draw as separate segments instead of one trail body.
+ */
 function b10Body(id, to) {
   const at = (minBefore) => sec(to) - minBefore * 60;
   return {
@@ -64,9 +70,9 @@ function b10Body(id, to) {
     icao24: id,
     callsign: null,
     path: [
-      [at(300), 29.0, -97, 3000, 0, false, 'adsblol'],
-      [at(290), 29.1, -97, 3000, 0, false, 'adsblol'],
-      [at(120), 29.6, -97, 3000, 0, false, 'opensky'],
+      [at(90), 29.0, -97, 3000, 0, false, 'adsblol'],
+      [at(80), 29.1, -97, 3000, 0, false, 'adsblol'],
+      [at(45), 29.6, -97, 3000, 0, false, 'opensky'],
       [at(2), 29.9, -97, 3000, 0, false, 'opensky'],
     ],
     sources: ['adsblol', 'opensky'],
@@ -219,17 +225,17 @@ test('flights B12e: the TRACKED aircraft asks its recorded track [t-6h, t] on ea
       minGapSec: '60',
     });
     // the 4 recorded points are spliced in behind the icon; the trail body
-    // draws all but the newest (the head segment runs from there to the
-    // icon), exactly as live
+    // draws every one at or before the display time (upstream's trail model:
+    // the head segment then runs from the newest point to the icon)
     assert.ok(
       await until(() =>
-        s.trailPositions('gev-trail:fl-head').some((p) => p.length === 3),
+        s.trailPositions('gev-trail:fl-head').some((p) => p.length === 4),
       ),
       `trail ${JSON.stringify(s.trailPositions('gev-trail:fl-head').map((p) => p.length))}`,
     );
     const body = s
       .trailPositions('gev-trail:fl-head')
-      .find((p) => p.length === 3);
+      .find((p) => p.length === 4);
     const first = Cesium.Cartographic.fromCartesian(body[0]);
     assert.ok(Math.abs(Cesium.Math.toDegrees(first.latitude) - 29.0) < 1e-6);
     assert.equal(s.router.getState().track.id, 'a00001');
@@ -240,7 +246,7 @@ test('flights B12e: the TRACKED aircraft asks its recorded track [t-6h, t] on ea
     assert.equal(
       s.router.getState().track.gaps.length,
       2,
-      '290->120 and 120->2 min',
+      '80->45 and 45->2 min',
     );
 
     // t moves: the selected aircraft's track is asked again for the new t

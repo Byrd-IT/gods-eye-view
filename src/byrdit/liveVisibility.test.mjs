@@ -256,7 +256,8 @@ test('UI state does not build frame URLs for every catalog camera', () => {
     selection: { getActiveRecord: () => records[0] },
     model: {
       isNoFeedType: () => false,
-      isVideoFeedType: () => false,
+      isVideoFeedCamera: () => false,
+      isBrowserOverlayCamera: () => false,
       sectorAreaKm2: () => 1,
       currentViewContext: () => 'city:x',
     },

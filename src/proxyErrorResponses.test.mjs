@@ -4,8 +4,14 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { providerCooldownMs } from '../server/providers/space/cooldown.js';
 import { parseTerrainPoints } from './data/terrainHeightsProxy.js';
-import { readResponseTextCapped, coalesceProxyRequest } from './sources/httpBody.js';
-import { makeRateLimiter, clientKey } from '../server/providers/common/rate-limit.js';
+import {
+  readResponseTextCapped,
+  coalesceProxyRequest,
+} from './sources/httpBody.js';
+import {
+  makeRateLimiter,
+  clientKey,
+} from '../server/providers/common/rate-limit.js';
 
 const source = [
   'local.js',
@@ -36,17 +42,29 @@ function extract(name) {
   return source.slice(start, end + 2).replace(/^export /, '');
 }
 
-function fixture(name, overrides = {}, preview = false) {
+// A plugin with several routes (CelesTrak: GP CSV at /api/celestrak, SATCAT at
+// /api/celestrak-satcat, RCS) is tested on the route asked for, whatever order
+// it registers them in; a single-route plugin is tested on its only route.
+function fixture(
+  name,
+  overrides = {},
+  preview = false,
+  route = '/api/celestrak',
+) {
   const logs = [];
   const deps = {
-    readResponseTextCapped, coalesceProxyRequest, providerCooldownMs,
+    readResponseTextCapped,
+    coalesceProxyRequest,
+    providerCooldownMs,
     // The rate-limited proxies reach for these; give them the real ones so a
     // fixture request is throttled exactly as production would be.
-    makeRateLimiter, clientKey,
+    makeRateLimiter,
+    clientKey,
     // terrain.js gates cross-site requests first; fixture requests carry no
     // browser headers, so admit them like a loopback tool.
     admitSameSiteKeyless: () => false,
-    path, process: { cwd: () => '/fixture', env: {} },
+    path,
+    process: { cwd: () => '/fixture', env: {} },
     fsp: {
       readFile: async () => {
         throw new Error('cache absent');
@@ -84,15 +102,16 @@ function fixture(name, overrides = {}, preview = false) {
     ...Object.keys(deps),
     `${helpers}\n${extract(name)}\nreturn ${name}();`,
   )(...Object.values(deps));
-  let middleware;
-  // A plugin with several routes (CelesTrak: TLEs, then SATCAT) is tested on its first.
+  const routes = new Map();
   plugin[preview ? 'configurePreviewServer' : 'configureServer']({
     middlewares: {
-      use(_route, handler) {
-        middleware ??= handler;
+      use(registered, handler) {
+        routes.set(registered, handler);
       },
     },
   });
+  const middleware = routes.get(route) ?? routes.values().next().value;
+  assert.ok(middleware, `${name} registers ${route}`);
   return {
     logs,
     async request(url = '/', method = 'GET') {
@@ -227,6 +246,14 @@ test('CelesTrak retains invalid-group and unavailable responses', async () => {
   const res = await app.request('/stations');
   assert.equal(res.status, 502);
   assert.equal(res.headers['x-tle-cache'], 'NONE');
+  // Byrd-IT fork: the failed refresh latches the halt, reported once, without
+  // the upstream error text (app.request also checks no detail is logged).
+  const reports = app.logs.filter((line) => line.includes('HALTED'));
+  assert.equal(reports.length, 1);
+  assert.match(
+    reports[0],
+    /stations refresh failed \(upstream request failed\)/,
+  );
 });
 
 test('CelesTrak retains fresh and stale GP CSV caches', async () => {
@@ -255,6 +282,75 @@ test('CelesTrak retains fresh and stale GP CSV caches', async () => {
     'OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION\r\nISS,1998-067A,2026-09-19T00:00:00.000000,15.5',
   );
   assert.equal(stale.headers['x-tle-cache'], 'STALE-ERROR');
+});
+
+const SATCAT_CSV =
+  'OBJECT_NAME,OBJECT_ID,NORAD_CAT_ID,OBJECT_TYPE,OPS_STATUS_CODE,OWNER\r\nSL-16 R/B,1992-093B,22285,R/B,,CIS';
+
+test('CelesTrak SATCAT unexpected failures hide details', async () => {
+  const app = fixture(
+    'celestrakProxy',
+    {
+      Date: {
+        now() {
+          throw new Error(detail);
+        },
+      },
+    },
+    false,
+    '/api/celestrak-satcat',
+  );
+  const res = await app.request('/sar');
+  assert.equal(res.status, 500);
+  assert.equal(res.body, 'celestrak proxy error');
+  assert.equal(res.headers['x-satcat-cache'], 'ERROR');
+});
+
+test('CelesTrak SATCAT retains invalid-group and unavailable responses under the halt latch', async () => {
+  const app = fixture('celestrakProxy', {}, false, '/api/celestrak-satcat');
+  // Only the core groups have SATCAT; starlink and active are GP-only.
+  for (const group of ['/../', '/starlink', '/active', '/nope'])
+    assert.equal((await app.request(group)).status, 400, group);
+  assert.equal(app.logs.length, 0, 'rejected groups never reach upstream');
+  const res = await app.request('/sar');
+  assert.equal(res.status, 502);
+  assert.equal(res.headers['x-satcat-cache'], 'NONE');
+  const reports = app.logs.filter((line) => line.includes('HALTED'));
+  assert.equal(reports.length, 1);
+  assert.match(
+    reports[0],
+    /satcat-sar refresh failed \(upstream request failed\)/,
+  );
+});
+
+test('CelesTrak SATCAT retains fresh and stale caches for a day', async () => {
+  let now = Date.now();
+  let calls = 0;
+  const app = fixture(
+    'celestrakProxy',
+    {
+      Date: class extends Date {
+        static now() {
+          return now;
+        }
+      },
+      fetch: async () => {
+        if (++calls > 1) throw new Error(detail);
+        return new Response(SATCAT_CSV);
+      },
+    },
+    false,
+    '/api/celestrak-satcat',
+  );
+  assert.equal((await app.request('/sar')).headers['x-satcat-cache'], 'MISS');
+  now += 23 * 3600_000;
+  assert.equal((await app.request('/sar')).headers['x-satcat-cache'], 'HIT');
+  now += 2 * 3600_000;
+  const stale = await app.request('/sar');
+  assert.equal(stale.status, 200);
+  assert.equal(stale.body, SATCAT_CSV);
+  assert.equal(stale.headers['x-satcat-cache'], 'STALE-ERROR');
+  assert.equal(calls, 2);
 });
 
 test('terrain unexpected failures hide details', async () => {
@@ -308,11 +404,22 @@ test('ADSBDB retains validation and missing-aircraft semantics', async () => {
 for (const preview of [false, true]) {
   test(`terrain server rejects out-of-range points before upstream resolution in ${preview ? 'preview' : 'development'}`, async () => {
     let calls = 0;
-    const app = fixture('terrainHeightsProxy', { parseTerrainPoints,
-      resolveTerrainHeightRequest: async () => { calls++; return { status: 200, body: { results: [] } }; },
-    }, preview);
+    const app = fixture(
+      'terrainHeightsProxy',
+      {
+        parseTerrainPoints,
+        resolveTerrainHeightRequest: async () => {
+          calls++;
+          return { status: 200, body: { results: [] } };
+        },
+      },
+      preview,
+    );
     for (const points of ['181,0', '-181,0', '0,91', '0,-91', '1,2;0,91']) {
-      assert.equal((await app.request('/?points=' + encodeURIComponent(points))).status, 400);
+      assert.equal(
+        (await app.request('/?points=' + encodeURIComponent(points))).status,
+        400,
+      );
     }
     assert.equal(calls, 0);
     assert.equal((await app.request('/?points=-180,-90;180,90')).status, 200);

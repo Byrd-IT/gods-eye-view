@@ -60,12 +60,39 @@ function separationDeg(az1, el1, az2, el2) {
   return Math.acos(Math.min(1, Math.max(-1, c))) / D2R;
 }
 
+// Byrd-IT: upstream's layer also loads these Earth-observation groups as core
+// (classes come from src/layers/satellites/classes.js). The Sky view keeps its
+// six: its classes come from the group tag (satelliteClass.js), which has no
+// class for them, and the `active` switch already holds every one of these
+// objects as class 'other'. A new layer group fails this test until someone
+// decides which way it goes in the Sky view.
+const LAYER_ONLY_GROUPS = ['resource', 'weather', 'planet', 'sar', 'science'];
+
 test('core groups and ISS id mirror the satellites layer (policy.js)', () => {
+  const layer = CATALOG_GROUPS.map((g) => ({ ...g }));
+  // Same tags, paths and dedupe priority for every group the Sky view loads...
   assert.deepEqual(
     SKY_CORE_GROUPS.map((g) => ({ ...g })),
-    CATALOG_GROUPS.map((g) => ({ ...g })),
+    layer.filter((g) => !LAYER_ONLY_GROUPS.includes(g.tag)),
+  );
+  // ...the layer's extra groups follow them, so the priorities cannot shift.
+  assert.deepEqual(
+    layer.slice(SKY_CORE_GROUPS.length).map((g) => g.tag),
+    LAYER_ONLY_GROUPS,
   );
   assert.equal(ISS_NORAD, LAYER_ISS_NORAD);
+});
+
+test('the layer-only groups reach the Sky view through the active switch as class other', () => {
+  for (const tag of LAYER_ONLY_GROUPS)
+    assert.equal(groupInfo(tag), null, `${tag} is not loaded on its own`);
+  // A weather satellite in the `active` rows is an active-set object, class other.
+  assert.deepEqual(groupInfo('active', 'FENGYUN 3D'), {
+    tag: 'active',
+    set: 'active',
+    priority: 12,
+  });
+  assert.equal(skyClassOf('active', 43010), 'other');
 });
 
 test('flags pack and decode round trip; three states from sunlit x dark', () => {
