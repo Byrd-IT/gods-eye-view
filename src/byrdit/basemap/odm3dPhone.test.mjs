@@ -630,6 +630,30 @@ test('phone can be allowed off: setPhoneMode(false) releases pressure and REBUIL
   layer.destroy();
 });
 
+test('a mode change during a failed load retries using the final mode', async () => {
+  const f = fake();
+  const original = f.Cesium.Cesium3DTileset.fromUrl;
+  let fail;
+  let calls = 0;
+  f.Cesium.Cesium3DTileset.fromUrl = (...args) => {
+    if (calls++ === 0)
+      return new Promise((resolve, reject) => {
+        fail = reject;
+      });
+    return original(...args);
+  };
+  const layer = phoneLayer(f, { requestGateFactory: gateSpy().factory });
+  const first = layer.load();
+  layer.setPhoneMode(false);
+  fail(new Error('failure'));
+  await first;
+  await layer._loading;
+  assert.equal(calls, 2);
+  assert.equal(layer.status, 'ready');
+  assert.equal(f.calls.tilesets[0].url, entry3d().url);
+  layer.destroy();
+});
+
 test('failed model load never exposes raw exception text', async () => {
   const f = fake();
   const secret = 'SYNTHETIC-BEARER-secretSuffix123';

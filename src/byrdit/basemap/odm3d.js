@@ -448,6 +448,7 @@ export class Odm3dLayer {
           void this.load();
         }
       } catch {
+        const drift = !this.destroyed && this._buildPhone !== this.phoneActive;
         // Nothing half-loaded may keep drawing, requesting frames or gate
         // state behind: drop the tileset/pump/listeners, the request gate
         // AND the pressure state (a failed tileset can never settle or
@@ -463,6 +464,10 @@ export class Odm3dLayer {
         this.error = this.gateError
           ? '3D request gate unavailable'
           : '3D model load failed';
+        if (drift) {
+          this.status = 'idle';
+          void this.load();
+        }
       }
     })();
     // A failure INSIDE this IIFE (the fail-closed phone gate throws before
