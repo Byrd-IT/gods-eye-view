@@ -428,6 +428,25 @@ test('OdmRequestGate unit behavior: cap, ordering, refuse-requeue and destroy', 
   );
 });
 
+test('gate never propagates sensitive upstream exception text', async () => {
+  const gate = new OdmRequestGate({ maxInFlight: 1 });
+  const secret = 'syntheticBearerSuffix123';
+  const message = `Bearer ${secret} https://user:pass@host/path?key=${secret}`;
+  for (const fetch of [
+    () => {
+      throw new Error(message);
+    },
+    () => Promise.reject(new Error(message)),
+  ]) {
+    const result = await gate
+      .run({ request: { cancelled: false } }, {}, fetch)
+      .catch((error) => error);
+    assert.equal(result.message, 'ODM tile request failed');
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  }
+  gate.destroy();
+});
+
 test('synchronous request failures drain a large queue without recursive pumping', async () => {
   const gate = new OdmRequestGate({ maxInFlight: 1 });
   gate.setPaused(true);

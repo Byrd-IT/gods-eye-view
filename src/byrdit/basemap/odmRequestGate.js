@@ -156,11 +156,11 @@ export class OdmRequestGate {
     let promise;
     try {
       promise = entry.baseFetch(entry.resource, entry.options);
-    } catch (error) {
+    } catch {
       this.inFlight--;
       // The caller's pump continues iteratively; recursive pump here can
       // overflow the stack on a burst of synchronous request failures.
-      entry.reject(error);
+      entry.reject(new Error('ODM tile request failed'));
       return true;
     }
     if (promise === undefined) {
@@ -178,10 +178,10 @@ export class OdmRequestGate {
         this.pump();
         entry.resolve(value);
       },
-      (error) => {
+      () => {
         this.inFlight--;
         this.pump();
-        entry.reject(error);
+        entry.reject(new Error('ODM tile request failed'));
       },
     );
     return true;
