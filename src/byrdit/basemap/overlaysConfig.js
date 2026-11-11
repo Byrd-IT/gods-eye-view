@@ -93,6 +93,11 @@ export function normalizeOverlays(raw) {
       kind,
       format,
       url,
+      ...(is3d &&
+      entry.phoneUrl === `/basemap/odm3d/${id}-phone/tileset.json` &&
+      URL_3D.test(entry.phoneUrl)
+        ? { phoneUrl: entry.phoneUrl }
+        : {}),
       minzoom,
       maxzoom,
       bounds: b,

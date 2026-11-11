@@ -138,6 +138,11 @@ export function composeOverlays(
   const MAX_LAYERS = layerCap(maxLayers, DEFAULT_OVERLAY_MAX_LAYERS);
   const routes = new Map();
   const layers = [];
+  const reservedIds = new Set(
+    (Array.isArray(raw?.layers) ? raw.layers : [])
+      .slice(0, MAX_LAYERS)
+      .map((entry) => entry?.id),
+  );
   for (const entry of (Array.isArray(raw?.layers) ? raw.layers : []).slice(
     0,
     MAX_LAYERS,
@@ -161,6 +166,19 @@ export function composeOverlays(
       format: type.format,
       port: is3d ? null : int(entry?.edge?.port, 1024, 65535),
     });
+    const phoneId = `${id}-phone`;
+    const phoneValid =
+      is3d &&
+      ID.test(phoneId) &&
+      !reservedIds.has(phoneId) &&
+      entry.phone_archive === `odm3d/${phoneId}` &&
+      archiveOk(entry.phone_archive);
+    if (phoneValid)
+      routes.set(phoneId, {
+        archive: entry.phone_archive,
+        format: '3dtiles',
+        port: null,
+      });
     const opacity = Number(entry?.default_opacity);
     layers.push({
       id,
@@ -170,6 +188,9 @@ export function composeOverlays(
       url: is3d
         ? `/basemap/odm3d/${id}/tileset.json`
         : `/basemap/overlay/${id}/{z}/{x}/{y}.${type.format}`,
+      ...(phoneValid
+        ? { phoneUrl: `/basemap/odm3d/${phoneId}/tileset.json` }
+        : {}),
       minzoom,
       maxzoom,
       bounds,
