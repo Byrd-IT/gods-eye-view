@@ -4261,5 +4261,10 @@
   "{source} imagery could not be opened": "לא ניתן היה לפתוח את הצילומים של {source}",
   "{place} has no position to look for imagery at": "ל-{place} אין מיקום לחיפוש צילומים",
   "No {source} imagery near {place}": "אין צילומים של {source} ליד {place}",
-  "{reason} (filters on: {filters})": "{reason} (מסננים פעילים: {filters})"
+  "{reason} (filters on: {filters})": "{reason} (מסננים פעילים: {filters})",
+  "Phone mode": "מצב טלפון",
+  "Phone mode: softer model to save memory": "מצב טלפון: מודל פחות מפורט לחיסכון בזיכרון",
+  "Paused under memory pressure: no new 3D tile loads": "מושהה עקב מחסור בזיכרון: לא נטענים אריחי תלת־ממד חדשים",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "נעצר עקב מחסור בזיכרון: אין טעינה, ממתין לפינוי זיכרון",
+  "The 3D model request gate could not be created": "לא ניתן ליצור את שער הבקשות למודל התלת־ממדי"
 }

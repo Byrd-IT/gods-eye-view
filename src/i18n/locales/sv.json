@@ -4171,5 +4171,10 @@
   "Control history": "Styr historik",
   "Control sky": "Styr himmel",
   "Control imagery": "Styr bilder",
-  "Control drone plan": "Styr drönarplan"
+  "Control drone plan": "Styr drönarplan",
+  "Phone mode": "Telefonläge",
+  "Phone mode: softer model to save memory": "Telefonläge: mindre detaljerad modell för att spara minne",
+  "Paused under memory pressure: no new 3D tile loads": "Pausad på grund av minnesbrist: inga nya 3D-rutor laddas",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Stannat på grund av minnesbrist: inget laddas, väntar på ledigt minne",
+  "The 3D model request gate could not be created": "Det gick inte att skapa 3D-modellens begärandegrind"
 }
