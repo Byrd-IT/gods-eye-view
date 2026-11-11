@@ -353,12 +353,13 @@ export class Odm3dLayer {
         // may hand over a fake factory (or a Cesium without Resource) and
         // keep the load-without-gate fallback; whatever came out is
         // recorded in `gateError` for the panel.
-        let tilesetUrl = entry.url;
+        let tilesetUrl =
+          this.phoneActive && entry.phoneUrl ? entry.phoneUrl : entry.url;
         if (this.phoneActive) {
           let bundle = null;
           let gateFailure = null;
           try {
-            bundle = this.requestGateFactory(Cesium, entry.url, {
+            bundle = this.requestGateFactory(Cesium, tilesetUrl, {
               maxInFlight: this.phoneLimits.inFlightCap,
             });
             if (!bundle?.gate) {

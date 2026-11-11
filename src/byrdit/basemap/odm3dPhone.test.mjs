@@ -311,7 +311,10 @@ test('desktop keeps its cache budget explicitly: 256 MiB with 256 MiB overflow, 
 test('phone: coarse first within the owner band, 64MiB cache with no overflow, then refines inside the owner band once settled', async () => {
   const f = fake();
   const { timers, map, tick } = timersOf();
-  const layer = phoneLayer(f, { timers, requestGateFactory: gateSpy().factory });
+  const layer = phoneLayer(f, {
+    timers,
+    requestGateFactory: gateSpy().factory,
+  });
   await layer.load();
   const tileset = f.calls.added[0];
   assert.equal(f.calls.sse[0], PHONE_LIMITS.initialError, 'coarse initial SSE');
@@ -383,11 +386,7 @@ test('phone: heap pressure pauses new loads on the tileset gate and lifts on rec
   tick();
   assert.equal(layer._pressed, true, 'heap at the pressure line = pressed');
   assert.equal(layer._gate.paused, true, 'the gate closed: no new loads start');
-  assert.equal(
-    tileset.show,
-    true,
-    'still visible and still updating',
-  );
+  assert.equal(tileset.show, true, 'still visible and still updating');
   assert.equal(
     tileset.maximumScreenSpaceError,
     PHONE_LIMITS.initialError,
@@ -434,7 +433,11 @@ test('phone: loaded-tile pressure pauses the gate and recovers under hysteresis'
     PHONE_LIMITS.loadedTileCap + 1;
   tick();
   assert.equal(layer._pressed, true, 'too many loaded tiles = pressure');
-  assert.equal(layer._gate.paused, true, 'gate closed while tile count is over');
+  assert.equal(
+    layer._gate.paused,
+    true,
+    'gate closed while tile count is over',
+  );
   assert.equal(tileset.show, true, 'never hidden');
   assert.equal(
     tileset.maximumScreenSpaceError,
@@ -486,18 +489,17 @@ test('phone: pressure pauses during load, keeps the queue draining, ready show w
   for (let i = 0; i < 3; i++) tick();
   assert.equal(layer.status, 'ready');
   assert.equal(tileset.show, true, 'ready + calm = drawn, one code path');
-  assert.equal(
-    layer._gate.paused,
-    false,
-    'gate reopened once calm',
-  );
+  assert.equal(layer._gate.paused, false, 'gate reopened once calm');
   layer.destroy();
 });
 
 test('phone: many phone layers together still write nothing shared; the last destroy leaves Cesium defaults', async () => {
   const f = fake();
   const { timers, tick } = timersOf();
-  const layer = phoneLayer(f, { timers, requestGateFactory: gateSpy().factory });
+  const layer = phoneLayer(f, {
+    timers,
+    requestGateFactory: gateSpy().factory,
+  });
   await layer.load();
   const tileset = f.calls.added[0];
   tileset.tilesLoaded = true;
@@ -515,13 +517,43 @@ test('phone: many phone layers together still write nothing shared; the last des
   });
   tick(); // layer2 pressed by heap, layer1 calm
   assert.equal(layer2._pressed, true);
-  assert.equal(layer2._gate.paused, true, 'the pressed layer pauses its OWN gate');
+  assert.equal(
+    layer2._gate.paused,
+    true,
+    'the pressed layer pauses its OWN gate',
+  );
   assert.equal(layer._pressed, false, 'the calm layer is not pressed');
   schedulerUntouched(f, 'two phone layers, one pressed');
 
   layer.destroy();
   layer2.destroy();
   schedulerUntouched(f, 'after both destroyed');
+});
+
+test('phone uses its variant through the gate and mode switches restore each URL', async () => {
+  const f = fake();
+  const entry = {
+    ...entry3d(),
+    phoneUrl: '/basemap/odm3d/odm-3d-9be42b4f-phone/tileset.json',
+  };
+  const urls = [];
+  const g = gateSpy();
+  const layer = phoneLayer(f, {
+    entry,
+    requestGateFactory: (C, url, options) => {
+      urls.push(url);
+      return g.factory(C, url, options);
+    },
+  });
+  await layer.load();
+  assert.deepEqual(urls, [entry.phoneUrl]);
+  layer.setPhoneMode(false);
+  await layer._loading;
+  assert.equal(f.calls.added[1].url, entry.url);
+  layer.setPhoneMode(true);
+  await layer._loading;
+  assert.deepEqual(urls, [entry.phoneUrl, entry.phoneUrl]);
+  layer.destroy();
 });
 
 test('phone can be allowed off: setPhoneMode(false) releases pressure and REBUILDS a clean desktop build (ungated, desktop cache); re-enabling rebuilds through the gate', async () => {
@@ -607,7 +639,11 @@ test('setPhoneMode on a failed layer changes nothing shared and cannot strand pr
   assert.equal(layer._pressed, false, 'no pressure state survives the failure');
   assert.equal(layer.tileset, null);
   assert.equal(layer._gate, null, 'the failed layer holds no gate');
-  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true, 'gate destroyed');
+  assert.equal(
+    g.log.some((e) => e[0] === 'destroyed'),
+    true,
+    'gate destroyed',
+  );
   assert.equal(layer.setPhoneMode(false) === undefined, true);
   layer.setPhoneMode(true);
   assert.equal(layer.phoneActive, true);
@@ -686,7 +722,11 @@ test('phone: destroy under pressure stops the pump, kills the gate, removes the 
   assert.equal(f.calls.removed[0], tileset);
   assert.equal(tileset.destroyed, true);
   assert.equal(map.size, 0, 'no timers left');
-  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true, 'gate destroyed');
+  assert.equal(
+    g.log.some((e) => e[0] === 'destroyed'),
+    true,
+    'gate destroyed',
+  );
   assert.equal(layer._gate, null, 'no gate left behind');
   assert.equal(layer._pressed, true, 'flag is inert after destroy');
   layer.heapProbe = () => ({ used: 0, limit: HEAP_MAX });
@@ -698,7 +738,10 @@ test('phone: destroy under pressure stops the pump, kills the gate, removes the 
 test('phone: Fly to coarsens a ready, refined layer back to the initial SSE and lets it refine again after settling', async () => {
   const f = fake();
   const { timers, tick, map } = timersOf();
-  const layer = phoneLayer(f, { timers, requestGateFactory: gateSpy().factory });
+  const layer = phoneLayer(f, {
+    timers,
+    requestGateFactory: gateSpy().factory,
+  });
   await layer.load();
   const tileset = f.calls.added[0];
   // The bounding-sphere flight path Cesium really takes; a spy camera.
@@ -869,7 +912,11 @@ test('setPhoneMode(false) during an in-flight phone load ends with a clean deskt
   assert.equal(second.destroyed, false);
   assert.equal(layer.status, 'ready');
   assert.equal(layer.phoneActive, false);
-  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true, 'gate destroyed');
+  assert.equal(
+    g.log.some((e) => e[0] === 'destroyed'),
+    true,
+    'gate destroyed',
+  );
   schedulerUntouched(f, 'drift rebuild desktop');
   layer.destroy();
 });
@@ -922,7 +969,11 @@ test('destroy during an in-flight load with a pending drift: no post-destroy reb
   assert.equal(f.calls.tilesets?.length, 1, 'no post-destroy rebuild');
   assert.equal(f.calls.tilesets[0].destroyed, true, 'the build was destroyed');
   assert.equal(map.size, 0, 'no timers left');
-  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true, 'gate destroyed');
+  assert.equal(
+    g.log.some((e) => e[0] === 'destroyed'),
+    true,
+    'gate destroyed',
+  );
   assert.equal(layer._gate, null);
   layer.setPhoneMode(false); // inert after destroy
   layer.setPhoneMode(true);
@@ -1045,7 +1096,10 @@ test('setPhoneMode(true) after a desktop load rebuilds the tileset through the g
     entry3d().url,
     'the desktop build is ungated, as designed',
   );
-  assert.equal(g.log.some((e) => e[0] === 'created'), false);
+  assert.equal(
+    g.log.some((e) => e[0] === 'created'),
+    false,
+  );
 
   layer.setPhoneMode(true);
   await layer._loading; // the rebuild load
@@ -1078,7 +1132,10 @@ test('setPhoneMode(true) after a desktop load rebuilds the tileset through the g
   assert.equal(layer.status, 'ready');
   schedulerUntouched(f, 'desktop -> phone rebuild');
   layer.destroy();
-  assert.equal(g.log.some((e) => e[0] === 'destroyed'), true);
+  assert.equal(
+    g.log.some((e) => e[0] === 'destroyed'),
+    true,
+  );
 });
 
 // (superseded stall-release test removed)
