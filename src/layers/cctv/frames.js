@@ -279,11 +279,20 @@ export function createFrames({ state: layerState, services, parts, source }) {
     // clears this latch so the next normal tick can refresh.
     if (runtime.imageLoading) return;
     const now = Date.now();
-    const refreshMs =
+    const defaultRefreshMs =
       record.camera.id === layerState._activeCameraId
         ? PROJECTION_ACTIVE_REFRESH_MS
         : PROJECTION_IDLE_REFRESH_MS;
-    if (!force && now - runtime.lastImageRefreshAt < refreshMs) return;
+    const sourceRefreshMs = parts.model.safeNumber(
+      record.camera.frameRefreshMs,
+      0,
+    );
+    const refreshMs = Math.max(defaultRefreshMs, sourceRefreshMs);
+    const sinceLastRefresh = now - runtime.lastImageRefreshAt;
+    // Forced activation may skip the normal active interval, but it cannot
+    // bypass a provider's explicit minimum between image requests.
+    if (sourceRefreshMs > 0 && sinceLastRefresh < sourceRefreshMs) return;
+    if (!force && sinceLastRefresh < refreshMs) return;
     // Byrd-IT visibility: no new picture for a camera whose plane is off
     // screen (panned away / far side of the globe). Forced refreshes (fresh
     // activation) still run; the next tick after it scrolls back in fetches.

@@ -38,6 +38,7 @@ const LEFT_STACK_OBSTACLE_SELECTOR = [
   '#gev-voice-control',
   '#pp-toggles',
   '#param-slider-panel',
+  '#world-timeline',
 ].join(', ');
 /**
  * Fixed UI regions that can occupy the right control lane. Runtime rectangle
@@ -66,6 +67,7 @@ const RIGHT_STACK_OBSTACLE_SELECTOR = [
   '#command-dock',
   '#gev-voice-control',
   '#gev-nav-control',
+  '#world-timeline',
 ].join(', ');
 /** Is a CSS transition (the chrome fading back in) still running? */
 function chromeTransitionRunning() {
@@ -115,6 +117,7 @@ export class PanelLayoutController {
     this._ppToggles = document.getElementById('pp-toggles');
     this._cctvPanel = document.getElementById('cctv-panel');
     this._weatherPanel = document.getElementById('weather-panel');
+    this._newsPanel = document.getElementById('news-panel');
     this._recentImageryPanel = document.getElementById('recent-imagery-panel');
     this._streetLevelPanel = document.getElementById('street-level-panel');
     this._timeTravelPanel = document.getElementById('time-travel-panel');
@@ -272,6 +275,7 @@ export class PanelLayoutController {
     for (const panel of [
       this._cctvPanel,
       this._weatherPanel,
+      this._newsPanel,
       this._recentImageryPanel,
       this._streetLevelPanel,
       this._timeTravelPanel,
@@ -291,6 +295,7 @@ export class PanelLayoutController {
         this._ppToggles,
         this._cctvPanel,
         this._weatherPanel,
+        this._newsPanel,
         this._recentImageryPanel,
         this._streetLevelPanel,
         this._timeTravelPanel,

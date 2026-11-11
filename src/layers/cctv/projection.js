@@ -173,6 +173,9 @@ export function createProjection({
     if (!layerState._viewer) return null;
     // Byrd-IT: a location-only camera has no feed to project.
     if (parts.model.isNoFeedType(record.camera.feedType)) return null;
+    // Québec 511 denies CORS pixel access; Québec map previews are native DOM
+    // videos positioned over the globe, never Cesium video textures.
+    if (parts.model.isBrowserOverlayCamera(record.camera)) return null;
     const canvas = document.createElement('canvas');
     canvas.width = PROJECTION_CANVAS_WIDTH;
     canvas.height = PROJECTION_CANVAS_HEIGHT;

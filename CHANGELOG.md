@@ -4,6 +4,9 @@
 
 - Keep expanded Weather and Recent Imagery cards from being squashed in the
   phone Context sheet, so their controls remain reachable (Byrd-IT).
+- An application's own tool can take the pointer as Draw does, and its click
+  handlers can yield while a tool holds it, as the layers' do (`pointer` from
+  `createApplicationTools`) (samehkhamis, #1641).
 
 ## [0.3.0] — 2026-10-27 — Street Level, On Your Phone, in Your Language
 

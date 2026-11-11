@@ -41,8 +41,8 @@ test('catalogs construct distinct layers and classification from their supplied 
     signal: b.signal,
     surface: fixtureSurface(b.signal),
   });
-  // Byrd-IT fork registers BYRDIT_FORK_LAYER_COUNT local layers on top of upstream's 38.
-  assert.equal(first.layers.length, 38 + BYRDIT_FORK_LAYER_COUNT);
+  // Byrd-IT fork registers BYRDIT_FORK_LAYER_COUNT local layers on top of upstream's 40.
+  assert.equal(first.layers.length, 40 + BYRDIT_FORK_LAYER_COUNT);
   assert.ok(first.get('local-adsb'), 'Local ADS-B is registered');
   assert.deepEqual(
     first.metadata.find(({ id }) => id === 'osm-places'),
@@ -70,6 +70,7 @@ test('catalogs construct distinct layers and classification from their supplied 
   assert.ok(first.get('gnss-integrity'));
   assert.ok(first.get('s2-ghostmaps'));
   assert.ok(first.get('drone-airspace'));
+  assert.ok(first.get('news'));
   assert.ok(first.get('transit'));
   assert.equal(first.get('local-usgs-water')?.name, 'USGS Rivers & Streams');
   assert.equal(first.get('local-usgs-wells')?.name, 'USGS Groundwater Wells');
@@ -165,8 +166,8 @@ test('Mapillary can be omitted or replaced without changing catalog membership',
     surface: fixtureSurface(lifetime.signal),
   };
   const catalog = createApplicationCatalog(options);
-  // Byrd-IT fork: upstream's 38 + BYRDIT_FORK_LAYER_COUNT local layers.
-  assert.equal(catalog.layers.length, 38 + BYRDIT_FORK_LAYER_COUNT);
+  // Byrd-IT fork: upstream's 40 + BYRDIT_FORK_LAYER_COUNT local layers.
+  assert.equal(catalog.layers.length, 40 + BYRDIT_FORK_LAYER_COUNT);
   assert.deepEqual(catalog.get('street-level').providerIds, []);
   assert.equal(
     catalogControlServices(catalog).streetLevelLayer,

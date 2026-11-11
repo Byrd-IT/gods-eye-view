@@ -11,14 +11,17 @@ export function celestrakTleUrl(group) {
 }
 
 /**
- * CelesTrak SATCAT for the active payloads, CSV (documented query form,
- * https://celestrak.org/satcat/satcat-format.php). Verified once on
- * 2026-10-12 01:17 UTC from S4: HTTP 200, 17,210 rows, 1.52 MB, RCS column
- * present (filled for 880 rows only; null for Starlink and most new objects).
+ * CelesTrak SATCAT records (object type, status, owner) for a GP group, as
+ * CSV (documented query form, https://celestrak.org/satcat/satcat-format.php).
+ * With no group it is the active payloads, which the Byrd-IT Sky view RCS
+ * cache reads. Verified once on 2026-10-12 01:17 UTC from S4: HTTP 200, 17,210
+ * rows, 1.52 MB, RCS column present (filled for 880 rows only; null for
+ * Starlink and most new objects). The satellites layer's classes read the
+ * per-group form (upstream).
  */
-export function celestrakSatcatUrl() {
+export function celestrakSatcatUrl(group = 'ACTIVE') {
   const url = new URL('https://celestrak.org/satcat/records.php');
-  url.searchParams.set('GROUP', 'ACTIVE');
+  url.searchParams.set('GROUP', group);
   url.searchParams.set('FORMAT', 'CSV');
   return url;
 }

@@ -75,6 +75,7 @@ function fixture(name, overrides = {}, preview = false) {
   const helpers = [
     'launchLibraryRequestHeaders',
     'celestrakTleUrl',
+    'celestrakSatcatUrl',
     'launchLibraryRecentUrl',
   ]
     .map(extract)
@@ -84,10 +85,11 @@ function fixture(name, overrides = {}, preview = false) {
     `${helpers}\n${extract(name)}\nreturn ${name}();`,
   )(...Object.values(deps));
   let middleware;
+  // A plugin with several routes (CelesTrak: TLEs, then SATCAT) is tested on its first.
   plugin[preview ? 'configurePreviewServer' : 'configureServer']({
     middlewares: {
       use(_route, handler) {
-        middleware = handler;
+        middleware ??= handler;
       },
     },
   });

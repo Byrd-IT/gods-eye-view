@@ -17,6 +17,8 @@ import {
 import { describeError } from './errors.js';
 import { openBasemap } from '../byrdit/basemap/index.js';
 import { attachWayback } from '../byrdit/wayback/index.js';
+import { worldClock, worldTimeFor } from '../time/worldClock.js';
+import { followWorldTime } from '../time/viewerClock.js';
 import { onLocaleChange, t } from '../i18n/index.js';
 
 /** Construct the application globe using the caller's local configuration. */
@@ -52,6 +54,12 @@ export async function createApplicationScene({
     if (!viewer.isDestroyed()) viewer.destroy();
   });
   defer(installTrackpadPinchZoom(viewer));
+  defer(
+    followWorldTime(viewer, worldTimeFor('sky'), {
+      subscribe: worldClock.subscribe,
+      requestRender: () => governorRequestRender('world-time'),
+    }),
+  );
   defer(installFreeLookHeightLimit(viewer));
   registerDataCredits(viewer, credits);
   configureCreditKeyboardAccess(document);

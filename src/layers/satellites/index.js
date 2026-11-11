@@ -1,5 +1,6 @@
 import { createControls } from './controls.js';
 import { createCatalog } from './catalog.js';
+import { createCockpitSubject } from './cockpitSubject.js';
 import { createLabels } from './labels.js';
 import { createOrbits } from './orbits.js';
 import { createRendering } from './rendering.js';
@@ -31,9 +32,11 @@ export function createSatellitesLayer({ services, source }) {
   parts.lifecycle = createLifecycle(context);
   parts.ingestion = createIngestion(context);
   parts.history = createHistory(context);
+  parts.cockpit = createCockpitSubject(context);
   return Object.assign(
     {},
     parts.controls.methods,
+    parts.cockpit.methods,
     parts.lifecycle.methods,
     parts.ingestion.methods,
     parts.history.methods,

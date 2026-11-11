@@ -15,6 +15,7 @@ import {
 import { POINT_SCHEMA, resolvePoint } from '../area.js';
 import { defineTool, ToolError } from '../catalog.js';
 import { LIMIT_SCHEMA, capRows, countNoun, isoTime } from '../results.js';
+import { roundHeadingDegrees } from '../../data/headingDegrees.js';
 
 const text = (value) => (typeof value === 'string' && value ? value : null);
 
@@ -258,7 +259,7 @@ export const nextSatellitePass = defineTool({
           peak: isoTime(pass.maxElevMs),
           set: isoTime(pass.setMs),
           max_elevation_deg: round(pass.maxElevDeg, 1),
-          rise_azimuth_deg: round(pass.riseAzDeg, 0),
+          rise_azimuth_deg: roundHeadingDegrees(pass.riseAzDeg),
           rise_direction: compass(pass.riseAzDeg),
           visible: pass.visible,
         },
@@ -300,7 +301,7 @@ export const satellitesOverhead = defineTool({
                 name: entry.name,
                 norad: entry.norad,
                 elevation_deg: round(look.elevDeg, 1),
-                azimuth_deg: round(look.azDeg, 0),
+                azimuth_deg: roundHeadingDegrees(look.azDeg),
                 direction: compass(look.azDeg),
               },
             ]

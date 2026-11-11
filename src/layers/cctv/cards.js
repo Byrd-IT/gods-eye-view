@@ -132,12 +132,14 @@ export function createCards({ state: layerState, services, parts, source }) {
           record.camera.lon,
         ),
         inView,
+        // Québec's browser-only sources have no registered frame endpoint;
+        // keep them out of still-card fill just like video feeds.
         // Byrd-IT: location-only cameras (feedType 'none') never get an
-        // ambient card, same as video feeds.
+        // ambient card either.
         isVideo:
-          parts.model.isVideoFeedType(
-            parts.model.normalizeFeedType(record.camera.feedType),
-          ) || parts.model.isNoFeedType(record.camera.feedType),
+          parts.model.isVideoFeedCamera(record.camera) ||
+          parts.model.isBrowserOverlayCamera(record.camera) ||
+          parts.model.isNoFeedType(record.camera.feedType),
         sx,
         sy,
       });
