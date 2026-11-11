@@ -461,34 +461,31 @@ test('degraded Byrd-IT Open: still selectable, "(degraded)" label, first warning
   assert.equal(model.ariaLabel, `Byrd-IT Open degraded: ${warning}`);
 });
 
-test(
-  'mapStackChipModels: the Auto chip lights while auto mode is on, and only then',
-  () => {
-    const auto = { id: 'basemap-auto', label: 'Auto', available: true };
-    assert.equal(mapStackChipModel(auto, 'photoreal', true).active, true);
-    for (const mode of [false, 'google', 'open', 'other'])
-      assert.equal(
-        mapStackChipModel(auto, 'photoreal', mode).active,
-        false,
-        `autoMode ${String(mode)}`,
-      );
-    // Other stacks are lit by activeId as before; auto never fakes another id.
-    const stacks = [
-      auto,
-      { id: 'photoreal', label: 'Google 3D', available: true },
-    ];
-    assert.deepEqual(
-      mapStackChipModels(stacks, 'photoreal', true).map((m) => m.active),
-      [true, true],
+test('mapStackChipModels: the Auto chip lights while auto mode is on, and only then', () => {
+  const auto = { id: 'basemap-auto', label: 'Auto', available: true };
+  assert.equal(mapStackChipModel(auto, 'photoreal', true).active, true);
+  for (const mode of [false, 'google', 'open', 'other'])
+    assert.equal(
+      mapStackChipModel(auto, 'photoreal', mode).active,
+      false,
+      `autoMode ${String(mode)}`,
     );
-    assert.deepEqual(
-      mapStackChipModels(stacks, 'photoreal', false).map((m) => m.active),
-      [false, true],
-    );
-    // Default call keeps the old behaviour (auto off).
-    assert.equal(mapStackChipModel(auto, 'basemap-auto').active, false);
-  },
-);
+  // Other stacks are lit by activeId as before; auto never fakes another id.
+  const stacks = [
+    auto,
+    { id: 'photoreal', label: 'Google 3D', available: true },
+  ];
+  assert.deepEqual(
+    mapStackChipModels(stacks, 'photoreal', true).map((m) => m.active),
+    [true, true],
+  );
+  assert.deepEqual(
+    mapStackChipModels(stacks, 'photoreal', false).map((m) => m.active),
+    [false, true],
+  );
+  // Default call keeps the old behaviour (auto off).
+  assert.equal(mapStackChipModel(auto, 'basemap-auto').active, false);
+});
 
 test('degraded never overrides unavailable, and a blank reason is not degraded', () => {
   const down = mapStackChipModel(

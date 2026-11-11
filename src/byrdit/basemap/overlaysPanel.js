@@ -389,7 +389,10 @@ export function createOverlaysPanel({
               String(Boolean(layer.phoneMode)),
             );
             // Translated at update time: a locale switch re-words the chip.
-            row.phone.setAttribute('title', t('Phone mode: softer model to save memory'));
+            row.phone.setAttribute(
+              'title',
+              t('Phone mode: softer model to save memory'),
+            );
           }
           // The note is composed and translated NOW, in this render pass.
           row.note.textContent = noteText(layer);
