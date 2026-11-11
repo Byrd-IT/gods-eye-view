@@ -79,9 +79,8 @@ export const DESKTOP_CACHE_OVERFLOW_BYTES = 256 * MIB;
  *
  *   - the `cacheBytes`/`maximumCacheOverflowBytes` pair is the tile *cache*
  * budget, not a hard cap on the process: decoded GPU/upload buffers and other
- * features' use of the process are outside it. What stops runaway memory here
- * is the pressure gate (the two signals above), which keeps the cache itself
- * from ever spilling.
+ * features' use of the process are outside it. The pressure gate can limit
+ * additional requests but cannot guarantee a hard cap or prevent cache spill.
  */
 export const PHONE_MEDIA_QUERY = '(max-width: 820px)';
 export const PHONE_COARSE_QUERY = '(pointer: coarse)';
@@ -440,7 +439,7 @@ export class Odm3dLayer {
           this.status = 'idle';
           void this.load();
         }
-      } catch (error) {
+      } catch {
         // Nothing half-loaded may keep drawing, requesting frames or gate
         // state behind: drop the tileset/pump/listeners, the request gate
         // AND the pressure state (a failed tileset can never settle or
@@ -453,7 +452,9 @@ export class Odm3dLayer {
         this._loading = null;
         this._buildPhone = null;
         this.status = this.destroyed ? 'idle' : 'failed';
-        this.error = String(error?.message ?? error).slice(0, 120);
+        this.error = this.gateError
+          ? '3D request gate unavailable'
+          : '3D model load failed';
       }
     })();
     // A failure INSIDE this IIFE (the fail-closed phone gate throws before

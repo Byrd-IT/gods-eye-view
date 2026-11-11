@@ -622,6 +622,22 @@ test('phone can be allowed off: setPhoneMode(false) releases pressure and REBUIL
   layer.destroy();
 });
 
+test('failed model load never exposes raw exception text', async () => {
+  const f = fake();
+  const secret = 'SYNTHETIC-BEARER-secretSuffix123';
+  f.Cesium.Cesium3DTileset.fromUrl = async () => {
+    throw new Error(
+      `Authorization: Bearer ${secret} https://user:pass@host/path?key=${secret}`,
+    );
+  };
+  const layer = phoneLayer(f, { requestGateFactory: gateSpy().factory });
+  await layer.load();
+  assert.equal(layer.status, 'failed');
+  assert.equal(layer.error, '3D model load failed');
+  assert.equal(JSON.stringify(layer.error).includes(secret), false);
+  layer.destroy();
+});
+
 test('setPhoneMode on a failed layer changes nothing shared and cannot strand pressure', async () => {
   const f = fake();
   // Break the tileset factory: the layer fails before a tileset exists.
