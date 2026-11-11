@@ -216,6 +216,12 @@ body.mobile-shell[data-mobile-sheet='more'] #right-context-rail > #pp-toggles {
    painted over its Map overlays section). */
 body.mobile-shell[data-mobile-sheet='context']
   #right-context-rail
+  > #weather-panel:not([hidden]),
+body.mobile-shell[data-mobile-sheet='context']
+  #right-context-rail
+  > #recent-imagery-panel:not([hidden]),
+body.mobile-shell[data-mobile-sheet='context']
+  #right-context-rail
   > #time-travel-panel:not([hidden]),
 body.mobile-shell[data-mobile-sheet='context']
   #right-context-rail

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Keep expanded Weather and Recent Imagery cards from being squashed in the
+  phone Context sheet, so their controls remain reachable (Byrd-IT).
+
 ## [0.3.0] — 2026-10-27 — Street Level, On Your Phone, in Your Language
 
 - Show a Street Level view facing 359.5° or more as 0°. The viewer caption
