@@ -110,6 +110,7 @@ function tileset3d(raw) {
     (Array.isArray(raw?.canopy_options_ft) ? raw.canopy_options_ft : [90, 120])
       .map((v) => num(v, 10, CANOPY_MAX_FT))
       .filter((v) => v !== null),
+    raw?.canopy_default_ft,
   );
   const def = raw?.canopy_default_ft;
   return {

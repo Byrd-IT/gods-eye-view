@@ -161,6 +161,21 @@ test('composeOverlays: the 60 ft canopy option is offered alongside the 90 ft de
   assert.equal(round.model.canopyDefaultFt, 90);
 });
 
+test('manifest non-preset canopy default survives proxy and browser normalization', () => {
+  const browser = composeOverlays(
+    publish({
+      ...THREE_D,
+      canopy_options_ft: [45, 70, 80, 95],
+      canopy_default_ft: 95,
+    }),
+  ).browser;
+  const layer = normalizeOverlays(browser).layers.find(
+    (l) => l.id === THREE_D.id,
+  );
+  assert.equal(layer.model.canopyDefaultFt, 95);
+  assert.deepEqual(layer.model.canopyOptionsFt, [60, 90, 95, 120]);
+});
+
 test('normalizeOverlays: a browser block that skips the proxy still gains the 60 ft canopy option', () => {
   const raw = composeOverlays(publish(THREE_D)).browser.layers.find(
     (l) => l.id === THREE_D.id,
@@ -630,22 +645,24 @@ function setup3d({ session = { tileset: null }, realFactory = false } = {}) {
     heightOf: () => 3000,
     viewOf: () => ({ viewBounds: [-95.2, 32.6, -95.1, 32.7], lat: 32.69 }),
     createProvider: (entry) => ({ entry }),
-    create3d: realFactory ? undefined : (entry) => {
-      const calls = [];
-      const layer = {
-        status: 'ready',
-        alignedM: 0,
-        load: async () => calls.push('load'),
-        setOpacity: (v) => calls.push(['opacity', v]),
-        setCut: (v) => calls.push(['cut', v]),
-        flyTo: () => calls.push('fly'),
-        destroy: () => calls.push('destroy'),
-        calls,
-        entry,
-      };
-      made.push(layer);
-      return layer;
-    },
+    create3d: realFactory
+      ? undefined
+      : (entry) => {
+          const calls = [];
+          const layer = {
+            status: 'ready',
+            alignedM: 0,
+            load: async () => calls.push('load'),
+            setOpacity: (v) => calls.push(['opacity', v]),
+            setCut: (v) => calls.push(['cut', v]),
+            flyTo: () => calls.push('fly'),
+            destroy: () => calls.push('destroy'),
+            calls,
+            entry,
+          };
+          made.push(layer);
+          return layer;
+        },
     createPanel: () => ({
       update: (state) => panel.updates.push(state),
       setVisible() {},

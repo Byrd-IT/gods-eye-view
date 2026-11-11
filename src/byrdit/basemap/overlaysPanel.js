@@ -349,7 +349,7 @@ export function createOverlaysPanel({
             },
             // The 60 ft low cut is offered even when the state was built
             // from an older config that still carried [90, 120] only.
-            ...withCanopyLow(layer.canopyOptionsFt ?? []).map((ft) => ({
+            ...withCanopyLow(layer.canopyOptionsFt ?? [], feet).map((ft) => ({
               id: String(ft),
               label: t('Cut above {ft} ft', { ft }),
               active: feet === ft,

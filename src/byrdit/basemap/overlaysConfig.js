@@ -33,6 +33,7 @@ function normalizeModel(raw) {
     (Array.isArray(raw.canopyOptionsFt) ? raw.canopyOptionsFt : [])
       .filter((v) => finite(v, 10, 120))
       .slice(0, 4),
+    raw.canopyDefaultFt,
   );
   const def = options.includes(raw.canopyDefaultFt)
     ? raw.canopyDefaultFt

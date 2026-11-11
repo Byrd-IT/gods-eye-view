@@ -25,6 +25,10 @@ test('withCanopyLow already containing presets: deduped, ascending, still capped
   assert.deepEqual(withCanopyLow('nope'), [60, 90, 120]);
 });
 
+test('a non-preset manifest default survives the four-choice cap', () => {
+  assert.deepEqual(withCanopyLow([45, 70, 80, 95], 95), [60, 90, 95, 120]);
+});
+
 test('withCanopyLow constants match the owner-approved band', () => {
   assert.equal(CANOPY_DEFAULT_LOW_FT, 60);
   assert.equal(CANOPY_HISTORIC_DEFAULT_FT, 90);
