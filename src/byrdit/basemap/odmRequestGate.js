@@ -237,7 +237,7 @@ export function createOdmRequestGateResource(Cesium, url, options = {}) {
   // turning it away silently disabled the phone gate on the real page.
   const text = String(url);
   const httpish = /^https?:/i.test(text);
-  const rootRelative = /^\/(?!\/)/.test(text);
+  const rootRelative = /^\/(?!\/)/.test(text) && !text.includes('\\');
   if (!httpish && !rootRelative) return null;
 
   const gate = new OdmRequestGate({ maxInFlight: options.maxInFlight });

@@ -200,6 +200,7 @@ test('the factory still refuses non-http schemes and origin-escaping URLs (no un
     'data:application/json,{}',
     'blob:blob-url',
     '//evil.example/basemap/odm3d/x/tileset.json', // protocol-relative: origin-escaping
+    '/\\evil.example/basemap/odm3d/x/tileset.json', // WHATWG treats backslash as slash
     'ftp://host/basemap/odm3d/x/tileset.json',
   ]) {
     assert.equal(createOdmRequestGateResource(Cesium, url), null, url);
