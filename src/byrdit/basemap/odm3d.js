@@ -654,17 +654,15 @@ export class Odm3dLayer {
     if (on === this.phoneActive) return;
     this.phoneActive = on;
     if (this.destroyed) return;
+    if (this._loading !== null || this._buildPhone !== null) {
+      // Preserve a paused in-flight gate: the drift resolver will destroy it
+      // if the final mode differs, or its pressure monitor will release it.
+      return;
+    }
     this._pressed = false;
     this._refined = false;
     this._queued = 0;
     this._heapRatio = null;
-    this._gate?.setPaused(false); // no stranded pause across a mode switch
-    if (this._loading !== null || this._buildPhone !== null) {
-      // A build is in flight for the other mode: do not mutate the options
-      // of a build that has already started. The drift resolver at the end
-      // of load() rebuilds for this mode (cleared again if it toggles back).
-      return;
-    }
     if (!this.tileset && this.status === 'failed') {
       // Nothing is built and nothing is under way: the last load failed
       // (e.g. a failed phone gate) and must not stay failed at the OLD

@@ -572,7 +572,15 @@ test('phone can be allowed off: setPhoneMode(false) releases pressure and REBUIL
   assert.equal(layer._gate.paused, true, 'paused');
 
   assert.equal(layer.phoneActive, true);
+  const beforeSwitch = g.log.length;
   layer.setPhoneMode(false);
+  assert.equal(
+    g.log
+      .slice(beforeSwitch)
+      .some(([event, value]) => event === 'setPaused' && value === false),
+    false,
+    'mode switch never reopens a pressured gate before destroying it',
+  );
   await layer._loading; // the desktop rebuild
   assert.equal(layer.phoneActive, false);
   assert.equal(layer._pressed, false, 'pressure released');
