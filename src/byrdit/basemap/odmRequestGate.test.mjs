@@ -271,6 +271,28 @@ test('cancellation while queued: the tile never issues HTTP for a cancelled requ
   }
 });
 
+test('destroying a paused gate leaves a real Cesium tile retryable', async () => {
+  const srv = await serverOf({ delayMs: 10 });
+  try {
+    const { resource, gate } = createOdmRequestGateResource(
+      Cesium,
+      `http://127.0.0.1:${srv.port}/tileset.json`,
+      { maxInFlight: 1 },
+    );
+    gate.setPaused(true);
+    const [request] = requestTiles(resource, ['tiles/retry.b3dm']);
+    assert.equal(gate.queued, 1);
+    gate.destroy();
+    await request.promise;
+    assert.equal(request.result.ok, true);
+    assert.equal(request.tile.contentUnloaded, true);
+    assert.equal(request.tile.contentFailed, false);
+    assert.deepEqual(srv.requests, []);
+  } finally {
+    await srv.close();
+  }
+});
+
 test('the gate is per tileset: a paused ODM tileset cannot block an unrelated same-origin Resource fetch', async () => {
   const srv = await serverOf({ delayMs: 30 });
   try {
@@ -390,7 +412,11 @@ test('OdmRequestGate unit behavior: cap, ordering, refuse-requeue and destroy', 
   const queued = dying.run(queuedResource, {}, baseFetch);
   dying.destroy();
   await assert.rejects(() => queued, { isCancelledRequest: true });
-  assert.equal(queuedResource.request.cancelled, true, 'Cesium sees queued teardown as cancellation');
+  assert.equal(
+    queuedResource.request.cancelled,
+    true,
+    'Cesium sees queued teardown as cancellation',
+  );
   assert.equal(dying.destroyed, true);
   await started;
   await assert.rejects(() =>
@@ -411,7 +437,11 @@ test('scheduler refusals never hot-loop the pump: the re-queued entry is retried
   };
   const pending = [1, 2, 3].map(() =>
     gate
-      .run({ request: { priorityFunction: () => 1, cancelled: false } }, {}, fetch)
+      .run(
+        { request: { priorityFunction: () => 1, cancelled: false } },
+        {},
+        fetch,
+      )
       .then(
         () => 'done',
         (e) => `err:${e.message}`,
