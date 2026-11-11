@@ -155,6 +155,7 @@ const GEV_RELATIVE_URL = () => `/basemap/odm3d/buildA/tileset.json`;
 
 const entryFor = (url) => ({
   url,
+  phoneUrl: url, // factory test isolates gating from config normalization
   bounds: [-97.0, 32.0, -96.99, 32.01],
   model: { groundM: 150, heightOffsetM: null },
 });
@@ -236,9 +237,7 @@ test('RED->GREEN regression: the real Odm3dLayer phone loads its tileset through
       );
       const saw = srv.requests;
       assert.ok(
-        saw.includes(
-          `/basemap/odm3d/buildA/tileset.json`,
-        ),
+        saw.includes(`/basemap/odm3d/buildA/tileset.json`),
         'the tileset.json was fetched from the resolved relative path',
       );
       assert.equal(
@@ -281,11 +280,7 @@ test('the layer phone gate actually caps: requests queue in the gate when the ca
       t.after(() => layer.destroy());
       assert.equal(layer.status, 'ready', layer.error ?? '');
       assert.ok(layer._gate, 'the default factory produced a live gate');
-      assert.equal(
-        layer._gate.paused,
-        false,
-        'the gate starts open',
-      );
+      assert.equal(layer._gate.paused, false, 'the gate starts open');
       // The gate is a live participant: pausing it stops it from handing
       // over; releasing reopens. (The cap/pause mechanics are covered
       // end-to-end against HTTP in odmRequestGate.test.mjs.)

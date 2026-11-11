@@ -1168,6 +1168,31 @@ test('setPhoneMode(true) after a desktop load rebuilds the tileset through the g
 
 // A phone build without its gate is ungated, unmanaged load pressure: the
 // DEFAULT factory failing is a load failure, not a silent fallback.
+test('phone without a validated smaller variant fails closed without loading the original', async () => {
+  const f = fake();
+  let attempted = false;
+  f.Cesium.Cesium3DTileset.fromUrl = async () => {
+    attempted = true;
+    throw new Error('original must not load');
+  };
+  const layer = phoneLayer(f);
+  await layer.load();
+  assert.equal(layer.status, 'failed');
+  assert.equal(layer.error, 'Phone 3D variant unavailable');
+  assert.equal(attempted, false);
+  f.Cesium.Cesium3DTileset.fromUrl = async () => {
+    throw new Error('desktop was attempted');
+  };
+  layer.setPhoneMode(false);
+  await layer._loading;
+  assert.equal(
+    layer.error,
+    '3D model load failed',
+    'disabling phone retries the original instead of stranding the layer',
+  );
+  layer.destroy();
+});
+
 test('phone: the default gate factory failing fails the load closed (no ungated tileset)', async () => {
   const f = fake();
   const { timers } = timersOf();
@@ -1177,7 +1202,10 @@ test('phone: the default gate factory failing fails the load closed (no ungated 
   const layer = new Odm3dLayer({
     Cesium: f.Cesium,
     viewer: f.viewer,
-    entry: entry3d(),
+    entry: {
+      ...entry3d(),
+      phoneUrl: '/basemap/odm3d/odm-3d-9be42b4f-phone/tileset.json',
+    },
     phoneMode: true,
     timers,
   });

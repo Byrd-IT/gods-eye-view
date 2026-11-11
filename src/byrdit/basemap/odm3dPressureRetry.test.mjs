@@ -49,7 +49,10 @@ function fake() {
     },
     ClippingPlane: class {},
     Ellipsoid: {
-      WGS84: { geodeticSurfaceNormal: (c, out) => Object.assign(out, { x: 0, y: 0, z: 1 }) },
+      WGS84: {
+        geodeticSurfaceNormal: (c, out) =>
+          Object.assign(out, { x: 0, y: 0, z: 1 }),
+      },
     },
     Matrix4: { fromTranslation: (v) => ({ translation: v }) },
     Rectangle: { fromDegrees: (w, s, e, n) => ({ w, s, e, n }) },
@@ -145,7 +148,10 @@ test('after a failed phone gate, setPhoneMode(false) retries safely: clean deskt
   const layer = new Odm3dLayer({
     Cesium: f.Cesium,
     viewer: f.viewer,
-    entry: entry3d(),
+    entry: {
+      ...entry3d(),
+      phoneUrl: '/basemap/odm3d/odm-3d-9be42b4f-phone/tileset.json',
+    },
     phoneMode: true,
     timers: t.timers,
   });
@@ -214,6 +220,10 @@ test('a pressure sync after an idle stretch reads the heap fresh: no pause on a 
   f.calls.tilesets.at(-1).report(2, 0);
   assert.equal(layer._heapRatio, 0.5, 'the reading was taken now, not reused');
   assert.equal(layer._pressed, false, 'the stale press did not survive');
-  assert.equal(layer._gate.paused, false, 'the gate did not pause on stale heap');
+  assert.equal(
+    layer._gate.paused,
+    false,
+    'the gate did not pause on stale heap',
+  );
   layer.destroy();
 });

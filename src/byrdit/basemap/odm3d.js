@@ -339,6 +339,14 @@ export class Odm3dLayer {
         // surface the previous attempt's error as if it were current.
         this.error = null;
         const { Cesium, viewer, entry } = this;
+        // Never silently feed the large desktop mesh to a phone if its
+        // separately validated variant is absent or its manifest is broken.
+        if (this.phoneActive && this._defaultGateFactory && !entry.phoneUrl) {
+          this._buildPhone = null;
+          this.status = 'failed';
+          this.error = 'Phone 3D variant unavailable';
+          return;
+        }
         // Phones fetch through a per-tileset gate (request cap + pressure
         // pause) carried on the tileset's own Resource chain — never via
         // shared scheduler state.
