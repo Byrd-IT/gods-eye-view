@@ -498,7 +498,17 @@ export class Odm3dLayer {
       const tileset = this.tileset;
       if (this.destroyed || !tileset) return this._stopPump();
       this._gate?.pump?.();
-      if (!this.pressureStalled) this.viewer.scene.requestRender?.();
+      // Cesium needs frames to evict loaded tiles. An idle heap-only stall
+      // can wait for GC without rendering, but a tile-count stall cannot.
+      const loaded = tileset.statistics?.numberOfTilesWithContentReady;
+      const tilePressure =
+        Number.isFinite(loaded) &&
+        loaded >
+          Math.round(
+            this.phoneLimits.loadedTileCap * this.phoneLimits.resumeFraction,
+          );
+      if (!this.pressureStalled || tilePressure)
+        this.viewer.scene.requestRender?.();
       if (this.phoneActive) this._probePressure();
       this._settled = tileset.tilesLoaded === true ? this._settled + 1 : 0;
       if (this._settled >= 3 && !this._pressed) {

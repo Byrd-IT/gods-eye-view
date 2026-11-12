@@ -252,6 +252,37 @@ const timersOf = () => {
 
 const heap = (used) => () => ({ used, limit: HEAP_MAX });
 
+test('idle heap stall stops extra frames but tile-pressure stall still allows eviction', async () => {
+  const f = fake();
+  const clock = timersOf();
+  const layer = phoneLayer(f, {
+    timers: clock.timers,
+    heapUsage: heap(HEAP_MAX),
+    requestGateFactory: () => ({
+      resource: {},
+      gate: { setPaused() {}, destroy() {}, pump() {} },
+    }),
+  });
+  await layer.load();
+  layer._pressed = true;
+  layer._queued = 0;
+  layer._gate.paused = true;
+  layer.tileset.tilesLoaded = true;
+  layer._pump();
+  const before = f.renders();
+  clock.tick();
+  assert.equal(f.renders(), before, 'heap-only idle stall does not repaint');
+  layer.tileset.statistics.numberOfTilesWithContentReady =
+    PHONE_LIMITS.loadedTileCap + 1;
+  clock.tick();
+  assert.equal(
+    f.renders(),
+    before + 1,
+    'tile-pressure stall renders for Cesium eviction',
+  );
+  layer.destroy();
+});
+
 // A gate factory the layer can be pointed at: it hands the layer a
 // distinguishable resource plus a gate whose pause/destroy calls are logged.
 const gateSpy = () => {
