@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import net from 'node:net';
 import { mkdtempSync, readdirSync, existsSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -58,6 +59,7 @@ async function boot({ trusted = '127.0.0.1', now } = {}) {
     store,
     call,
     port,
+    handler,
     close: async () => {
       await new Promise((r) => server.close(r));
       rmSync(root, { recursive: true, force: true });
@@ -343,6 +345,84 @@ test('no identity: 401 and the store root is not even created', async () => {
   }
 });
 
+test('malformed request target: 400, not a crash', async () => {
+  const s = await boot();
+  try {
+    const answer = await new Promise((resolve, reject) => {
+      const socket = net.connect(s.port, '127.0.0.1', () => {
+        socket.write('GET /api/byrdit/plans/a% HTTP/1.1\r\nHost: 127.0.0.1\r\nx-gev-user: amy\r\nx-requested-with: gev\r\nConnection: close\r\n\r\n');
+      });
+      let text = '';
+      socket.on('data', (c) => (text += c));
+      socket.on('end', () => resolve(text));
+      socket.on('error', reject);
+    });
+    const status = Number(answer.split(' ')[1]);
+    assert.equal(status, 400, `a malformed request target answers 400, got: ${answer.slice(0, 60)}`);
+    assert.match(answer, /bad-target/);
+  } finally {
+    await s.close();
+  }
+});
+
+test('malformed unrelated target: next(); malformed plan target: 400', async () => {
+  const s = await boot();
+  try {
+    // Unrelated paths must fall through even when they are malformed: the
+    // handler is a global middleware and owns only its own prefix.
+    for (const bad of ['/other%', '/api/byrdit/plan%s', 'http://', '/x%2', '/a/b%z', '/foo%?u=http://x/api/byrdit/plans']) {
+      const out = await new Promise((resolve) => {
+        const res = { statusCode: 0 };
+        res.setHeader = () => {};
+        res.end = (text) => resolve({ code: res.statusCode, body: JSON.parse(text) });
+        s.handler({ method: 'GET', url: bad, headers: {} }, res, () => resolve(null));
+      });
+      assert.equal(out, null, `${bad} falls through to next()`);
+    }
+    // Absolute-form targets that name this API are still ours to answer.
+    const out = await new Promise((resolve) => {
+      const res = { statusCode: 0 };
+      res.setHeader = () => {};
+      res.end = (text) => resolve({ code: res.statusCode, body: JSON.parse(text) });
+      s.handler(
+        { method: 'GET', url: 'http://127.0.0.1/api/byrdit/plans/a%', headers: {} },
+        res,
+        () => resolve(null),
+      );
+    });
+    assert.equal(out.code, 400, 'an absolute-form plan URL gets 400');
+    assert.equal(out.body.error, 'bad-target');
+  } finally {
+    await s.close();
+  }
+});
+
+test('GET /api/byrdit/plans// is the root list, not a parse error', async () => {
+  const s = await boot();
+  try {
+    s.store.create('alice', { name: 'A' }, PLAN);
+    const direct = await new Promise((resolve) => {
+      const res = { statusCode: 0 };
+      res.setHeader = () => {};
+      res.end = (text) => resolve(JSON.parse(text));
+      s.handler(
+        {
+          method: 'GET',
+          url: '/api/byrdit/plans//',
+          headers: { 'x-gev-user': 'alice' },
+          socket: { remoteAddress: '127.0.0.1' },
+        },
+        res,
+        () => resolve(null),
+      );
+    });
+    assert.ok(direct, 'the double-slash root list is handled');
+    assert.deepEqual(direct.plans.map((p) => p.name), ['A']);
+  } finally {
+    await s.close();
+  }
+});
+
 test('?owner= naming yourself (any case) is your own plans, not a foreign owner', async () => {
   const s = await boot();
   try {
@@ -479,4 +559,40 @@ test('save() numbers a legacy plan too (first call after the upgrade)', () => {
   const saved = store.save('amy', a.id, PLAN, {});
   assert.equal((saved.plan ?? saved).missionNo, 1);
   rmSync(root, { recursive: true, force: true });
+});
+
+
+test('bare double-slash malformed request target does not throw', async () => {
+  const s = await boot();
+  try {
+    const out = await new Promise((resolve) => {
+      const res = { statusCode: 0, setHeader() {}, end(text) { resolve({code:this.statusCode, body:JSON.parse(text)}); } };
+      s.handler({method:'GET', url:'//', headers:{}}, res, () => resolve(null));
+    });
+    assert.equal(out?.code, 400);
+    assert.equal(out?.body.error, 'bad-target');
+  } finally { await s.close(); }
+});
+
+test('valid normalized plan paths still reach the plan handler', async () => {
+  const s = await boot();
+  try {
+    const out = await new Promise((resolve) => {
+      const res = {
+        statusCode: 0,
+        setHeader() {},
+        end(text) {
+          resolve({ code: this.statusCode, body: JSON.parse(text) });
+        },
+      };
+      s.handler(
+        { method: 'GET', url: '/api/byrdit/other/../plans', headers: {} },
+        res,
+        () => resolve(null),
+      );
+    });
+    assert.equal(out?.code, 401);
+  } finally {
+    await s.close();
+  }
 });

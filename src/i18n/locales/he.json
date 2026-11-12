@@ -3560,7 +3560,6 @@
   "Land, boundaries and geology": "יבשה, גבולות וגאולוגיה",
   "Loading 3D model...": "טוען מודל תלת-ממדי...",
   "The 3D model could not be loaded": "לא ניתן לטעון את המודל התלת-ממדי",
-  "The phone 3D model is unavailable": "מודל התלת־ממד לטלפון אינו זמין",
   "Map layers": "שכבות מפה",
   "Search map layers": "חיפוש שכבות מפה",
   "Aerial and historic imagery: open Time Travel": "צילומי אוויר והיסטוריים: פתח את מסע בזמן",
@@ -4263,9 +4262,12 @@
   "{place} has no position to look for imagery at": "ל-{place} אין מיקום לחיפוש צילומים",
   "No {source} imagery near {place}": "אין צילומים של {source} ליד {place}",
   "{reason} (filters on: {filters})": "{reason} (מסננים פעילים: {filters})",
-  "Phone mode": "מצב טלפון",
+  "Air quality feed is unavailable": "נתוני איכות האוויר אינם זמינים",
+  "Live earthquake feed is unavailable": "נתוני רעידות האדמה בזמן אמת אינם זמינים",
   "Phone mode: softer model to save memory": "מצב טלפון: מודל פחות מפורט לחיסכון בזיכרון",
+  "The 3D model request gate could not be created": "לא ניתן ליצור את שער הבקשות למודל התלת־ממדי",
   "Paused under memory pressure: no new 3D tile loads": "מושהה עקב מחסור בזיכרון: לא נטענים אריחי תלת־ממד חדשים",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "נעצר עקב מחסור בזיכרון: אין טעינה, ממתין לפינוי זיכרון",
-  "The 3D model request gate could not be created": "לא ניתן ליצור את שער הבקשות למודל התלת־ממדי"
+  "The phone 3D model is unavailable": "מודל התלת־ממד לטלפון אינו זמין",
+  "Phone mode": "מצב טלפון",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "נעצר עקב מחסור בזיכרון: אין טעינה, ממתין לפינוי זיכרון"
 }

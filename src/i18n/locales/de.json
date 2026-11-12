@@ -4083,7 +4083,6 @@
   "Fly to this model and keep Byrd-IT Open selected": "Zu diesem Modell fliegen und Byrd-IT Open ausgewählt lassen",
   "Loading 3D model...": "3D-Modell wird geladen ...",
   "The 3D model could not be loaded": "Das 3D-Modell konnte nicht geladen werden",
-  "The phone 3D model is unavailable": "Das 3D-Modell für Mobilgeräte ist nicht verfügbar",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "Nur Militärflugzeuge (aufgezeichnete Kopie)",
   "Show feet and mph. The mission file always stays in metres": "Fuß und mph anzeigen. Die Missionsdatei bleibt immer in Metern",
@@ -4173,9 +4172,12 @@
   "{place} has no position to look for imagery at": "{place} hat keine Position, an der nach Bildern gesucht werden kann",
   "No {source} imagery near {place}": "Keine Bilder von {source} in der Nähe von {place}",
   "{reason} (filters on: {filters})": "{reason} (aktive Filter: {filters})",
-  "Phone mode": "Telefonmodus",
+  "Live earthquake feed is unavailable": "Der Live-Erdbeben-Feed ist nicht verfügbar",
+  "Air quality feed is unavailable": "Luftqualitäts-Feed ist nicht verfügbar",
   "Phone mode: softer model to save memory": "Telefonmodus: weniger detailliertes Modell, um Speicher zu sparen",
+  "The 3D model request gate could not be created": "Die Anfrage-Sperre des 3D-Modells konnte nicht erstellt werden",
   "Paused under memory pressure: no new 3D tile loads": "Angehalten wegen Speicherdruck: keine neuen 3D-Kachel-Ladevorgänge",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Stillstand wegen Speicherdruck: nichts lädt, auf freien Speicher warten",
-  "The 3D model request gate could not be created": "Die Anfrage-Sperre des 3D-Modells konnte nicht erstellt werden"
+  "The phone 3D model is unavailable": "Das 3D-Modell für Mobilgeräte ist nicht verfügbar",
+  "Phone mode": "Telefonmodus",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Stillstand wegen Speicherdruck: nichts lädt, auf freien Speicher warten"
 }

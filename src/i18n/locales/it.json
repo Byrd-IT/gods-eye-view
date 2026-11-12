@@ -4173,7 +4173,6 @@
   "Fly to this model and keep Byrd-IT Open selected": "Vai a questo modello e mantieni selezionato Byrd-IT Open",
   "Loading 3D model...": "Caricamento del modello 3D...",
   "The 3D model could not be loaded": "Impossibile caricare il modello 3D",
-  "The phone 3D model is unavailable": "Il modello 3D per telefono non è disponibile",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "Solo velivoli militari (copia registrata)",
   "Show feet and mph. The mission file always stays in metres": "Mostra piedi e mph. Il file di missione resta sempre in metri",
@@ -4263,9 +4262,12 @@
   "{place} has no position to look for imagery at": "{place} non ha una posizione in cui cercare immagini",
   "No {source} imagery near {place}": "Nessuna immagine di {source} vicino a {place}",
   "{reason} (filters on: {filters})": "{reason} (filtri attivi: {filters})",
-  "Phone mode": "Modalità telefono",
+  "Live earthquake feed is unavailable": "Il feed sismico in tempo reale non è disponibile",
+  "Air quality feed is unavailable": "Il feed di qualità dell'aria non è disponibile",
   "Phone mode: softer model to save memory": "Modalità telefono: modello meno dettagliato per risparmiare memoria",
+  "The 3D model request gate could not be created": "Impossibile creare il gate delle richieste del modello 3D",
   "Paused under memory pressure: no new 3D tile loads": "In pausa per pressione di memoria: nessun nuovo caricamento di tile 3D",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "In stallo per pressione di memoria: nulla in caricamento, attesa di memoria libera",
-  "The 3D model request gate could not be created": "Impossibile creare il gate delle richieste del modello 3D"
+  "The phone 3D model is unavailable": "Il modello 3D per telefono non è disponibile",
+  "Phone mode": "Modalità telefono",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "In stallo per pressione di memoria: nulla in caricamento, attesa di memoria libera"
 }

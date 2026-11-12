@@ -3993,7 +3993,6 @@
   "Fly to this model and keep Byrd-IT Open selected": "飞往此模型并保持选中 Byrd-IT Open",
   "Loading 3D model...": "正在加载 3D 模型...",
   "The 3D model could not be loaded": "无法加载 3D 模型",
-  "The phone 3D model is unavailable": "手机版 3D 模型不可用",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "仅限军用飞机（已记录副本）",
   "Show feet and mph. The mission file always stays in metres": "显示英尺和英里/小时（mph）。任务文件始终使用米",
@@ -4083,9 +4082,12 @@
   "{place} has no position to look for imagery at": "{place} 没有可查找影像的位置",
   "No {source} imagery near {place}": "{place} 附近没有 {source} 影像",
   "{reason} (filters on: {filters})": "{reason}（已开启筛选：{filters}）",
-  "Phone mode": "手机模式",
+  "Live earthquake feed is unavailable": "实时地震数据源不可用",
+  "Air quality feed is unavailable": "空气质量数据源不可用",
   "Phone mode: softer model to save memory": "手机模式：降低模型精细度以节省内存",
+  "The 3D model request gate could not be created": "无法创建 3D 模型请求闸门",
   "Paused under memory pressure: no new 3D tile loads": "因内存压力暂停：不再加载新的 3D 切片",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "因内存压力停滞：没有正在加载的内容，等待内存释放",
-  "The 3D model request gate could not be created": "无法创建 3D 模型请求闸门"
+  "The phone 3D model is unavailable": "手机版 3D 模型不可用",
+  "Phone mode": "手机模式",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "因内存压力停滞：没有正在加载的内容，等待内存释放"
 }

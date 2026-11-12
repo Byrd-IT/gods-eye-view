@@ -4173,7 +4173,6 @@
   "Fly to this model and keep Byrd-IT Open selected": "Aller à ce modèle et garder Byrd-IT Open sélectionné",
   "Loading 3D model...": "Chargement du modèle 3D...",
   "The 3D model could not be loaded": "Impossible de charger le modèle 3D",
-  "The phone 3D model is unavailable": "Le modèle 3D pour téléphone est indisponible",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "Aéronefs militaires uniquement (copie enregistrée)",
   "Show feet and mph. The mission file always stays in metres": "Afficher les pieds et les mph. Le fichier de mission reste toujours en mètres",
@@ -4263,9 +4262,12 @@
   "{place} has no position to look for imagery at": "{place} n'a pas de position où chercher des images",
   "No {source} imagery near {place}": "Aucune image {source} près de {place}",
   "{reason} (filters on: {filters})": "{reason} (filtres actifs : {filters})",
-  "Phone mode": "Mode téléphone",
+  "Live earthquake feed is unavailable": "Le flux sismique en direct est indisponible",
+  "Air quality feed is unavailable": "Le flux de qualité de l'air est indisponible",
   "Phone mode: softer model to save memory": "Mode téléphone : modèle moins détaillé pour économiser la mémoire",
+  "The 3D model request gate could not be created": "Impossible de créer la barrière de requêtes du modèle 3D",
   "Paused under memory pressure: no new 3D tile loads": "En pause sous pression mémoire : plus aucun chargement de tuiles 3D",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Bloqué sous pression mémoire : rien ne se charge, en attendant que la mémoire se libère",
-  "The 3D model request gate could not be created": "Impossible de créer la barrière de requêtes du modèle 3D"
+  "The phone 3D model is unavailable": "Le modèle 3D pour téléphone est indisponible",
+  "Phone mode": "Mode téléphone",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Bloqué sous pression mémoire : rien ne se charge, en attendant que la mémoire se libère"
 }

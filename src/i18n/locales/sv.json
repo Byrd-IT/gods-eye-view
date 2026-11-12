@@ -3506,7 +3506,6 @@
   "Land, boundaries and geology": "Mark, gränser och geologi",
   "Loading 3D model...": "Laddar 3D-modell …",
   "The 3D model could not be loaded": "3D-modellen kunde inte laddas",
-  "The phone 3D model is unavailable": "3D-modellen för telefon är inte tillgänglig",
   "Map layers": "Kartlager",
   "Search map layers": "Sök kartlager",
   "Aerial and historic imagery: open Time Travel": "Flyg- och historiska bilder: öppna Tidsresa",
@@ -4173,9 +4172,12 @@
   "Control sky": "Styr himmel",
   "Control imagery": "Styr bilder",
   "Control drone plan": "Styr drönarplan",
-  "Phone mode": "Telefonläge",
+  "Air quality feed is unavailable": "Luftkvalitetsflödet är inte tillgängligt",
+  "Live earthquake feed is unavailable": "Jordbävningsflödet i realtid är inte tillgängligt",
   "Phone mode: softer model to save memory": "Telefonläge: mindre detaljerad modell för att spara minne",
+  "The 3D model request gate could not be created": "Det gick inte att skapa 3D-modellens begärandegrind",
   "Paused under memory pressure: no new 3D tile loads": "Pausad på grund av minnesbrist: inga nya 3D-rutor laddas",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Stannat på grund av minnesbrist: inget laddas, väntar på ledigt minne",
-  "The 3D model request gate could not be created": "Det gick inte att skapa 3D-modellens begärandegrind"
+  "The phone 3D model is unavailable": "3D-modellen för telefon är inte tillgänglig",
+  "Phone mode": "Telefonläge",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Stannat på grund av minnesbrist: inget laddas, väntar på ledigt minne"
 }

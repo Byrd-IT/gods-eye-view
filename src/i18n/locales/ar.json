@@ -4443,7 +4443,6 @@
   "Fly to this model and keep Byrd-IT Open selected": "الانتقال إلى هذا النموذج مع إبقاء Byrd-IT Open محددًا",
   "Loading 3D model...": "جارٍ تحميل النموذج ثلاثي الأبعاد...",
   "The 3D model could not be loaded": "تعذّر تحميل النموذج ثلاثي الأبعاد",
-  "The phone 3D model is unavailable": "نموذج الهاتف ثلاثي الأبعاد غير متوفر",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "الطائرات العسكرية فقط (نسخة مسجّلة)",
   "Show feet and mph. The mission file always stays in metres": "عرض الأقدام و ميل/ساعة (mph). يبقى ملف المهمة دائمًا بالأمتار.",
@@ -4533,9 +4532,12 @@
   "{place} has no position to look for imagery at": "لا يوجد لـ{place} موضع للبحث عن الصور فيه",
   "No {source} imagery near {place}": "لا توجد صور {source} قرب {place}",
   "{reason} (filters on: {filters})": "{reason} (المرشحات المفعّلة: {filters})",
-  "Phone mode": "وضع الهاتف",
+  "Live earthquake feed is unavailable": "بث الزلازل المباشر غير متوفر",
+  "Air quality feed is unavailable": "بيانات جودة الهواء غير متوفرة",
   "Phone mode: softer model to save memory": "وضع الهاتف: نموذج أخف لحفظ الذاكرة",
+  "The 3D model request gate could not be created": "تعذّر إنشاء بوابة طلبات النموذج ثلاثي الأبعاد",
   "Paused under memory pressure: no new 3D tile loads": "متوقف بسبب ضغط الذاكرة: لا تحميلات جديدة لبلاطات ثلاثية الأبعاد",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "متعثر بسبب ضغط الذاكرة: لا شيء يُحمَّل، بانتظار تحرر الذاكرة",
-  "The 3D model request gate could not be created": "تعذّر إنشاء بوابة طلبات النموذج ثلاثي الأبعاد"
+  "The phone 3D model is unavailable": "نموذج الهاتف ثلاثي الأبعاد غير متوفر",
+  "Phone mode": "وضع الهاتف",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "متعثر بسبب ضغط الذاكرة: لا شيء يُحمَّل، بانتظار تحرر الذاكرة"
 }

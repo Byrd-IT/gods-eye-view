@@ -4173,7 +4173,6 @@
   "Fly to this model and keep Byrd-IT Open selected": "Ir a este modelo y mantener Byrd-IT Open seleccionado",
   "Loading 3D model...": "Cargando modelo 3D...",
   "The 3D model could not be loaded": "No se pudo cargar el modelo 3D",
-  "The phone 3D model is unavailable": "El modelo 3D para teléfono no está disponible",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "Solo aeronaves militares (copia registrada)",
   "Show feet and mph. The mission file always stays in metres": "Mostrar pies y mph. El archivo de misión siempre queda en metros",
@@ -4263,9 +4262,12 @@
   "{place} has no position to look for imagery at": "{place} no tiene una posición donde buscar imágenes",
   "No {source} imagery near {place}": "No hay imágenes de {source} cerca de {place}",
   "{reason} (filters on: {filters})": "{reason} (filtros activos: {filters})",
-  "Phone mode": "Modo teléfono",
+  "Live earthquake feed is unavailable": "El suministro de datos de terremotos en vivo no está disponible",
+  "Air quality feed is unavailable": "El suministro de datos de calidad del aire no está disponible",
   "Phone mode: softer model to save memory": "Modo teléfono: modelo menos detallado para ahorrar memoria",
+  "The 3D model request gate could not be created": "No se pudo crear la puerta de peticiones del modelo 3D",
   "Paused under memory pressure: no new 3D tile loads": "Pausado por presión de memoria: no se cargan nuevos mosaicos 3D",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Estancado por presión de memoria: nada cargando, esperando que se libere memoria",
-  "The 3D model request gate could not be created": "No se pudo crear la puerta de peticiones del modelo 3D"
+  "The phone 3D model is unavailable": "El modelo 3D para teléfono no está disponible",
+  "Phone mode": "Modo teléfono",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Estancado por presión de memoria: nada cargando, esperando que se libere memoria"
 }

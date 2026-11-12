@@ -83,6 +83,39 @@ function sameOrigin(req) {
 }
 
 /**
+ * Parse the request target. A malformed plan-library target (something the
+ * URL parser refuses, or a path with a broken percent escape) is answered
+ * with 400 straight away: the middleware must never throw out of the
+ * request handler.
+ */
+function parseTarget(req) {
+  if (req.url === undefined) return null;
+  try {
+    const url = new URL(req.url, 'http://local');
+    decodeURIComponent(url.pathname);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A raw (unparsed) request target that belongs to this API. The handler is
+ * installed as a global middleware, so it also sees targets that have
+ * nothing to do with the plan library: a malformed one of those must fall
+ * through to next(), not take the 400 branch. Without a parseable URL we
+ * can only decide from the raw text, so match `/api/byrdit/plans` at the
+ * start of the path (origin-form) or after the authority (absolute-form),
+ * followed by the end of the path, a slash, a question mark or a hash.
+ */
+function isPlanTarget(raw) {
+  if (typeof raw !== 'string') return false;
+  return /^(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*)?\/api\/byrdit\/plans(?=[/?#]|$)/.test(
+    raw,
+  );
+}
+
+/**
  * @param {{ store?: ReturnType<typeof createStore>, env?: object }} [deps]
  * @returns {(req, res, next) => void}
  */
@@ -200,7 +233,18 @@ export function createPlanLibraryHandler({
   }
 
   return function planLibraryHandler(req, res, next) {
-    const url = new URL(req.url ?? '/', 'http://local');
+    // Only a malformed target that is unmistakably ours becomes a 400;
+    // other middleware still sees its requests.
+    // The bare authority marker cannot be parsed by downstream URL handlers.
+    // Reject this explicitly requested crash case; other unrelated paths pass on.
+    const url = parseTarget(req);
+    if (url === null) {
+      if (req.url !== '//' && !isPlanTarget(req.url)) return next();
+      return send(res, 400, {
+        error: 'bad-target',
+        message: 'The request target is malformed',
+      });
+    }
     if (
       url.pathname !== API_PREFIX &&
       !url.pathname.startsWith(`${API_PREFIX}/`)

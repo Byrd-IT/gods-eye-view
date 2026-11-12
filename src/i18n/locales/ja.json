@@ -3993,7 +3993,6 @@
   "Fly to this model and keep Byrd-IT Open selected": "このモデルへ移動し、Byrd-IT Open を選択したままにする",
   "Loading 3D model...": "3Dモデルを読み込み中...",
   "The 3D model could not be loaded": "3Dモデルを読み込めませんでした",
-  "The phone 3D model is unavailable": "携帯電話用の3Dモデルを利用できません",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "軍用機のみ（記録されたコピー）",
   "Show feet and mph. The mission file always stays in metres": "フィートとマイル毎時（mph）を表示します。ミッションファイルは常にメートルのままです",
@@ -4083,9 +4082,12 @@
   "{place} has no position to look for imagery at": "{place}には画像を探す位置がありません",
   "No {source} imagery near {place}": "{place}の近くに{source}の画像はありません",
   "{reason} (filters on: {filters})": "{reason}（有効なフィルター: {filters}）",
-  "Phone mode": "電話モード",
+  "Live earthquake feed is unavailable": "リアルタイム地震フィードは利用できません",
+  "Air quality feed is unavailable": "大気質フィードは利用できません",
   "Phone mode: softer model to save memory": "電話モード：メモリーを節約するため簡易モデル",
+  "The 3D model request gate could not be created": "3D モデルのリクエストゲートを作成できませんでした",
   "Paused under memory pressure: no new 3D tile loads": "メモリ圧力のため一時停止: 新しい 3D タイルの読み込みは行いません",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "メモリ圧力で停滞中: 読み込み対象はなく、メモリの解放を待っています",
-  "The 3D model request gate could not be created": "3D モデルのリクエストゲートを作成できませんでした"
+  "The phone 3D model is unavailable": "携帯電話用の3Dモデルを利用できません",
+  "Phone mode": "電話モード",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "メモリ圧力で停滞中: 読み込み対象はなく、メモリの解放を待っています"
 }

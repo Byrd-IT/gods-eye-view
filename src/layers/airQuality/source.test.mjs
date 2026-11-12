@@ -195,3 +195,203 @@ test('a request that outlives its deadline is aborted', async (t) => {
   t.mock.timers.tick(1_000);
   await assert.rejects(pending, /ECCC request timed out/);
 });
+
+// t_a1a1cca6 item 1: the ES-live bridge answers AQHI from our Elasticsearch
+// copy; its stale marker and its errors must look neutral to the layer.
+
+const esLiveSource = (overrides = {}, body = null) =>
+  createEcccAirQualitySource({
+    // Fixed clock: the fixtures carry NOW-anchored observation times.
+    now: () => NOW,
+    fetchImpl: async (url) =>
+      json(
+        body ?? {
+          type: 'FeatureCollection',
+          features: url.includes('aqhi-stations')
+            ? [station('A')]
+            : [observation('A', NOW - 60_000)],
+        },
+        overrides,
+      ),
+  });
+
+test('a stale ES-copy answer reaches the snapshot detail', async () => {
+  const source = esLiveSource({
+    headers: { 'X-Data-Stale': 'true', 'Retry-After': '75' },
+  });
+  await assert.doesNotReject(source.getSnapshot());
+  const detail = await source.getSnapshotDetail();
+  assert.equal(detail.stale, true);
+  assert.equal(detail.retryAfterSec, 75);
+  assert.equal(detail.readings.length, 1);
+});
+
+test('a fresh ES-copy answer is not marked stale', async () => {
+  const source = esLiveSource();
+  const detail = await source.getSnapshotDetail();
+  assert.equal(detail.stale, false);
+  assert.equal(detail.retryAfterSec, null);
+});
+
+test('an ES-live outage is reported neutrally, not as an ECCC fault', async () => {
+  const source = esLiveSource(
+    { status: 503 },
+    { error: 'es_live_unavailable' },
+  );
+  await assert.rejects(source.getSnapshot(), (error) => {
+    assert.match(error.message, /unavailable/i);
+    assert.doesNotMatch(error.message, /ECCC/i);
+    return true;
+  });
+});
+
+test('a 503 that names itself elasticsearch is also neutral', async () => {
+  const source = esLiveSource(
+    { status: 503, headers: { 'X-Feed-Source': 'elasticsearch' } },
+    { error: 'not_ours' },
+  );
+  // Only the header carries the marker; the error body names something else.
+  await assert.rejects(source.getSnapshot(), (error) => {
+    assert.doesNotMatch(error.message, /ECCC/i);
+    return true;
+  });
+});
+
+test('a plain redirected same-origin 404 reported by the bridge stays neutral', async () => {
+  // A redirected /api/es-live/* 404 returned with no marker at all: the
+  // failure is ours, not ECCC's.
+  const response = new Response('not found', { status: 404 });
+  Object.defineProperty(response, 'url', {
+    value: 'https://grid.example/api/es-live/aqhi-stations',
+  });
+  const source = createEcccAirQualitySource({
+    now: () => NOW,
+    fetchImpl: async () => response,
+  });
+  await assert.rejects(source.getSnapshot(), (error) => {
+    assert.match(error.message, /unavailable/i);
+    assert.doesNotMatch(error.message, /ECCC/i);
+    return true;
+  });
+});
+
+test('a 404 from the provider itself still names the provider', async () => {
+  const response = new Response('not found', { status: 404 });
+  Object.defineProperty(response, 'url', {
+    value: 'https://api.weather.gc.ca/collections/aqhi-stations/items',
+  });
+  const source = createEcccAirQualitySource({
+    now: () => NOW,
+    fetchImpl: async () => response,
+  });
+  await assert.rejects(source.getSnapshot(), /ECCC HTTP 404/);
+});
+
+// t_a1a1cca6 item 2: the station catalog can be served stale too. Its stale
+// marker must reach the snapshot detail, and a cached catalog must keep its
+// recorded freshness until a refresh actually replaces it.
+
+/** A two-collection feed whose headers can be changed between requests. */
+function staleableFeed() {
+  const state = {
+    clock: NOW,
+    stationHeaders: {},
+    observationHeaders: {},
+    stations: [station('A')],
+  };
+  state.source = createEcccAirQualitySource({
+    now: () => state.clock,
+    fetchImpl: async (url) =>
+      json(
+        {
+          type: 'FeatureCollection',
+          features: url.includes('aqhi-stations')
+            ? state.stations
+            : [observation('A', state.clock)],
+        },
+        {
+          headers: url.includes('aqhi-stations')
+            ? state.stationHeaders
+            : state.observationHeaders,
+        },
+      ),
+  });
+  return state;
+}
+
+test('a stale station refresh marks the snapshot stale', async () => {
+  const state = staleableFeed();
+  state.stationHeaders = { 'X-Data-Stale': 'true' };
+  const detail = await state.source.getSnapshotDetail();
+  assert.equal(detail.stale, true);
+});
+
+test('a stale catalog keeps the snapshot stale past the observation marker', async () => {
+  const state = staleableFeed();
+  state.stationHeaders = { 'X-Data-Stale': 'true' };
+  assert.equal((await state.source.getSnapshotDetail()).stale, true);
+  // The catalog is cached; its staleness must persist even though every
+  // later observation answer is fresh, because the coordinates are aged.
+  state.clock += HOUR;
+  state.observationHeaders = { 'X-Data-Stale': 'false' };
+  assert.equal(
+    (await state.source.getSnapshotDetail()).stale,
+    true,
+    'the cached catalog was served stale and stays stale until replaced',
+  );
+  // Once the catalog actually refreshes fresh, the staleness clears.
+  state.clock += 12 * HOUR;
+  state.stationHeaders = {};
+  assert.equal((await state.source.getSnapshotDetail()).stale, false);
+});
+
+test('an empty stale refresh keeps the cached catalog fresh', async () => {
+  const state = staleableFeed();
+  assert.equal((await state.source.getSnapshotDetail()).stale, false);
+  // The refresh is stale but empty: nothing is adopted, so the cached
+  // catalog keeps the freshness it was fetched with.
+  state.stations = [];
+  state.stationHeaders = { 'X-Data-Stale': 'true' };
+  state.clock += 13 * HOUR;
+  assert.equal((await state.source.getSnapshotDetail()).stale, false);
+});
+
+test('a stale station catalog plus stale observations is stale', async () => {
+  const state = staleableFeed();
+  state.stationHeaders = { 'X-Data-Stale': 'true' };
+  state.observationHeaders = { 'X-Data-Stale': 'true' };
+  assert.equal((await state.source.getSnapshotDetail()).stale, true);
+});
+
+test('a superseded station refresh cannot replace newer cached freshness', async () => {
+  let resolveOld;
+  let stationCalls = 0;
+  const source = createEcccAirQualitySource({
+    now: () => NOW,
+    fetchImpl: async (url) => {
+      if (url.includes('aqhi-stations')) {
+        stationCalls++;
+        if (stationCalls === 1) return new Promise((resolve) => { resolveOld = resolve; });
+        return json({ type: 'FeatureCollection', features: [station('A')] });
+      }
+      return json({ type: 'FeatureCollection', features: [observation('A')] });
+    },
+  });
+  const old = source.getSnapshotDetail();
+  const fresh = await source.getSnapshotDetail();
+  assert.equal(fresh.stale, false);
+  resolveOld(json({ type: 'FeatureCollection', features: [station('A')] }, { headers: { 'X-Data-Stale': 'true' } }));
+  await old;
+  assert.equal((await source.getSnapshotDetail()).stale, false);
+});
+
+test('error classification does not consume oversized response bodies', async () => {
+  let pulled = 0;
+  const huge = JSON.stringify({ error: 'es_live_unavailable', padding: 'x'.repeat(70000) });
+  const response = new Response(new ReadableStream({
+    pull(controller) { pulled++; controller.enqueue(new TextEncoder().encode(huge)); controller.close(); },
+  }), { status: 503, headers: { 'content-length': String(huge.length) } });
+  const source = createEcccAirQualitySource({ fetchImpl: async () => response });
+  await assert.rejects(source.getSnapshot(), /ECCC HTTP 503/);
+  assert.ok(pulled <= 1);
+});

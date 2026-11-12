@@ -4263,7 +4263,6 @@
   "Fly to this model and keep Byrd-IT Open selected": "Перелететь к этой модели и оставить выбранным Byrd-IT Open",
   "Loading 3D model...": "Загрузка 3D-модели...",
   "The 3D model could not be loaded": "Не удалось загрузить 3D-модель",
-  "The phone 3D model is unavailable": "3D-модель для телефона недоступна",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "Только военные самолёты (записанная копия)",
   "Show feet and mph. The mission file always stays in metres": "Показывать футы и мили в час (mph). Файл миссии всегда остаётся в метрах",
@@ -4353,9 +4352,12 @@
   "{place} has no position to look for imagery at": "У места «{place}» нет координат для поиска снимков",
   "No {source} imagery near {place}": "Нет снимков {source} рядом с {place}",
   "{reason} (filters on: {filters})": "{reason} (включены фильтры: {filters})",
-  "Phone mode": "Режим телефона",
+  "Live earthquake feed is unavailable": "Поток данных о землетрясениях в реальном времени недоступен",
+  "Air quality feed is unavailable": "Поток данных о качестве воздуха недоступен",
   "Phone mode: softer model to save memory": "Режим телефона: упрощённая модель для экономии памяти",
+  "The 3D model request gate could not be created": "Не удалось создать шлюз запросов 3D-модели",
   "Paused under memory pressure: no new 3D tile loads": "Пауза из-за нехватки памяти: новые загрузки 3D-тайлов остановлены",
-  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Застой из-за нехватки памяти: нечего загружать, ожидание освобождения памяти",
-  "The 3D model request gate could not be created": "Не удалось создать шлюз запросов 3D-модели"
+  "The phone 3D model is unavailable": "3D-модель для телефона недоступна",
+  "Phone mode": "Режим телефона",
+  "Stalled under memory pressure: nothing loading, waiting for memory to free up": "Застой из-за нехватки памяти: нечего загружать, ожидание освобождения памяти"
 }
