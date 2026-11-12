@@ -4171,5 +4171,7 @@
   "Control history": "Styr historik",
   "Control sky": "Styr himmel",
   "Control imagery": "Styr bilder",
-  "Control drone plan": "Styr drönarplan"
+  "Control drone plan": "Styr drönarplan",
+  "Air quality feed is unavailable": "Luftkvalitetsflödet är inte tillgängligt",
+  "Live earthquake feed is unavailable": "Jordbävningsflödet i realtid är inte tillgängligt"
 }

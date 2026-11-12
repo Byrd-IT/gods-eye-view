@@ -83,7 +83,11 @@ export function previewFlagHtmlMiddleware({
     // MCP is also a server endpoint, installed by a later plugin.
     const raw = String(req.url ?? '');
     const pathname = raw.split(/[?#]/)[0];
-    if (pathname.startsWith('/api') || pathname === '/mcp' || pathname.startsWith('/mcp/'))
+    if (
+      pathname.startsWith('/api') ||
+      pathname === '/mcp' ||
+      pathname.startsWith('/mcp/')
+    )
       return next();
     const last = pathname.slice(pathname.lastIndexOf('/') + 1);
     // '/' and '/index.html' are always the entry page; an extension-less path
