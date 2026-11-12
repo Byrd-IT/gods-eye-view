@@ -41,7 +41,7 @@ function noteText(layer) {
   if (layer.gateError)
     return t('The 3D model request gate could not be created');
   if (layer.status === 'failed' && layer.phoneVariantMissing)
-    return `${t('Phone mode')}: ${t('The 3D model could not be loaded')}`;
+    return t('The phone 3D model is unavailable');
   if (layer.status === 'failed') return t('The 3D model could not be loaded');
   // ...and the pressure pause says what is actually happening.
   if (layer.pressurePaused) {

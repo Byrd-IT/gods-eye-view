@@ -427,10 +427,7 @@ test('panel: missing phone copy has a specific safe message', () => {
     onOpacity() {},
   });
   const note = panel.element.find((n) => /gev-ov-3d-note/.test(n.className))[0];
-  assert.match(
-    note.textContent,
-    /^Phone mode: The 3D model could not be loaded$/,
-  );
+  assert.match(note.textContent, /^The phone 3D model is unavailable$/);
 });
 
 test('panel: the loading note wins over the phone note until the model settles', () => {

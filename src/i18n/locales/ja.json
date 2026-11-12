@@ -3993,6 +3993,7 @@
   "Fly to this model and keep Byrd-IT Open selected": "このモデルへ移動し、Byrd-IT Open を選択したままにする",
   "Loading 3D model...": "3Dモデルを読み込み中...",
   "The 3D model could not be loaded": "3Dモデルを読み込めませんでした",
+  "The phone 3D model is unavailable": "携帯電話用の3Dモデルを利用できません",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "軍用機のみ（記録されたコピー）",
   "Show feet and mph. The mission file always stays in metres": "フィートとマイル毎時（mph）を表示します。ミッションファイルは常にメートルのままです",

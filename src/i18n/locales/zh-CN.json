@@ -3993,6 +3993,7 @@
   "Fly to this model and keep Byrd-IT Open selected": "飞往此模型并保持选中 Byrd-IT Open",
   "Loading 3D model...": "正在加载 3D 模型...",
   "The 3D model could not be loaded": "无法加载 3D 模型",
+  "The phone 3D model is unavailable": "手机版 3D 模型不可用",
   "Byrd Ranch builds": "Byrd Ranch builds",
   "Military aircraft only (recorded copy)": "仅限军用飞机（已记录副本）",
   "Show feet and mph. The mission file always stays in metres": "显示英尺和英里/小时（mph）。任务文件始终使用米",
