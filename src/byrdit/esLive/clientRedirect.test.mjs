@@ -119,8 +119,9 @@ test('install: initial config failure fails CLOSED — the request is never sent
 test('install: a Request input for a listed URL is redirected with its method and headers', async () => {
   const seen = [];
   const target = {
+    location: { href: 'https://gev.example.test/' },
     async fetch(input) {
-      if (input === ES_LIVE_CONFIG_URL)
+      if (input === new URL(ES_LIVE_CONFIG_URL, target.location.href).href)
         return new Response(JSON.stringify({ feeds: ['quakes'] }));
       seen.push(input);
       return new Response('ok');
@@ -562,7 +563,7 @@ test('redirected POST 404 gets the original same-origin 404 straight away: no re
   const seen = []; let configCalls = 0;
   const target = { location: { href: 'http://localhost/' }, async fetch(input) {
     const href = typeof input === 'string' ? input : (input?.url ?? String(input));
-    if (href === ES_LIVE_CONFIG_URL) { configCalls++; return new Response(JSON.stringify({ feeds: ['quakes'] })); }
+    if (href === new URL(ES_LIVE_CONFIG_URL, target.location.href).href) { configCalls++; return new Response(JSON.stringify({ feeds: ['quakes'] })); }
     seen.push({ url: href, body: await input.text() }); return new Response('', { status: 404 });
   } };
   const undo = installEsLiveFetch({ target, doc: null });
@@ -608,56 +609,46 @@ test('redirected GET 404 retry cancels the dropped 404 body before the replay', 
 });
 
 test('uninstall aborts every concurrent config harness, not only the latest one', { timeout: 5000 }, async () => {
-  // ask 1 answers "listed"; two concurrent 404 rechecks (asks 2 and 3) hang;
-  // uninstall must abort BOTH hung harnesses
+  // ask 1 answers "listed"; two concurrent 404 rechecks share one ask that hangs;
+  // uninstall must abort the shared hung harness
   const target = scriptedTarget([
     { feeds: ['quakes'] },
-    HANG,
     HANG,
   ]);
   const undo = installEsLiveFetch({ target, doc: null, configTimeoutMs: 60_000 });
   const a = target.fetch(USGS);
   const b = target.fetch(USGS);
   // wait until both recheck asks are in flight
-  for (let i = 0; i < 100 && target.signals.length < 3; i += 1)
+  for (let i = 0; i < 100 && target.signals.length < 2; i += 1)
     await new Promise((r) => setTimeout(r, 5));
-  assert.equal(target.signals.length, 3, 'both 404 rechecks started their own config ask');
+  assert.equal(target.signals.length, 2, 'concurrent rechecks share a single config ask');
   undo(); // aborts every in-flight harness
   await Promise.allSettled([a, b]);
   assert.deepEqual(
     target.signals.map((s) => s.aborted),
-    [false, true, true],
+    [false, true],
     'uninstall aborted all still-active config harnesses, not just the latest',
   );
 });
 
-test('an old failed 404 recheck cannot clear a newer configuration', async () => {
-  let configCalls = 0, rejectOld, releaseFirst, first = true;
+test('a failed shared refresh is not cached for the next request', async () => {
+  let calls = 0;
   const target = { async fetch(input) {
     const href = typeof input === 'string' ? input : input.url;
     if (href === ES_LIVE_CONFIG_URL) {
-      configCalls++;
-      if (configCalls === 2) return new Promise((_, reject) => { rejectOld = reject; });
-      return new Response(JSON.stringify({ feeds: ['quakes'] }));
+      calls++;
+      if (calls === 2) throw new Error('refresh failed');
+      return new Response(JSON.stringify({feeds:['quakes']}));
     }
-    if (first) { first = false; return new Promise(resolve => { releaseFirst = () => resolve(new Response('', { status: 404 })); }); }
-    return new Response('', { status: 404 });
-  } };
-  const undo = installEsLiveFetch({ target, doc: null });
-  const a = target.fetch(USGS);
-  while (!releaseFirst) await new Promise(resolve => setTimeout(resolve, 1));
-  const b = target.fetch(USGS);
-  while (!rejectOld) await new Promise(resolve => setTimeout(resolve, 1));
-  releaseFirst();
-  await a;
-  rejectOld(new Error('older config failed'));
-  await b;
-  const before = configCalls;
-  await target.fetch(USGS);
-  assert.equal(configCalls, before + 1, 'only the next 404 triggers a new config ask');
+    return new Response('gone', {status:404});
+  }};
+  const undo = installEsLiveFetch({target, doc:null});
+  assert.equal((await target.fetch(USGS)).status, 404);
+  assert.equal(calls, 2);
+  assert.equal((await target.fetch(USGS)).status, 404);
+  assert.equal(calls, 4);
   undo();
 });
-
 
 test('a 404 returned after config recheck failure retains its body', async () => {
   let calls = 0;

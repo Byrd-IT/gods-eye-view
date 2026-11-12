@@ -101,14 +101,10 @@ export function esLiveTarget(href, feeds) {
 /** Whether a URL is one of the two provider requests this module can redirect. */
 export const isRedirectable = (href) => esLiveTarget(href, ALL) !== null;
 
-/** Absolute base for a Request (a Request needs an absolute URL outside a page). */
-function baseOf(target, doc) {
-  return (
-    doc?.baseURI ??
-    target?.location?.href ??
-    globalThis.location?.href ??
-    'http://localhost/'
-  );
+/** Resolve against the document location, never the mutable <base> element. */
+function localTarget(path, target) {
+  const href = target?.location?.href ?? globalThis.location?.href;
+  return href ? new URL(path, href).href : path;
 }
 
 const timeoutReason = () =>
@@ -217,11 +213,15 @@ export function installEsLiveFetch({
       const harness = signalHarness([signal], configTimeoutMs);
       inFlight.add(harness);
       try {
-        const response = await original.call(target, ES_LIVE_CONFIG_URL, {
-          headers: { Accept: 'application/json' },
-          cache: 'no-store',
-          signal: harness.signal,
-        });
+        const response = await original.call(
+          target,
+          localTarget(ES_LIVE_CONFIG_URL, target),
+          {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store',
+            signal: harness.signal,
+          },
+        );
         if (response.status === 404) return new Set();
         if (!response.ok)
           throw new Error(`es-live config HTTP ${response.status}`);
@@ -256,8 +256,9 @@ export function installEsLiveFetch({
       // included (the config answer is unknown; a provider call is unsafe)
       throw new EsLiveConfigUnavailableError(true);
     let feeds;
+    const generation = feedsOf();
     try {
-      feeds = await waitWithSignal(feedsOf(), ownSignal);
+      feeds = await waitWithSignal(generation, ownSignal);
     } catch {
       // fail closed: network error, non-ok status, non-JSON body, timeout or
       // cancellation — never fall through to the provider. The raw reason
@@ -269,8 +270,13 @@ export function installEsLiveFetch({
     if (!to) return original.call(this, input, init);
     const next =
       typeof input === 'string' || input instanceof URL
-        ? to
-        : new Request(new URL(to, baseOf(target, doc)).href, input);
+        ? localTarget(to, target)
+        : new Request(
+            localTarget(to, target) === to
+              ? new URL(to, 'http://localhost/').href
+              : localTarget(to, target),
+            input,
+          );
     const response = await original.call(this, next, init);
     if (response.status === 404) {
       // the served answer was a 404: the cached config may be stale, so drop
@@ -285,7 +291,7 @@ export function installEsLiveFetch({
       const method = String(
         init?.method ?? input?.method ?? 'GET',
       ).toUpperCase();
-      asked = null;
+      if (asked === generation) asked = null;
       if (method !== 'GET' && method !== 'HEAD') return response;
       try {
         feeds = await waitWithSignal(feedsOf(), ownSignal);
@@ -298,8 +304,13 @@ export function installEsLiveFetch({
       void response.body?.cancel().catch(() => {});
       const again =
         typeof input === 'string' || input instanceof URL
-          ? retry
-          : new Request(new URL(retry, baseOf(target, doc)).href, input);
+          ? localTarget(retry, target)
+          : new Request(
+              localTarget(retry, target) === retry
+                ? new URL(retry, 'http://localhost/').href
+                : localTarget(retry, target),
+              input,
+            );
       return original.call(this, again, init);
     }
     return response;
