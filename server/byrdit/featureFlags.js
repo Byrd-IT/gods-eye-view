@@ -82,7 +82,9 @@ export function previewFlagHtmlMiddleware({
     if (accept && !accept.includes('text/html') && !accept.includes('*/*'))
       return next();
     const raw = String(req.url ?? '');
-    const pathname = raw.split(/[?#]/)[0];
+    const pathname =
+      raw.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, '').split(/[?#]/)[0] ||
+      '/';
     if (/^\/api(?:$|[/.])/i.test(pathname) || /^\/mcp(?:$|\/)/i.test(pathname))
       return next();
     const last = pathname.slice(pathname.lastIndexOf('/') + 1);
@@ -171,6 +173,7 @@ export function featureFlagsHtmlPlugins({ env = process.env } = {}) {
   return [
     {
       name: 'byrdit-feature-flags',
+      enforce: 'post',
       configResolved(config) {
         documentHeaders = config?.preview?.headers ?? {};
         const outDir = config?.build?.outDir;
