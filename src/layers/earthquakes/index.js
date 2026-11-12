@@ -26,6 +26,9 @@ export function createEarthquakesLayer({ source, overlayHost } = {}) {
   let _count = 0;
   let _lastUpdate = null;
   let _lastError = null;
+  /** The server answered from its last-good ES copy (X-Data-Stale). */
+  let _stale = false;
+  let _retryAfterSec = null;
   let _enabled = false;
 
   const layer = {
@@ -44,6 +47,8 @@ export function createEarthquakesLayer({ source, overlayHost } = {}) {
       _count = 0;
       _lastUpdate = null;
       _lastError = null;
+      _stale = false;
+      _retryAfterSec = null;
       _enabled = false;
       overlayHost.setVisible(EARTHQUAKE_OVERLAY_SOURCE_ID, false);
       console.log('[Data:Earthquakes] Initialized');
@@ -72,9 +77,25 @@ export function createEarthquakesLayer({ source, overlayHost } = {}) {
       const request = new AbortController();
       _request = request;
       try {
-        const rows = await source.getSnapshot({ signal: request.signal });
+        // A detail source reports how fresh the answer is: an ES-copy refresh
+        // served with X-Data-Stale must reach the layer status, keeping live
+        // narration off the quakes. A legacy source stays fully supported.
+        const detail = source.getSnapshotDetail
+          ? await source.getSnapshotDetail({ signal: request.signal })
+          : {
+              rows: await source.getSnapshot({ signal: request.signal }),
+              stale: false,
+              retryAfterSec: null,
+            };
+        // Only commit status from a request that is still current: a
+        // superseded or aborted answer must not overwrite the fresh one.
+        const stale = detail.stale === true;
+        const retryAfterSec = detail.retryAfterSec ?? null;
+        const rows = detail.rows;
         if (request.signal.aborted || _request !== request || !_enabled)
           return false;
+        _stale = stale;
+        _retryAfterSec = retryAfterSec;
 
         const nextEntities = [];
         let count = 0;
@@ -157,8 +178,15 @@ export function createEarthquakesLayer({ source, overlayHost } = {}) {
       } catch (e) {
         if (request.signal.aborted || _request !== request || !_enabled)
           return false;
-        console.warn('[Data:Earthquakes] Fetch error:', e);
-        _lastError = e?.message || msg('Earthquake source unavailable');
+        const message = e?.message;
+        _lastError =
+          typeof message === 'string' &&
+          (message === 'Live earthquake feed is unavailable' ||
+            message === 'Malformed USGS response' ||
+            /^USGS HTTP [1-5]\d\d$/.test(message))
+            ? message
+            : msg('Earthquake source unavailable');
+        console.warn('[Data:Earthquakes] Fetch error:', _lastError);
         return false;
       } finally {
         if (_request === request) _request = null;
@@ -179,6 +207,8 @@ export function createEarthquakesLayer({ source, overlayHost } = {}) {
       _count = 0;
       _lastUpdate = null;
       _lastError = null;
+      _stale = false;
+      _retryAfterSec = null;
     },
 
     /**
@@ -230,6 +260,8 @@ export function createEarthquakesLayer({ source, overlayHost } = {}) {
         count: _count,
         lastUpdate: _lastUpdate,
         error: _lastError,
+        stale: _stale,
+        retryAfterSec: _stale ? _retryAfterSec : null,
       };
     },
   };

@@ -4261,5 +4261,7 @@
   "{source} imagery could not be opened": "Não foi possível abrir as imagens de {source}",
   "{place} has no position to look for imagery at": "{place} não tem uma posição para buscar imagens",
   "No {source} imagery near {place}": "Nenhuma imagem de {source} perto de {place}",
-  "{reason} (filters on: {filters})": "{reason} (filtros ativos: {filters})"
+  "{reason} (filters on: {filters})": "{reason} (filtros ativos: {filters})",
+  "Live earthquake feed is unavailable": "O serviço de dados de sismos em tempo real está indisponível",
+  "Air quality feed is unavailable": "O serviço de qualidade do ar está indisponível"
 }

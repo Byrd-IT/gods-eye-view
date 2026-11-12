@@ -17,9 +17,15 @@ import { FIRST_RECORD_TTL_MS, notRecorded } from './historySlicesB12c.js';
  *    (server/byrdit/historyWater.js: the H8 live-api backend over USGS NWIS
  *    instantaneous values) answers the same question for about the last 120
  *    days. X-History-Source: usgs-nwis-iv.
- * The box is required; the NWIS source refuses one over 25 square degrees.
- * Both are answered as an empty, explained slice (X-History-Empty-Reason),
- * never as an error.
+ *  - GEV_ES_LIVE_WATER=1 replaces the reader with the recorded copy alone:
+ *    there is no NWIS stand-in, successful slices carry
+ *    X-History-Recorded-Only: 1 (so the adapter never says USGS is asked),
+ *    and a time before the recording starts stays an explained empty slice.
+ * The box is required. The NWIS source refuses one over 25 square degrees;
+ * the recorded copy has no such box cap (it just applies its row cap), and
+ * it is the only source under that flag. A recorded-only request before the
+ * first recording returns an explained empty slice (X-History-Empty-Reason);
+ * unavailable readers and other failures may instead return an error.
  *
  * The body is a GeoJSON FeatureCollection in the schema-2 shape of the
  * exporter (scripts/export_usgs_water.py), so the water layer parses it
@@ -302,15 +308,16 @@ export function createWaterSlices({
   async function sliceWater(q) {
     const { t, bbox, maxRows, windowMs } = q;
     if (!bbox) return notRecorded('area_required');
-    // an unreadable copy of ours degrades to the NWIS reader (still true data; the lookup remembers a failure for a minute)
+    // An unreadable copy may fall back to NWIS only when that reader is enabled;
+    // recorded-only mode has no NWIS fallback and propagates the failure.
     const first = es ? await firstRecorded() : null;
     let fellBack = false;
     if (first !== null && t >= first) {
       try {
         return await sliceRecorded(q, first);
       } catch (error) {
-        // our copy failed after answering before: NWIS can still answer for
-        // about the last 120 days; further back the error stands
+        // If the NWIS reader is enabled it can answer for about the last
+        // 120 days; without it or for older times, the error stands.
         if (!reader || t < reader.earliestMs(now())) throw error;
         fellBack = true;
       }

@@ -34,6 +34,9 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
   let _count = 0;
   let _lastUpdate = null;
   let _lastError = null;
+  /** The server answered from its last-good ES copy (X-Data-Stale). */
+  let _feedStale = false;
+  let _feedRetryAfterSec = null;
   let _enabled = false;
   let rowControlsListener = null;
 
@@ -69,6 +72,8 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
       _count = 0;
       _lastUpdate = null;
       _lastError = null;
+      _feedStale = false;
+      _feedRetryAfterSec = null;
       _enabled = false;
       overlayHost.setVisible(AIR_QUALITY_OVERLAY_SOURCE_ID, false);
     },
@@ -97,12 +102,24 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
       const request = new AbortController();
       _request = request;
       try {
-        const readings = await source.getSnapshot({ signal: request.signal });
+        // A detail source reports how fresh the answer is: the ES-live bridge
+        // marks a last-good copy stale with X-Data-Stale and that marker must
+        // reach the layer status. A legacy source keeps the observation-time
+        // judgement below.
+        const detail = source.getSnapshotDetail
+          ? await source.getSnapshotDetail({ signal: request.signal })
+          : {
+              readings: await source.getSnapshot({ signal: request.signal }),
+              stale: false,
+              retryAfterSec: null,
+            };
         // A superseded or aborted request must not touch the scene, and neither
         // must one that lands after the layer was switched off.
         if (request.signal.aborted || _request !== request || !_enabled)
           return false;
-        _readings = readings;
+        _readings = detail.readings;
+        _feedStale = detail.stale === true;
+        _feedRetryAfterSec = detail.retryAfterSec ?? null;
         this._render();
         _count = _readings.length;
         _lastUpdate = Date.now();
@@ -111,7 +128,20 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
         return true;
       } catch (error) {
         if (request.signal.aborted || _request !== request) return false;
-        _lastError = error?.message || msg('Air quality request failed');
+        const message = error?.message;
+        const known = [
+          'Air quality feed is unavailable',
+          'ECCC request timed out',
+          'Malformed AQHI station response',
+          'Malformed AQHI observation response',
+          'No AQHI stations available',
+          'Upstream response too large',
+        ];
+        _lastError =
+          typeof message === 'string' &&
+          (known.includes(message) || /^ECCC HTTP [1-5]\d\d$/.test(message))
+            ? message
+            : msg('Air quality request failed');
         console.warn('[Data:AirQuality] Refresh failed:', _lastError);
         notify();
         return false;
@@ -199,6 +229,8 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
       _count = 0;
       _lastUpdate = null;
       _lastError = null;
+      _feedStale = false;
+      _feedRetryAfterSec = null;
       rowControlsListener = null;
     },
 
@@ -287,7 +319,11 @@ export function createAirQualityLayer({ source, overlayHost } = {}) {
         error: _lastError,
         observedAt: newestObservation(_readings),
         // Only a completed refresh can be stale; before one there is no feed.
-        stale: _lastUpdate !== null && readingsAreStale(_readings),
+        // Either the source observation times are too old or the server served
+        // its ES-copy last-good snapshot instead of a fresh read.
+        stale:
+          _feedStale || (_lastUpdate !== null && readingsAreStale(_readings)),
+        retryAfterSec: _feedStale ? _feedRetryAfterSec : null,
       };
     },
   };
