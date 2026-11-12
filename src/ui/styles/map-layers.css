@@ -83,6 +83,15 @@
 .gev-ov-panel[hidden] {
   display: none;
 }
+/* A panel-wide switch is a primary control, not an 8px per-row chip. */
+.gev-ov-panel .gev-ov-phone {
+  min-height: 44px;
+  font-size: 12px;
+}
+.gev-ov-panel .gev-ov-phone:not(.active) {
+  color: var(--text-primary);
+  border-color: var(--glass-border-hover);
+}
 .gev-ov-float {
   position: absolute;
   left: var(--left-stack-x);

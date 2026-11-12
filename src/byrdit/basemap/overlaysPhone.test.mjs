@@ -5,6 +5,7 @@
 // and both directions re-apply to live models at once.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { composeOverlays } from './overlaysProxy.js';
 import { normalizeOverlays } from './overlaysConfig.js';
 import { OVERLAYS_PUBLISH } from './fixtures/overlays.mjs';
@@ -371,6 +372,17 @@ test('panel: a stale chip click still reads the latest phone mode of the row', (
     [THREE_D.id, true],
     [THREE_D.id, false],
   ]);
+});
+
+test('phone control has a readable, finger-sized target', () => {
+  const css = readFileSync(
+    new URL('../../ui/styles/map-layers.css', import.meta.url),
+    'utf8',
+  );
+  const rule =
+    css.match(/\.gev-ov-panel\s+\.gev-ov-phone\s*\{([^}]*)\}/)?.[1] ?? '';
+  assert.match(rule, /min-height:\s*44px/);
+  assert.match(rule, /font-size:\s*12px/);
 });
 
 test('panel: phone mode is one global control for multiple models', () => {
