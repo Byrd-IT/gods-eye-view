@@ -49,9 +49,9 @@ test('simultaneous 404s share a single refresh and late 404 cannot invalidate ne
         if (asks === 2) await refresh.promise;
         return new Response(JSON.stringify({ feeds: ['quakes'] }));
       }
-      routes++;
-      if (routes === 1) await delayed.promise;
-      if (routes <= 3) return new Response('gone', { status: 404 });
+      const ordinal = ++routes;
+      if (ordinal === 1) await delayed.promise;
+      if (ordinal <= 3) return new Response('gone', { status: 404 });
       return new Response('ok');
     },
   };
