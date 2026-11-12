@@ -72,22 +72,18 @@ export function applyRuntimeFlagMetas(
 export function previewFlagHtmlMiddleware({
   env = process.env,
   readTarget,
+  documentHeaders = {},
 } = {}) {
   if (typeof readTarget !== 'function')
     throw new TypeError('previewFlagHtmlMiddleware requires readTarget');
   return async (req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-    // No Accept gate: vite preview's SPA fallback answers html regardless of
-    // Accept, and this middleware must not narrow that. API paths are the
-    // exception — feature plugins own those (they run ahead of this one).
-    // MCP is also a server endpoint, installed by a later plugin.
+    const accept = req.headers?.accept;
+    if (accept && !accept.includes('text/html') && !accept.includes('*/*'))
+      return next();
     const raw = String(req.url ?? '');
     const pathname = raw.split(/[?#]/)[0];
-    if (
-      pathname.startsWith('/api') ||
-      pathname === '/mcp' ||
-      pathname.startsWith('/mcp/')
-    )
+    if (/^\/api(?:$|[/.])/i.test(pathname) || /^\/mcp(?:$|\/)/i.test(pathname))
       return next();
     const last = pathname.slice(pathname.lastIndexOf('/') + 1);
     // '/' and '/index.html' are always the entry page; an extension-less path
@@ -107,6 +103,11 @@ export function previewFlagHtmlMiddleware({
       }
       file = await readTarget(rel);
       if (file != null) return next(); // a real file: sirv serves it
+      // Preserve Vite's directory-index and .html resolution before SPA fallback.
+      const htmlTarget = pathname.endsWith('/')
+        ? `${rel}index.html`
+        : `${rel}.html`;
+      if ((await readTarget(htmlTarget)) != null) return next();
       file = await readTarget(null);
       if (file == null) return next(); // no build to serve
     }
@@ -118,7 +119,14 @@ export function previewFlagHtmlMiddleware({
       // flags must never be answered from a cache of the old page.
       'cache-control': 'no-store',
     };
-    res.writeHead(200, headers);
+    // Use setHeader so the embed-framing middleware can enforce its override.
+    for (const [name, value] of Object.entries({
+      ...documentHeaders,
+      ...headers,
+    })) {
+      res.setHeader(name, value);
+    }
+    res.writeHead(200);
     if (req.method === 'HEAD') return res.end();
     return res.end(body);
   };
@@ -159,10 +167,12 @@ export function readTargetResolver(directory) {
  */
 export function featureFlagsHtmlPlugins({ env = process.env } = {}) {
   let readTarget = null;
+  let documentHeaders = {};
   return [
     {
       name: 'byrdit-feature-flags',
       configResolved(config) {
+        documentHeaders = config?.preview?.headers ?? {};
         const outDir = config?.build?.outDir;
         if (!outDir) return;
         // build.outDir is preview's serving root (preview.outDir defaults
@@ -176,7 +186,11 @@ export function featureFlagsHtmlPlugins({ env = process.env } = {}) {
       configurePreviewServer(server) {
         server.middlewares.use((req, res, next) => {
           if (!readTarget) return next(); // never resolved: nothing to serve
-          return previewFlagHtmlMiddleware({ env, readTarget })(req, res, next);
+          return previewFlagHtmlMiddleware({
+            env,
+            readTarget,
+            documentHeaders,
+          })(req, res, next);
         });
       },
     },

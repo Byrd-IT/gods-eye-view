@@ -15,7 +15,8 @@ import {
 const HEAD = '<!doctype html><html lang="en"><head><title>gev</title>';
 const BODIED = '</head><body></body></html>';
 /** What `vite build` bakes today when both flags are on at build time. */
-const BAKED_BOTH = '<meta name="gev-basemap" content="1"><meta name="gev-wayback" content="1">';
+const BAKED_BOTH =
+  '<meta name="gev-basemap" content="1"><meta name="gev-wayback" content="1">';
 const BUILT = `${HEAD}${BAKED_BOTH}${BODIED}`;
 
 test('runtime flags: off by default, only "1" enables (same trim rule as the server flags)', () => {
@@ -47,7 +48,8 @@ test('runtime on: exactly one head tag per enabled flag, baked copies removed', 
   assert.equal(out.includes('gev-wayback'), false);
   // Runtime tag sits inside <head>, where the browser readers find it.
   assert.ok(
-    out.includes('<head') && out.indexOf('gev-basemap') < out.indexOf('</head>'),
+    out.includes('<head') &&
+      out.indexOf('gev-basemap') < out.indexOf('</head>'),
     'basemap tag must be in head',
   );
   const both = applyRuntimeFlagMetas(`${HEAD}${BODIED}`, {
@@ -84,11 +86,13 @@ test('idempotent: applying twice is the same as applying once', () => {
 function fakeRes() {
   return {
     status: null,
-    headers: null,
+    headers: {},
     body: null,
-    writeHead(code, headers) {
+    setHeader(name, value) {
+      this.headers[name] = value;
+    },
+    writeHead(code) {
       this.status = code;
-      this.headers = headers;
     },
     end(body) {
       this.body = body === undefined ? null : body;
@@ -147,7 +151,11 @@ test('preview middleware: HEAD answers headers only; non-HTML traffic passes', a
   assert.equal(head.res.status, 200);
   assert.equal(head.res.body, null);
 
-  const post = await call(middleware, { method: 'POST', headers: { accept: 'text/html' }, url: '/' });
+  const post = await call(middleware, {
+    method: 'POST',
+    headers: { accept: 'text/html' },
+    url: '/',
+  });
   assert.equal(post.nexted, 1);
 
   const api = await call(
@@ -189,7 +197,10 @@ test('preview middleware: real dotless files hand off to sirv; missing builds pa
 
 test('plugin: preview-only wiring, no build-time html change, no dev hooks', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gev-flags-'));
-  await fs.writeFile(path.join(dir, 'index.html'), `${HEAD}${BAKED_BOTH}${BODIED}`);
+  await fs.writeFile(
+    path.join(dir, 'index.html'),
+    `${HEAD}${BAKED_BOTH}${BODIED}`,
+  );
   const [plugin] = featureFlagsHtmlPlugins();
   assert.equal(plugin.name, 'byrdit-feature-flags');
   assert.equal(plugin.transformIndexHtml, undefined);
@@ -212,7 +223,10 @@ test('plugin: preview-only wiring, no build-time html change, no dev hooks', asy
 
 test('plugin: built html from disk gets runtime tags under preview (serves real outDir)', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gev-flags2-'));
-  await fs.writeFile(path.join(dir, 'index.html'), `${HEAD}${BAKED_BOTH}${BODIED}`);
+  await fs.writeFile(
+    path.join(dir, 'index.html'),
+    `${HEAD}${BAKED_BOTH}${BODIED}`,
+  );
   const [plugin] = featureFlagsHtmlPlugins({ env: { GEV_BASEMAP: '1' } });
   let mw = null;
   plugin.configResolved({ root: dir, build: { outDir: dir } });
@@ -244,13 +258,68 @@ test('preview resolver does not read outside the build root', async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-
 test('preview middleware never shadows MCP GET or HEAD routes', async () => {
-  const middleware = previewFlagHtmlMiddleware({env:{}, readTarget:async (rel) => rel === null ? '<html></html>' : null});
+  const middleware = previewFlagHtmlMiddleware({
+    env: {},
+    readTarget: async (rel) => (rel === null ? '<html></html>' : null),
+  });
   for (const url of ['/mcp', '/mcp/stream']) {
     for (const method of ['GET', 'HEAD']) {
-      const result = await call(middleware, {method, url, headers:{}});
+      const result = await call(middleware, { method, url, headers: {} });
       assert.equal(result.nexted, 1, `${method} ${url} must reach MCP`);
     }
+  }
+});
+
+test('preview respects API casing and non-HTML Accept headers', async () => {
+  const middleware = previewFlagHtmlMiddleware({
+    env: {},
+    readTarget: async (rel) => (rel === null ? BUILT : null),
+  });
+  assert.equal((await call(middleware, get('/API/missing'))).nexted, 1);
+  assert.equal(
+    (await call(middleware, get('/some/route', 'application/json'))).nexted,
+    1,
+  );
+});
+
+test('preview respects directory index and sibling HTML fallback', async () => {
+  const middleware = previewFlagHtmlMiddleware({
+    env: {},
+    readTarget: async (rel) =>
+      [null, 'panel/index.html', 'about.html'].includes(rel) ? BUILT : null,
+  });
+  assert.equal((await call(middleware, get('/panel/'))).nexted, 1);
+  assert.equal((await call(middleware, get('/about'))).nexted, 1);
+});
+
+test('preview applies configured document security headers', async () => {
+  const [plugin] = featureFlagsHtmlPlugins({ env: {} });
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gev-preview-headers-'));
+  try {
+    await fs.writeFile(path.join(dir, 'index.html'), BUILT);
+    plugin.configResolved({
+      root: dir,
+      build: { outDir: dir },
+      preview: {
+        headers: {
+          'X-Frame-Options': 'DENY',
+          'Content-Security-Policy': "default-src 'self'",
+        },
+      },
+    });
+    let mw;
+    plugin.configurePreviewServer({
+      middlewares: {
+        use: (fn) => {
+          mw = fn;
+        },
+      },
+    });
+    const { res } = await call(mw, get('/'));
+    assert.equal(res.headers['X-Frame-Options'], 'DENY');
+    assert.equal(res.headers['Content-Security-Policy'], "default-src 'self'");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });
