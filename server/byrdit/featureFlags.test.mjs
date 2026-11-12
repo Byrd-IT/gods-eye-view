@@ -323,3 +323,73 @@ test('preview applies configured document security headers', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('actual vite preview keeps security, embed policy, fallback and runtime flags', async () => {
+  const { preview } = await import('vite');
+  const { embedFramingPlugin } = await import('../../build/embed-framing.js');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gev-real-preview-'));
+  let server;
+  try {
+    await fs.writeFile(path.join(dir, 'index.html'), BUILT);
+    await fs.mkdir(path.join(dir, 'panel'));
+    await fs.writeFile(
+      path.join(dir, 'panel', 'index.html'),
+      '<html>panel</html>',
+    );
+    await fs.writeFile(path.join(dir, 'about.html'), '<html>about</html>');
+    server = await preview({
+      configFile: false,
+      root: dir,
+      build: { outDir: dir },
+      preview: {
+        host: '127.0.0.1',
+        port: 0,
+        headers: {
+          'X-Frame-Options': 'DENY',
+          'Content-Security-Policy':
+            "default-src 'self'; frame-ancestors 'none'",
+          'X-Content-Type-Options': 'nosniff',
+        },
+      },
+      plugins: [
+        embedFramingPlugin({ ancestors: 'https://example.test' }),
+        ...featureFlagsHtmlPlugins({ env: { GEV_BASEMAP: '1' } }),
+      ],
+    });
+    const base = `http://127.0.0.1:${server.httpServer.address().port}`;
+    const normal = await fetch(base + '/', {
+      headers: { accept: 'text/html' },
+    });
+    assert.equal(normal.headers.get('x-frame-options'), 'DENY');
+    assert.match(
+      normal.headers.get('content-security-policy'),
+      /frame-ancestors 'none'/,
+    );
+    assert.equal(normal.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(await normal.text(), /gev-basemap/);
+    const embedded = await fetch(base + '/?embed=1', {
+      headers: { accept: 'text/html' },
+    });
+    assert.equal(embedded.headers.get('x-frame-options'), null);
+    assert.match(
+      embedded.headers.get('content-security-policy'),
+      /frame-ancestors https:\/\/example\.test/,
+    );
+    assert.match(await (await fetch(base + '/panel/')).text(), /panel/);
+    assert.match(await (await fetch(base + '/about')).text(), /about/);
+    assert.equal(
+      (
+        await fetch(base + '/missing-path', {
+          headers: { accept: 'application/json' },
+        })
+      ).status,
+      404,
+    );
+  } finally {
+    if (server)
+      await new Promise((resolve, reject) =>
+        server.httpServer.close((err) => (err ? reject(err) : resolve())),
+      );
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
