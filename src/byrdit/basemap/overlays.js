@@ -240,6 +240,8 @@ export function attachOverlays({
             pressurePaused: models.get(entry.id)?.pressurePaused ?? false,
             pressureStalled: models.get(entry.id)?.pressureStalled ?? false,
             gateError: models.get(entry.id)?.gateError ?? null,
+            phoneVariantMissing:
+              models.get(entry.id)?.error === 'Phone 3D variant unavailable',
           }
         : {}),
     })),
@@ -256,7 +258,7 @@ export function attachOverlays({
     [...models.entries()]
       .map(
         ([id, m]) =>
-          `${id}:${m?.status}|${m?.pressurePaused}|${m?.pressureStalled}|${m?.gateError ?? ''}`,
+          `${id}:${m?.status}|${m?.pressurePaused}|${m?.pressureStalled}|${m?.gateError ?? ''}|${m?.error === 'Phone 3D variant unavailable'}`,
       )
       .join(';');
 

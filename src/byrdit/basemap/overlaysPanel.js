@@ -40,6 +40,8 @@ function noteText(layer) {
   // A specific gate failure beats the generic one...
   if (layer.gateError)
     return t('The 3D model request gate could not be created');
+  if (layer.status === 'failed' && layer.phoneVariantMissing)
+    return `${t('Phone mode')}: ${t('The 3D model could not be loaded')}`;
   if (layer.status === 'failed') return t('The 3D model could not be loaded');
   // ...and the pressure pause says what is actually happening.
   if (layer.pressurePaused) {
@@ -91,6 +93,19 @@ export function createOverlaysPanel({
     },
     cls: embedded ? 'gev-ov-panel' : 'gev-ov-panel gev-ov-float',
   });
+
+  // Phone mode applies to every model, so present one panel-wide switch.
+  const firstModel = state.layers.find((layer) => layer.kind === '3d');
+  let phoneState = firstModel;
+  const phone = firstModel
+    ? el(doc, 'button', panel, {
+        cls: 'data-toggle-chip gev-ov-phone',
+        attrs: { type: 'button', 'aria-pressed': 'false' },
+      })
+    : null;
+  phone?.addEventListener('click', () =>
+    onPhone(firstModel.id, !phoneState?.phoneMode),
+  );
 
   // ---- grouped chrome: search, aerial hint, empty note, group sections ----
   const groups = new Map(); // group id -> {section, head, count, body, open, title}
@@ -219,7 +234,6 @@ export function createOverlaysPanel({
     // shortcut to fly to the model. Rows of flat layers have neither.
     let cut = null;
     let note = null;
-    let phone = null;
     if (layer.kind === '3d') {
       cut = el(doc, 'div', row, {
         cls: 'gev-ov-cut',
@@ -229,21 +243,6 @@ export function createOverlaysPanel({
         cls: 'gev-ov-3d-note',
         attrs: { role: 'status' },
       });
-      // A standalone toggle (not a canopy chip): the user's phone switch for
-      // the softer 3D model that saves memory, on desktop machines too.
-      phone = el(doc, 'button', row, {
-        cls: 'data-toggle-chip gev-ov-phone',
-        attrs: {
-          type: 'button',
-          'aria-pressed': 'false',
-          // The wording is re-set on every update() below (translation at
-          // render time, so a locale switch re-translates).
-          title: '',
-        },
-      });
-      phone.addEventListener('click', () =>
-        onPhone(layer.id, !rows.get(layer.id)?.layer?.phoneMode),
-      );
     }
     box.addEventListener('change', () =>
       onEnabled(layer.id, Boolean(box.checked)),
@@ -254,7 +253,6 @@ export function createOverlaysPanel({
     rows.set(layer.id, {
       cut,
       note,
-      phone,
       row,
       box,
       range,
@@ -314,6 +312,20 @@ export function createOverlaysPanel({
   const api = {
     element: panel,
     update(next) {
+      phoneState =
+        next.layers.find((layer) => layer.id === firstModel?.id) ?? phoneState;
+      if (phone) {
+        phone.textContent = t('Phone mode');
+        phone.setAttribute(
+          'aria-pressed',
+          String(Boolean(phoneState?.phoneMode)),
+        );
+        phone.setAttribute(
+          'title',
+          t('Phone mode: softer model to save memory'),
+        );
+        phone.className = `data-toggle-chip gev-ov-phone${phoneState?.phoneMode ? ' active' : ''}`;
+      }
       const nextOrder = next.layers.map((layer) => layer.id);
       // Reorder rows only for a full, changed ordering (append moves a node).
       if (
@@ -381,18 +393,6 @@ export function createOverlaysPanel({
               if (chip === 'fly') onFlyTo(layer.id);
               else onCanopy(layer.id, chip === 'off' ? null : Number(chip));
             });
-          }
-          if (row.phone) {
-            row.phone.textContent = t('Phone mode');
-            row.phone.setAttribute(
-              'aria-pressed',
-              String(Boolean(layer.phoneMode)),
-            );
-            // Translated at update time: a locale switch re-words the chip.
-            row.phone.setAttribute(
-              'title',
-              t('Phone mode: softer model to save memory'),
-            );
           }
           // The note is composed and translated NOW, in this render pass.
           row.note.textContent = noteText(layer);

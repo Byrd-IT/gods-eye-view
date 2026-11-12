@@ -373,6 +373,25 @@ test('panel: a stale chip click still reads the latest phone mode of the row', (
   ]);
 });
 
+test('panel: phone mode is one global control for multiple models', () => {
+  const first = stateThreeD(true).layers[1];
+  const second = { ...first, id: 'second-model', name: 'Second model' };
+  const calls = [];
+  const panel = createOverlaysPanel({
+    container: new Node('div'),
+    doc: fakeDoc(),
+    state: { layers: [first, second] },
+    onEnabled() {},
+    onOpacity() {},
+    onPhone: (id, on) => calls.push([id, on]),
+  });
+  const buttons = panel.element.find((n) => /gev-ov-phone/.test(n.className));
+  assert.equal(buttons.length, 1);
+  buttons[0].listeners.click();
+  assert.deepEqual(calls, [[first.id, false]]);
+  assert.match(buttons[0].className, /active/);
+});
+
 test('panel: a flat overlay row has no phone toggle and no load/phone note', () => {
   const panel = createOverlaysPanel({
     container: new Node('div'),
@@ -382,12 +401,35 @@ test('panel: a flat overlay row has no phone toggle and no load/phone note', () 
     onOpacity() {},
   });
   assert.equal(
-    panel.element.find((n) => n.dataset.chipId === 'phone').length,
+    panel.element.find((n) => /gev-ov-phone/.test(n.className)).length,
     0,
   );
   assert.equal(
     panel.element.find((n) => /gev-ov-3d-note/.test(n.className)).length,
     0,
+  );
+});
+
+test('panel: missing phone copy has a specific safe message', () => {
+  const panel = createOverlaysPanel({
+    container: new Node('div'),
+    doc: fakeDoc(),
+    state: {
+      layers: [
+        {
+          ...stateThreeD(true).layers[1],
+          status: 'failed',
+          phoneVariantMissing: true,
+        },
+      ],
+    },
+    onEnabled() {},
+    onOpacity() {},
+  });
+  const note = panel.element.find((n) => /gev-ov-3d-note/.test(n.className))[0];
+  assert.match(
+    note.textContent,
+    /^Phone mode: The 3D model could not be loaded$/,
   );
 });
 
@@ -429,6 +471,12 @@ test('attachOverlays: a 3D row carries the model pressure state (paused, stalled
   models[0].pressureStalled = false;
   viewerPreUpdate(viewer);
   assert.match(row3d().gateError, /gate could not be created/);
+  models[0].error = 'Phone 3D variant unavailable';
+  viewerPreUpdate(viewer);
+  assert.equal(row3d().phoneVariantMissing, true);
+  models[0].error = 'untrusted upstream detail';
+  viewerPreUpdate(viewer);
+  assert.equal(row3d().phoneVariantMissing, false);
 });
 
 test('panel: the note names paused and stalled pressure and gate failures, translated at update', async () => {
