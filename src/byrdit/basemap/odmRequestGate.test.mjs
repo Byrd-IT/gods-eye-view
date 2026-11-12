@@ -228,6 +228,24 @@ test('pressuring the gate stops NEW loads at the HTTP level; in-flight requests 
   }
 });
 
+test('paused gate prunes cancelled queue entries without starting requests', async () => {
+  const gate = new OdmRequestGate({ maxInFlight: 1 });
+  gate.setPaused(true);
+  const request = { cancelled: false };
+  let starts = 0;
+  const result = gate
+    .run({ request }, {}, () => {
+      starts++;
+    })
+    .catch((err) => err);
+  request.cancelled = true;
+  gate.pump();
+  assert.equal(gate.queued, 0);
+  await result;
+  assert.equal(starts, 0);
+  gate.destroy();
+});
+
 test('cancellation while queued: the tile never issues HTTP for a cancelled request', async () => {
   const srv = await serverOf({ delayMs: 80 });
   try {

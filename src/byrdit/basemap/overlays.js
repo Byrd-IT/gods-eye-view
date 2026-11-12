@@ -17,6 +17,18 @@ const { Odm3dLayer, terrainSampler } = odm3d;
 /** True on a phone: 3D builds start with softer tile caching to save memory. */
 const phoneDevice = odm3d.isPhoneEnvironment ?? (() => false);
 
+/** Reserve a share for every offered model, even before it is enabled. */
+export function phoneLimitsForCount(count) {
+  const n = Math.max(1, count);
+  if (!Number.isInteger(n) || n > odm3d.PHONE_LIMITS.inFlightCap) return null;
+  return {
+    ...odm3d.PHONE_LIMITS,
+    cacheBytes: Math.floor(odm3d.PHONE_LIMITS.cacheBytes / n),
+    inFlightCap: Math.floor(odm3d.PHONE_LIMITS.inFlightCap / n),
+    loadedTileCap: Math.floor(odm3d.PHONE_LIMITS.loadedTileCap / n),
+  };
+}
+
 /**
  * Map overlay layers for the Byrd-IT Open stack (BASEMAP M2 follow-up):
  * raster (US Topo, hillshade, colour relief, terrain-RGB) and vector
@@ -70,17 +82,21 @@ export function attachOverlays({
       ? createVectorOverlayProvider(Cesium, entry)
       : createNaipImageryProvider(Cesium, entry),
   createPanel = null,
-  create3d = (entry) =>
+  create3d = (entry, phoneLimits) =>
     new Odm3dLayer({
       Cesium,
       viewer,
       entry,
+      phoneLimits: phoneLimits ?? { ...odm3d.PHONE_LIMITS, unavailable: true },
       sampleTerrain: terrainSampler(Cesium, viewer),
     }),
 }) {
   const scene = viewer.scene;
   const collection = viewer.imageryLayers;
   const defaultOrder = stackOrder(overlays);
+  const phoneLimits = phoneLimitsForCount(
+    defaultOrder.filter((entry) => entry.kind === '3d').length,
+  );
   /** Entries bottom -> top. The user's raise/lower choices live here. */
   const order = [...defaultOrder];
   let orderChanged = false;
@@ -137,7 +153,7 @@ export function attachOverlays({
   function syncModel(entry, s) {
     let model = models.get(entry.id);
     if (!model) {
-      model = create3d(entry);
+      model = create3d(entry, phoneLimits);
       models.set(entry.id, model);
       created += 1;
       // Applied before load(): the tileset is built with the phone cache.

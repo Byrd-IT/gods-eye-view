@@ -38,7 +38,7 @@ const DEFAULT_OPEN_GROUPS = Object.freeze(['lakes', 'byrd-ranch']);
 function noteText(layer) {
   if (layer.status === 'loading') return t('Loading 3D model...');
   // A specific gate failure beats the generic one...
-  if (layer.gateError)
+  if (layer.status === 'failed' && layer.gateError)
     return t('The 3D model request gate could not be created');
   if (layer.status === 'failed' && layer.phoneVariantMissing)
     return t('The phone 3D model is unavailable');

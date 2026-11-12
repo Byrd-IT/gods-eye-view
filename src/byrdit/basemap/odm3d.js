@@ -339,6 +339,12 @@ export class Odm3dLayer {
         // surface the previous attempt's error as if it were current.
         this.error = null;
         const { Cesium, viewer, entry } = this;
+        if (this.phoneActive && this.phoneLimits.unavailable) {
+          this._buildPhone = null;
+          this.status = 'failed';
+          this.error = 'Phone 3D budget unavailable';
+          return;
+        }
         // Never silently feed the large desktop mesh to a phone if its
         // separately validated variant is absent or its manifest is broken.
         if (this.phoneActive && this._defaultGateFactory && !entry.phoneUrl) {
@@ -491,7 +497,8 @@ export class Odm3dLayer {
     this._pumpTimer = this.timers.setInterval(() => {
       const tileset = this.tileset;
       if (this.destroyed || !tileset) return this._stopPump();
-      this.viewer.scene.requestRender?.();
+      this._gate?.pump?.();
+      if (!this.pressureStalled) this.viewer.scene.requestRender?.();
       if (this.phoneActive) this._probePressure();
       this._settled = tileset.tilesLoaded === true ? this._settled + 1 : 0;
       if (this._settled >= 3 && !this._pressed) {

@@ -10,6 +10,8 @@ import { composeOverlays } from './overlaysProxy.js';
 import { normalizeOverlays } from './overlaysConfig.js';
 import { OVERLAYS_PUBLISH } from './fixtures/overlays.mjs';
 import { attachOverlays } from './overlays.js';
+import * as overlaysModule from './overlays.js';
+import { PHONE_LIMITS } from './odm3d.js';
 import { createOverlaysPanel } from './overlaysPanel.js';
 import { DEFAULT_LOCALE } from '../../i18n/locale.js';
 import { setLocale } from '../../i18n/index.js';
@@ -33,6 +35,17 @@ const THREE_D = {
   file: 'hires/odm3d/odm-3d-9be42b4f/tileset.json',
 };
 const raster = OVERLAYS_PUBLISH.layers[0];
+
+test('phone limits share total budgets across every offered model', () => {
+  assert.equal(typeof overlaysModule.phoneLimitsForCount, 'function');
+  const { phoneLimitsForCount } = overlaysModule;
+  const two = phoneLimitsForCount(2);
+  assert.equal(two.cacheBytes * 2, PHONE_LIMITS.cacheBytes);
+  assert.equal(two.inFlightCap * 2, PHONE_LIMITS.inFlightCap);
+  assert.equal(two.loadedTileCap * 2, PHONE_LIMITS.loadedTileCap);
+  assert.equal(two.cacheOverflowBytes, 0);
+  assert.equal(phoneLimitsForCount(PHONE_LIMITS.inFlightCap + 1), null);
+});
 
 const OVERLAYS = normalizeOverlays(
   composeOverlays({
@@ -95,7 +108,7 @@ function fakeCesium() {
   return { ImageryLayer, Credit, Rectangle: { fromDegrees: () => ({}) } };
 }
 
-function setup({ createdPhone } = {}) {
+function setup({ createdPhone, overlays = OVERLAYS } = {}) {
   const models = [];
   const viewer = {
     imageryLayers: {
@@ -137,12 +150,13 @@ function setup({ createdPhone } = {}) {
       getActiveId: () => active.id,
       subscribe: () => () => {},
     },
-    overlays: OVERLAYS,
+    overlays,
     session: { tileset: null },
     createProvider: () => ({}),
     // Phone mode starts from device detection unless the test pins it.
-    create3d: (entry) => {
+    create3d: (entry, limits) => {
       const model = fakeModel(entry);
+      model.limits = limits;
       if (createdPhone !== undefined) model.setPhoneMode(createdPhone);
       models.push(model);
       return model;
@@ -151,6 +165,34 @@ function setup({ createdPhone } = {}) {
   const row3d = () => detach.state().layers.find((l) => l.id === THREE_D.id);
   return { detach, models, row3d, viewer };
 }
+
+test('attachOverlays reserves aggregate phone budgets before two models load', () => {
+  const second = {
+    ...THREE_D,
+    id: 'odm-3d-7055ca6b',
+    archive: 'odm3d/odm-3d-7055ca6b',
+    file: 'hires/odm3d/odm-3d-7055ca6b/tileset.json',
+  };
+  const overlays = normalizeOverlays(
+    composeOverlays({ ...OVERLAYS_PUBLISH, layers: [THREE_D, second] }).browser,
+  );
+  const { detach, models } = setup({ overlays });
+  detach.setPhoneMode(true);
+  detach.setEnabled(THREE_D.id, true);
+  detach.setEnabled(second.id, true);
+  assert.equal(models.length, 2);
+  assert.ok(models.every((m) => m.phoneMode));
+  assert.equal(
+    models.reduce((n, m) => n + m.limits.cacheBytes, 0),
+    PHONE_LIMITS.cacheBytes,
+  );
+  assert.equal(
+    models.reduce((n, m) => n + m.limits.inFlightCap, 0),
+    PHONE_LIMITS.inFlightCap,
+  );
+  assert.ok(models.every((m) => m.limits.cacheOverflowBytes === 0));
+  detach();
+});
 
 test('attachOverlays: enabling a 3D build applies phone mode BEFORE the tileset is created', async () => {
   const { detach, models, row3d } = setup();
@@ -508,6 +550,8 @@ test('panel: the note names paused and stalled pressure and gate failures, trans
   assert.match(note().textContent, /Stalled/i);
   panel.update({ layers: [mk({ status: 'failed', gateError: 'gate boom' })] });
   assert.match(note().textContent, /gate/i);
+  panel.update({ layers: [mk({ status: 'ready', gateError: 'gate boom' })] });
+  assert.doesNotMatch(note().textContent, /gate/i);
   panel.update({
     layers: [mk({ status: 'failed', gateError: null })],
   });

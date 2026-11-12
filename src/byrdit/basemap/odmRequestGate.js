@@ -121,7 +121,13 @@ export class OdmRequestGate {
    * scheduler sorts exactly this ascending).
    */
   pump() {
-    if (this.destroyed || this.paused) return;
+    if (this.destroyed) return;
+    this._queue = this._queue.filter((entry) => {
+      if (entry.request?.cancelled !== true) return true;
+      entry.reject(OdmRequestGate.cancelledError());
+      return false;
+    });
+    if (this.paused) return;
     if (this._queue.length === 0 || this.inFlight >= this.maxInFlight) return;
     this._queue.sort(
       (a, b) => OdmRequestGate.priorityOf(a) - OdmRequestGate.priorityOf(b),

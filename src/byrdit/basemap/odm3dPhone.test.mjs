@@ -135,6 +135,29 @@ function fake({ terrain = [94, 94, 94] } = {}) {
 }
 
 const MiB = 1024 * 1024;
+
+test('unavailable aggregate budget fails closed in phone mode before gate or tileset', async () => {
+  const f = fake();
+  let gateCalls = 0;
+  const layer = new Odm3dLayer({
+    Cesium: f.Cesium,
+    viewer: f.viewer,
+    entry: entry3d(),
+    phoneLimits: { ...PHONE_LIMITS, unavailable: true },
+    requestGateFactory: () => {
+      gateCalls++;
+      return null;
+    },
+    sampleTerrain: async () => 0,
+  });
+  layer.setPhoneMode(true);
+  await layer.load();
+  assert.equal(layer.status, 'failed');
+  assert.equal(gateCalls, 0);
+  assert.equal(f.calls.options.length, 0);
+  assert.doesNotThrow(() => layer.pressureSummary());
+  layer.destroy();
+});
 const schedulerUntouched = (f, label) => {
   const s = f.Cesium.RequestScheduler;
   assert.equal(s.maximumRequestsPerServer, 6, `${label}: per-server default`);
