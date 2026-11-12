@@ -497,6 +497,7 @@ export class Odm3dLayer {
     this._pumpTimer = this.timers.setInterval(() => {
       const tileset = this.tileset;
       if (this.destroyed || !tileset) return this._stopPump();
+      if (this.phoneActive) this._probePressure();
       this._gate?.pump?.();
       // Cesium needs frames to evict loaded tiles. An idle heap-only stall
       // can wait for GC without rendering, but a tile-count stall cannot.
@@ -509,7 +510,7 @@ export class Odm3dLayer {
           );
       if (!this.pressureStalled || tilePressure)
         this.viewer.scene.requestRender?.();
-      if (this.phoneActive) this._probePressure();
+
       this._settled = tileset.tilesLoaded === true ? this._settled + 1 : 0;
       if (this._settled >= 3 && !this._pressed) {
         // Coarse first on a phone; refine once everything has settled. A
@@ -617,12 +618,16 @@ export class Odm3dLayer {
           ? Math.round(f.loadedTileCap * resumeFraction)
           : f.loadedTileCap);
     const pressed = hOver || tOver;
+    // Cesium normally evicts by bytes, not tile count. Ask it to trim
+    // unselected tiles even if the byte cache is still below its target.
+    if (tOver) this.tileset.trimLoadedTiles?.();
     if (pressed === this._pressed) return;
     this._pressed = pressed;
     if (pressed) {
       // Stop NEW loads on this tileset; started requests drain, queued ones
       // wait and can be cancelled by Cesium's own out-of-view path.
       this._gate?.setPaused(true);
+
       // The stall release (an idle press above its release threshold) runs
       // on the monitor tick: a press that arrives while the pump was
       // stopped after an earlier settle pass must restart it, or the pause

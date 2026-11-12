@@ -525,6 +525,9 @@ test('attachOverlays: a 3D row carries the model pressure state (paused, stalled
   models[0].error = 'Phone 3D variant unavailable';
   viewerPreUpdate(viewer);
   assert.equal(row3d().phoneVariantMissing, true);
+  models[0].error = 'Phone 3D budget unavailable';
+  viewerPreUpdate(viewer);
+  assert.equal(row3d().phoneVariantMissing, true);
   models[0].error = 'untrusted upstream detail';
   viewerPreUpdate(viewer);
   assert.equal(row3d().phoneVariantMissing, false);

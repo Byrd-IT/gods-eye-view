@@ -257,7 +257,7 @@ test('idle heap stall stops extra frames but tile-pressure stall still allows ev
   const clock = timersOf();
   const layer = phoneLayer(f, {
     timers: clock.timers,
-    heapUsage: heap(HEAP_MAX),
+    heapProbe: heap(HEAP_MAX),
     requestGateFactory: () => ({
       resource: {},
       gate: { setPaused() {}, destroy() {}, pump() {} },
@@ -482,10 +482,16 @@ test('phone: loaded-tile pressure pauses the gate and recovers under hysteresis'
   const layer = phoneLayer(f, { timers, requestGateFactory: g.factory });
   await layer.load();
   const tileset = f.calls.added[0];
+  let trims = 0;
+  tileset.trimLoadedTiles = () => trims++;
   tileset.tilesLoaded = true;
   tileset.statistics.numberOfTilesWithContentReady =
     PHONE_LIMITS.loadedTileCap + 1;
   tick();
+  assert.ok(
+    trims > 0,
+    'tile-count pressure asks Cesium to evict unselected tiles',
+  );
   assert.equal(layer._pressed, true, 'too many loaded tiles = pressure');
   assert.equal(
     layer._gate.paused,
