@@ -34,8 +34,9 @@ export const DESKTOP_CACHE_OVERFLOW_BYTES = 256 * MIB;
  * Phone mode: what changes when the layer runs on a phone.
  *   - the tileset loads coarse (a slow start within the owner-approved band)
  *     and refines to the sharpest SSE in the owner band once it has settled
- *     (a quick usable layer, band-wide quality afterwards). Phone mode never
- *     leaves 64-96; the desktop SSE is restored only when phone mode is off.
+ *     (a quick usable layer afterwards). The configured SSE stays in 64-96;
+ *     Cesium can raise its effective SSE when its tile cache is over budget.
+ *     The desktop SSE is restored only when phone mode is off.
  *   - the tileset runs on a 64 MiB cache with no overflow: under memory
  *     pressure Cesium spills, and spilled tiles reload — a phone is better
  *     off holding a smaller set steady;
@@ -62,9 +63,9 @@ export const DESKTOP_CACHE_OVERFLOW_BYTES = 256 * MIB;
  *     held, so a queue-signal press could never release — pressing on it
  *     would deadlock the release path. The cap itself already bounds the
  *     in-flight work the queue signal used to catch.
- *     Quality is never a pressure lever (no SSE coarsening on press, no
- *     restoration on release); the owner band 64-96 is only traversed by
- *     the coarse(80) -> refined(64) settle pass and the Fly-to coarsening.
+ *     The gate does not change configured SSE on press or release. Cesium may
+ *     increase effective SSE under cache pressure independently. The configured
+ *     band is traversed by the coarse(80) -> refined(64) pass and Fly-to.
  *     Never `show = false` for pressure: Cesium 1.138's updateForPass
  *     returns before the tile queue when show is false, which strands
  *     pending work, loadProgress and the gate's own release path. With show
@@ -87,9 +88,9 @@ export const PHONE_COARSE_QUERY = '(pointer: coarse)';
 export const PHONE_LIMITS = {
   initialError: 80, // coarse first (owner band 64-96)
   fineError: DESKTOP_SSE,
-  // Refined phone quality: the sharpest edge of the owner band. Phone mode
-  // never leaves 64-96 while it is on; `fineError` returns only when phone
-  // mode is switched off.
+  // Configured phone quality uses the sharpest edge of the owner band;
+  // Cesium may independently raise effective SSE when the cache is full.
+  // `fineError` returns only when phone mode is switched off.
   phoneFineError: 64,
   cacheBytes: 64 * MIB,
   cacheOverflowBytes: 0,
@@ -586,12 +587,12 @@ export class Odm3dLayer {
    * thresholds, which the still-running monitor tick watches. The press
    * is a real per-tileset request pause: the tileset's own gate stops
    * handing over or starting any new request, started requests drain, and
-   * the page origin's other users (imagery, terrain, the buildings
-   * tileset) are untouched — no scheduler state is consulted or written,
-   * and quality never coarsens with pressure. Synchronous
-   * against the show gate — no awaits — so a deadlock is not reachable, and
-   * the monitor keeps ticking while pressed so releases are watched
-   * continuously (one interval at ~4 Hz, never a hot loop).
+   * the page origin's other users (imagery, terrain, and the buildings
+   * tileset) are untouched. The gate does not adjust SSE;
+   * Cesium may raise effective SSE under cache pressure independently.
+   * All transitions are synchronous against the show gate; the monitor
+   * keeps ticking while pressed, but a stall can persist when tiles remain
+   * selected or the heap does not fall (one interval at ~4 Hz).
    */
   _syncPressure() {
     if (!this.phoneActive || this.destroyed || !this.tileset) return;
