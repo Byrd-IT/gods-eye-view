@@ -237,9 +237,9 @@ export function createPlanLibraryHandler({
     // other middleware still sees its requests.
     // The bare authority marker cannot be parsed by downstream URL handlers.
     // Reject this explicitly requested crash case; other unrelated paths pass on.
-    if (req.url !== '//' && !isPlanTarget(req.url)) return next();
     const url = parseTarget(req);
     if (url === null) {
+      if (req.url !== '//' && !isPlanTarget(req.url)) return next();
       return send(res, 400, {
         error: 'bad-target',
         message: 'The request target is malformed',
