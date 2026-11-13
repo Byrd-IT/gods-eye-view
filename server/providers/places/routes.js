@@ -364,9 +364,12 @@ async function fetchRoute({
   } catch (error) {
     // Local refusals (queue full) and the 429 above are not upstream faults
     // and are reported by the middleware / logRefusal already.
+    // An outage with no cause (non-OK status, non-JSON) was logged by
+    // logRefusal with its status and body already.
     if (
       !(error instanceof RouteBusyError) &&
-      !(error instanceof UpstreamRateLimitError)
+      !(error instanceof UpstreamRateLimitError) &&
+      !(error instanceof UpstreamUnavailableError && error.cause === undefined)
     )
       console.warn(
         `[Route Proxy] upstream request failed target="${target}" class=${failureClass(error.cause ?? error)} ` +

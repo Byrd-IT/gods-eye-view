@@ -39,10 +39,20 @@ const BODY = fx('b8-collector-vessels.body');
 const BODY7 = fx('b8-collector-vessels-7.body');
 const TRACK = fx('b8-collector-vessels-track.body');
 
+/**
+ * Upstream (7df581765, vessel typical length) rows carry the hull `length` and
+ * `beam` from AIS static dimensions. The Byrd-IT collector (gev-history) does
+ * not render them yet, so the byte contract is checked without those two keys
+ * until the collector adds them (follow-up); a row without them draws at its
+ * ship type's typical size.
+ */
+const withoutHullSize = (rows) =>
+  rows.map(({ length: _length, beam: _beam, ...rest }) => rest);
+
 /** ais-live.js /api/vessels body expression (copied). */
 function gevBody(rows, feed) {
   return JSON.stringify({
-    rows,
+    rows: withoutHullSize(rows),
     source: 'AISStream',
     status: feed.status,
     error: feed.error,

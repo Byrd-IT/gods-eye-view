@@ -440,7 +440,8 @@ test('routes non-OK + malformed JSON bodies: secrets corpus, coordinates echo, b
       const res = await callRoute(
         async () => new Response(sent, { status, headers: { 'content-type': ctype } }),
       );
-      assert.equal(res.status, 200);
+      // Upstream (#1509): non-OK and unparsable answers are outages (502).
+      assert.equal(res.status, 502);
       const bodies = loggedBodies(logs.join('\n'));
       assert.equal(bodies.length, 1, `${label} ${status}: snippet kept: ${logs}`);
       assertNoCanary(logs, `${label} ${status}`);
@@ -460,7 +461,7 @@ test('routes non-OK + malformed JSON bodies: secrets corpus, coordinates echo, b
   assert.doesNotMatch(logs.join('\n'), /-97\.741234|30\.271234/);
 });
 
-test('routes: a malformed JSON 200 keeps its body snippet in the failure log', async (t) => {
+test('routes: a malformed JSON 200 is an outage and keeps its body snippet in the failure log', async (t) => {
   const logs = captureLogs(t);
   const res = await callRoute(
     async () =>
@@ -468,7 +469,8 @@ test('routes: a malformed JSON 200 keeps its body snippet in the failure log', a
         headers: { 'content-type': 'application/json' },
       }),
   );
-  assert.deepEqual(res.body, { ok: false, error: 'route proxy error' });
+  assert.equal(res.status, 502);
+  assert.deepEqual(res.body, { ok: false, error: 'routing service unavailable' });
   assert.match(logs[0], /class=malformed status=200 .*body="\{\\"code\\":\\"Ok\\", truncated"/);
 });
 

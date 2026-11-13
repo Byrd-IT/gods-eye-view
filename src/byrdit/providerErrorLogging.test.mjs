@@ -514,15 +514,18 @@ async function callRoute(fetchImpl, peer, endpoints = {}) {
   return { status: res.statusCode, body: JSON.parse(res.body) };
 }
 
-test('routes: 500 keeps "no route found" and logs target/status/elapsed/body (no coordinates)', async (t) => {
+// Upstream (#1509): a routing outage is answered 502 "routing service
+// unavailable"; only OSRM's own 400 stays "no route found". The failure log
+// lines (b12) are unchanged.
+test('routes: 500 is an outage (502) and logs target/status/elapsed/body (no coordinates)', async (t) => {
   const logs = captureLogs(t);
   const res = await callRoute(
     async () => new Response(BODY_500, { status: 500 }),
     '10.99.0.1',
     { car: 'https://u:p@osrm.example/routed-car' },
   );
-  assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { ok: false, error: 'no route found' });
+  assert.equal(res.status, 502);
+  assert.deepEqual(res.body, { ok: false, error: 'routing service unavailable' });
   assert.equal(logs.length, 1);
   assertHttpFailureLine(logs[0], {
     target: 'target="GET https://osrm.example/routed-car/route/v1/driving/<2 coords>"',
@@ -530,7 +533,7 @@ test('routes: 500 keeps "no route found" and logs target/status/elapsed/body (no
   assert.doesNotMatch(logs[0], /-97\.74|u:p@/);
 });
 
-test('routes: timeout keeps "route proxy error" and logs class=timeout', async (t) => {
+test('routes: timeout is an outage (502) and logs class=timeout', async (t) => {
   const logs = captureLogs(t);
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let called;
@@ -544,18 +547,19 @@ test('routes: timeout keeps "route proxy error" and logs class=timeout', async (
   await fetched;
   t.mock.timers.tick(12_000);
   const res = await pending;
-  assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { ok: false, error: 'route proxy error' });
+  assert.equal(res.status, 502);
+  assert.deepEqual(res.body, { ok: false, error: 'routing service unavailable' });
   assert.match(logs[0], /upstream request failed target="GET https:\/\/routing\.openstreetmap\.de\/routed-car\/route\/v1\/driving\/<2 coords>" class=timeout status=none elapsed_ms=\d+ timeout_ms=12000/);
-  assert.match(logs[1], /\[Route Proxy\] request failed class=AbortError response="route proxy error"/);
+  assert.equal(logs.length, 1);
 });
 
-test('routes: network error keeps "route proxy error" and logs the cause code', async (t) => {
+test('routes: network error is an outage (502) and logs the cause code', async (t) => {
   const logs = captureLogs(t);
   const res = await callRoute(async () => {
     throw networkError('EAI_AGAIN');
   }, '10.99.0.3');
-  assert.deepEqual(res.body, { ok: false, error: 'route proxy error' });
+  assert.equal(res.status, 502);
+  assert.deepEqual(res.body, { ok: false, error: 'routing service unavailable' });
   assert.match(logs[0], /class=dns code=EAI_AGAIN/);
 });
 
