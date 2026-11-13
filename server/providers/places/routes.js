@@ -353,7 +353,10 @@ async function fetchRoute({
     }
     // Read and parse failures are outages; later ones stay "route proxy error".
     try {
-      text = await readResponseTextCapped(upstreamRes, ROUTE_MAX_RESPONSE_BYTES);
+      text = await readResponseTextCapped(
+        upstreamRes,
+        ROUTE_MAX_RESPONSE_BYTES,
+      );
       osrm = JSON.parse(text);
     } catch (cause) {
       throw new UpstreamUnavailableError(cause);
