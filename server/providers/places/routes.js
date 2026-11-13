@@ -74,10 +74,16 @@ class UpstreamRateLimitError extends Error {
 
 /** Thrown when the routing service failed or sent no JSON; answered as 502. */
 class UpstreamUnavailableError extends Error {
-  constructor(cause) {
+  /**
+   * @param {unknown} [cause] Byrd-IT: the underlying failure, kept for the
+   *   cause-class log line.
+   * @param {{logged?: boolean}} [options] `logged`: logRefusal already wrote
+   *   this outage's status and body, so the failure line is not repeated.
+   */
+  constructor(cause, { logged = false } = {}) {
     super('routing service unavailable');
-    // Byrd-IT: keep the underlying failure for the cause-class log line.
     if (cause !== undefined) this.cause = cause;
+    this.logged = logged;
     this.name = 'UpstreamUnavailableError';
   }
 }
@@ -341,7 +347,7 @@ async function fetchRoute({
     }
     if (!upstreamRes.ok) {
       logRefusal('non-OK', await peekAndCancel(upstreamRes));
-      throw new UpstreamUnavailableError();
+      throw new UpstreamUnavailableError(undefined, { logged: true });
     }
     const ctype = upstreamRes.headers.get('content-type') || '';
     if (!ctype.includes('json')) {
@@ -349,7 +355,7 @@ async function fetchRoute({
         `non-JSON content-type=${JSON.stringify(ctype.slice(0, 80))}`,
         await peekAndCancel(upstreamRes),
       );
-      throw new UpstreamUnavailableError();
+      throw new UpstreamUnavailableError(undefined, { logged: true });
     }
     // Read and parse failures are outages; later ones stay "route proxy error".
     try {
@@ -364,12 +370,12 @@ async function fetchRoute({
   } catch (error) {
     // Local refusals (queue full) and the 429 above are not upstream faults
     // and are reported by the middleware / logRefusal already.
-    // An outage with no cause (non-OK status, non-JSON) was logged by
-    // logRefusal with its status and body already.
+    // An outage that logRefusal already wrote (non-OK status, non-JSON) is
+    // not logged a second time.
     if (
       !(error instanceof RouteBusyError) &&
       !(error instanceof UpstreamRateLimitError) &&
-      !(error instanceof UpstreamUnavailableError && error.cause === undefined)
+      !(error instanceof UpstreamUnavailableError && error.logged)
     )
       console.warn(
         `[Route Proxy] upstream request failed target="${target}" class=${failureClass(error.cause ?? error)} ` +
