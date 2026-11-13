@@ -4,11 +4,11 @@ import {
   mapAnalystRecord,
   parseGeojsonLines,
 } from '../sources/infrastructureData.js';
-import { createInfrastructureOverlayEntry } from './infrastructureOverlayEntry.js';
 import {
   isUsgsWaterLayer,
   usgsWaterCardDetails,
 } from '../byrdit/usgsWaterCopy.js';
+import { createInfrastructureOverlayEntry } from './infrastructureOverlayEntry.js';
 import { isPointerFree } from './inputOwnership.js';
 import {
   selectInfraLod,
@@ -94,6 +94,13 @@ export function localInfrastructureOverlayCopy(properties, layerId) {
     // Byrd-IT fork: gauge readings + observation time (src/byrdit/usgsWaterCopy.js).
     for (const line of usgsWaterCardDetails(props)) {
       details.push(clampCardLine(line));
+    }
+  } else if (Array.isArray(props.__gevDetails)) {
+    // Data Library features carry their card lines from the manifest
+    // (src/library/formats.js presentLibraryProperties).
+    for (const line of props.__gevDetails.slice(0, 2)) {
+      const clean = cleanLabel(line);
+      if (clean) details.push(clampCardLine(clean));
     }
   }
 
@@ -301,7 +308,10 @@ export function localDatasetError(error) {
  * A minimal, rock-solid native implementation for loading local GeoJSON Data.
  * Draws 3D stems (polylines) attached to Point entities and ensures
  * standard scene.pick natively clicks them.
- * @param {object} options Dataset URL, identity, appearance and optional Cesium adapters.
+ * @param {object} options Dataset URL (or a `loadFeatures({signal})` loader
+ *   resolving to GeoJSON features), identity, appearance (an optional
+ *   `featureColor(properties)` returns a CSS colour per feature) and optional
+ *   Cesium adapters.
  * @param {object} services Caller-owned operations; see docs/INFRASTRUCTURE-LAYERS.md.
  * @returns {object} A fresh layer implementing init/enable/disable/update/destroy/getStats/getAnalystRecords.
  * One live instance per layer id is allowed in a given viewer/context/overlay host.
@@ -319,12 +329,15 @@ export function createLocalGeoJsonLayer(
     labels = true,
     labelMax = DEFAULT_LABEL_MAX,
     labelGridPx = DEFAULT_LABEL_GRID_PX,
+    loadFeatures = null,
     /**
      * Byrd-IT: optional loader `(signal, viewer) => Promise<object[]>` used
      * instead of fetching `url`. Its result is NOT cached across enables, so
      * viewport-driven layers can call `reload()` to rebuild from new data.
+     * (Upstream's `loadFeatures({signal})` is the cached Data Library loader.)
      */
-    loadFeatures = null,
+    loadViewFeatures = null,
+    featureColor = null,
     screenSpaceEventHandlerFactory = (canvas) =>
       new Cesium.ScreenSpaceEventHandler(canvas),
     projectToWindow = (scene, position) =>
@@ -356,9 +369,9 @@ export function createLocalGeoJsonLayer(
   let _lastVisibilityUpdate = 0;
   let _destroyed = false;
   let _loadPromise = null;
-  let _loadController = null;
   /** Byrd-IT: a reload() requested while a load was in flight. */
   let _reloadQueued = false;
+  let _loadController = null;
   /**
    * The parsed bundled dataset, kept across disable/enable so a re-enable
    * rebuilds entities without refetching. The Cesium entities themselves are
@@ -370,6 +383,12 @@ export function createLocalGeoJsonLayer(
    * @type {Array<object>|null}
    */
   let _cachedFeatures = null;
+  /**
+   * The source a `replaceFeatures()` rebuild is replacing: it stays drawn
+   * until the new one is in the scene, and comes back if the rebuild fails.
+   * @type {{source: object, stemRecords: object[], count: number, lastUpdate: number|null, error: string|null}|null}
+   */
+  let _outgoing = null;
   /**
    * Globe-LOD active set: the record ids allowed to carry a live stem right
    * now. This bounds geometry refreshes and ground-sample work to the
@@ -454,7 +473,19 @@ export function createLocalGeoJsonLayer(
    * survive a disable is the per-frame visualizer walk and the entity memory.
    * @param {object} viewer
    */
+  const releaseOutgoing = (viewer) => {
+    if (!_outgoing) return;
+    const { source } = _outgoing;
+    _outgoing = null;
+    try {
+      viewer?.dataSources?.remove(source, true);
+    } catch {
+      /* already gone */
+    }
+  };
+
   const releaseDataSource = (viewer) => {
+    releaseOutgoing(viewer);
     if (!_dataSource) return;
     const source = _dataSource;
     _dataSource = null;
@@ -494,7 +525,7 @@ export function createLocalGeoJsonLayer(
     }
   };
 
-  const api = {
+  const layer = {
     id,
     name,
     icon,
@@ -569,521 +600,554 @@ export function createLocalGeoJsonLayer(
       return result;
     },
 
-    enable: (viewer) => enableLayer(viewer),
-  };
+    enable: async (viewer) => {
+      if (_destroyed) return;
+      _enabled = true;
+      _stemGeometryDirty = true;
+      _lastVisibilityUpdate = Number.NEGATIVE_INFINITY;
+      _groundRetryArms = 0; // fresh give-up budget per enable-cycle
+      _lastGroundSampleCapability = null;
+      _activeLodIds = new Set(); // fresh globe-LOD selection per enable-cycle
+      _lodGraceState = new Map();
+      _lastLodBudgetLimit = 0;
+      _lodComputed = false;
+      _lastLodProbeMs = Number.NEGATIVE_INFINITY;
+      _overlayPublisher.show();
 
-  async function enableLayer(viewer) {
-    if (_destroyed) return;
-    _enabled = true;
-    _stemGeometryDirty = true;
-    _lastVisibilityUpdate = Number.NEGATIVE_INFINITY;
-    _groundRetryArms = 0; // fresh give-up budget per enable-cycle
-    _lastGroundSampleCapability = null;
-    _activeLodIds = new Set(); // fresh globe-LOD selection per enable-cycle
-    _lodGraceState = new Map();
-    _lastLodBudgetLimit = 0;
-    _lodComputed = false;
-    _lastLodProbeMs = Number.NEGATIVE_INFINITY;
-    _overlayPublisher.show();
+      // 1. Initialize data source
+      if (!_dataSource) {
+        if (!_loadPromise)
+          _loadPromise = (async () => {
+            _loadController = new AbortController();
+            const baseColor = Cesium.Color.fromCssColorString(color);
 
-    // 1. Initialize data source
-    if (!_dataSource) {
-      if (!_loadPromise)
-        _loadPromise = (async () => {
-          _loadController = new AbortController();
-          const baseColor = Cesium.Color.fromCssColorString(color);
-
-          // Fetch and parse JSON Lines (.geojsonl) into a FeatureCollection.
-          // The source is built into a local and committed to `_dataSource`
-          // only once setup finishes: a half-built source published early would
-          // make every later enable() skip this block, so the layer could never
-          // clear its error or retry.
-          _error = null;
-          let loaded = null;
-          // Whether the scene has actually accepted `loaded` — the two rollback
-          // windows (before vs after the add settles) need different cleanup.
-          let addedToScene = false;
-          try {
-            let features = loadFeatures ? null : _cachedFeatures;
-            if (!features && loadFeatures) {
-              features = await loadFeatures(_loadController.signal, viewer);
-              if (_destroyed) return;
-            } else if (!features) {
-              const response = await fetch(url, {
-                signal: _loadController.signal,
-              });
-              if (_destroyed) return;
-              // A 404 returns an HTML body that would otherwise die in JSON.parse
-              // one line later, reported as a parse error for a missing file.
-              if (!response.ok) {
-                throw new Error(`HTTP ${response.status ?? '?'}`);
+            // Fetch and parse JSON Lines (.geojsonl) into a FeatureCollection.
+            // The source is built into a local and committed to `_dataSource`
+            // only once setup finishes: a half-built source published early would
+            // make every later enable() skip this block, so the layer could never
+            // clear its error or retry.
+            _error = null;
+            let loaded = null;
+            // Whether the scene has actually accepted `loaded` — the two rollback
+            // windows (before vs after the add settles) need different cleanup.
+            let addedToScene = false;
+            try {
+              let features = loadViewFeatures ? null : _cachedFeatures;
+              if (!features && loadViewFeatures) {
+                features = await loadViewFeatures(
+                  _loadController.signal,
+                  viewer,
+                );
+                if (_destroyed) return;
+              } else if (!features && loadFeatures) {
+                // A caller-owned loader (the Data Library) fetches and bounds
+                // its own live dataset; this layer only renders it.
+                features = await loadFeatures({
+                  signal: _loadController.signal,
+                });
+                if (_destroyed) return;
+                if (!Array.isArray(features))
+                  throw new Error('dataset unavailable');
+                _cachedFeatures = features;
+              } else if (!features) {
+                const response = await fetch(url, {
+                  signal: _loadController.signal,
+                });
+                if (_destroyed) return;
+                // A 404 returns an HTML body that would otherwise die in JSON.parse
+                // one line later, reported as a parse error for a missing file.
+                if (!response.ok) {
+                  throw new Error(`HTTP ${response.status ?? '?'}`);
+                }
+                const text = await response.text();
+                if (_destroyed) return;
+                features = parseGeojsonLines(text);
+                _cachedFeatures = features;
               }
-              const text = await response.text();
+
+              const geojson = {
+                type: 'FeatureCollection',
+                features,
+              };
+
+              // Natively parse into entities and use it as our _dataSource
+              loaded = await Cesium.GeoJsonDataSource.load(geojson, {
+                clampToGround: true,
+                stroke: baseColor,
+                fill: baseColor.withAlpha(0.3),
+                strokeWidth: 2,
+                markerSize: 8,
+                markerColor: baseColor,
+              });
+
               if (_destroyed) return;
-              features = parseGeojsonLines(text);
-              _cachedFeatures = features;
+              loaded.name = name;
+              loaded.show = false;
+              // Cesium's DataSourceCollection.add() returns a promise and only
+              // inserts on a later microtask. Without this await, a throw during
+              // post-processing would roll back a source the scene had not
+              // accepted yet — and Cesium would then insert the "removed" source
+              // anyway, leaving an orphan the retry would double up on. Awaiting
+              // also routes an add() rejection into the error path below instead
+              // of leaving it uncaught with healthy-looking stats.
+              await viewer.dataSources.add(loaded);
+              addedToScene = true;
+              if (_destroyed) {
+                viewer.dataSources.remove(loaded, true);
+                return;
+              }
+
+              // Convert parsed points into 3D stems or style polygons
+              const entities = loaded.entities.values;
+              _count = entities.length;
+              _stemRecords = [];
+              _stemGeometryDirty = true;
+
+              // An optional per-feature colour (Data Library colorBy); one
+              // Cesium colour per distinct CSS value.
+              const colorCache = new Map([[color, baseColor]]);
+              const colorFor = (entity) => {
+                if (typeof featureColor !== 'function') return baseColor;
+                const css = featureColor(propertyObject(entity)) || color;
+                if (!colorCache.has(css))
+                  colorCache.set(css, Cesium.Color.fromCssColorString(css));
+                return colorCache.get(css);
+              };
+
+              for (let i = 0; i < entities.length; i++) {
+                const feature = entities[i];
+                feature.__localLayerId = id; // Tag it so our click handler knows it belongs to this layer
+                const featureBaseColor = colorFor(feature);
+
+                let pos = feature.position?.getValue(Cesium.JulianDate.now());
+
+                if (!pos) {
+                  // It's a polygon or line
+                  if (feature.polygon) {
+                    feature.polygon.outline = true;
+                    feature.polygon.outlineColor = featureBaseColor;
+                    if (featureBaseColor !== baseColor)
+                      feature.polygon.material =
+                        featureBaseColor.withAlpha(0.3);
+
+                    // Calculate center point for the stem
+                    const hierarchy = feature.polygon.hierarchy?.getValue(
+                      Cesium.JulianDate.now(),
+                    );
+                    if (
+                      hierarchy &&
+                      hierarchy.positions &&
+                      hierarchy.positions.length > 0
+                    ) {
+                      pos = Cesium.BoundingSphere.fromPoints(
+                        hierarchy.positions,
+                      ).center;
+                    }
+                  }
+                }
+
+                if (!pos) continue;
+
+                const carto = Cesium.Cartographic.fromCartesian(pos);
+                const groundHeight = 0; // Ellipsoid surface until a scene sample lands
+                const tipHeight = 2000; // Initial Stem height
+
+                const base = Cesium.Cartesian3.fromRadians(
+                  carto.longitude,
+                  carto.latitude,
+                  groundHeight,
+                );
+                const tip = Cesium.Cartesian3.fromRadians(
+                  carto.longitude,
+                  carto.latitude,
+                  tipHeight,
+                );
+                const properties = propertyObject(feature);
+                const recordId = String(feature.id ?? i);
+
+                // Store references for bounded stem scaling and native picking.
+                feature.__localBaseCarto = carto;
+                feature.__localBaseCartesian = base;
+                const context = registerEntityContext(feature, {
+                  id: `${id}:${recordId}`,
+                  layerId: id,
+                  layerName: name,
+                  source,
+                  dataSource: loaded,
+                  label: featureLabelFromProperties(properties, id),
+                  properties,
+                  latitude: Number(
+                    Cesium.Math.toDegrees(carto.latitude).toFixed(6),
+                  ),
+                  longitude: Number(
+                    Cesium.Math.toDegrees(carto.longitude).toFixed(6),
+                  ),
+                });
+
+                // Constant properties are refreshed on the existing 450 ms source
+                // cadence. Cesium no longer evaluates 2-3 callbacks per entity on
+                // every frame, while the point/stem pick surface stays native.
+                feature.position = tip;
+                const stemPositionBuffers = [
+                  [base, tip],
+                  [base, tip],
+                ];
+                feature.polyline = new Cesium.PolylineGraphics({
+                  positions: stemPositionBuffers[0],
+                  width: 3.5,
+                  material: new Cesium.ColorMaterialProperty(featureBaseColor),
+                });
+                feature.point = new Cesium.PointGraphics({
+                  pixelSize: 10,
+                  color: featureBaseColor,
+                  outlineColor: Cesium.Color.BLACK,
+                  outlineWidth: 2,
+                  // Never depth-cull the anchor against the photoreal mesh —
+                  // globe-horizon culling is handled by the pre-render occluder.
+                  disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                });
+
+                const priority = labelPriorityFromProperties(properties, id);
+                _stemRecords.push({
+                  id: recordId,
+                  entity: feature,
+                  context,
+                  carto,
+                  base,
+                  tip,
+                  nextTip: Cesium.Cartesian3.clone(tip),
+                  stemPositionBuffers,
+                  stemPositionBufferIndex: 0,
+                  groundHeight,
+                  groundSampled: false,
+                  lastGroundSampleMs: 0,
+                  priority,
+                  entry: labels
+                    ? createLocalInfrastructureOverlayEntry({
+                        id: recordId,
+                        layerId: id,
+                        position: tip,
+                        properties,
+                        priority,
+                        accent: featureBaseColor.toCssHexString(),
+                      })
+                    : null,
+                });
+              }
+              // Setup finished — publish it.
+              _dataSource = loaded;
+              _lastUpdate = Date.now();
+            } catch (e) {
+              // The dataset ships with the build, so this is a broken install,
+              // not a blip — it has to reach the chip, not just the console.
+              if (!_destroyed) _error = localDatasetError(e);
+              // Roll the partial build back so a later enable() retries from
+              // scratch instead of inheriting a half-populated source. Only the
+              // post-add window has something in the scene to remove: a failure
+              // before (or inside) add() never reached the collection, and
+              // removing then would race Cesium's pending insert.
+              if (addedToScene) {
+                try {
+                  viewer?.dataSources?.remove(loaded, true);
+                } catch {
+                  /* already gone */
+                }
+              }
+              if (_destroyed) return;
+              removeEntityContextsForLayer(id);
+              _count = 0;
+              _stemRecords = [];
+              console.error(`Failed to load ${id}:`, e);
             }
-
-            const geojson = {
-              type: 'FeatureCollection',
-              features,
-            };
-
-            // Natively parse into entities and use it as our _dataSource
-            loaded = await Cesium.GeoJsonDataSource.load(geojson, {
-              clampToGround: true,
-              stroke: baseColor,
-              fill: baseColor.withAlpha(0.3),
-              strokeWidth: 2,
-              markerSize: 8,
-              markerColor: baseColor,
-            });
 
             if (_destroyed) return;
-            loaded.name = name;
-            loaded.show = false;
-            // Cesium's DataSourceCollection.add() returns a promise and only
-            // inserts on a later microtask. Without this await, a throw during
-            // post-processing would roll back a source the scene had not
-            // accepted yet — and Cesium would then insert the "removed" source
-            // anyway, leaving an orphan the retry would double up on. Awaiting
-            // also routes an add() rejection into the error path below instead
-            // of leaving it uncaught with healthy-looking stats.
-            await viewer.dataSources.add(loaded);
-            addedToScene = true;
-            if (_destroyed) {
-              viewer.dataSources.remove(loaded, true);
-              return;
-            }
-
-            // Convert parsed points into 3D stems or style polygons
-            const entities = loaded.entities.values;
-            _count = entities.length;
-            _stemRecords = [];
-            _stemGeometryDirty = true;
-
-            for (let i = 0; i < entities.length; i++) {
-              const feature = entities[i];
-              feature.__localLayerId = id; // Tag it so our click handler knows it belongs to this layer
-
-              let pos = feature.position?.getValue(Cesium.JulianDate.now());
-
-              if (!pos) {
-                // It's a polygon or line
-                if (feature.polygon) {
-                  feature.polygon.outline = true;
-                  feature.polygon.outlineColor = baseColor;
-
-                  // Calculate center point for the stem
-                  const hierarchy = feature.polygon.hierarchy?.getValue(
-                    Cesium.JulianDate.now(),
-                  );
-                  if (
-                    hierarchy &&
-                    hierarchy.positions &&
-                    hierarchy.positions.length > 0
-                  ) {
-                    pos = Cesium.BoundingSphere.fromPoints(
-                      hierarchy.positions,
-                    ).center;
-                  }
-                }
-              }
-
-              if (!pos) continue;
-
-              const carto = Cesium.Cartographic.fromCartesian(pos);
-              const groundHeight = 0; // Ellipsoid surface until a scene sample lands
-              const tipHeight = 2000; // Initial Stem height
-
-              const base = Cesium.Cartesian3.fromRadians(
-                carto.longitude,
-                carto.latitude,
-                groundHeight,
+            // 2. Install native global click handler
+            if (!_clickHandler) {
+              _clickHandler = screenSpaceEventHandlerFactory(
+                viewer.scene.canvas,
               );
-              const tip = Cesium.Cartesian3.fromRadians(
-                carto.longitude,
-                carto.latitude,
-                tipHeight,
-              );
-              const properties = propertyObject(feature);
-              const recordId = String(feature.id ?? i);
+              _clickHandler.setInputAction((click) => {
+                // A tool owns the pointer (src/data/inputOwnership.js).
+                if (!isPointerFree()) return;
+                if (!_enabled) return;
+                const picked = viewer.scene.pick(click.position);
 
-              // Store references for bounded stem scaling and native picking.
-              feature.__localBaseCarto = carto;
-              feature.__localBaseCartesian = base;
-              registerEntityContext(feature, {
-                id: `${id}:${recordId}`,
-                layerId: id,
-                layerName: name,
-                source,
-                dataSource: loaded,
-                label: featureLabelFromProperties(properties, id),
-                properties,
-                latitude: Number(
-                  Cesium.Math.toDegrees(carto.latitude).toFixed(6),
-                ),
-                longitude: Number(
-                  Cesium.Math.toDegrees(carto.longitude).toFixed(6),
-                ),
-              });
+                if (picked && picked.id && picked.id.__localLayerId === id) {
+                  const entity = picked.id;
+                  viewer.selectedEntity = entity;
+                  selectEntityContext(entity);
 
-              // Constant properties are refreshed on the existing 450 ms source
-              // cadence. Cesium no longer evaluates 2-3 callbacks per entity on
-              // every frame, while the point/stem pick surface stays native.
-              feature.position = tip;
-              const stemPositionBuffers = [
-                [base, tip],
-                [base, tip],
-              ];
-              feature.polyline = new Cesium.PolylineGraphics({
-                positions: stemPositionBuffers[0],
-                width: 3.5,
-                material: new Cesium.ColorMaterialProperty(baseColor),
-              });
-              feature.point = new Cesium.PointGraphics({
-                pixelSize: 10,
-                color: baseColor,
-                outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 2,
-                // Never depth-cull the anchor against the photoreal mesh —
-                // globe-horizon culling is handled by the pre-render occluder.
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-              });
+                  // We zoom to the surface base of the stem or the center of the polygon
+                  let targetPos = null;
 
-              const priority = labelPriorityFromProperties(properties, id);
-              _stemRecords.push({
-                id: recordId,
-                entity: feature,
-                carto,
-                base,
-                tip,
-                nextTip: Cesium.Cartesian3.clone(tip),
-                stemPositionBuffers,
-                stemPositionBufferIndex: 0,
-                groundHeight,
-                groundSampled: false,
-                lastGroundSampleMs: 0,
-                priority,
-                entry: labels
-                  ? createLocalInfrastructureOverlayEntry({
-                      id: recordId,
-                      layerId: id,
-                      position: tip,
-                      properties,
-                      priority,
-                      accent: color,
-                    })
-                  : null,
-              });
-            }
-            // Setup finished — publish it.
-            _dataSource = loaded;
-            _lastUpdate = Date.now();
-          } catch (e) {
-            // The dataset ships with the build, so this is a broken install,
-            // not a blip — it has to reach the chip, not just the console.
-            if (!_destroyed) _error = localDatasetError(e);
-            // Roll the partial build back so a later enable() retries from
-            // scratch instead of inheriting a half-populated source. Only the
-            // post-add window has something in the scene to remove: a failure
-            // before (or inside) add() never reached the collection, and
-            // removing then would race Cesium's pending insert.
-            if (addedToScene) {
-              try {
-                viewer?.dataSources?.remove(loaded, true);
-              } catch {
-                /* already gone */
-              }
-            }
-            if (_destroyed) return;
-            removeEntityContextsForLayer(id);
-            _count = 0;
-            _stemRecords = [];
-            console.error(`Failed to load ${id}:`, e);
-          }
-
-          if (_destroyed) return;
-          // 2. Install native global click handler
-          if (!_clickHandler) {
-            _clickHandler = screenSpaceEventHandlerFactory(viewer.scene.canvas);
-            _clickHandler.setInputAction((click) => {
-              // A tool owns the pointer (src/data/inputOwnership.js).
-              if (!isPointerFree()) return;
-              if (!_enabled) return;
-              const picked = viewer.scene.pick(click.position);
-
-              if (picked && picked.id && picked.id.__localLayerId === id) {
-                const entity = picked.id;
-                viewer.selectedEntity = entity;
-                selectEntityContext(entity);
-
-                // We zoom to the surface base of the stem or the center of the polygon
-                let targetPos = null;
-
-                if (entity.polyline) {
-                  // If it's a stem, fly to the base
-                  const positions = entity.polyline.positions.getValue(
-                    Cesium.JulianDate.now(),
-                  );
-                  if (positions && positions.length > 0) {
-                    targetPos = positions[0];
+                  if (entity.polyline) {
+                    // If it's a stem, fly to the base
+                    const positions = entity.polyline.positions.getValue(
+                      Cesium.JulianDate.now(),
+                    );
+                    if (positions && positions.length > 0) {
+                      targetPos = positions[0];
+                    }
+                  } else if (entity.polygon && entity.polygon.hierarchy) {
+                    // If it's a polygon, just fly to its center
+                    const hierarchy = entity.polygon.hierarchy.getValue(
+                      Cesium.JulianDate.now(),
+                    );
+                    if (hierarchy && hierarchy.positions.length > 0) {
+                      targetPos = Cesium.BoundingSphere.fromPoints(
+                        hierarchy.positions,
+                      ).center;
+                    }
                   }
-                } else if (entity.polygon && entity.polygon.hierarchy) {
-                  // If it's a polygon, just fly to its center
-                  const hierarchy = entity.polygon.hierarchy.getValue(
-                    Cesium.JulianDate.now(),
-                  );
-                  if (hierarchy && hierarchy.positions.length > 0) {
-                    targetPos = Cesium.BoundingSphere.fromPoints(
-                      hierarchy.positions,
-                    ).center;
+
+                  if (targetPos) {
+                    const carto = Cesium.Cartographic.fromCartesian(targetPos);
+
+                    // Disable interactions so Cesium doesn't magically cancel the flight
+                    viewer.scene.screenSpaceCameraController.enableInputs = false;
+
+                    viewer.camera.flyTo({
+                      destination: Cesium.Cartesian3.fromRadians(
+                        carto.longitude,
+                        carto.latitude,
+                        5000,
+                      ),
+                      duration: 1.5,
+                      complete: () => {
+                        viewer.scene.screenSpaceCameraController.enableInputs = true;
+                      },
+                      cancel: () => {
+                        viewer.scene.screenSpaceCameraController.enableInputs = true;
+                      },
+                    });
                   }
                 }
-
-                if (targetPos) {
-                  const carto = Cesium.Cartographic.fromCartesian(targetPos);
-
-                  // Disable interactions so Cesium doesn't magically cancel the flight
-                  viewer.scene.screenSpaceCameraController.enableInputs = false;
-
-                  viewer.camera.flyTo({
-                    destination: Cesium.Cartesian3.fromRadians(
-                      carto.longitude,
-                      carto.latitude,
-                      5000,
-                    ),
-                    duration: 1.5,
-                    complete: () => {
-                      viewer.scene.screenSpaceCameraController.enableInputs = true;
-                    },
-                    cancel: () => {
-                      viewer.scene.screenSpaceCameraController.enableInputs = true;
-                    },
-                  });
-                }
-              }
-            }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-          }
-        })();
-      try {
-        await _loadPromise;
-      } finally {
-        _loadPromise = null;
-        _loadController = null;
-      }
-    }
-
-    if (_destroyed) return;
-    if (_enabled && _count > 0 && osmDerived) showOsmCredit?.(viewer, id);
-    // 3. Add an incredibly fast pre-render occluder to hide points behind the globe
-    if (_enabled && !_preRenderRemover) {
-      _preRenderRemover = viewer.scene.preRender.addEventListener(() => {
-        if (!_enabled || !_dataSource) return;
-        const now = performance.now();
-        if (now - _lastVisibilityUpdate < VISIBILITY_UPDATE_MS) return;
-        _lastVisibilityUpdate = now;
-
-        const cameraPos = viewer.camera.positionWC;
-        if (!cameraPos) return;
-
-        // --- Globe-LOD motion fallback. ---
-        // `_stemGeometryDirty` is otherwise raised only by moveEnd, which a
-        // tracked-entity follow, Cockpit, route flight, or continuous orbit
-        // never emits. Left alone the selection stays pinned to the region
-        // the camera left: the walk below hides those records one by one as
-        // they pass behind the globe and admits nothing newly visible, so
-        // the layer bleeds down to sparse-or-empty until motion stops.
-        // Bounded: rate-limited to a probe window, and only when the camera
-        // has actually travelled since the last selection.
-        if (!_stemGeometryDirty && _lodComputed && _stemRecords.length > 0) {
-          const probe = shouldRecomputeInfraLod({
-            nowMs: now,
-            lastProbeMs: _lastLodProbeMs,
-            movedSqM: Cesium.Cartesian3.distanceSquared(
-              cameraPos,
-              _lastLodCameraPos,
-            ),
-            cameraHeightM: viewer.camera.positionCartographic?.height,
-          });
-          _lastLodProbeMs = probe.lastProbeMs;
-          // Re-selecting demands fresh stem geometry: a record admitted
-          // mid-motion has never had its tip sized for this camera.
-          if (probe.recompute) _stemGeometryDirty = true;
+              }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+            }
+          })();
+        try {
+          await _loadPromise;
+        } finally {
+          _loadPromise = null;
+          _loadController = null;
         }
+      }
 
-        const occluder = new Cesium.EllipsoidalOccluder(
-          Cesium.Ellipsoid.WGS84,
-          cameraPos,
-        );
-        const visibleOverlayRecords = [];
-        const refreshStemGeometry = _stemGeometryDirty;
+      if (_destroyed) return;
+      if (_enabled && _count > 0 && osmDerived) showOsmCredit?.(viewer, id);
+      // 3. Add an incredibly fast pre-render occluder to hide points behind the globe
+      if (_enabled && !_preRenderRemover) {
+        _preRenderRemover = viewer.scene.preRender.addEventListener(() => {
+          if (!_enabled || !_dataSource) return;
+          const now = performance.now();
+          if (now - _lastVisibilityUpdate < VISIBILITY_UPDATE_MS) return;
+          _lastVisibilityUpdate = now;
 
-        // A scene that cannot sample heights can never ground a record, so it
-        // must never arm a retry (the arm would re-arm on every requested
-        // frame, forever) and must not spend ANY per-record work trying.
-        // Read once per walk, not per record.
-        const canSampleGround = viewer.scene.sampleHeightSupported === true;
-        // Capability can arrive late (WebGL context restore, a tileset that
-        // finally supports sampling). A parked camera has no moveEnd to
-        // re-open a spent budget, so the false→true edge does it.
-        if (canSampleGround && _lastGroundSampleCapability === false)
-          _groundRetryArms = 0;
-        _lastGroundSampleCapability = canSampleGround;
-        let groundRetryPending = false;
-        let groundSampleProgress = false;
+          const cameraPos = viewer.camera.positionWC;
+          if (!cameraPos) return;
 
-        // --- Globe-LOD: recompute the active-stem set on camera moves. ---
-        // `_stemGeometryDirty` is set by moveEnd, the first enable, and the
-        // motion fallback above — exactly when the camera-height budget and
-        // per-record distances can have changed. Without this, all local
-        // infrastructure features run stem trig + Cesium property writes on
-        // every move; with it, only the ~80 (global) to ~420 (regional)
-        // budgeted records do.
-        // The occluder test is the same cheap dot product used below.
-        if (refreshStemGeometry && _stemRecords.length > 0) {
-          const cameraHeightM = viewer.camera.positionCartographic?.height;
-          const candidates = new Array(_stemRecords.length);
+          // --- Globe-LOD motion fallback. ---
+          // `_stemGeometryDirty` is otherwise raised only by moveEnd, which a
+          // tracked-entity follow, Cockpit, route flight, or continuous orbit
+          // never emits. Left alone the selection stays pinned to the region
+          // the camera left: the walk below hides those records one by one as
+          // they pass behind the globe and admits nothing newly visible, so
+          // the layer bleeds down to sparse-or-empty until motion stops.
+          // Bounded: rate-limited to a probe window, and only when the camera
+          // has actually travelled since the last selection.
+          if (!_stemGeometryDirty && _lodComputed && _stemRecords.length > 0) {
+            const probe = shouldRecomputeInfraLod({
+              nowMs: now,
+              lastProbeMs: _lastLodProbeMs,
+              movedSqM: Cesium.Cartesian3.distanceSquared(
+                cameraPos,
+                _lastLodCameraPos,
+              ),
+              cameraHeightM: viewer.camera.positionCartographic?.height,
+            });
+            _lastLodProbeMs = probe.lastProbeMs;
+            // Re-selecting demands fresh stem geometry: a record admitted
+            // mid-motion has never had its tip sized for this camera.
+            if (probe.recompute) _stemGeometryDirty = true;
+          }
+
+          const occluder = new Cesium.EllipsoidalOccluder(
+            Cesium.Ellipsoid.WGS84,
+            cameraPos,
+          );
+          const visibleOverlayRecords = [];
+          const refreshStemGeometry = _stemGeometryDirty;
+
+          // A scene that cannot sample heights can never ground a record, so it
+          // must never arm a retry (the arm would re-arm on every requested
+          // frame, forever) and must not spend ANY per-record work trying.
+          // Read once per walk, not per record.
+          const canSampleGround = viewer.scene.sampleHeightSupported === true;
+          // Capability can arrive late (WebGL context restore, a tileset that
+          // finally supports sampling). A parked camera has no moveEnd to
+          // re-open a spent budget, so the false→true edge does it.
+          if (canSampleGround && _lastGroundSampleCapability === false)
+            _groundRetryArms = 0;
+          _lastGroundSampleCapability = canSampleGround;
+          let groundRetryPending = false;
+          let groundSampleProgress = false;
+
+          // --- Globe-LOD: recompute the active-stem set on camera moves. ---
+          // `_stemGeometryDirty` is set by moveEnd, the first enable, and the
+          // motion fallback above — exactly when the camera-height budget and
+          // per-record distances can have changed. Without this, all local
+          // infrastructure features run stem trig + Cesium property writes on
+          // every move; with it, only the ~80 (global) to ~420 (regional)
+          // budgeted records do.
+          // The occluder test is the same cheap dot product used below.
+          if (refreshStemGeometry && _stemRecords.length > 0) {
+            const cameraHeightM = viewer.camera.positionCartographic?.height;
+            const candidates = new Array(_stemRecords.length);
+            for (let i = 0; i < _stemRecords.length; i++) {
+              const record = _stemRecords[i];
+              candidates[i] = {
+                id: record.id,
+                priority: record.priority,
+                distanceM: Cesium.Cartesian3.distance(cameraPos, record.base),
+                inView: occluder.isPointVisible(record.base),
+              };
+            }
+            const selection = selectInfraLod(candidates, {
+              cameraHeightM,
+              incumbentIds: _activeLodIds,
+            });
+            const grace = applyInfraEvictionGrace({
+              selectedIds: selection.activeIds,
+              builtIds: [..._activeLodIds],
+              graceState: _lodGraceState,
+              nowMs: now,
+              activeLimit: selection.budget.activeLimit,
+            });
+            _activeLodIds = new Set(grace.keepIds);
+            _lodGraceState = grace.graceState;
+            _lastLodBudgetLimit = selection.budget.activeLimit;
+            _lodComputed = true;
+            // Adopt this pass as the motion-fallback reference. Travel is
+            // measured from the last SELECTION, never the previous walk, so
+            // jitter around a parked camera never accumulates into a
+            // recompute while genuine slow travel eventually does.
+            Cesium.Cartesian3.clone(cameraPos, _lastLodCameraPos);
+            _lastLodProbeMs = now;
+          }
+
           for (let i = 0; i < _stemRecords.length; i++) {
             const record = _stemRecords[i];
-            candidates[i] = {
-              id: record.id,
-              priority: record.priority,
-              distanceM: Cesium.Cartesian3.distance(cameraPos, record.base),
-              inView: occluder.isPointVisible(record.base),
-            };
-          }
-          const selection = selectInfraLod(candidates, {
-            cameraHeightM,
-            incumbentIds: _activeLodIds,
-          });
-          const grace = applyInfraEvictionGrace({
-            selectedIds: selection.activeIds,
-            builtIds: [..._activeLodIds],
-            graceState: _lodGraceState,
-            nowMs: now,
-            activeLimit: selection.budget.activeLimit,
-          });
-          _activeLodIds = new Set(grace.keepIds);
-          _lodGraceState = grace.graceState;
-          _lastLodBudgetLimit = selection.budget.activeLimit;
-          _lodComputed = true;
-          // Adopt this pass as the motion-fallback reference. Travel is
-          // measured from the last SELECTION, never the previous walk, so
-          // jitter around a parked camera never accumulates into a
-          // recompute while genuine slow travel eventually does.
-          Cesium.Cartesian3.clone(cameraPos, _lastLodCameraPos);
-          _lastLodProbeMs = now;
-        }
+            const isActive = !_lodComputed || _activeLodIds.has(record.id);
+            const isVisible = isActive && occluder.isPointVisible(record.base);
+            if (record.entity.show !== isVisible)
+              record.entity.show = isVisible;
 
-        for (let i = 0; i < _stemRecords.length; i++) {
-          const record = _stemRecords[i];
-          const isActive = !_lodComputed || _activeLodIds.has(record.id);
-          const isVisible = isActive && occluder.isPointVisible(record.base);
-          if (record.entity.show !== isVisible) record.entity.show = isVisible;
+            // Records outside the globe-LOD active set carry no visible stem,
+            // so skip every per-frame cost for them — geometry trig, the
+            // ground-sample GPU readback, overlay-label candidacy. They rejoin
+            // on the next camera move if the budget has room.
+            if (!isActive) continue;
 
-          // Records outside the globe-LOD active set carry no visible stem,
-          // so skip every per-frame cost for them — geometry trig, the
-          // ground-sample GPU readback, overlay-label candidacy. They rejoin
-          // on the next camera move if the budget has room.
-          if (!isActive) continue;
-
-          const wasGroundSampled = record.groundSampled;
-          const terrainFloorChanged = refreshLocalTerrainFloor(viewer, record);
-          if (refreshStemGeometry || terrainFloorChanged) {
-            updateLocalStemGeometry(viewer, record, now);
-          } else if (
-            canSampleGround &&
-            !record.groundSampled &&
-            now - record.lastGroundSampleMs >= GROUND_SAMPLE_RETRY_MS
-          ) {
-            // Capability first: without it the distance below is pure waste,
-            // once per ungrounded record per walk, forever.
-            const distance = Cesium.Cartesian3.distance(
-              viewer.camera.positionWC,
-              record.base,
+            const wasGroundSampled = record.groundSampled;
+            const terrainFloorChanged = refreshLocalTerrainFloor(
+              viewer,
+              record,
             );
-            if (
-              distance < GROUND_SAMPLE_MAX_DISTANCE_M &&
-              sampleLocalGroundHeight(viewer, record, now)
+            if (refreshStemGeometry || terrainFloorChanged) {
+              updateLocalStemGeometry(viewer, record, now);
+            } else if (
+              canSampleGround &&
+              !record.groundSampled &&
+              now - record.lastGroundSampleMs >= GROUND_SAMPLE_RETRY_MS
             ) {
-              updateLocalStemGeometry(viewer, record, now, distance);
+              // Capability first: without it the distance below is pure waste,
+              // once per ungrounded record per walk, forever.
+              const distance = Cesium.Cartesian3.distance(
+                viewer.camera.positionWC,
+                record.base,
+              );
+              if (
+                distance < GROUND_SAMPLE_MAX_DISTANCE_M &&
+                sampleLocalGroundHeight(viewer, record, now)
+              ) {
+                updateLocalStemGeometry(viewer, record, now, distance);
+              }
             }
+            if (!wasGroundSampled && record.groundSampled)
+              groundSampleProgress = true;
+            // Still unsampled AND close enough for a retry to succeed: this
+            // layer has no hold and no periodic update, so under the idle
+            // governor the retry's preRender never arrives on a parked camera
+            // and the stem stays at ellipsoid height (buried/floating) until
+            // the user happens to move. Schedule the frame the retry needs.
+            // Gated on a sampleable scene and in-range, in-view records only,
+            // so a far camera (or a keyless scene) stays fully idle; the
+            // distance is only computed for still-unsampled stems.
+            if (
+              canSampleGround &&
+              !record.groundSampled &&
+              !groundRetryPending &&
+              Cesium.Cartesian3.distance(
+                viewer.camera.positionWC,
+                record.base,
+              ) < GROUND_SAMPLE_MAX_DISTANCE_M &&
+              groundSampleInView(viewer, record)
+            ) {
+              groundRetryPending = true;
+            }
+            if (isVisible && record.entry) visibleOverlayRecords.push(record);
           }
-          if (!wasGroundSampled && record.groundSampled)
-            groundSampleProgress = true;
-          // Still unsampled AND close enough for a retry to succeed: this
-          // layer has no hold and no periodic update, so under the idle
-          // governor the retry's preRender never arrives on a parked camera
-          // and the stem stays at ellipsoid height (buried/floating) until
-          // the user happens to move. Schedule the frame the retry needs.
-          // Gated on a sampleable scene and in-range, in-view records only,
-          // so a far camera (or a keyless scene) stays fully idle; the
-          // distance is only computed for still-unsampled stems.
-          if (
-            canSampleGround &&
-            !record.groundSampled &&
-            !groundRetryPending &&
-            Cesium.Cartesian3.distance(viewer.camera.positionWC, record.base) <
-              GROUND_SAMPLE_MAX_DISTANCE_M &&
-            groundSampleInView(viewer, record)
-          ) {
-            groundRetryPending = true;
-          }
-          if (isVisible && record.entry) visibleOverlayRecords.push(record);
-        }
-        _stemGeometryDirty = false;
-        // Tiles ARE streaming in: real progress re-opens the give-up budget
-        // so the records still waiting get their own bounded run of retries.
-        if (groundSampleProgress) _groundRetryArms = 0;
-        if (groundRetryPending) scheduleGroundRetryRender(viewer);
+          _stemGeometryDirty = false;
+          // Tiles ARE streaming in: real progress re-opens the give-up budget
+          // so the records still waiting get their own bounded run of retries.
+          if (groundSampleProgress) _groundRetryArms = 0;
+          if (groundRetryPending) scheduleGroundRetryRender(viewer);
 
-        const canvas = viewer.scene.canvas;
-        const cohort = selectLocalInfrastructureOverlayCohort(
-          visibleOverlayRecords,
-          {
-            maxEntries: labelMax,
-            gridPx: labelGridPx,
-            width: canvas.clientWidth || canvas.width || 0,
-            height: canvas.clientHeight || canvas.height || 0,
-            cohortLimit: LOCAL_OVERLAY_COHORT_LIMIT,
-            project: (record) => projectToWindow(viewer.scene, record.tip),
-          },
-        );
-        _overlayPublisher.publish(cohort);
-      });
-    }
-    if (_enabled && !_cameraMoveEndRemover) {
-      _cameraMoveEndRemover = viewer.camera.moveEnd.addEventListener(() => {
-        if (!_enabled) return;
-        _stemGeometryDirty = true;
-        _lastVisibilityUpdate = Number.NEGATIVE_INFINITY;
-        // Real camera motion is a fresh situation (new tiles, new distances)
-        // and its frames are free, so it re-opens the retry budget that a
-        // parked camera may have spent.
-        _groundRetryArms = 0;
-        viewer.scene.requestRender?.();
-      });
-    }
+          const canvas = viewer.scene.canvas;
+          const cohort = selectLocalInfrastructureOverlayCohort(
+            visibleOverlayRecords,
+            {
+              maxEntries: labelMax,
+              gridPx: labelGridPx,
+              width: canvas.clientWidth || canvas.width || 0,
+              height: canvas.clientHeight || canvas.height || 0,
+              cohortLimit: LOCAL_OVERLAY_COHORT_LIMIT,
+              project: (record) => projectToWindow(viewer.scene, record.tip),
+            },
+          );
+          _overlayPublisher.publish(cohort);
+        });
+      }
+      if (_enabled && !_cameraMoveEndRemover) {
+        _cameraMoveEndRemover = viewer.camera.moveEnd.addEventListener(() => {
+          if (!_enabled) return;
+          _stemGeometryDirty = true;
+          _lastVisibilityUpdate = Number.NEGATIVE_INFINITY;
+          // Real camera motion is a fresh situation (new tiles, new distances)
+          // and its frames are free, so it re-opens the retry budget that a
+          // parked camera may have spent.
+          _groundRetryArms = 0;
+          viewer.scene.requestRender?.();
+        });
+      }
 
-    // Honor a disable() that landed while we were awaiting the fetch/parse:
-    // disable() runs before _dataSource exists, so its release is a no-op —
-    // release the finished build here instead of parking it hidden in the
-    // scene (the parsed features stay cached for the next enable).
-    if (!_enabled) {
-      releaseDataSource(viewer);
-      return;
-    }
-    if (_dataSource) _dataSource.show = true;
-    viewer.scene.requestRender?.();
-  }
+      // Honor a disable() that landed while we were awaiting the fetch/parse:
+      // disable() runs before _dataSource exists, so its release is a no-op —
+      // release the finished build here instead of parking it hidden in the
+      // scene (the parsed features stay cached for the next enable).
+      if (!_enabled) {
+        releaseDataSource(viewer);
+        return;
+      }
+      if (_dataSource) _dataSource.show = true;
+      viewer.scene.requestRender?.();
+    },
 
-  Object.assign(api, {
     disable: disableLayer,
 
     /**
-     * Byrd-IT: rebuild entities from a fresh `loadFeatures()` call while the
-     * layer stays enabled (viewport layers call this on camera settle). A
+     * Byrd-IT: rebuild entities from a fresh `loadViewFeatures()` call while
+     * the layer stays enabled (viewport layers call this on camera settle). A
      * reload while a load is in flight is coalesced into one follow-up.
      * @param {object} viewer
      * @returns {Promise<void>}
@@ -1096,12 +1160,114 @@ export function createLocalGeoJsonLayer(
       }
       releaseDataSource(viewer);
       _cachedFeatures = null;
-      await enableLayer(viewer);
+      await coreEnable(viewer);
       if (_reloadQueued && _enabled && !_destroyed) {
         _reloadQueued = false;
         releaseDataSource(viewer);
-        await enableLayer(viewer);
+        await coreEnable(viewer);
       }
+    },
+
+    /**
+     * Forget the parsed features so the next enable() loads them again: a
+     * caller-owned live loader (the Data Library) uses it once its data is
+     * older than the source allows.
+     */
+    dropCachedFeatures: () => {
+      _cachedFeatures = null;
+    },
+
+    /**
+     * Draw a new feature set in place of the current one while the layer is
+     * on (a live loader's refresh). The current features stay drawn until
+     * the new ones are in the scene; a selected feature stays selected when
+     * the new set still has it (same id, or same place and label); a failed
+     * rebuild keeps the current features and rejects. Off, the set is only
+     * kept for the next enable().
+     * @param {object} viewer
+     * @param {object[]} features GeoJSON features.
+     */
+    replaceFeatures: async (viewer, features) => {
+      if (_destroyed) return;
+      const previousFeatures = _cachedFeatures;
+      _cachedFeatures = features;
+      if (!_enabled || !_dataSource || _loadPromise) return;
+      const selected =
+        viewer?.selectedEntity?.__localLayerId === id
+          ? viewer.selectedEntity
+          : null;
+      const selectedLabel = selected
+        ? _stemRecords.find((record) => record.entity === selected)?.context
+            ?.label
+        : undefined;
+      _outgoing = {
+        source: _dataSource,
+        stemRecords: _stemRecords,
+        count: _count,
+        lastUpdate: _lastUpdate,
+        error: _error,
+      };
+      const outgoing = _outgoing;
+      _dataSource = null;
+      await coreEnable(viewer);
+      // Disabled or destroyed meanwhile: release took both sources.
+      if (_destroyed || !_enabled || _outgoing !== outgoing) return;
+      _outgoing = null;
+      if (!_dataSource) {
+        // The rebuild failed: the current features come back as they were.
+        const failure = _error;
+        _cachedFeatures = previousFeatures;
+        _dataSource = outgoing.source;
+        _stemRecords = outgoing.stemRecords;
+        _count = outgoing.count;
+        _lastUpdate = outgoing.lastUpdate;
+        _error = outgoing.error;
+        _stemGeometryDirty = true;
+        _lastVisibilityUpdate = Number.NEGATIVE_INFINITY;
+        for (const record of _stemRecords)
+          if (record.context)
+            registerEntityContext(record.entity, record.context);
+        if (selected && viewer.selectedEntity === selected)
+          selectEntityContext(selected);
+        throw new Error(failure || 'dataset unavailable');
+      }
+      try {
+        viewer?.dataSources?.remove(outgoing.source, true);
+      } catch {
+        /* already gone */
+      }
+      // Records the new set no longer has go with the old source.
+      removeEntityContextsForLayer(id, {
+        retainIds: new Set(
+          _stemRecords.map((record) => record.context?.id).filter(Boolean),
+        ),
+      });
+      if (selected) {
+        const same = (record) => {
+          const old = selected.__localBaseCarto;
+          const next = record.entity.__localBaseCarto;
+          return (
+            old &&
+            next &&
+            Math.abs(old.longitude - next.longitude) < 1e-9 &&
+            Math.abs(old.latitude - next.latitude) < 1e-9 &&
+            record.context?.label === selectedLabel
+          );
+        };
+        const match = _stemRecords.find((record) =>
+          selected.id !== undefined && record.entity.id === selected.id
+            ? true
+            : same(record),
+        );
+        if (match) {
+          viewer.selectedEntity = match.entity;
+          selectEntityContext(match.entity);
+        } else if (viewer.selectedEntity === selected) {
+          viewer.selectedEntity = undefined;
+          clearSelectedEntityContextForLayer(id);
+        }
+      }
+      viewer?.scene?.requestRender?.();
     },
 
     destroy: (viewer) => {
@@ -1127,8 +1293,9 @@ export function createLocalGeoJsonLayer(
       _lastUpdate = null;
       _error = null;
     },
-  });
-  return api;
+  };
+  const coreEnable = layer.enable;
+  return layer;
 }
 
 function compareLocalOverlayRecords(a, b) {
@@ -1363,6 +1530,10 @@ function labelPriorityFromProperties(props, layerId) {
   if (props.output || tags['plant:output:electricity']) score += 120;
   if (layerId === 'local-dams') score += 80;
   if (layerId === 'local-datacenters') score += 60;
+  // Data Library features carry their manifest importance (0–600), below the
+  // named/unnamed gap so a rank never promotes an unnamed feature.
+  if (Number.isFinite(props.__gevRank))
+    score += Math.max(0, Math.min(600, props.__gevRank));
   return score;
 }
 

@@ -154,7 +154,7 @@ export function createUsgsWaterLayers(
       return manifest;
     }
 
-    const loadFeatures = async (signal, viewer) => {
+    const loadViewFeatures = async (signal, viewer) => {
       const m = await loadManifest(signal);
       const cls = m?.classes?.[spec.cls];
       if (!cls) throw new Error(`manifest has no ${spec.cls} class`);
@@ -186,7 +186,7 @@ export function createUsgsWaterLayers(
         labels: true,
         labelMax: 700,
         labelGridPx: 138,
-        loadFeatures,
+        loadViewFeatures,
         ...(screenSpaceEventHandlerFactory
           ? { screenSpaceEventHandlerFactory }
           : {}),

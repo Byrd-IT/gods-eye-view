@@ -252,7 +252,12 @@
     "KMZ",
     "SOLUNAR",
     "Solunar",
-    "Byrd Ranch builds"
+    "Byrd Ranch builds",
+    "COMMUNITY",
+    "Regional",
+    "OPT-IN",
+    "{minutes} min",
+    "1 min/s"
   ],
   "es": [
     "1 min/s",
@@ -420,7 +425,9 @@
     "Solunar",
     "12 h",
     "24 h",
-    "Byrd Ranch builds"
+    "Byrd Ranch builds",
+    "Regional",
+    "{datasets} · {tiles} · {packs}"
   ],
   "fr": [
     "1 min/s",
@@ -641,7 +648,14 @@
     "KMZ",
     "12 h",
     "24 h",
-    "Byrd Ranch builds"
+    "Byrd Ranch builds",
+    "Photo · {licence}",
+    "PACK",
+    "{count} packs",
+    "Orthophoto",
+    "Oblique",
+    "Type",
+    "{range} NM"
   ],
   "it": [
     "1 min/s",
@@ -849,7 +863,10 @@
     "KMZ",
     "12 h",
     "24 h",
-    "Byrd Ranch builds"
+    "Byrd Ranch builds",
+    "DATASET",
+    "{count} datasets",
+    "ZOOM"
   ],
   "ja": [
     "1090 MHz",
@@ -1086,7 +1103,8 @@
     "Solunar",
     "12 h",
     "24 h",
-    "Byrd Ranch builds"
+    "Byrd Ranch builds",
+    "Regional"
   ],
   "ru": [
     "1900–1945",
@@ -1126,7 +1144,8 @@
     "GhostMaps",
     "KMZ",
     "{label} (V)",
-    "Byrd Ranch builds"
+    "Byrd Ranch builds",
+    "{datasets} · {tiles} · {packs}"
   ],
   "sv": [
     "STATION",

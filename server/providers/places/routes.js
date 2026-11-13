@@ -72,6 +72,16 @@ class UpstreamRateLimitError extends Error {
   }
 }
 
+/** Thrown when the routing service failed or sent no JSON; answered as 502. */
+class UpstreamUnavailableError extends Error {
+  constructor(cause) {
+    super('routing service unavailable');
+    // Byrd-IT: keep the underlying failure for the cause-class log line.
+    if (cause !== undefined) this.cause = cause;
+    this.name = 'UpstreamUnavailableError';
+  }
+}
+
 /**
  * Run one outbound request no sooner than the shared gate allows.
  * @template T
@@ -270,6 +280,7 @@ async function fetchRoute({
     `${base.replace(/\/$/, '')}/route/v1/${osrmProfile}/${coords}` +
     `?overview=full&geometries=geojson&alternatives=false&steps=${withSteps ? 'true' : 'false'}`;
   const controller = new AbortController();
+  // The 12 s budget includes queue wait, so Directions (15 s) hears back.
   const timer = setTimeout(() => controller.abort(), 12000);
   const target = routeTargetForLog(base, osrmProfile, coords);
   let startedAt = 0;
@@ -297,15 +308,23 @@ async function fetchRoute({
   let osrm;
   let text = null;
   try {
-    const upstreamRes = await throughUpstreamGate(() => {
+    const upstreamRes = await throughUpstreamGate(async () => {
+      // Expiry before dispatch reflects our backlog, not an upstream outage.
+      if (controller.signal.aborted)
+        throw new RouteBusyError(_upstreamIntervalMs);
       startedAt = performance.now();
-      return fetchImpl(upstream, {
-        signal: controller.signal,
-        // The endpoint is configured above; a redirect is the one way out of
-        // it, so it is refused rather than followed.
-        redirect: 'error',
-        headers: { 'User-Agent': 'gods-eye-view/dev (local)' },
-      });
+      try {
+        return await fetchImpl(upstream, {
+          signal: controller.signal,
+          // The endpoint is configured above; a redirect is the one way out of
+          // it, so it is refused rather than followed.
+          redirect: 'error',
+          headers: { 'User-Agent': 'gods-eye-view/dev (local)' },
+        });
+      } catch (cause) {
+        // Byrd-IT: the cause class is kept for the failure log below.
+        throw new UpstreamUnavailableError(cause);
+      }
     });
     upstreamStatus = upstreamRes.status;
     if (upstreamRes.status === 429) {
@@ -315,9 +334,14 @@ async function fetchRoute({
         Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 5,
       );
     }
-    if (!upstreamRes.ok) {
+    // OSRM answers 400 for a route it cannot find; other failures are outages.
+    if (upstreamRes.status === 400) {
       logRefusal('non-OK', await peekAndCancel(upstreamRes));
       return { payload: null, error: 'no route found' };
+    }
+    if (!upstreamRes.ok) {
+      logRefusal('non-OK', await peekAndCancel(upstreamRes));
+      throw new UpstreamUnavailableError();
     }
     const ctype = upstreamRes.headers.get('content-type') || '';
     if (!ctype.includes('json')) {
@@ -325,10 +349,15 @@ async function fetchRoute({
         `non-JSON content-type=${JSON.stringify(ctype.slice(0, 80))}`,
         await peekAndCancel(upstreamRes),
       );
-      return { payload: null, error: 'no route found' };
+      throw new UpstreamUnavailableError();
     }
-    text = await readResponseTextCapped(upstreamRes, ROUTE_MAX_RESPONSE_BYTES);
-    osrm = JSON.parse(text);
+    // Read and parse failures are outages; later ones stay "route proxy error".
+    try {
+      text = await readResponseTextCapped(upstreamRes, ROUTE_MAX_RESPONSE_BYTES);
+      osrm = JSON.parse(text);
+    } catch (cause) {
+      throw new UpstreamUnavailableError(cause);
+    }
   } catch (error) {
     // Local refusals (queue full) and the 429 above are not upstream faults
     // and are reported by the middleware / logRefusal already.
@@ -337,7 +366,7 @@ async function fetchRoute({
       !(error instanceof UpstreamRateLimitError)
     )
       console.warn(
-        `[Route Proxy] upstream request failed target="${target}" class=${failureClass(error)} ` +
+        `[Route Proxy] upstream request failed target="${target}" class=${failureClass(error.cause ?? error)} ` +
           `status=${upstreamStatus || 'none'} elapsed_ms=${elapsed()} timeout_ms=12000` +
           // A body that was read but did not parse is the evidence.
           (text !== null ? ` body=${snippet(text)}` : ''),
@@ -497,6 +526,11 @@ export function installRouteMiddleware(
             'routing service is rate limited',
             upstreamError.retryAfterSec,
           );
+        }
+        if (upstreamError instanceof UpstreamUnavailableError) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: upstreamError.message }));
+          return;
         }
         throw upstreamError;
       }
