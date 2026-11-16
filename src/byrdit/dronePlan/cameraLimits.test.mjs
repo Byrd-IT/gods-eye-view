@@ -201,3 +201,13 @@ test('shutter advice rounds up to a standard stop and flags what the camera cann
   assert.equal(veryFast.standard, null);
   assert.equal(veryFast.beyondCamera, true);
 });
+
+test('the 1/8000 s camera limit applies only to the 1-inch camera aircraft', () => {
+  const other = getPreset('dji-mavic-3');
+  assert.equal(hasPhotoSizes(other), false);
+  const fast = shutterAdvice(other, 0.05, 15);
+  assert.ok(fast.exact > CAMERA_FASTEST_SHUTTER_DENOMINATOR);
+  assert.equal(fast.beyondCamera, false);
+  const e = effectivePreset(mini, 'mapping-50mp');
+  assert.equal(shutterAdvice(e, 0.05, 15).beyondCamera, true);
+});

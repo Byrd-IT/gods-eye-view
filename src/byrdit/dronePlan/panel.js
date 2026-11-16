@@ -693,6 +693,12 @@ export function initDronePlan({
     ui.status.textContent = text;
     ui.status.dataset.tone = tone;
   };
+  // A compressed export that fails (no CompressionStream, out of memory) says
+  // so instead of leaving the click silent.
+  const exportFailed = () => {
+    status(t('The file could not be saved'), 'warn');
+    return false;
+  };
   const boxTool = initImageryBoxTool({
     viewer,
     cesium,
@@ -5999,7 +6005,7 @@ export function initDronePlan({
       };
       // The compact export compresses, which is asynchronous.
       return state.exportCompact
-        ? buildSuiteZipCompact(suite.passes, suiteOpts).then(emit)
+        ? buildSuiteZipCompact(suite.passes, suiteOpts).then(emit, exportFailed)
         : emit(buildSuiteZip(suite.passes, suiteOpts));
     };
     const results = suite.passes.map((p) => p.result).filter(Boolean);
@@ -6221,7 +6227,7 @@ export function initDronePlan({
     };
     // The compact export compresses, which is asynchronous.
     return state.exportCompact
-      ? buildKmzDeflated(mission, result.plan, kmzOpts).then(emit)
+      ? buildKmzDeflated(mission, result.plan, kmzOpts).then(emit, exportFailed)
       : emit(buildKmz(mission, result.plan, kmzOpts));
   }
 
@@ -6256,7 +6262,7 @@ export function initDronePlan({
       };
       // The compact export compresses, which is asynchronous.
       return state.exportCompact
-        ? buildBundleZipCompact(result, bundleOpts).then(emit)
+        ? buildBundleZipCompact(result, bundleOpts).then(emit, exportFailed)
         : emit(buildBundleZip(result, bundleOpts));
     };
     const items = flightsOf([result]);

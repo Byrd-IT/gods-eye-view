@@ -77,3 +77,22 @@ test('Splat orbit and Fast survey recommendations are unchanged by the photo siz
     assert.deepEqual(a.photoMode, recommend(mini, mode, {}).photoMode);
   }
 });
+
+test('leaving Timed for Splat orbit or Fast survey turns Stop capture back on', () => {
+  const timed = { pattern: 'grid', captureMode: 'timed', photoMode: 'waypoint' };
+  for (const mode of ['splat-orbit', 'fast-survey']) {
+    const patch = modeSelectionPatch(timed, mode);
+    assert.equal(patch.captureMode, 'stop', mode);
+    const after = { ...timed, ...patch };
+    assert.equal(modeFor(after), mode);
+    assert.notEqual(after.captureMode, 'timed');
+  }
+  // Nothing to clear when the capture mode was not Timed.
+  for (const mode of ['splat-orbit', 'fast-survey']) {
+    assert.equal(
+      'captureMode' in
+        modeSelectionPatch({ pattern: 'grid', captureMode: 'distance' }, mode),
+      false,
+    );
+  }
+});

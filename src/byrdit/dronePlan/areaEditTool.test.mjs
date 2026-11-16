@@ -594,3 +594,17 @@ test('a missing viewer or commit handler gives no tool', () => {
   assert.equal(initAreaEditTool({ onCommit: () => true }), null);
   assert.equal(initAreaEditTool({ viewer: { scene: {} } }), null);
 });
+
+test('an edge drag that is dropped puts the earlier corner selection back', () => {
+  const f = fixture();
+  f.tool.start(polygonArea());
+  f.click(510, 310);
+  assert.equal(f.tool.selectedCorner(), 2);
+  f.down(455, 310);
+  f.move(455, 360);
+  f.key('Escape');
+  assert.equal(f.tool.selectedCorner(), 2, 'Escape during the drag');
+  f.up(455, 360);
+  assert.equal(f.commits.length, 0);
+  f.tool.destroy();
+});

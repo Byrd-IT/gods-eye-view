@@ -5940,12 +5940,11 @@ test('timing: a fixed photo spacing that a chosen Timed-shot interval overrides 
   input.dispatch('input');
   // Mapping Grid (Timed) hides the note together with the fixed-distance rows.
   assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, true);
+  // Leaving Timed turns Stop capture back on, so no stale Timed shot is left
+  // behind a Fast survey; the note has nothing to say any more.
   pick(w, 'Mode', 'fast-survey');
-  assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, false);
-  assert.match(
-    captureRole(w, 'timing-spacing-ignored').textContent,
-    /not used/,
-  );
+  assert.equal(w.handle.getState().options.captureMode, 'stop');
+  assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, true);
   w.handle.destroy();
 });
 
@@ -6333,4 +6332,31 @@ test('modes: the voice/patch path selects Timed the same way as the Mode control
   assert.equal(w.handle.applyOptions({ mode: 'mapping-grid' }), true);
   assert.equal(w.handle.getState().options.captureMode, 'stop');
   w.handle.destroy();
+});
+
+test('a compact export that cannot compress says so and downloads nothing', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 200));
+  await w.handle.replan();
+  const box = w.find((n) => n.getAttribute('data-export') === 'compact')[0];
+  box.checked = true;
+  box.dispatch('change');
+  const real = globalThis.CompressionStream;
+  globalThis.CompressionStream = class {
+    constructor() {
+      throw new Error('no compression here');
+    }
+  };
+  try {
+    const before = w.downloads.length;
+    assert.equal(await w.handle.downloadMission(0), false);
+    assert.equal(await w.handle.downloadAll(), false);
+    assert.equal(w.downloads.length, before);
+    const status = w.find((n) => n.getAttribute('role') === 'status')[0];
+    assert.equal(status.textContent, 'The file could not be saved');
+    assert.equal(status.dataset.tone, 'warn');
+  } finally {
+    globalThis.CompressionStream = real;
+    w.handle.destroy();
+  }
 });

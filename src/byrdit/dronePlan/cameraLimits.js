@@ -154,7 +154,10 @@ export function defaultTimedInterval({
   return meeting.length ? meeting.at(-1) : allowed[0];
 }
 
-/** The fastest still shutter DJI lists for the 1-inch camera: 1/8000 s. */
+/**
+ * The fastest still shutter DJI lists for the 1-inch camera: 1/8000 s. Only
+ * the aircraft in PHOTO_SIZE_AIRCRAFT use it; no limit is known for the others.
+ */
 export const CAMERA_FASTEST_SHUTTER_DENOMINATOR = 8000;
 
 /**
@@ -176,6 +179,7 @@ export function shutterAdvice(preset, gsdCm, speedMs) {
     exact,
     standard,
     beyondTable: standard == null,
-    beyondCamera: exact > CAMERA_FASTEST_SHUTTER_DENOMINATOR,
+    beyondCamera:
+      hasPhotoSizes(preset) && exact > CAMERA_FASTEST_SHUTTER_DENOMINATOR,
   };
 }

@@ -424,6 +424,8 @@ export function initAreaEditTool({
     } else if (result) {
       const index = handle.kind === 'vertex' ? handle.index : selected;
       commit(result, { select: index, before: finished.selectedBefore });
+    } else if (finished.moved) {
+      selected = finished.selectedBefore;
     }
     setHover(false);
     redraw();
@@ -438,6 +440,7 @@ export function initAreaEditTool({
   /** Esc during a drag drops the drag; otherwise it leaves edit mode. */
   function abortDrag() {
     if (!drag) return false;
+    selected = drag.selectedBefore;
     drag = null;
     draft = null;
     documentRef?.removeEventListener?.('pointerup', onDocumentUp);

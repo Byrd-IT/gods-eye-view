@@ -139,7 +139,9 @@ export function modeSelectionPatch(options, mode) {
     patch.pattern = options.pattern;
   }
   if (next.captureMode) patch.captureMode = next.captureMode;
-  else if (mode === 'mapping-grid' && options?.captureMode === 'timed') {
+  else if (options?.captureMode === 'timed') {
+    // Leaving Timed for any other mode turns Stop capture back on, so an
+    // orbit or a Fast survey never keeps the camera's timer by accident.
     patch.captureMode = 'stop';
   }
   return patch;
