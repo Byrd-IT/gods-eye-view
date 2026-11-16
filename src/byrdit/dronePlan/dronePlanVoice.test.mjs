@@ -446,3 +446,17 @@ test('a missing panel does not throw', async () => {
     error: 'Drone Flight Plan is not available right now',
   });
 });
+
+test('recommend takes the Mapping Grid (Timed) mode and refuses an unknown one', async () => {
+  const { handle, calls } = fakeHandle();
+  const voice = createDronePlanVoice(handle);
+  const ok = await voice.recommend('mapping-grid-timed');
+  assert.equal(ok.ok, true);
+  assert.equal(calls.find((c) => c[0] === 'useRecommended')[1], 'mapping-grid-timed');
+  const bad = await voice.recommend('mapping-grid-faster');
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /mapping-grid-timed/);
+  const patch = await voice.options({ mode: 'mapping-grid-timed' });
+  assert.equal(patch.ok, true);
+  assert.equal(calls.filter((c) => c[0] === 'applyOptions').at(-1)[1].mode, 'mapping-grid-timed');
+});
