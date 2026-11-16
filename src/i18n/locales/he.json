@@ -4418,5 +4418,11 @@
   "Use 1/{exact} s or faster at this speed and height (faster than the Shutter speed list)": "השתמשו ב-1/{exact} שנ׳ או מהר יותר במהירות ובגובה האלה (מהר יותר מרשימת מהירויות התריס)",
   "Use 1/{n} s or faster at this speed and height": "השתמשו ב-1/{n} שנ׳ או מהר יותר במהירות ובגובה האלה",
   "Estimate from the planner blur limit, not a DJI figure. Exact figure 1/{exact} s.": "הערכה לפי מגבלת הטשטוש של המתכנן, לא נתון של DJI. הערך המדויק 1/{exact} שנ׳.",
-  "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.": "המרווח הקצר ביותר בצילום מתוזמן ב-{mp} MP הוא {seconds} שנ׳, לפי הרשימה ש-DJI פרסמה. לא אומת בטיסה."
+  "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.": "המרווח הקצר ביותר בצילום מתוזמן ב-{mp} MP הוא {seconds} שנ׳, לפי הרשימה ש-DJI פרסמה. לא אומת בטיסה.",
+  "Selected and neighbors": "נבחרת ושכנות",
+  "n/a": "לא זמין",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "חפיפה עם התמונות השכנות: קדימה {front}, אחורה {back}, שמאל {left}, ימין {right}",
+  "Compact file (test it on your controller)": "קובץ קומפקטי (בדקו אותו בשלט שלכם)",
+  "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "קובץ KMZ קטן יותר לשלט שנתקע בקבצים גדולים: בלי רווחים, דחוס, וללא שני שדות שאינם בשימוש. לא אומת ב-DJI Fly ובשלט: נסו אותו לצד קובץ רגיל.",
+  "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "קבצים קומפקטיים אינם מאומתים: טרם נטענו בשלט של DJI. הרווחים הוסרו, הקובץ דחוס, והשדות שאינם בשימוש waypointPoiPoint ו-waypointTurnDampingDist הושמטו. כל נקודת ציון שומרת על המהירות ועל זווית הגימבל שלה. הורידו גם קובץ רגיל והשוו."
 }

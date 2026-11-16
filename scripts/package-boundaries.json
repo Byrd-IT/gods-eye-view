@@ -2794,6 +2794,8 @@
       "src/byrdit/dronePlan/checkGeometry.js",
       "src/byrdit/dronePlan/suite.js",
       "src/byrdit/dronePlan/checkLayer.js",
+      "src/byrdit/dronePlan/neighborPhotos.js",
+      "src/byrdit/dronePlan/footprintOverlap.js",
       "src/byrdit/dronePlan/obstacles.js",
       "src/byrdit/dronePlan/obstacleData.js",
       "src/byrdit/dronePlan/obstacleLayer.js",

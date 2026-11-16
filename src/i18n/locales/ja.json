@@ -4226,5 +4226,11 @@
   "Use 1/{exact} s or faster at this speed and height (faster than the Shutter speed list)": "この速度と高度では 1/{exact} 秒またはそれより速く設定してください（シャッター速度の一覧より速くなります）",
   "Use 1/{n} s or faster at this speed and height": "この速度と高度では 1/{n} 秒またはそれより速く設定してください",
   "Estimate from the planner blur limit, not a DJI figure. Exact figure 1/{exact} s.": "計画のブレ限界からの推定で、DJIの数値ではありません。正確な値は 1/{exact} 秒です。",
-  "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.": "{mp} MPのタイマー撮影の最短インターバルは {seconds} 秒で、DJIが公開しているリストによります。飛行では未確認です。"
+  "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.": "{mp} MPのタイマー撮影の最短インターバルは {seconds} 秒で、DJIが公開しているリストによります。飛行では未確認です。",
+  "Selected and neighbors": "選択と隣接",
+  "n/a": "該当なし",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "隣接写真との重なり: 前 {front}、後 {back}、左 {left}、右 {right}",
+  "Compact file (test it on your controller)": "コンパクトファイル（送信機で試してください）",
+  "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "大きなファイルでフリーズする送信機向けの小さなKMZ：空白なし、圧縮済み、未使用の2項目を省略。DJI Flyと送信機では未検証です。通常のファイルと並べて試してください。",
+  "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "コンパクトファイルは未検証です。DJIの送信機にはまだ読み込んでいません。空白を除き、ファイルを圧縮し、未使用の waypointPoiPoint と waypointTurnDampingDist の項目を省いています。各ウェイポイントは自分の速度とジンバルのピッチを保持します。通常のファイルも保存して比べてください。"
 }

@@ -69,7 +69,7 @@ import {
 } from './planner.js';
 import { minShutterDenominator, SHUTTER_DENOMINATORS } from './speed.js';
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
-import { makeZip } from './zip.js';
+import { makeZip, makeZipDeflated } from './zip.js';
 import { MPH_PER_MS } from './timing.js';
 import { getUnitSystem, normalizeUnitSystem } from './units.js';
 import { warningText as pilotWarningText } from './format.js';
@@ -541,11 +541,80 @@ function oneShotPerWaypoint(mission) {
 }
 
 /**
+ * The opt-in COMPACT export ("Compact file (test it on your controller)").
+ * The owner's controller locks up on large files, so this form is as small as
+ * is safe. It is UNVERIFIED on DJI Fly and on the controller: nobody has flown
+ * or even loaded it yet. The default export never uses it.
+ *
+ * What changes, and only this:
+ *  - the XML has no whitespace between tags (no indentation, no newlines);
+ *    the declaration, namespaces and every value are kept;
+ *  - the ZIP entries are DEFLATE-compressed (buildKmzDeflated and friends);
+ *  - the elements below are left out where they hold the constant that says
+ *    "not used". Every other element, every speed, every gimbal pitch and
+ *    every action group (ids, order, parameters) is written exactly as in the
+ *    normal file.
+ * Evidence for each omission (DJI WPML reference, and what DJI Fly writes in
+ * its own re-saved files) is in the commit message and the report; an element
+ * without clear evidence is kept.
+ */
+export const COMPACT_OMISSIONS = Object.freeze([
+  Object.freeze({
+    element: 'wpml:waypointPoiPoint',
+    summary:
+      'waypointPoiPoint (0,0,0, at waypoints that do not point at a place)',
+    // DJI: "only effective when waypointHeadingMode is towardPOI"; GEV never
+    // writes towardPOI, so the field is always the 0,0,0 placeholder.
+    pattern:
+      /\s*<wpml:waypointPoiPoint>0\.000000,0\.000000,0\.000000<\/wpml:waypointPoiPoint>/g,
+    when: (placemark) => !placemark.includes('>towardPOI<'),
+  }),
+  Object.freeze({
+    element: 'wpml:waypointTurnDampingDist',
+    summary: 'waypointTurnDampingDist (0, where useStraightLine is 0)',
+    // DJI: required only for coordinateTurn, or a pass-through with
+    // useStraightLine 1. Neither is written with a 0 distance.
+    pattern:
+      /\s*<wpml:waypointTurnDampingDist>0<\/wpml:waypointTurnDampingDist>/g,
+    when: (placemark) =>
+      placemark.includes('<wpml:useStraightLine>0</wpml:useStraightLine>') &&
+      !placemark.includes('>coordinateTurn<'),
+  }),
+]);
+
+/** The compact form of one XML document written by buildMissionFiles. */
+export function compactXml(xml) {
+  const trimmed = xml.replace(/<Placemark>[\s\S]*?<\/Placemark>/g, (mark) => {
+    let out = mark;
+    for (const rule of COMPACT_OMISSIONS) {
+      if (rule.when(out)) out = out.replace(rule.pattern, '');
+    }
+    return out;
+  });
+  // No whitespace between tags, and none around a value.
+  return trimmed.replace(/>([^<]*)</g, (_, text) => `>${text.trim()}<`).trim();
+}
+
+/** The notice that opens the README of a compact export. */
+export function compactNoticeLines() {
+  return [
+    `COMPACT TEST FILE: whitespace removed, compressed and these optional fields left out: ${COMPACT_OMISSIONS.map((o) => o.summary).join(', ')}; not yet flown on a controller; use the normal export to compare.`,
+    'UNVERIFIED on DJI Fly and on the remote controller. Every waypoint still',
+    'states its own speed and gimbal pitch, and every action is the same as in',
+    'the normal export. If DJI Fly or the controller refuses or misreads this',
+    'file, use the normal export.',
+    '',
+  ];
+}
+
+/**
  * The two XML documents of one mission.
  * @param {object} mission One entry of assembleMissions().missions.
  * @param {object} plan The plan it came from.
  * @param {{ name?: string, createdMs?: number, wpml?: object,
- *   explicitWaypointGimbal?: boolean }} [opts]
+ *   explicitWaypointGimbal?: boolean, compact?: boolean }} [opts]
+ *   `compact: true` gives the compact form (COMPACT_OMISSIONS); anything
+ *   else is the normal file, byte for byte as before.
  */
 export function buildMissionFiles(mission, plan, opts = {}) {
   const preset = plan.preset;
@@ -589,6 +658,12 @@ ${body}
   </Document>
 </kml>
 `;
+  if (opts.compact === true) {
+    return {
+      templateKml: compactXml(templateKml),
+      waylinesWpml: compactXml(waylinesWpml),
+    };
+  }
   return { templateKml, waylinesWpml };
 }
 
@@ -596,6 +671,24 @@ ${body}
 export function buildKmz(mission, plan, opts = {}) {
   const { templateKml, waylinesWpml } = buildMissionFiles(mission, plan, opts);
   return makeZip(
+    [
+      { name: 'wpmz/template.kml', data: templateKml },
+      { name: 'wpmz/waylines.wpml', data: waylinesWpml },
+    ],
+    opts.when ? new Date(opts.when) : new Date(),
+  );
+}
+
+/**
+ * One mission as a COMPACT KMZ: compact XML, DEFLATE entries. Asynchronous
+ * (the platform's CompressionStream is). Unverified on a controller.
+ */
+export async function buildKmzDeflated(mission, plan, opts = {}) {
+  const { templateKml, waylinesWpml } = buildMissionFiles(mission, plan, {
+    ...opts,
+    compact: true,
+  });
+  return makeZipDeflated(
     [
       { name: 'wpmz/template.kml', data: templateKml },
       { name: 'wpmz/waylines.wpml', data: waylinesWpml },
@@ -1060,6 +1153,7 @@ export function readmeText(result, when = new Date(), opts = {}) {
   const capture = captureOf(plan);
   const marked = distanceTriggerMarked(plan);
   const lines = [
+    ...(opts.compact === true ? compactNoticeLines() : []),
     'GEV Drone Flight Plan',
     `Created ${when.toISOString()}`,
     '',
@@ -1233,7 +1327,7 @@ export function bundleEntries(result, opts = {}) {
     }
     return {
       name: `${folder}${file}`,
-      data: buildKmz(mission, result.plan, {
+      data: (opts.kmzBuilder ?? buildKmz)(mission, result.plan, {
         ...opts,
         when,
         ...(label ? { name: flightTitle(label, flight, flightTotal) } : {}),
@@ -1247,13 +1341,36 @@ export function bundleEntries(result, opts = {}) {
       controllerIds: opts.controllerIds,
       unitSystem: opts.unitSystem,
       labelFlights,
+      compact: opts.compact === true,
     }),
   });
   return entries;
+}
+
+/**
+ * bundleEntries for the compact export: each mission is a DEFLATE KMZ with
+ * compact XML, and the README opens with the compact notice. Asynchronous.
+ */
+export async function bundleEntriesCompact(result, opts = {}) {
+  const entries = bundleEntries(result, {
+    ...opts,
+    compact: true,
+    kmzBuilder: buildKmzDeflated,
+  });
+  return Promise.all(entries.map(async (e) => ({ ...e, data: await e.data })));
 }
 
 /** Every mission plus a README, as one ZIP. Jobs get a folder each. */
 export function buildBundleZip(result, opts = {}) {
   const when = opts.when ? new Date(opts.when) : new Date();
   return makeZip(bundleEntries(result, { ...opts, when }), when);
+}
+
+/** The compact export of every mission plus a README, as one DEFLATE ZIP. */
+export async function buildBundleZipCompact(result, opts = {}) {
+  const when = opts.when ? new Date(opts.when) : new Date();
+  return makeZipDeflated(
+    await bundleEntriesCompact(result, { ...opts, when }),
+    when,
+  );
 }

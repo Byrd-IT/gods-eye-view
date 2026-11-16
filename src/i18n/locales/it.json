@@ -4418,5 +4418,11 @@
   "Use 1/{exact} s or faster at this speed and height (faster than the Shutter speed list)": "Usa 1/{exact} s o più veloce con questa velocità e quota (più veloce dell'elenco dei tempi di otturazione)",
   "Use 1/{n} s or faster at this speed and height": "Usa 1/{n} s o più veloce con questa velocità e quota",
   "Estimate from the planner blur limit, not a DJI figure. Exact figure 1/{exact} s.": "Stima dal limite di sfocatura del pianificatore, non un dato DJI. Valore esatto 1/{exact} s.",
-  "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.": "L'intervallo più breve dello scatto temporizzato a {mp} MP è {seconds} s, dall'elenco pubblicato da DJI. Non verificato in volo."
+  "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.": "L'intervallo più breve dello scatto temporizzato a {mp} MP è {seconds} s, dall'elenco pubblicato da DJI. Non verificato in volo.",
+  "Selected and neighbors": "Selezionata e vicine",
+  "n/a": "n/d",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Sovrapposizione con le vicine: davanti {front}, dietro {back}, sinistra {left}, destra {right}",
+  "Compact file (test it on your controller)": "File compatto (provalo sul tuo radiocomando)",
+  "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "Un KMZ più piccolo per un radiocomando che si blocca con i file grandi: senza spazi, compresso e senza due campi inutilizzati. NON VERIFICATO su DJI Fly e sul radiocomando: provalo accanto a un file normale.",
+  "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "I file compatti sono NON VERIFICATI: non ancora caricati su un radiocomando DJI. Gli spazi sono rimossi, il file è compresso e i campi inutilizzati waypointPoiPoint e waypointTurnDampingDist sono omessi. Ogni waypoint mantiene la propria velocità e l'inclinazione del gimbal. Scarica anche un file normale e confronta."
 }

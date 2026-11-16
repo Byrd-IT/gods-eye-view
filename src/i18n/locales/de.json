@@ -4322,5 +4322,11 @@
   "Use 1/{exact} s or faster at this speed and height (faster than the Shutter speed list)": "1/{exact} s oder schneller nutzen, bei dieser Geschwindigkeit und Höhe (schneller als die Liste der Verschlusszeiten)",
   "Use 1/{n} s or faster at this speed and height": "Bei dieser Geschwindigkeit und Höhe 1/{n} s oder schneller nutzen",
   "Estimate from the planner blur limit, not a DJI figure. Exact figure 1/{exact} s.": "Schätzung aus der Unschärfegrenze der Planung, kein DJI-Wert. Genauer Wert 1/{exact} s.",
-  "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.": "Das kürzeste Intervall der Zeitauslösung bei {mp} MP ist {seconds} s, aus DJIs veröffentlichter Liste. Im Flug nicht geprüft."
+  "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.": "Das kürzeste Intervall der Zeitauslösung bei {mp} MP ist {seconds} s, aus DJIs veröffentlichter Liste. Im Flug nicht geprüft.",
+  "Selected and neighbors": "Auswahl und Nachbarn",
+  "n/a": "k. A.",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Überlappung mit Nachbarn: voraus {front}, zurück {back}, links {left}, rechts {right}",
+  "Compact file (test it on your controller)": "Kompakte Datei (an Ihrer Fernsteuerung testen)",
+  "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "Eine kleinere KMZ für eine Fernsteuerung, die bei großen Dateien hängt: ohne Leerraum, komprimiert und mit zwei ungenutzten Feldern weniger. NICHT VERIFIZIERT in DJI Fly und auf der Fernsteuerung: neben einer normalen Datei ausprobieren.",
+  "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "Kompakte Dateien sind NICHT VERIFIZIERT: noch nicht auf einer DJI-Fernsteuerung geladen. Leerraum ist entfernt, die Datei ist komprimiert, und die ungenutzten Felder waypointPoiPoint und waypointTurnDampingDist fehlen. Jeder Wegpunkt behält seine eigene Geschwindigkeit und Gimbal-Neigung. Laden Sie zusätzlich eine normale Datei herunter und vergleichen Sie."
 }
