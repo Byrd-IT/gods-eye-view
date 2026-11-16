@@ -127,7 +127,8 @@ export function initPolygonTool({
   };
 
   const canFinish = () => vertices.length >= MIN_CORNERS;
-  const notify = () => onChange?.({ count: vertices.length, canFinish: canFinish() });
+  const notify = () =>
+    onChange?.({ count: vertices.length, canFinish: canFinish() });
 
   const dot = (vertex, first) => ({
     position: cesium.Cartesian3.fromDegrees(vertex.lon, vertex.lat),

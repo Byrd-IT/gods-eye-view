@@ -46,7 +46,10 @@ const SOURCE_NAME = 'gev-drone-plan-area-edit';
 
 const copyShape = (area) =>
   isPolygonShape(area)
-    ? { kind: 'polygon', ring: area.ring.map((p) => ({ lon: p.lon, lat: p.lat })) }
+    ? {
+        kind: 'polygon',
+        ring: area.ring.map((p) => ({ lon: p.lon, lat: p.lat })),
+      }
     : { kind: area.kind ?? 'rect', box: { ...area.box } };
 
 /** True when the key event came from somewhere the user is typing text. */
@@ -324,7 +327,8 @@ export function initAreaEditTool({
     freezeCamera();
     documentRef?.addEventListener?.('pointerup', onDocumentUp);
     documentRef?.addEventListener?.('pointercancel', onDocumentUp);
-    if (viewer.scene.canvas?.style) viewer.scene.canvas.style.cursor = 'grabbing';
+    if (viewer.scene.canvas?.style)
+      viewer.scene.canvas.style.cursor = 'grabbing';
   };
 
   /** The draft shape for the pointer at `world`, from the shape the drag began with. */
@@ -343,7 +347,8 @@ export function initAreaEditTool({
         dxM,
         dyM,
       );
-      const box = target && boxFromCorner(startShape.box, handle.corner, target);
+      const box =
+        target && boxFromCorner(startShape.box, handle.corner, target);
       return box && { kind: startShape.kind, box };
     }
     return null;

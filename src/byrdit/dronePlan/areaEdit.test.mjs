@@ -43,8 +43,8 @@ const TRIANGLE = [
 const SQUARE = [
   { lon: -97.77, lat: 30.27 },
   { lon: -97.77 + 0.0020784838124633, lat: 30.27 },
-  { lon: -97.77 + 0.0020784838124633, lat: 30.27 + 0.0018041262414180 },
-  { lon: -97.77, lat: 30.27 + 0.0018041262414180 },
+  { lon: -97.77 + 0.0020784838124633, lat: 30.27 + 0.001804126241418 },
+  { lon: -97.77, lat: 30.27 + 0.001804126241418 },
 ];
 
 test('metricOffset and translatePoint measure metres, not degrees', () => {
@@ -275,7 +275,10 @@ test('validateEditedShape applies the polygon rules', () => {
   });
   assert.equal(bowtie.ok, false);
   assert.equal(bowtie.reason, 'self-intersecting');
-  const two = validateEditedShape({ kind: 'polygon', ring: SQUARE.slice(0, 2) });
+  const two = validateEditedShape({
+    kind: 'polygon',
+    ring: SQUARE.slice(0, 2),
+  });
   assert.equal(two.reason, 'too-few-corners');
   const bad = validateEditedShape({
     kind: 'polygon',
