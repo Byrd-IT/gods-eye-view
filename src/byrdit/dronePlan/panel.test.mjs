@@ -1960,7 +1960,10 @@ test('Steps: each header carries a one-line summary of its current values', asyn
   const line = (key) =>
     w.find((n) => n.getAttribute('data-step-line') === key)[0].textContent;
   assert.match(line('area'), /Nothing drawn yet/);
-  assert.match(line('shots'), /Mapping grid.*Grid.*80 m.*80% \/ 70%/);
+  assert.match(
+    line('shots'),
+    /Mapping Grid \(Waypoints\).*Grid.*80 m.*80% \/ 70%/,
+  );
   assert.match(line('flight'), /m\/s.*25 min battery/);
   assert.match(line('plan'), /Not planned yet/);
   w.handle.setBox(boxM(300, 200));
@@ -4680,7 +4683,11 @@ test('production panel supplies pause labels a ConstantPositionProperty can feed
 test('a custom camera minimum drives warnings, save/load and the planned speed limit', async () => {
   const w = setup();
   const note = () => captureRole(w, 'camera-interval-note').textContent;
-  assert.match(note(), /derived\/unverified/);
+  // Mini 5 Pro, 50 MP: the default comes from DJI's published Timed shot list.
+  assert.match(note(), /Default 5\.0 s for 50 MP photos/);
+  assert.match(note(), /DJI's published Timed shot list/);
+  assert.match(note(), /Not verified in flight/);
+  assert.doesNotMatch(note(), /derived\/unverified/);
   assert.equal(w.control('Camera minimum interval (s)').value, '');
   assert.equal(
     Object.hasOwn(
@@ -4880,12 +4887,12 @@ test('timing: typing an interval shows the resulting front overlap at once and p
   w.handle.destroy();
 });
 
-test('timing: 5, 7 and 10 are quick-fill examples; CLEAR removes the interval; any positive number works', async () => {
+test("timing: the quick-fill buttons are DJI's list for the photo size; CLEAR removes the interval; any positive number works", async () => {
   const w = await timedWorld();
   const chips = w.find((n) => n.getAttribute('data-role') === 'timing-chip');
   assert.deepEqual(
     chips.map((c) => c.getAttribute('data-seconds')),
-    ['5', '7', '10'],
+    ['5', '7', '10', '15', '20', '30', '60'],
   );
   chips[1].click();
   assert.equal(w.handle.getState().options.timedIntervalS, 7);
@@ -4896,7 +4903,15 @@ test('timing: 5, 7 and 10 are quick-fill examples; CLEAR removes the interval; a
   input.value = '6.5';
   input.dispatch('change');
   assert.equal(w.handle.getState().options.timedIntervalS, 6.5);
-  w.find((n) => n.getAttribute('data-action') === 'timing-clear')[0].click();
+  // Mapping Grid (Timed) is never without an interval, so CLEAR is not offered
+  // there; in Fast survey (photos by distance, Timed shot) it still is.
+  const clear = w.find(
+    (n) => n.getAttribute('data-action') === 'timing-clear',
+  )[0];
+  assert.equal(clear.hidden, true);
+  pick(w, 'Mode', 'fast-survey');
+  assert.equal(clear.hidden, false);
+  clear.click();
   assert.equal(w.handle.getState().options.timedIntervalS, null);
   assert.equal(w.control(INTERVAL).value, '');
   assert.equal(captureRole(w, 'timing-result').hidden, true);
@@ -4979,7 +4994,14 @@ test('timing: outside Timed shot the interval is not asked for, and one click sw
   assert.equal(o.captureMode, 'timed');
   assert.equal(w.control('Capture mode').value, 'timed');
   assert.equal(captureRole(w, 'timing-timed').hidden, false);
-  assert.equal(o.timedIntervalS, null, 'switching does not invent an interval');
+  // Timed capture on a grid is Mapping Grid (Timed), which is never without
+  // an interval: it starts from one of the camera's own options.
+  assert.ok(
+    [5, 7, 10, 15, 20, 30, 60].includes(o.timedIntervalS),
+    `starts from a camera option, got ${o.timedIntervalS}`,
+  );
+  assert.equal(w.control('Mode').value, 'mapping-grid-timed');
+  assert.equal(captureRole(w, 'timing-recommended').hidden, true);
   pick(w, 'Capture mode', 'distance');
   assert.equal(captureRole(w, 'timing-timed').hidden, true);
   w.handle.destroy();
@@ -5371,6 +5393,9 @@ test('timing: a fixed photo spacing that a chosen Timed-shot interval overrides 
   const input = w.control(INTERVAL);
   input.value = '7';
   input.dispatch('input');
+  // Mapping Grid (Timed) hides the note together with the fixed-distance rows.
+  assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, true);
+  pick(w, 'Mode', 'fast-survey');
   assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, false);
   assert.match(
     captureRole(w, 'timing-spacing-ignored').textContent,
@@ -5455,8 +5480,17 @@ test('timing: the chosen interval saves with the plan, an old plan has none, a b
     areas: [],
     options: { speedMs: 4 },
   });
-  assert.equal(w2.handle.getState().options.timedIntervalS, null);
-  assert.equal(w2.control(INTERVAL).value, '');
+  // The old file has no interval; the panel is still in Mapping Grid (Timed),
+  // which starts from one of the camera's own options.
+  assert.ok(
+    [5, 7, 10, 15, 20, 30, 60].includes(
+      w2.handle.getState().options.timedIntervalS,
+    ),
+  );
+  assert.equal(
+    w2.control(INTERVAL).value,
+    String(w2.handle.getState().options.timedIntervalS),
+  );
   w.handle.destroy();
   w2.handle.destroy();
 });
@@ -5482,5 +5516,276 @@ test('timing: the capture readout figures follow the interval, not a stale spaci
       Number(readout.getAttribute('data-seconds')) - spacing / o.speedMs,
     ) < 1e-9,
   );
+  w.handle.destroy();
+});
+
+// ----------------------------------------- Mapping Grid (Timed) and sizes --
+const optionsOf = (control) =>
+  control.children.map((c) => [c.getAttribute('value') ?? c.value, c.textContent]);
+const roleList = (w, role) =>
+  w.find((n) => n.getAttribute('data-role') === role);
+const hiddenNow = (n) => {
+  for (let p = n; p; p = p.parentNode) if (p.hidden) return true;
+  return false;
+};
+const timedChips = (w) =>
+  roleList(w, 'timing-chip').map((c) => c.getAttribute('data-seconds'));
+const tickLabels = (w) =>
+  roleList(w, 'interval-tick').map((c) => c.textContent);
+
+test('modes: the list is Mapping Grid (Waypoints), Mapping Grid (Timed), Splat orbit, Fast survey', () => {
+  const w = setup();
+  assert.deepEqual(optionsOf(w.control('Mode')), [
+    ['mapping-grid', 'Mapping Grid (Waypoints)'],
+    ['mapping-grid-timed', 'Mapping Grid (Timed)'],
+    ['splat-orbit', 'Splat orbit'],
+    ['fast-survey', 'Fast survey'],
+  ]);
+  w.handle.destroy();
+});
+
+test('modes: picking Timed turns the camera Timed shot on; Waypoints turns Stop capture back on', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  w.handle.getState().options.frontOverlap = 77;
+  pick(w, 'Mode', 'mapping-grid-timed');
+  let o = w.handle.getState().options;
+  assert.equal(o.captureMode, 'timed');
+  assert.equal(o.photoMode, 'waypoint');
+  assert.equal(o.frontOverlap, 77, 'the other values are kept');
+  assert.ok(o.timedIntervalS > 0, 'Timed never has no interval');
+  assert.equal(w.control('Mode').value, 'mapping-grid-timed');
+  pick(w, 'Mode', 'mapping-grid');
+  o = w.handle.getState().options;
+  assert.equal(o.captureMode, 'stop');
+  assert.equal(o.frontOverlap, 77);
+  assert.equal(w.control('Mode').value, 'mapping-grid');
+  // A double grid keeps its pattern between the two mapping modes.
+  pick(w, 'Pattern', 'double');
+  pick(w, 'Mode', 'mapping-grid-timed');
+  assert.equal(w.control('Pattern').value, 'double');
+  w.handle.destroy();
+});
+
+test('modes: a saved plan with captureMode timed opens as Mapping Grid (Timed)', async () => {
+  const w = await timedWorld();
+  assert.equal(w.control('Mode').value, 'mapping-grid-timed');
+  w.handle.destroy();
+});
+
+test('Timed hides exactly the controls with no effect; Waypoints shows them again', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const photos = rowOf(w.control('Photos'));
+  const capture = rowOf(w.control('Capture mode'));
+  const speed = w.control('Speed');
+  const front = w.control('Front overlap');
+  const side = w.control('Side overlap');
+  const height = w.control('Height above ground');
+  const shutter = w.control('Shutter speed');
+  const continuous = roleList(w, 'timing')[0];
+  pick(w, 'Mode', 'mapping-grid-timed');
+  await w.handle.replan();
+  assert.equal(hiddenNow(photos), true);
+  assert.equal(hiddenNow(capture), true);
+  assert.equal(hiddenNow(roleList(w, 'timing-recommended')[0]), true);
+  assert.equal(hiddenNow(roleList(w, 'timing-mode')[0]), true);
+  assert.equal(hiddenNow(roleList(w, 'timing-spacing-ignored')[0]), true);
+  for (const kept of [speed, front, side, height, shutter, continuous]) {
+    assert.equal(hiddenNow(kept), false);
+  }
+  assert.equal(hiddenNow(roleList(w, 'interval-slider-row')[0]), false);
+  assert.equal(hiddenNow(roleList(w, 'min-shutter')[0]), false);
+  pick(w, 'Mode', 'mapping-grid');
+  await w.handle.replan();
+  assert.equal(hiddenNow(photos), false);
+  assert.equal(hiddenNow(capture), false);
+  assert.equal(hiddenNow(roleList(w, 'timing-recommended')[0]), false);
+  assert.equal(hiddenNow(roleList(w, 'interval-slider-row')[0]), true);
+  assert.equal(hiddenNow(roleList(w, 'min-shutter')[0]), true);
+  w.handle.destroy();
+});
+
+test('size: the quick-fill buttons and slider ticks follow the camera size, aircraft and mode', async () => {
+  const w = await timedWorld();
+  assert.deepEqual(timedChips(w), ['5', '7', '10', '15', '20', '30', '60']);
+  assert.deepEqual(tickLabels(w), ['5 s', '7 s', '10 s', '15 s', '20 s', '30 s', '60 s']);
+  const slider = roleList(w, 'interval-slider')[0];
+  assert.equal(slider.max, '6');
+  pick(w, 'Camera settings preset', 'test-12mp');
+  assert.deepEqual(timedChips(w), ['2', '3', '5', '7', '10', '15', '20', '30', '60']);
+  assert.deepEqual(
+    tickLabels(w),
+    ['2 s', '3 s', '5 s', '7 s', '10 s', '15 s', '20 s', '30 s', '60 s'],
+  );
+  assert.equal(slider.max, '8');
+  // An aircraft with no size choice keeps today's examples.
+  pick(w, 'Aircraft', 'dji-mavic-3');
+  assert.deepEqual(timedChips(w), ['5', '7', '10']);
+  w.handle.destroy();
+});
+
+test('size: the default camera minimum is 2 s for 12 MP and 5 s for 50 MP; a typed one is kept', async () => {
+  const w = await timedWorld();
+  const min = () => roleList(w, 'camera-min-interval')[0];
+  const note = () => roleList(w, 'camera-interval-note')[0].textContent;
+  assert.match(note(), /Default 5\.0 s for 50 MP photos/);
+  pick(w, 'Camera settings preset', 'test-12mp');
+  assert.match(note(), /Default 2\.0 s for 12 MP photos/);
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.preset.minPhotoIntervalS, 2);
+  min().value = '4';
+  min().dispatch('change');
+  pick(w, 'Camera settings preset', 'mapping-50mp');
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.minPhotoIntervalS, 4);
+  assert.equal(w.handle.getResult().plan.preset.minPhotoIntervalS, 4);
+  w.handle.destroy();
+});
+
+test('size: 12 MP ground detail is twice the 50 MP value in the plan', async () => {
+  const w = await timedWorld();
+  const g50 = w.handle.getResult().plan.gsdCm;
+  pick(w, 'Camera settings preset', 'test-12mp');
+  await w.handle.replan();
+  const g12 = w.handle.getResult().plan.gsdCm;
+  assert.ok(Math.abs(g12 / g50 - 2) < 1e-9, `${g12} vs ${g50}`);
+  w.handle.destroy();
+});
+
+test('interval slider: moving it sets the interval; typing moves the thumb to the nearest tick', async () => {
+  const w = await timedWorld();
+  const slider = roleList(w, 'interval-slider')[0];
+  slider.value = '3';
+  slider.dispatch('input');
+  assert.equal(w.handle.getState().options.timedIntervalS, 15);
+  assert.equal(w.control(INTERVAL).value, '15');
+  const box = w.control(INTERVAL);
+  box.value = '8';
+  box.dispatch('input');
+  assert.equal(w.handle.getState().options.timedIntervalS, 8);
+  assert.equal(slider.value, '1', 'nearest tick to 8 s is 7 s');
+  assert.equal(slider.getAttribute('data-off-tick'), 'true');
+  assert.match(slider.getAttribute('aria-valuetext'), /8/);
+  w.handle.destroy();
+});
+
+test('red marks: every slider has one, with a text label, and they only inform', async () => {
+  const w = await timedWorld({ frontOverlap: 80 });
+  const before = { ...w.handle.getState().options };
+  for (const name of ['overlap', 'speed', 'interval', 'height']) {
+    const tick = roleList(w, `redmark-${name}`)[0];
+    const text = roleList(w, `redmark-${name}-label`)[0];
+    assert.ok(tick && text, name);
+    assert.equal(tick.getAttribute('aria-hidden'), 'true');
+    assert.notEqual(text.textContent, '', `${name} has visible text`);
+    const f = Number(tick.getAttribute('data-fraction'));
+    assert.ok(f >= 0 && f <= 1, `${name} fraction ${f}`);
+  }
+  const o = w.handle.getState().options;
+  for (const k of ['speedMs', 'frontOverlap', 'timedIntervalS', 'aglM']) {
+    assert.equal(o[k], before[k], `${k} unchanged`);
+  }
+  w.handle.destroy();
+});
+
+test('red marks: the overlap mark is what speed x interval gives, and the speed mark round-trips', async () => {
+  const w = await timedWorld({ frontOverlap: 80, timedIntervalS: 10 });
+  const o = w.handle.getState().options;
+  const along = figuresNow(w).footprint.alongM;
+  const given = (1 - (o.speedMs * 10) / along) * 100;
+  const tick = roleList(w, 'redmark-overlap')[0];
+  assert.ok(Math.abs(Number(tick.getAttribute('data-value')) - given) < 1e-6);
+  const speedMark = Number(roleList(w, 'redmark-speed')[0].getAttribute('data-value'));
+  assert.ok(Math.abs((1 - (speedMark * 10) / along) - 0.8) < 1e-9);
+  w.handle.destroy();
+});
+
+test('red marks: out of range pins at the end and the label says which end', async () => {
+  const w = await timedWorld({ frontOverlap: 98, timedIntervalS: 60 });
+  const speed = roleList(w, 'redmark-speed')[0];
+  assert.equal(speed.getAttribute('data-status'), 'below');
+  assert.match(roleList(w, 'redmark-speed-label')[0].textContent, /below the start of this slider/);
+  assert.equal(Number(speed.getAttribute('data-fraction')), 0);
+  w.handle.destroy();
+});
+
+test('red marks: the labels follow the ft/m switch', async () => {
+  const w = await timedWorld();
+  const label = () => roleList(w, 'redmark-speed-label')[0].textContent;
+  const height = () => roleList(w, 'redmark-height-label')[0].textContent;
+  assert.match(label(), /m\/s/);
+  unitBtn(w, 'ft').click();
+  assert.match(label(), /mph/);
+  assert.match(height(), /ft/);
+  unitBtn(w, 'm').click();
+  assert.match(label(), /m\/s/);
+  w.handle.destroy();
+});
+
+test('minimum shutter: the line follows speed, height and photo size, and says it is an estimate', async () => {
+  const w = await timedWorld();
+  const main = () => roleList(w, 'min-shutter-main')[0].textContent;
+  const exact = () => Number(roleList(w, 'min-shutter')[0].getAttribute('data-exact'));
+  assert.match(main(), /^Use 1\/\d+ s or faster at this speed and height$/);
+  assert.match(roleList(w, 'min-shutter-note')[0].textContent, /Estimate from the planner blur limit, not a DJI figure\. Exact figure 1\/\d+ s\./);
+  const e50 = exact();
+  pick(w, 'Camera settings preset', 'test-12mp');
+  assert.ok(exact() < e50, '12 MP allows a slower shutter');
+  const speed = w.control('Speed');
+  speed.value = '10';
+  speed.dispatch('input');
+  await w.handle.replan();
+  const height = w.control('Height above ground');
+  height.value = '10';
+  height.dispatch('input');
+  await w.handle.replan();
+  speed.value = '15';
+  speed.dispatch('input');
+  await w.handle.replan();
+  assert.equal(roleList(w, 'min-shutter-main')[0].getAttribute('data-tone'), 'bad');
+  assert.match(main(), /faster than the camera can do \(1\/8,000 s\)/);
+  w.handle.destroy();
+});
+
+test('Continuous route stays available in Timed: it decides whether the file is split by battery', async () => {
+  const w = await timedWorld();
+  const o = w.handle.getState().options;
+  o.continuousRoute = true;
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.options.continuousRoute, true);
+  pick(w, 'Mode', 'mapping-grid');
+  await w.handle.replan();
+  assert.equal(w.handle.getResult().plan.options.continuousRoute, false, 'Stop capture cannot be continuous');
+  w.handle.destroy();
+});
+
+test('USE RECOMMENDED works for Timed and sets an interval from the camera list', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 300));
+  pick(w, 'Mode', 'mapping-grid-timed');
+  w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'use-recommended').click();
+  await w.handle.replan();
+  const o = w.handle.getResult().plan.options;
+  assert.equal(o.captureMode, 'timed');
+  assert.equal(o.aglM, 80);
+  assert.ok([5, 7, 10, 15, 20, 30, 60].includes(o.timedIntervalS));
+  w.handle.destroy();
+});
+
+test('modes: the voice/patch path selects Timed the same way as the Mode control', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  assert.equal(w.handle.applyOptions({ mode: 'mapping-grid-timed' }), true);
+  await w.handle.replan();
+  const o = w.handle.getState().options;
+  assert.equal(o.captureMode, 'timed');
+  assert.equal(o.photoMode, 'waypoint');
+  assert.ok(o.timedIntervalS > 0);
+  assert.equal(w.control('Mode').value, 'mapping-grid-timed');
+  assert.equal(w.handle.applyOptions({ mode: 'mapping-grid' }), true);
+  assert.equal(w.handle.getState().options.captureMode, 'stop');
   w.handle.destroy();
 });

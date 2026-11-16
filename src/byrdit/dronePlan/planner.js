@@ -14,6 +14,7 @@ import {
   transitNeeds,
 } from './obstacles.js';
 import { DEFAULT_PRESET_ID, getPreset } from './presets.js';
+import { effectivePreset } from './cameraLimits.js';
 import {
   ADVISORY_AGL_M,
   PLANNING_MAX_AGL_FT,
@@ -651,8 +652,15 @@ export function normalizeOptions(raw = {}, box = null) {
   o.orbitHeightsM = rings;
   return {
     options: o,
-    // speedLimits reads preset.minPhotoIntervalS. Unset keeps the original.
-    preset: presetWithPhotoInterval(preset, o.minPhotoIntervalS),
+    // The photo size (12 MP / 50 MP, aircraft that have both) sets the pixel
+    // size and the default shortest interval: ONE effective preset for the
+    // plan, the panel readouts and the README (cameraLimits.js). Then
+    // speedLimits reads preset.minPhotoIntervalS: a plan override replaces it,
+    // unset keeps the size's default.
+    preset: presetWithPhotoInterval(
+      effectivePreset(preset, o.cameraPresetId),
+      o.minPhotoIntervalS,
+    ),
     notes,
   };
 }

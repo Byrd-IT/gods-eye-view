@@ -530,3 +530,78 @@ body.gev-drone-box .cesium-widget canvas {
   gap: 4px;
   margin-top: 4px;
 }
+
+/* Mapping Grid (Timed): red marks on the four linked sliders, the evenly
+   spaced interval ticks and the minimum shutter line. A marked row is a grid:
+   the slider and the tick share column 1, so the tick's left offset is a
+   fraction of the slider's own width (the thumb centre travels 5px in from
+   each end). The tick is aria-hidden; the text label says the same in words. */
+.gev-dp-control--marks {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 6px;
+  position: relative;
+}
+.gev-dp-control--marks > .gev-quantitative-slider {
+  grid-column: 1;
+  grid-row: 1;
+}
+.gev-dp-control--marks > output {
+  grid-column: 2;
+  grid-row: 1;
+}
+.gev-dp-redmark {
+  position: absolute;
+  grid-column: 1;
+  grid-row: 1;
+  top: 0;
+  width: 2px;
+  height: 18px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: #ff4d4f;
+  pointer-events: none;
+}
+.gev-dp-redmark[data-matches='true'] {
+  background: #5dd39e;
+}
+.gev-dp-redmark-text {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  color: #ff6b6b;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.gev-dp-redmark-text[data-matches='true'] {
+  color: #5dd39e;
+}
+.gev-dp-interval-ticks {
+  position: relative;
+  grid-column: 1;
+  grid-row: 2;
+  height: 14px;
+  margin-bottom: 2px;
+}
+.gev-dp-interval-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: var(--text-dim, #8a94a0);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.gev-dp-timing-chiplist {
+  display: contents;
+}
+.gev-dp-min-shutter {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.14));
+  border-radius: 6px;
+}
+.gev-dp-min-shutter-main {
+  font-size: 13px;
+  font-weight: 600;
+}

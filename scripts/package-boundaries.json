@@ -2822,6 +2822,8 @@
       "src/byrdit/dronePlan/speed.js",
       "src/byrdit/dronePlan/terrain.js",
       "src/byrdit/dronePlan/timing.js",
+      "src/byrdit/dronePlan/cameraLimits.js",
+      "src/byrdit/dronePlan/linkedControls.js",
       "src/byrdit/dronePlan/djiKmz.js",
       "src/byrdit/dronePlan/importFile.js",
       "src/byrdit/dronePlan/importShots.js",
