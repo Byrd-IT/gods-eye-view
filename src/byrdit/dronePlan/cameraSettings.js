@@ -29,7 +29,7 @@ export const CAMERA_PRESETS = Object.freeze([
   }),
   Object.freeze({
     id: 'test-12mp',
-    name: '12 MP, 4:3 (test)',
+    name: '12 MP, 4:3',
     megapixels: 12,
     ratio: '4:3',
     width: 4096,

@@ -1960,7 +1960,10 @@ test('Steps: each header carries a one-line summary of its current values', asyn
   const line = (key) =>
     w.find((n) => n.getAttribute('data-step-line') === key)[0].textContent;
   assert.match(line('area'), /Nothing drawn yet/);
-  assert.match(line('shots'), /Mapping grid.*Grid.*80 m.*80% \/ 70%/);
+  assert.match(
+    line('shots'),
+    /Mapping Grid \(Waypoints\).*Grid.*80 m.*80% \/ 70%/,
+  );
   assert.match(line('flight'), /m\/s.*25 min battery/);
   assert.match(line('plan'), /Not planned yet/);
   w.handle.setBox(boxM(300, 200));
@@ -4680,7 +4683,11 @@ test('production panel supplies pause labels a ConstantPositionProperty can feed
 test('a custom camera minimum drives warnings, save/load and the planned speed limit', async () => {
   const w = setup();
   const note = () => captureRole(w, 'camera-interval-note').textContent;
-  assert.match(note(), /derived\/unverified/);
+  // Mini 5 Pro, 50 MP: the default comes from DJI's published Timed shot list.
+  assert.match(note(), /Default 5\.0 s for 50 MP photos/);
+  assert.match(note(), /DJI's published Timed shot list/);
+  assert.match(note(), /Not verified in flight/);
+  assert.doesNotMatch(note(), /derived\/unverified/);
   assert.equal(w.control('Camera minimum interval (s)').value, '');
   assert.equal(
     Object.hasOwn(
@@ -4880,12 +4887,12 @@ test('timing: typing an interval shows the resulting front overlap at once and p
   w.handle.destroy();
 });
 
-test('timing: 5, 7 and 10 are quick-fill examples; CLEAR removes the interval; any positive number works', async () => {
+test("timing: the quick-fill buttons are DJI's list for the photo size; CLEAR removes the interval; any positive number works", async () => {
   const w = await timedWorld();
   const chips = w.find((n) => n.getAttribute('data-role') === 'timing-chip');
   assert.deepEqual(
     chips.map((c) => c.getAttribute('data-seconds')),
-    ['5', '7', '10'],
+    ['5', '7', '10', '15', '20', '30', '60'],
   );
   chips[1].click();
   assert.equal(w.handle.getState().options.timedIntervalS, 7);
@@ -4896,7 +4903,15 @@ test('timing: 5, 7 and 10 are quick-fill examples; CLEAR removes the interval; a
   input.value = '6.5';
   input.dispatch('change');
   assert.equal(w.handle.getState().options.timedIntervalS, 6.5);
-  w.find((n) => n.getAttribute('data-action') === 'timing-clear')[0].click();
+  // Mapping Grid (Timed) is never without an interval, so CLEAR is not offered
+  // there; in Fast survey (photos by distance, Timed shot) it still is.
+  const clear = w.find(
+    (n) => n.getAttribute('data-action') === 'timing-clear',
+  )[0];
+  assert.equal(clear.hidden, true);
+  pick(w, 'Mode', 'fast-survey');
+  assert.equal(clear.hidden, false);
+  clear.click();
   assert.equal(w.handle.getState().options.timedIntervalS, null);
   assert.equal(w.control(INTERVAL).value, '');
   assert.equal(captureRole(w, 'timing-result').hidden, true);
@@ -4979,7 +4994,14 @@ test('timing: outside Timed shot the interval is not asked for, and one click sw
   assert.equal(o.captureMode, 'timed');
   assert.equal(w.control('Capture mode').value, 'timed');
   assert.equal(captureRole(w, 'timing-timed').hidden, false);
-  assert.equal(o.timedIntervalS, null, 'switching does not invent an interval');
+  // Timed capture on a grid is Mapping Grid (Timed), which is never without
+  // an interval: it starts from one of the camera's own options.
+  assert.ok(
+    [5, 7, 10, 15, 20, 30, 60].includes(o.timedIntervalS),
+    `starts from a camera option, got ${o.timedIntervalS}`,
+  );
+  assert.equal(w.control('Mode').value, 'mapping-grid-timed');
+  assert.equal(captureRole(w, 'timing-recommended').hidden, true);
   pick(w, 'Capture mode', 'distance');
   assert.equal(captureRole(w, 'timing-timed').hidden, true);
   w.handle.destroy();
@@ -5371,6 +5393,9 @@ test('timing: a fixed photo spacing that a chosen Timed-shot interval overrides 
   const input = w.control(INTERVAL);
   input.value = '7';
   input.dispatch('input');
+  // Mapping Grid (Timed) hides the note together with the fixed-distance rows.
+  assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, true);
+  pick(w, 'Mode', 'fast-survey');
   assert.equal(captureRole(w, 'timing-spacing-ignored').hidden, false);
   assert.match(
     captureRole(w, 'timing-spacing-ignored').textContent,
@@ -5455,8 +5480,17 @@ test('timing: the chosen interval saves with the plan, an old plan has none, a b
     areas: [],
     options: { speedMs: 4 },
   });
-  assert.equal(w2.handle.getState().options.timedIntervalS, null);
-  assert.equal(w2.control(INTERVAL).value, '');
+  // The old file has no interval; the panel is still in Mapping Grid (Timed),
+  // which starts from one of the camera's own options.
+  assert.ok(
+    [5, 7, 10, 15, 20, 30, 60].includes(
+      w2.handle.getState().options.timedIntervalS,
+    ),
+  );
+  assert.equal(
+    w2.control(INTERVAL).value,
+    String(w2.handle.getState().options.timedIntervalS),
+  );
   w.handle.destroy();
   w2.handle.destroy();
 });

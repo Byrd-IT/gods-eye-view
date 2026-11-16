@@ -18,6 +18,19 @@ import {
   listCameraPresets,
   shutterForPreset,
 } from './cameraSettings.js';
+import {
+  CAMERA_FASTEST_SHUTTER_DENOMINATOR,
+  defaultTimedInterval,
+  effectivePreset,
+  photoSizeLimits,
+  shutterAdvice,
+  timedIntervalOptions,
+} from './cameraLimits.js';
+import {
+  alongAtHeightFn,
+  linkedMarks,
+  nearestTickIndex,
+} from './linkedControls.js';
 import { formatNumber, t } from '../../i18n/index.js';
 import { initImageryBoxTool } from '../../ui/imageryBoxTool.js';
 import { createSlider } from '../../ui/slider.js';
@@ -91,10 +104,17 @@ import {
   kmzStatus,
   listPresets,
 } from './presets.js';
-import { MODES, modeFor, recommend, recommendedOptions } from './recommend.js';
+import {
+  MODES,
+  modeFor,
+  modeSelectionPatch,
+  recommend,
+  recommendedOptions,
+} from './recommend.js';
 import {
   INTERVAL_QUICK_FILL_S,
   MAX_TIMED_INTERVAL_S,
+  mphToMs,
   effectiveSpeedMs,
   suiteTimingRows,
   timingFigures,
@@ -138,6 +158,7 @@ import {
   lengthFromM,
   lengthToM,
   lengthUnit,
+  FT_PER_M,
   readUnitSystem,
   setUnitSystem,
   sliderRange,
@@ -1761,6 +1782,27 @@ export function initDronePlan({
     const into = (key) => {
       host = ui.steps[key].body;
     };
+    // A slider that can carry a red mark: a tick drawn over its track (aria-
+    // hidden: the visible text label says the same in words) and a text label,
+    // both children of the control's own row, placed by CSS grid so the tick
+    // sits on the slider's own width. addMark() runs once field() has made
+    // the row and its output.
+    ui.marks = {};
+    const addMark = (name, outEl) => {
+      const wrap = outEl.parentNode;
+      wrap.classList.add('gev-dp-control--marks');
+      const tick = el(doc, 'span', wrap, {
+        cls: 'gev-dp-redmark',
+        attrs: { 'aria-hidden': 'true', 'data-role': `redmark-${name}` },
+      });
+      tick.hidden = true;
+      const text = el(doc, 'span', wrap, {
+        cls: 'gev-dp-redmark-text',
+        attrs: { 'data-role': `redmark-${name}-label` },
+      });
+      text.hidden = true;
+      ui.marks[name] = { tick, text };
+    };
     // The "Speed & photo timing" section of the Shots step. It owns the speed
     // and front-overlap sliders, the recommended interval, the interval the
     // person can set, the result of that interval, and a collapsed Details
@@ -1787,8 +1829,37 @@ export function initDronePlan({
         kind: 'speed',
       });
       ({ out: ui.speedOut } = makeField(t('Speed'), ui.speed));
+      addMark('speed', ui.speedOut);
       ui.front = slider(t('Front overlap'), 50, 98, 0.5);
       ({ out: ui.frontOut } = makeField(t('Front overlap'), ui.front));
+      addMark('overlap', ui.frontOut);
+      // Mapping Grid (Timed) only: the interval as a slider over the camera's
+      // own options, evenly spaced (one tick per option), linked to the number
+      // box further down.
+      ui.interval = slider(t('Interval'), 0, 0, 1);
+      ({ row: ui.intervalRow, out: ui.intervalOut } = makeField(
+        t('Interval'),
+        ui.interval,
+      ));
+      addMark('interval', ui.intervalOut);
+      ui.intervalRow.setAttribute('data-role', 'interval-slider-row');
+      ui.interval.setAttribute('data-role', 'interval-slider');
+      ui.intervalTicks = el(doc, 'span', ui.intervalOut.parentNode, {
+        cls: 'gev-dp-interval-ticks',
+        attrs: { 'data-role': 'interval-ticks', 'aria-hidden': 'true' },
+      });
+      ui.minShutter = el(doc, 'div', ui.timing, {
+        cls: 'gev-dp-min-shutter',
+        attrs: { 'data-role': 'min-shutter' },
+      });
+      ui.minShutterMain = el(doc, 'strong', ui.minShutter, {
+        cls: 'gev-dp-min-shutter-main',
+        attrs: { 'data-role': 'min-shutter-main' },
+      });
+      ui.minShutterNote = el(doc, 'span', ui.minShutter, {
+        cls: 'gev-dp-note',
+        attrs: { 'data-role': 'min-shutter-note' },
+      });
       ui.timingPlanned = el(doc, 'p', ui.timing, {
         cls: 'gev-dp-warning',
         attrs: { 'data-role': 'timing-planned' },
@@ -1833,20 +1904,14 @@ export function initDronePlan({
       ui.timingChips = el(doc, 'div', ui.timingTimed, {
         cls: 'gev-dp-timing-chips',
       });
-      ui.timingChipButtons = INTERVAL_QUICK_FILL_S.map((seconds) =>
-        el(doc, 'button', ui.timingChips, {
-          cls: 'data-toggle-chip',
-          text: t('{n} s', { n: String(seconds) }),
-          attrs: {
-            type: 'button',
-            'data-role': 'timing-chip',
-            'data-seconds': String(seconds),
-            title: t(
-              'Fill in this many seconds. An example only: use the interval your aircraft and DJI Fly allow.',
-            ),
-          },
-        }),
-      );
+      // The quick-fill buttons are rebuilt when the aircraft or the photo size
+      // changes (syncChips); the list starts empty.
+      ui.timingChipList = el(doc, 'span', ui.timingChips, {
+        cls: 'gev-dp-timing-chiplist',
+        attrs: { 'data-role': 'timing-chip-list' },
+      });
+      ui.timingChipButtons = [];
+      ui.timingChipKey = null;
       ui.timingClear = el(doc, 'button', ui.timingChips, {
         cls: 'data-toggle-chip',
         text: t('Clear'),
@@ -2116,6 +2181,7 @@ export function initDronePlan({
       t('Height above ground'),
       ui.agl,
     ));
+    addMark('height', ui.aglOut);
     ui.side = slider(t('Side overlap'), 40, 95, 1);
     ({ out: ui.sideOut } = field(t('Side overlap'), ui.side));
 
@@ -2803,11 +2869,9 @@ export function initDronePlan({
       // change when the person presses USE RECOMMENDED.
       // A pattern that already belongs to the chosen mode (for example
       // `double` in Mapping grid) is kept.
-      if (modeFor(o) !== ui.mode.value) {
-        const next = recommend(getPreset(o.presetId), ui.mode.value);
-        o.pattern = next.pattern;
-        o.photoMode = next.photoMode;
-      }
+      // Nothing else is touched, so the person's other values survive the
+      // switch between the two Mapping Grid modes.
+      Object.assign(o, modeSelectionPatch(o, ui.mode.value));
       syncControls();
       schedule();
     });
@@ -2957,7 +3021,7 @@ export function initDronePlan({
           const seeded = (() => {
             try {
               return captureFigures({
-                preset: getPreset(o.presetId),
+                preset: planPreset(o),
                 aglM: Math.min(Math.max(o.aglM, MIN_AGL_M), AGL_CAP_M),
                 tiltDeg: captureTiltDeg(o),
                 frontOverlap: o.frontOverlap,
@@ -3010,15 +3074,15 @@ export function initDronePlan({
       syncControls();
       schedule();
     });
-    ui.timingChipButtons.forEach((chip) => {
-      chip.addEventListener('click', () => {
-        o.timedIntervalS = cleanTimedIntervalS(
-          chip.getAttribute('data-seconds'),
-        );
-        state.timedReject = false;
-        syncControls();
-        schedule();
-      });
+    // Moving the interval slider picks one of the camera's own options.
+    ui.interval.addEventListener('input', () => {
+      const list = intervalChoices(o);
+      const picked = list[Math.round(Number(ui.interval.value))];
+      if (!(picked > 0)) return;
+      o.timedIntervalS = picked;
+      state.timedReject = false;
+      syncControls();
+      schedule();
     });
     ui.timingClear.addEventListener('click', () => {
       o.timedIntervalS = null;
@@ -3181,12 +3245,145 @@ export function initDronePlan({
         return t('Splat orbit');
       case 'fast-survey':
         return t('Fast survey');
+      case 'mapping-grid-timed':
+        return t('Mapping Grid (Timed)');
       default:
-        return t('Mapping grid');
+        return t('Mapping Grid (Waypoints)');
     }
   }
 
-  function cameraIntervalNote(preset, override) {
+  /**
+   * The aircraft preset the plan's maths uses: the photo size's pixel size and
+   * default shortest interval on top of the aircraft (cameraLimits.js). The
+   * same object the planner builds for the plan, so panel, plan and README
+   * never disagree. A "camera minimum interval" override is applied on top by
+   * presetWithPhotoInterval() where a readout needs it.
+   */
+  function planPreset(o = state.options) {
+    return effectivePreset(getPreset(o.presetId), o.cameraPresetId);
+  }
+
+  /** The planning preset with the plan's own camera minimum interval. */
+  function planPresetWithInterval(o = state.options) {
+    return presetWithPhotoInterval(planPreset(o), o.minPhotoIntervalS);
+  }
+
+  /** `6`, `6.5`, `6.25`: a typed interval as the person wrote it. */
+  const secondsText = (n) =>
+    formatNumber(n, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+  /** The camera's Timed-shot options for the chosen aircraft and photo size. */
+  function intervalChoices(o = state.options) {
+    return (
+      timedIntervalOptions(getPreset(o.presetId), o.cameraPresetId) ??
+      INTERVAL_QUICK_FILL_S
+    );
+  }
+
+  /**
+   * Mapping Grid (Timed) never has "no interval": when there is none, start
+   * from the longest option that still gives the wanted front overlap at this
+   * speed and height (cameraLimits.defaultTimedInterval).
+   */
+  function ensureTimedInterval(o) {
+    if (cleanTimedIntervalS(o.timedIntervalS) != null) return;
+    const preset = planPresetWithInterval(o);
+    let alongM = NaN;
+    try {
+      alongM = footprint(
+        preset,
+        Math.min(Math.max(Number(o.aglM) || 0, MIN_AGL_M), AGL_CAP_M),
+        captureTiltDeg(o),
+      ).alongM;
+    } catch {
+      // A tilt that reaches the horizon has no footprint: the shortest
+      // allowed option is used.
+    }
+    o.timedIntervalS = defaultTimedInterval({
+      options: intervalChoices(o),
+      minIntervalS: preset.minPhotoIntervalS,
+      alongM,
+      speedMs: effectiveSpeedMs(o.speedMs, preset),
+      frontOverlapPct: o.frontOverlap,
+    });
+  }
+
+  /** The quick-fill buttons for the chosen aircraft and photo size. */
+  function syncChips(o) {
+    const list = intervalChoices(o);
+    const listed = timedIntervalOptions(getPreset(o.presetId), o.cameraPresetId);
+    const key = `${listed ? 'dji' : 'example'}:${list.join(',')}`;
+    if (ui.timingChipKey === key) return;
+    ui.timingChipKey = key;
+    ui.timingChipList.replaceChildren();
+    ui.timingChipButtons = list.map((seconds) => {
+      const chip = el(doc, 'button', ui.timingChipList, {
+        cls: 'data-toggle-chip',
+        text: t('{n} s', { n: String(seconds) }),
+        attrs: {
+          type: 'button',
+          'data-role': 'timing-chip',
+          'data-seconds': String(seconds),
+          title: listed
+            ? t(
+                "Fill in this many seconds. It is in DJI's Timed shot list for this photo size.",
+              )
+            : t(
+                'Fill in this many seconds. An example only: use the interval your aircraft and DJI Fly allow.',
+              ),
+        },
+      });
+      chip.addEventListener('click', () => {
+        state.options.timedIntervalS = cleanTimedIntervalS(seconds);
+        state.timedReject = false;
+        syncControls();
+        schedule();
+      });
+      return chip;
+    });
+  }
+
+  /**
+   * The interval slider: one evenly spaced tick per camera option, its thumb
+   * on the option nearest the typed interval. The output text keeps the typed
+   * number, so an interval between two options is shown as typed.
+   */
+  function syncIntervalSlider(o) {
+    const list = intervalChoices(o);
+    const key = list.join(',');
+    ui.interval.min = '0';
+    ui.interval.max = String(Math.max(0, list.length - 1));
+    ui.interval.step = '1';
+    if (ui.intervalTickKey !== key) {
+      ui.intervalTickKey = key;
+      ui.intervalTicks.replaceChildren();
+      list.forEach((seconds, i) => {
+        const tick = el(doc, 'span', ui.intervalTicks, {
+          cls: 'gev-dp-interval-tick',
+          text: t('{n} s', { n: String(seconds) }),
+          attrs: {
+            'data-role': 'interval-tick',
+            'data-seconds': String(seconds),
+          },
+        });
+        tick.style.left = `calc(5px + (100% - 10px) * ${
+          list.length > 1 ? i / (list.length - 1) : 0
+        })`;
+      });
+    }
+    const at = nearestTickIndex(list, o.timedIntervalS);
+    ui.interval.value = String(Math.max(0, at));
+    const typed = o.timedIntervalS;
+    ui.intervalOut.textContent =
+      typed == null ? '' : t('{n} s', { n: secondsText(typed) });
+    ui.interval.setAttribute('aria-valuetext', ui.intervalOut.textContent);
+    ui.interval.setAttribute(
+      'data-off-tick',
+      String(typed != null && !list.includes(typed)),
+    );
+  }
+
+  function cameraIntervalNote(preset, override, sizeLimits = null) {
     if (state.intervalReject) {
       return t(
         'That interval was not used. Enter 0.1 to 60, or leave the field blank.',
@@ -3194,6 +3391,12 @@ export function initDronePlan({
     }
     const presetS = num(preset.minPhotoIntervalS, 1);
     if (override == null) {
+      if (sizeLimits) {
+        return t(
+          "Default {seconds} s for {mp} MP photos, from DJI's published Timed shot list. Not verified in flight. Blank keeps it. A number replaces it for this plan only.",
+          { seconds: presetS, mp: num(sizeLimits.megapixels) },
+        );
+      }
       if (
         preset.minPhotoIntervalStatus === 'derived' &&
         preset.verified === 'unverified'
@@ -3228,6 +3431,7 @@ export function initDronePlan({
 
   function renderRecommended(preset, mode) {
     const rec = recommend(preset, mode, {
+      cameraPresetId: state.options.cameraPresetId,
       orbitRadiusM:
         state.options.orbitRadiusM ??
         state.result?.plan?.options?.orbitRadiusM ??
@@ -3239,6 +3443,9 @@ export function initDronePlan({
       el(doc, 'dd', ui.recommended, { text: value });
     };
     row(t('Speed'), speedText(rec.speedMs));
+    if (rec.timedIntervalS != null) {
+      row(t('Interval'), t('{n} s', { n: secondsText(rec.timedIntervalS) }));
+    }
     if (rec.pattern !== 'orbit') row(t('Height'), heightText(rec.aglM));
     else row(t('Viewing angles (° down)'), DEFAULT_RING_ANGLES_DEG.join(', '));
     row(
@@ -3450,9 +3657,8 @@ export function initDronePlan({
         cur.passId);
     const fp = cur.footprint;
     const speed = Number(state.options.speedMs);
-    const minInterval = presetWithPhotoInterval(
-      getPreset(state.options.presetId),
-      state.options.minPhotoIntervalS,
+    const minInterval = planPresetWithInterval(
+      state.options,
     )?.minPhotoIntervalS;
     const underMin =
       cur.photoSpacingM > 0 &&
@@ -3489,9 +3695,7 @@ export function initDronePlan({
   }
 
   function cameraPresetName(id) {
-    return id === 'test-12mp'
-      ? t('12 MP, 4:3 (test)')
-      : t('50 MP, 4:3 (mapping)');
+    return id === 'test-12mp' ? t('12 MP, 4:3') : t('50 MP, 4:3 (mapping)');
   }
 
   function renderCameraChecklist(o) {
@@ -3525,7 +3729,18 @@ export function initDronePlan({
     ui.shutter.value = String(o.shutterDenominator);
     ui.cameraPreset.value = cameraPresetOrDefault(o.cameraPresetId).id;
     o.minPhotoIntervalS = cleanMinPhotoIntervalS(o.minPhotoIntervalS);
-    const intervalPreset = presetWithPhotoInterval(preset, o.minPhotoIntervalS);
+    // Mapping Grid (Timed) always has an interval to show and to plan with.
+    const timedMode = modeFor(o) === 'mapping-grid-timed';
+    if (timedMode) {
+      o.timedIntervalS = cleanTimedIntervalS(o.timedIntervalS);
+      ensureTimedInterval(o);
+    }
+    const sizeLimits = photoSizeLimits(preset, o.cameraPresetId);
+    const effective = planPreset(o);
+    const intervalPreset = presetWithPhotoInterval(
+      effective,
+      o.minPhotoIntervalS,
+    );
     ui.minPhotoInterval.value =
       o.minPhotoIntervalS == null ? '' : String(o.minPhotoIntervalS);
     ui.minPhotoInterval.setAttribute(
@@ -3533,8 +3748,9 @@ export function initDronePlan({
       state.intervalReject ? 'true' : 'false',
     );
     ui.minPhotoIntervalNote.textContent = cameraIntervalNote(
-      preset,
+      effective,
       o.minPhotoIntervalS,
+      sizeLimits,
     );
     renderCameraChecklist(o);
     ui.presetInfo.textContent = presetSummary(intervalPreset);
@@ -3643,8 +3859,13 @@ export function initDronePlan({
     ui.continuous.checked = o.continuousRoute;
     const intervalCapture = isContinuousCapture(o.captureMode);
     const surveyCapture = intervalCapture && o.pattern !== 'orbit';
-    ui.spacingSourceRow.hidden = !surveyCapture;
-    ui.spacingRow.hidden = !surveyCapture || !(o.photoSpacingM > 0);
+    // Mapping Grid (Timed): the interval sets the spacing, so the photo and
+    // capture choices and the fixed distance have no effect and are hidden.
+    // One continuous route does have an effect (battery splitting, pause
+    // marks), so it stays.
+    ui.captureRow.hidden = timedMode;
+    ui.spacingSourceRow.hidden = !surveyCapture || timedMode;
+    ui.spacingRow.hidden = !surveyCapture || timedMode || !(o.photoSpacingM > 0);
     ui.continuousRow.hidden = !surveyCapture;
     ui.continuousNote.hidden = !surveyCapture;
     ui.speed.value = String(Math.round(speedFromMs(o.speedMs) * 10) / 10);
@@ -3655,6 +3876,8 @@ export function initDronePlan({
       ui.timedInterval.value =
         o.timedIntervalS == null ? '' : String(o.timedIntervalS);
     }
+    syncChips(o);
+    syncIntervalSlider(o);
     ui.battery.value = String(o.batteryMin);
     ui.enum.value = String(
       state.wpml.droneEnumValue ?? preset.wpml?.droneEnumValue ?? '',
@@ -3663,7 +3886,7 @@ export function initDronePlan({
     ui.directionRow.hidden = orbit;
     // An orbit shoots by the ring's own spacing: the photo-mode choice only
     // applies to the grid patterns.
-    ui.photoRow.hidden = orbit;
+    ui.photoRow.hidden = orbit || timedMode;
     ui.tiltRow.hidden = o.pattern !== 'double';
     ui.radiusRow.hidden = !orbit;
     ui.ringsRow.hidden = !orbit;
@@ -3729,6 +3952,7 @@ export function initDronePlan({
     const o = state.options;
     const orbit = o.pattern === 'orbit';
     const timed = o.captureMode === 'timed';
+    const timedMode = modeFor(o) === 'mapping-grid-timed';
     const show = (node, on) => {
       node.hidden = !on;
     };
@@ -3737,11 +3961,11 @@ export function initDronePlan({
       else node.removeAttribute('data-tone');
       node.style.color = value ? (WARNING_TONE_COLOR[value] ?? '') : '';
     };
-    const preset = presetWithPhotoInterval(
-      getPreset(o.presetId),
-      o.minPhotoIntervalS,
-    );
+    const preset = planPresetWithInterval(o);
     const requestedMs = effectiveSpeedMs(o.speedMs, preset);
+    clearLinked();
+    show(ui.intervalRow, !orbit && timedMode);
+    ui.timingClear.hidden = timedMode;
 
     // Requested vs planned speed: the plan can lower the speed in Stop mode.
     const plan = !state.dirty && !state.busy ? state.result?.plan : null;
@@ -3768,7 +3992,9 @@ export function initDronePlan({
       : '';
     tone(ui.timingPlanned, lowered ? 'warn' : null);
 
-    show(ui.timingRec, !orbit);
+    // Mapping Grid (Timed) has no recommended-interval block (the slider and
+    // its red marks say it) and no USE TIMED SHOT (it is already timed).
+    show(ui.timingRec, !orbit && !timedMode);
     show(ui.timingTimed, !orbit && timed);
     show(ui.timingMode, !orbit && !timed);
     const terrainOff =
@@ -3892,7 +4118,11 @@ export function initDronePlan({
     );
     show(
       ui.timingSpacingNote,
-      !orbit && timed && o.timedIntervalS != null && o.photoSpacingM > 0,
+      !orbit &&
+        timed &&
+        !timedMode &&
+        o.timedIntervalS != null &&
+        o.photoSpacingM > 0,
     );
     // The grid and oblique passes of PLAN ALL have their own figures even
     // when the single plan is an orbit.
@@ -4033,7 +4263,148 @@ export function initDronePlan({
       }
     }
 
+    renderLinked({ o, preset, figs, requestedMs, timedMode });
     renderSuiteRows();
+  }
+
+  /** Hide every red mark and the shutter line (they refill from renderLinked). */
+  function clearLinked() {
+    for (const { tick, text } of Object.values(ui.marks)) {
+      tick.hidden = true;
+      text.hidden = true;
+      text.textContent = '';
+      for (const key of ['data-value', 'data-fraction', 'data-status']) {
+        tick.removeAttribute(key);
+        text.removeAttribute(key);
+      }
+      tick.removeAttribute('data-matches');
+      text.removeAttribute('data-matches');
+    }
+    ui.minShutter.hidden = true;
+    ui.minShutterMain.textContent = '';
+    ui.minShutterNote.textContent = '';
+    for (const key of ['data-exact', 'data-standard', 'data-beyond']) {
+      ui.minShutter.removeAttribute(key);
+    }
+  }
+
+  /**
+   * Mapping Grid (Timed): the red marks on the four sliders and the minimum
+   * shutter line. The arithmetic is linkedControls.js (same along-track
+   * footprint as the readout above); this only draws it. Nothing here changes
+   * a setting.
+   */
+  function renderLinked({ o, preset, figs, requestedMs, timedMode }) {
+    if (!timedMode || !figs) return;
+    const aglM = Math.min(Math.max(Number(o.aglM) || 0, MIN_AGL_M), AGL_CAP_M);
+    // The slider ends as the controls hold them (display unit), in metres and
+    // m/s again, so a mark and its thumb sit on the same scale.
+    const toM = (v) => (lengthUnit() === 'ft' ? v / FT_PER_M : v);
+    const toMs = (v) => (speedUnit() === 'mph' ? mphToMs(v) : v);
+    const rangeOf = (control, convert) => ({
+      min: convert(Number(control.min)),
+      max: convert(Number(control.max)),
+      step: convert(Number(control.step)),
+    });
+    const marks = linkedMarks({
+      alongM: figs.footprint.alongM,
+      speedMs: requestedMs,
+      intervalS: cleanTimedIntervalS(o.timedIntervalS),
+      frontOverlapPct: o.frontOverlap,
+      aglM,
+      alongAt: alongAtHeightFn(preset, captureTiltDeg(o)),
+      speedRange: rangeOf(ui.speed, toMs),
+      overlapRange: rangeOf(ui.front, (v) => v),
+      heightRange: rangeOf(ui.agl, toM),
+      intervalOptions: intervalChoices(o),
+    });
+    const setMark = (name, mark, words) => {
+      const { tick, text } = ui.marks[name];
+      if (!mark) return;
+      tick.hidden = false;
+      text.hidden = false;
+      tick.style.left = `calc(5px + (100% - 10px) * ${mark.fraction})`;
+      const wording = mark.matches ? t('matches') : words(mark);
+      text.textContent = wording;
+      for (const node of [tick, text]) {
+        node.setAttribute('data-value', String(mark.value));
+        node.setAttribute('data-fraction', String(mark.fraction));
+        node.setAttribute('data-status', mark.status);
+        node.setAttribute('data-matches', String(mark.matches));
+      }
+    };
+    const beyondSlider = (base, mark) =>
+      mark.status === 'above'
+        ? t('{text}, above the top of this slider', { text: base })
+        : mark.status === 'below'
+          ? t('{text}, below the start of this slider', { text: base })
+          : base;
+    setMark('overlap', marks.overlap, (mark) =>
+      beyondSlider(t('gives {pct}%', { pct: pct(mark.value) }), mark),
+    );
+    setMark('speed', marks.speed, (mark) =>
+      beyondSlider(t('needs {value}', { value: speedText(mark.value) }), mark),
+    );
+    setMark('interval', marks.interval, (mark) => {
+      const base = t('needs {value}', {
+        value: t('{n} s', { n: num(mark.value, 1) }),
+      });
+      return mark.status === 'above'
+        ? t('{text}, past the longest option', { text: base })
+        : mark.status === 'below'
+          ? t('{text}, under the shortest option', { text: base })
+          : base;
+    });
+    setMark('height', marks.height, (mark) =>
+      mark.status === 'above'
+        ? t('needs more than {value}, above the top of this slider', {
+            value: lengthText(mark.value),
+          })
+        : mark.status === 'below'
+          ? t('needs less than {value}, below the start of this slider', {
+              value: lengthText(mark.value),
+            })
+          : t('needs {value}', { value: lengthText(mark.value) }),
+    );
+
+    // Minimum shutter for this speed and height: the planner's blur limit with
+    // the chosen photo size's pixel size. An estimate, not a DJI figure.
+    const advice = shutterAdvice(preset, figs.footprint.gsdCm, requestedMs);
+    if (!advice) return;
+    ui.minShutter.hidden = false;
+    ui.minShutter.setAttribute('data-exact', String(advice.exact));
+    ui.minShutter.setAttribute('data-standard', String(advice.standard ?? ''));
+    ui.minShutter.setAttribute(
+      'data-beyond',
+      advice.beyondCamera ? 'camera' : advice.beyondTable ? 'table' : 'none',
+    );
+    const exact = num(advice.exact);
+    let headline;
+    if (advice.beyondCamera) {
+      headline = t(
+        'Needs 1/{exact} s: faster than the camera can do (1/{max} s). Slow down or fly higher',
+        { exact, max: num(CAMERA_FASTEST_SHUTTER_DENOMINATOR) },
+      );
+      ui.minShutterMain.setAttribute('data-tone', 'bad');
+      ui.minShutterMain.style.color = WARNING_TONE_COLOR.bad;
+    } else {
+      headline = advice.beyondTable
+        ? t(
+            'Use 1/{exact} s or faster at this speed and height (faster than the Shutter speed list)',
+            { exact },
+          )
+        : t('Use 1/{n} s or faster at this speed and height', {
+            n: num(advice.standard),
+          });
+      ui.minShutterMain.removeAttribute('data-tone');
+      ui.minShutterMain.style.color = '';
+    }
+    ui.minShutterMain.textContent = headline;
+    const note = t(
+      'Estimate from the planner blur limit, not a DJI figure. Exact figure 1/{exact} s.',
+      { exact },
+    );
+    ui.minShutterNote.textContent = note;
   }
 
   function renderCaptureReadout() {
@@ -4101,10 +4472,7 @@ export function initDronePlan({
         'warn',
       );
     }
-    const preset = presetWithPhotoInterval(
-      getPreset(o.presetId),
-      o.minPhotoIntervalS,
-    );
+    const preset = planPresetWithInterval(o);
     const agl = Math.min(Math.max(Number(o.aglM) || 0, MIN_AGL_M), AGL_CAP_M);
     let figs = null;
     let figureError = null;
@@ -4288,15 +4656,26 @@ export function initDronePlan({
     }
     say(
       o.minPhotoIntervalS == null
-        ? t(
-            'The shortest full-resolution interval on this aircraft is {seconds} s in the preset. That figure is derived from other planners, not verified here.',
-            { seconds: num(figs.minPhotoIntervalS, 1) },
-          )
+        ? photoSizeLimits(getPreset(o.presetId), o.cameraPresetId)
+          ? t(
+              "The shortest {mp} MP Timed shot interval is {seconds} s, from DJI's published list. Not verified in flight.",
+              {
+                mp: num(
+                  photoSizeLimits(getPreset(o.presetId), o.cameraPresetId)
+                    .megapixels,
+                ),
+                seconds: num(figs.minPhotoIntervalS, 1),
+              },
+            )
+          : t(
+              'The shortest full-resolution interval on this aircraft is {seconds} s in the preset. That figure is derived from other planners, not verified here.',
+              { seconds: num(figs.minPhotoIntervalS, 1) },
+            )
         : t(
             'This plan uses {seconds} s instead of the preset {preset} s. Not verified here.',
             {
               seconds: num(figs.minPhotoIntervalS, 1),
-              preset: num(getPreset(o.presetId).minPhotoIntervalS, 1),
+              preset: num(planPreset(o).minPhotoIntervalS, 1),
             },
           ),
       'capture-interval-derived',
@@ -5855,12 +6234,9 @@ export function initDronePlan({
     const o = state.options;
     const selected =
       typeof mode === 'string' && MODES.includes(mode) ? mode : ui.mode.value;
-    if (modeFor(o) !== selected) {
-      const next = recommend(getPreset(o.presetId), selected);
-      o.pattern = next.pattern;
-      o.photoMode = next.photoMode;
-    }
+    Object.assign(o, modeSelectionPatch(o, selected));
     const rec = recommend(getPreset(o.presetId), selected, {
+      cameraPresetId: o.cameraPresetId,
       orbitRadiusM:
         o.orbitRadiusM ??
         state.result?.plan?.options?.orbitRadiusM ??
@@ -5887,9 +6263,13 @@ export function initDronePlan({
       plan = true;
     }
     if (Object.hasOwn(patch, 'mode') && modeFor(o) !== patch.mode) {
-      const next = recommend(getPreset(o.presetId), patch.mode);
-      if (!Object.hasOwn(patch, 'pattern')) o.pattern = next.pattern;
-      if (!Object.hasOwn(patch, 'photoMode')) o.photoMode = next.photoMode;
+      const next = modeSelectionPatch(o, patch.mode);
+      if (!Object.hasOwn(patch, 'pattern') && next.pattern !== undefined)
+        o.pattern = next.pattern;
+      if (!Object.hasOwn(patch, 'photoMode') && next.photoMode !== undefined)
+        o.photoMode = next.photoMode;
+      if (!Object.hasOwn(patch, 'captureMode') && next.captureMode !== undefined)
+        o.captureMode = next.captureMode;
       plan = true;
     }
     if (Object.hasOwn(patch, 'pattern')) {
