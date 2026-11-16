@@ -1066,10 +1066,12 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // planning maximum, dronePlan/heightLimits.js). Re-pinned again at the
   // Speed & photo timing change (40659 -> 40789, +130): control_droneplan
   // gains the timedIntervalS option (Timed-shot interval, seconds, no floor).
-  assert.equal(block.length, 40789, 'serialized tool schema length drifted');
+  // Re-pinned again for Mapping Grid (Timed) (40789 -> 40810, +21): the
+  // control_droneplan mode enum gains mapping-grid-timed.
+  assert.equal(block.length, 40810, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '9ca47d68fe816fc8a36f01655d9b2f53087d8b1b83864e6b394786dc1a7557c2',
+    'f74e4b1aeeb98a7a94f2382b881a049f321c749bd0e4aac55a4009bfad5f5dd0',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

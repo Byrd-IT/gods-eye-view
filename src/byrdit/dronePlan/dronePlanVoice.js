@@ -258,7 +258,7 @@ export function createDronePlanVoice(handle) {
     async recommend(mode) {
       return guard(async () => {
         if (mode != null && !MODES.includes(mode))
-          return fail('mode must be mapping-grid, splat-orbit, or fast-survey');
+          return fail(`mode must be ${MODES.join(', ')}`);
         ensureOpen();
         handle.useRecommended(mode ?? undefined, { planNow: true });
         await handle.replan();

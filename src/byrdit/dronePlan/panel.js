@@ -3311,7 +3311,10 @@ export function initDronePlan({
   /** The quick-fill buttons for the chosen aircraft and photo size. */
   function syncChips(o) {
     const list = intervalChoices(o);
-    const listed = timedIntervalOptions(getPreset(o.presetId), o.cameraPresetId);
+    const listed = timedIntervalOptions(
+      getPreset(o.presetId),
+      o.cameraPresetId,
+    );
     const key = `${listed ? 'dji' : 'example'}:${list.join(',')}`;
     if (ui.timingChipKey === key) return;
     ui.timingChipKey = key;
@@ -3865,7 +3868,8 @@ export function initDronePlan({
     // marks), so it stays.
     ui.captureRow.hidden = timedMode;
     ui.spacingSourceRow.hidden = !surveyCapture || timedMode;
-    ui.spacingRow.hidden = !surveyCapture || timedMode || !(o.photoSpacingM > 0);
+    ui.spacingRow.hidden =
+      !surveyCapture || timedMode || !(o.photoSpacingM > 0);
     ui.continuousRow.hidden = !surveyCapture;
     ui.continuousNote.hidden = !surveyCapture;
     ui.speed.value = String(Math.round(speedFromMs(o.speedMs) * 10) / 10);
@@ -6268,7 +6272,10 @@ export function initDronePlan({
         o.pattern = next.pattern;
       if (!Object.hasOwn(patch, 'photoMode') && next.photoMode !== undefined)
         o.photoMode = next.photoMode;
-      if (!Object.hasOwn(patch, 'captureMode') && next.captureMode !== undefined)
+      if (
+        !Object.hasOwn(patch, 'captureMode') &&
+        next.captureMode !== undefined
+      )
         o.captureMode = next.captureMode;
       plan = true;
     }

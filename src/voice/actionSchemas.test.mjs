@@ -83,7 +83,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // aa95c2c2: show_street_level (query, latitude, longitude, provider, referent;
     // no pattern or other Unicode-property construct) adds exactly one tool; the
     // pin before it, 194f9966..., is reproduced when that tool is left out.
-    'e2f28fc8e38ce38f1e3a51d1c6f67574f5d6ead9704a1e67610d0761ff0628cb',
+    'bec0ddca27173cb668a1a9ceb164b8830e454f536e472596d233f1efbaaff9fc',
   );
 });
 

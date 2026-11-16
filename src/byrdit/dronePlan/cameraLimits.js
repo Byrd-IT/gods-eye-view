@@ -55,7 +55,8 @@ export function hasPhotoSizes(preset) {
 export function photoSizeLimits(preset, cameraPresetId) {
   if (!hasPhotoSizes(preset)) return null;
   const camera =
-    getCameraPreset(cameraPresetId) ?? getCameraPreset(DEFAULT_CAMERA_PRESET_ID);
+    getCameraPreset(cameraPresetId) ??
+    getCameraPreset(DEFAULT_CAMERA_PRESET_ID);
   const row = SIZE_TABLE[camera.id];
   if (!row) return null;
   return {

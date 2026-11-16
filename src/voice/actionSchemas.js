@@ -1178,7 +1178,12 @@ const schemas = [
         aircraft: { type: 'string', minLength: 1, maxLength: 40 },
         mode: {
           type: 'string',
-          enum: ['mapping-grid', 'splat-orbit', 'fast-survey'],
+          enum: [
+            'mapping-grid',
+            'mapping-grid-timed',
+            'splat-orbit',
+            'fast-survey',
+          ],
         },
         pattern: { type: 'string', enum: ['grid', 'double', 'orbit'] },
         direction: { type: 'string', enum: ['auto', 'ew', 'ns'] },
