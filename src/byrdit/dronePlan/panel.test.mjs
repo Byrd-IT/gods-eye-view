@@ -10,9 +10,11 @@ import { createLibraryClient } from './libraryClient.js';
 import { warningText } from './libraryPanel.js';
 import {
   claimPointer,
+  pointerOwner,
   releasePointer,
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
+import * as RealCesium from 'cesium';
 import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
 import {
   initDronePlan,
@@ -2264,6 +2266,383 @@ test('a saved plan reopens editable: areas, settings, takeoff, targets and missi
   );
   w.handle.destroy();
   w2.handle.destroy();
+});
+
+// ------------------------------------------- drawing and editing areas --
+// The fake canvas is 1000 x 500 px over -97.9..-97.7 E and 30.4..30.2 N, so
+// one pixel is 0.0002 deg of longitude and 0.0004 deg of latitude. These
+// helpers give the panel a camera that picks that mapping and a scene that
+// projects the other way, so the real tools run on the fakes end to end.
+const lonAtPx = (x) => -97.9 + x * 0.0002;
+const latAtPx = (y) => 30.4 - y * 0.0004;
+const pxOfLon = (lon) => (lon + 97.9) / 0.0002;
+const pxOfLat = (lat) => (30.4 - lat) / 0.0004;
+
+function drawingWorld() {
+  const w = setup();
+  w.viewer.camera = {
+    pickEllipsoid: (pos) =>
+      RealCesium.Cartesian3.fromDegrees(lonAtPx(pos.x), latAtPx(pos.y)),
+  };
+  w.cesium.SceneTransforms = {
+    worldToWindowCoordinates: (_scene, c) => ({
+      x: pxOfLon(c[0]),
+      y: pxOfLat(c[1]),
+    }),
+  };
+  // The panel hands the tools its document: let it carry key listeners.
+  w.doc.addEventListener = w.fakes.documentRef.addEventListener;
+  w.doc.removeEventListener = w.fakes.documentRef.removeEventListener;
+  const fire = (type, event) => w.fakes.fire(type, event);
+  const click = (x, y) => fire('LEFT_CLICK', { position: { x, y } });
+  const down = (x, y) => fire('LEFT_DOWN', { position: { x, y } });
+  const move = (x, y) => fire('MOUSE_MOVE', { endPosition: { x, y } });
+  const up = (x, y) => fire('LEFT_UP', { position: { x, y } });
+  const tap = (x, y) => {
+    down(x, y);
+    up(x, y);
+  };
+  const drag = (from, to) => {
+    down(...from);
+    move((from[0] + to[0]) / 2, (from[1] + to[1]) / 2);
+    move(...to);
+    up(...to);
+  };
+  const action = (name) =>
+    w.buttons('data-action').find((b) => b.getAttribute('data-action') === name);
+  const editButton = (id) =>
+    w.buttons('data-edit-area').find(
+      (b) => b.getAttribute('data-edit-area') === id,
+    );
+  const ringAt = (...pts) =>
+    pts.map(([x, y]) => ({ lon: lonAtPx(x), lat: latAtPx(y) }));
+  const ringPx = (ring) => ring.map((p) => [pxOfLon(p.lon), pxOfLat(p.lat)]);
+  return {
+    ...w,
+    fire,
+    click,
+    down,
+    move,
+    up,
+    tap,
+    drag,
+    action,
+    editButton,
+    ringAt,
+    ringPx,
+  };
+}
+
+// 1.9 km x 2.2 km box: pixels x 200..300, y 125..175.
+const EDIT_BOX = { west: -97.86, east: -97.84, south: 30.33, north: 30.35 };
+const RECT_PX = [
+  [200, 125],
+  [300, 125],
+  [300, 175],
+  [200, 175],
+];
+const near2 = (a, b, eps = 1e-6) =>
+  assert.ok(Math.abs(a - b) <= eps, `${a} is not within ${eps} of ${b}`);
+
+test('polygon: FINISH and UNDO LAST CORNER show while drawing; FINISH needs 3 corners', () => {
+  const w = drawingWorld();
+  const finish = w.action('finish-polygon');
+  const undo = w.action('undo-polygon-corner');
+  assert.ok(finish && undo);
+  assert.equal(finish.hidden, true);
+  assert.equal(finish.disabled, true);
+  assert.equal(undo.hidden, true);
+  assert.equal(w.handle.drawPolygon(), true);
+  assert.equal(finish.hidden, false);
+  assert.equal(finish.disabled, true);
+  assert.equal(finish.getAttribute('title'), 'Needs 3 corners');
+  assert.equal(undo.hidden, false);
+  assert.equal(undo.disabled, true);
+  assert.match(w.status(), /first dot, press Enter, or use FINISH/);
+  w.click(200, 125);
+  w.click(300, 125);
+  assert.equal(undo.disabled, false);
+  assert.equal(finish.disabled, true);
+  w.click(300, 175);
+  assert.equal(finish.disabled, false);
+  assert.equal(finish.getAttribute('title'), 'Close the polygon');
+  undo.click();
+  assert.equal(finish.disabled, true);
+  w.click(300, 175);
+  finish.click();
+  const { areas } = w.handle.getState();
+  assert.equal(areas.length, 1);
+  assert.equal(areas[0].kind, 'polygon');
+  assert.equal(areas[0].ring.length, 3);
+  assert.equal(finish.hidden, true);
+  assert.equal(undo.hidden, true);
+  assert.equal(w.action('draw-polygon').getAttribute('aria-pressed'), 'false');
+  assert.equal(pointerOwner(), null);
+  w.handle.destroy();
+});
+
+test('polygon: Enter finishes with 3 corners and is ignored with fewer', () => {
+  const w = drawingWorld();
+  w.handle.drawPolygon();
+  w.click(200, 125);
+  w.click(300, 125);
+  w.fakes.key('Enter');
+  assert.equal(w.handle.getState().areas.length, 0);
+  assert.equal(w.action('draw-polygon').getAttribute('aria-pressed'), 'true');
+  w.click(300, 175);
+  w.fakes.key('Enter');
+  assert.equal(w.handle.getState().areas.length, 1);
+  assert.equal(pointerOwner(), null);
+  w.handle.destroy();
+});
+
+test('polygon: a ring the planner refuses leaves the tool open and says why', () => {
+  const w = drawingWorld();
+  w.handle.drawPolygon();
+  // A 20 m sliver is below the planner's minimum size.
+  w.click(200, 125);
+  w.click(201, 125);
+  w.click(200, 126);
+  w.action('finish-polygon').click();
+  assert.equal(w.handle.getState().areas.length, 0);
+  assert.equal(w.action('draw-polygon').getAttribute('aria-pressed'), 'true');
+  assert.equal(w.action('finish-polygon').hidden, false);
+  assert.ok(w.status().length > 0);
+  w.handle.destroy();
+});
+
+test('edit: each area row has an EDIT toggle that follows aria-pressed', () => {
+  const w = drawingWorld();
+  assert.equal(w.handle.setBox(EDIT_BOX), true);
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  const [first] = w.handle.getState().areas;
+  assert.equal(first.id, 'area-1');
+  const edit = w.editButton('area-1');
+  assert.equal(edit.getAttribute('data-action'), 'edit-area');
+  assert.equal(edit.textContent, 'EDIT');
+  assert.equal(edit.getAttribute('aria-pressed'), 'false');
+  edit.click();
+  assert.equal(pointerOwner(), 'drone-plan-area-edit');
+  assert.equal(w.editButton('area-1').getAttribute('aria-pressed'), 'true');
+  w.editButton('area-1').click();
+  assert.equal(pointerOwner(), null);
+  assert.equal(w.editButton('area-1').getAttribute('aria-pressed'), 'false');
+  w.handle.destroy();
+});
+
+test('edit: only one area is edited at a time', () => {
+  const w = drawingWorld();
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  w.handle.setPolygon(w.ringAt([400, 125], [500, 125], [500, 175]));
+  const [a, b] = w.handle.getState().areas.map((x) => x.id);
+  w.editButton(a).click();
+  assert.equal(w.editButton(a).getAttribute('aria-pressed'), 'true');
+  w.editButton(b).click();
+  assert.equal(w.editButton(a).getAttribute('aria-pressed'), 'false');
+  assert.equal(w.editButton(b).getAttribute('aria-pressed'), 'true');
+  assert.equal(pointerOwner(), 'drone-plan-area-edit');
+  w.handle.destroy();
+  assert.equal(pointerOwner(), null);
+});
+
+test('edit: EDIT is disabled while a draw tool runs, and drawing ends editing', () => {
+  const w = drawingWorld();
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  const edit = () => w.editButton('area-1');
+  w.handle.drawPolygon();
+  assert.equal(edit().disabled, true);
+  edit().click();
+  assert.equal(pointerOwner(), 'drone-plan-polygon', 'the click did nothing');
+  assert.equal(w.handle.editArea('area-1'), false);
+  assert.match(w.status(), /Finish drawing first/);
+  w.handle.drawPolygon();
+  assert.equal(edit().disabled, false);
+  w.handle.drawBox();
+  assert.equal(edit().disabled, true);
+  w.handle.drawBox();
+  assert.equal(edit().disabled, false);
+  edit().click();
+  assert.equal(edit().getAttribute('aria-pressed'), 'true');
+  w.handle.drawPolygon();
+  assert.equal(edit().getAttribute('aria-pressed'), 'false');
+  assert.equal(pointerOwner(), 'drone-plan-polygon');
+  w.handle.destroy();
+});
+
+test('edit: removing the area, loading a plan or closing ends the edit', async () => {
+  const w = drawingWorld();
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  w.editButton('area-1').click();
+  w.handle.removeArea('area-1');
+  assert.equal(pointerOwner(), null);
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  w.editButton('area-2').click();
+  assert.equal(pointerOwner(), 'drone-plan-area-edit');
+  w.handle.setBox(EDIT_BOX);
+  assert.equal(pointerOwner(), null, 'replacing the areas ends the edit');
+  w.editButton('area-1').click();
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  await w.handle.loadPlan(doc);
+  assert.equal(pointerOwner(), null);
+  w.editButton('area-1').click();
+  w.handle.close();
+  assert.equal(pointerOwner(), null);
+  w.handle.destroy();
+});
+
+test('edit: dragging a box corner resizes the box and the next plan uses it', async () => {
+  const w = drawingWorld();
+  w.handle.setBox(EDIT_BOX);
+  await w.handle.replan();
+  const before = w.handle.getResult().totals.photoCount;
+  const nonce = Number(w.panel.dataset.planNonce);
+  w.editButton('area-1').click();
+  // Pull the north-east corner out and down: 2.5 km wide, 1.8 km tall.
+  w.drag([300, 125], [330, 135]);
+  const [area] = w.handle.getState().areas;
+  assert.equal(area.kind, 'rect');
+  assert.equal(area.ring, undefined);
+  assert.equal(area.box.west, EDIT_BOX.west);
+  assert.equal(area.box.south, EDIT_BOX.south);
+  near2(area.box.east, lonAtPx(330));
+  near2(area.box.north, latAtPx(135));
+  assert.equal(w.handle.getState().dirty, true, 'the old plan is marked stale');
+  assert.deepEqual(w.handle.getState().box, area.box);
+  await w.handle.replan();
+  assert.ok(Number(w.panel.dataset.planNonce) > nonce);
+  const after = w.handle.getResult().totals.photoCount;
+  assert.notEqual(after, before);
+  // The same box drawn fresh plans the same.
+  const fresh = drawingWorld();
+  fresh.handle.setBox(area.box);
+  await fresh.handle.replan();
+  assert.equal(fresh.handle.getResult().totals.photoCount, after);
+  w.handle.destroy();
+  fresh.handle.destroy();
+});
+
+test('edit: moving a polygon from the centre handle replans it and saves the new shape', async () => {
+  const w = drawingWorld();
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  await w.handle.replan();
+  const original = w.handle.getState().areas[0].ring.map((p) => ({ ...p }));
+  w.editButton('area-1').click();
+  // The centre handle is at pixel (250, 150).
+  w.drag([250, 150], [280, 140]);
+  const [area] = w.handle.getState().areas;
+  const px = w.ringPx(area.ring);
+  px.forEach(([x, y], i) => {
+    near2(x, RECT_PX[i][0] + 30, 1e-3);
+    near2(y, RECT_PX[i][1] - 10, 1e-3);
+  });
+  assert.notDeepEqual(area.ring, original);
+  await w.handle.replan();
+  assert.equal(w.panel.dataset.state, 'ready');
+  // The saved plan holds the edited ring and reopens to the same shape.
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  assert.equal(doc.areas.length, 1);
+  assert.equal(doc.areas[0].kind, 'polygon');
+  const w2 = drawingWorld();
+  await w2.handle.loadPlan(doc);
+  assert.deepEqual(w2.handle.getState().areas[0].ring, area.ring);
+  assert.deepEqual(w2.handle.getState().areas[0].box, area.box);
+  w.handle.destroy();
+  w2.handle.destroy();
+});
+
+test('edit: a corner drag, an added corner and a removed corner on a polygon', async () => {
+  const w = drawingWorld();
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  w.editButton('area-1').click();
+  const remove = w.action('remove-corner');
+  assert.equal(remove.hidden, false);
+  assert.equal(remove.disabled, true, 'nothing selected yet');
+  // Add a corner: click the midpoint of the top edge, at (250, 125).
+  w.tap(250, 125);
+  let ring = w.handle.getState().areas[0].ring;
+  assert.equal(ring.length, 5);
+  near2(pxOfLon(ring[1].lon), 250, 1e-3);
+  near2(pxOfLat(ring[1].lat), 125, 1e-3);
+  // The new corner is selected, so it can be removed again.
+  assert.equal(remove.disabled, false);
+  remove.click();
+  ring = w.handle.getState().areas[0].ring;
+  assert.equal(ring.length, 4);
+  assert.equal(remove.disabled, true);
+  // Drag one corner.
+  w.drag([200, 175], [210, 165]);
+  ring = w.handle.getState().areas[0].ring;
+  near2(pxOfLon(ring[3].lon), 210, 1e-3);
+  near2(pxOfLat(ring[3].lat), 165, 1e-3);
+  // Select a corner and remove it with the key: 3 corners are left.
+  w.tap(300, 175);
+  assert.equal(remove.disabled, false);
+  w.fakes.key('Delete');
+  assert.equal(w.handle.getState().areas[0].ring.length, 3);
+  // A triangle cannot lose a corner.
+  w.tap(200, 125);
+  assert.equal(remove.disabled, true);
+  assert.equal(remove.getAttribute('title'), 'Click a corner first');
+  w.fakes.key('Delete');
+  assert.equal(w.handle.getState().areas[0].ring.length, 3);
+  await w.handle.replan();
+  assert.equal(w.panel.dataset.state, 'ready');
+  w.handle.destroy();
+});
+
+test('edit: a shape the planner refuses is rejected, says why, and reverts', async () => {
+  const w = drawingWorld();
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  await w.handle.replan();
+  const before = JSON.stringify(w.handle.getState().areas[0].ring);
+  w.editButton('area-1').click();
+  // A bow-tie.
+  w.drag([300, 125], [230, 180]);
+  assert.equal(JSON.stringify(w.handle.getState().areas[0].ring), before);
+  assert.match(w.status(), /crosses itself/);
+  assert.equal(
+    w.find((n) => n.className.includes('gev-dp-status'))[0].dataset.tone,
+    'warn',
+  );
+  // Within the size limits, but more waypoints than one plan may hold: the
+  // planner's own check refuses it, as it does for a newly drawn polygon.
+  w.drag([200, 175], [190, 190]);
+  assert.equal(JSON.stringify(w.handle.getState().areas[0].ring), before);
+  assert.match(w.status(), /too many waypoints/);
+  // Far too big.
+  w.drag([300, 125], [900, 125]);
+  assert.equal(JSON.stringify(w.handle.getState().areas[0].ring), before);
+  assert.match(w.status(), /too big/);
+  // The tool is still editing and the plan was not made stale.
+  assert.equal(w.handle.getState().dirty, false);
+  assert.equal(pointerOwner(), 'drone-plan-area-edit');
+  w.handle.destroy();
+});
+
+test('edit: the area being edited is drawn by the edit tool, not twice', () => {
+  const w = drawingWorld();
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  const outlines = () =>
+    w.viewer.dataSources.sources
+      .flatMap((source) => source.entities.values)
+      .filter((e) => e.name === 'Area 1');
+  assert.equal(outlines().length, 1);
+  w.editButton('area-1').click();
+  assert.equal(outlines().length, 0);
+  assert.ok(
+    w.viewer.dataSources.sources.some(
+      (source) => source.name === 'gev-drone-plan-area-edit',
+    ),
+  );
+  w.editButton('area-1').click();
+  assert.equal(outlines().length, 1);
+  assert.equal(
+    w.viewer.dataSources.sources.some(
+      (source) => source.name === 'gev-drone-plan-area-edit',
+    ),
+    false,
+  );
+  w.handle.destroy();
 });
 
 async function snapshotOf(w) {

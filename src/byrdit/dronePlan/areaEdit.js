@@ -26,6 +26,9 @@ export const BOX_CORNERS = Object.freeze(['sw', 'se', 'ne', 'nw']);
 
 const OPPOSITE = Object.freeze({ sw: 'ne', se: 'nw', ne: 'sw', nw: 'se' });
 
+/** Longitude in (-180, 180], untouched (no rounding noise) when already there. */
+const normLon = (lon) => (lon > 180 || lon <= -180 ? wrapLon(lon) : lon);
+
 const finitePoint = (p) =>
   Number.isFinite(Number(p?.lon)) &&
   Number.isFinite(Number(p?.lat)) &&
@@ -72,7 +75,7 @@ export function moveVertex(ring, index, point) {
   if (index < 0 || index >= ring.length) return null;
   if (!finitePoint(point)) return null;
   const next = ring.map((p) => ({ lon: p.lon, lat: p.lat }));
-  next[index] = { lon: wrapLon(Number(point.lon)), lat: Number(point.lat) };
+  next[index] = { lon: normLon(Number(point.lon)), lat: Number(point.lat) };
   return next;
 }
 
@@ -81,8 +84,9 @@ export function edgeMidpoint(ring, index) {
   const a = ring[index];
   const b = ring[(index + 1) % ring.length];
   const frame = makeFrame(a.lon, (a.lat + b.lat) / 2);
+  const p = frame.toXY(a.lon, a.lat);
   const q = frame.toXY(b.lon, b.lat);
-  return frame.toLonLat(q.x / 2, q.y / 2);
+  return frame.toLonLat((p.x + q.x) / 2, (p.y + q.y) / 2);
 }
 
 /** The midpoint of every edge; entry i belongs to the edge from corner i. */
@@ -152,8 +156,8 @@ export function moveArea(shape, dxM, dyM) {
   return {
     kind: shape.kind ?? 'rect',
     box: {
-      west: wrapLon(west + dLon),
-      east: wrapLon(east + dLon),
+      west: normLon(west + dLon),
+      east: normLon(east + dLon),
       south: south + dLat,
       north: north + dLat,
     },
@@ -179,7 +183,7 @@ export function boxFromCorner(box, corner, point) {
   const opposite = OPPOSITE[corner];
   if (!opposite || !finitePoint(point)) return null;
   const fixed = boxCorners(box)[opposite];
-  const lons = shorterLonEdges(fixed.lon, wrapLon(Number(point.lon)));
+  const lons = shorterLonEdges(fixed.lon, normLon(Number(point.lon)));
   return {
     west: lons.west,
     east: lons.east,
