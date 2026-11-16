@@ -74,7 +74,7 @@ function areaRing(area) {
   return rectRing(area.box);
 }
 
-function unwrapCenter(points) {
+export function unwrapCenter(points) {
   const lon0 = points[0].lon;
   let lon = 0;
   let lat = 0;
@@ -88,7 +88,7 @@ function unwrapCenter(points) {
   };
 }
 
-function bboxOfPoints(points) {
+export function bboxOfPoints(points) {
   const centre = unwrapCenter(points);
   let minD = Infinity;
   let maxD = -Infinity;
