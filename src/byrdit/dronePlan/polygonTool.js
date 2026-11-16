@@ -1,32 +1,64 @@
 /**
  * Click-to-draw a polygon on the globe for the Drone Flight Plan tool.
- * Click adds a corner, double-click or a click on the first corner closes,
- * Backspace removes the last corner, Escape cancels. The pointer is claimed
- * and given back the same way as the box tool and the takeoff pick.
+ * Click adds a corner. Closing: click the first corner (a big, distinct dot),
+ * double-click, press Enter, or call `finish()` (the panel's FINISH button).
+ * Backspace or `undo()` removes the last corner, Escape cancels. Every corner
+ * is drawn as a dot and a rubber-band line follows the cursor. The pointer is
+ * claimed and given back the same way as the box tool and the takeoff pick.
  */
 import * as Cesium from 'cesium';
 import { pickWorldFromScreen } from '../../annotations/annotationResolver.js';
-import {
-  claimPointer,
-  pointerOwner,
-  releasePointer,
-} from '../../data/inputOwnership.js';
+import { claimPointer, releasePointer } from '../../data/inputOwnership.js';
+import { lonLatToScreen } from './screenPoint.js';
 
 export const POLYGON_POINTER_OWNER = 'drone-plan-polygon';
-const CLOSE_PX = 12;
+/** A click this close (canvas pixels) to the first corner closes the polygon. */
+export const POLYGON_CLOSE_PX = 24;
+/** The click that starts a double-click lands this close to where it ends. */
+const DOUBLE_CLICK_PX = 12;
+const MIN_CORNERS = 3;
+const LINE_CSS = '#8be9ff';
+const FIRST_CSS = '#ffd23f';
+
+/** True when the key event came from somewhere the user is typing text. */
+function isTypingTarget(event) {
+  const node = event?.target;
+  if (!node) return false;
+  const tag = String(node.tagName ?? '').toLowerCase();
+  return (
+    tag === 'textarea' ||
+    tag === 'select' ||
+    node.isContentEditable === true ||
+    (tag === 'input' &&
+      !['button', 'checkbox', 'radio', 'range'].includes(
+        String(node.type ?? '').toLowerCase(),
+      ))
+  );
+}
 
 /**
  * @param {{ viewer: object, onRing: (ring: {lon:number,lat:number}[]) => boolean|void,
  *   onCancel?: (reason: string) => void, onActive?: (active: boolean) => void,
- *   cesium?: object, pickWorld?: Function, documentRef?: object }} deps
+ *   onChange?: (state: {count: number, canFinish: boolean}) => void,
+ *   cesium?: object, pickWorld?: Function, project?: Function,
+ *   documentRef?: object }} deps
+ *   `project(viewer, lon, lat, {cesium, height})` gives the canvas pixel of a
+ *   lon/lat (null when unknown); it is how the first corner is found again
+ *   after the camera has moved.
+ * @returns {{ start: () => boolean, cancel: (reason?: string) => void,
+ *   finish: () => boolean, undo: () => boolean, isActive: () => boolean,
+ *   vertexCount: () => number, canFinish: () => boolean,
+ *   destroy: () => void } | null}
  */
 export function initPolygonTool({
   viewer,
   onRing,
   onCancel,
   onActive,
+  onChange,
   cesium = Cesium,
   pickWorld = pickWorldFromScreen,
+  project = lonLatToScreen,
   documentRef = globalThis.document,
   owner = POLYGON_POINTER_OWNER,
   bodyClass = 'gev-drone-box',
@@ -38,9 +70,13 @@ export function initPolygonTool({
   let lease = null;
   let savedSingleClick = null;
   let savedDoubleClick = null;
-  /** @type {{lon:number,lat:number,x:number,y:number}[]} */
+  /** @type {{lon:number,lat:number,height?:number,x:number,y:number}[]} */
   let vertices = [];
+  /** Where the pointer is now, for the rubber band; null until it moves. */
+  let cursor = null;
   let preview = null;
+
+  const color = (css) => cesium.Color?.fromCssColorString?.(css);
 
   const worldAt = (position) => {
     if (!position) return null;
@@ -51,13 +87,70 @@ export function initPolygonTool({
     const lon = Number(point?.lon);
     const lat = Number(point?.lat);
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
-    return { lon, lat, x: position.x, y: position.y };
+    const height = Number(point?.height);
+    return {
+      lon,
+      lat,
+      ...(Number.isFinite(height) ? { height } : {}),
+      x: position.x,
+      y: position.y,
+    };
+  };
+
+  /**
+   * Where a corner is on screen now, from its lon/lat, never from where the
+   * click was: the camera may have moved since. A pick on a roof sits above the
+   * terrain, so both heights count. Falls back to the click position only when
+   * the scene cannot project.
+   */
+  const screenSpots = (vertex) => {
+    const spots = [];
+    const at = project(viewer, vertex.lon, vertex.lat, {
+      cesium,
+      height: vertex.height,
+    });
+    if (at) spots.push(at);
+    if (Number.isFinite(vertex.height)) {
+      const ground = project(viewer, vertex.lon, vertex.lat, { cesium });
+      if (ground) spots.push(ground);
+    }
+    return spots.length ? spots : [{ x: vertex.x, y: vertex.y }];
   };
 
   const nearFirst = (position) => {
-    if (vertices.length < 3 || !position) return false;
-    const first = vertices[0];
-    return Math.hypot(position.x - first.x, position.y - first.y) <= CLOSE_PX;
+    if (vertices.length < MIN_CORNERS || !position) return false;
+    return screenSpots(vertices[0]).some(
+      (spot) =>
+        Math.hypot(position.x - spot.x, position.y - spot.y) <=
+        POLYGON_CLOSE_PX,
+    );
+  };
+
+  const canFinish = () => vertices.length >= MIN_CORNERS;
+  const notify = () =>
+    onChange?.({ count: vertices.length, canFinish: canFinish() });
+
+  const dot = (vertex, first) => ({
+    position: cesium.Cartesian3.fromDegrees(vertex.lon, vertex.lat),
+    point: {
+      pixelSize: first ? 16 : 10,
+      color: color(first ? FIRST_CSS : LINE_CSS),
+      outlineColor: color(first ? '#000000' : '#0b1b24'),
+      outlineWidth: first ? 3 : 2,
+      heightReference: cesium.HeightReference?.CLAMP_TO_GROUND,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+
+  const rubberBand = () => {
+    const last = vertices[vertices.length - 1];
+    if (!last || !cursor) return [];
+    return cesium.Cartesian3.fromDegreesArray([
+      last.lon,
+      last.lat,
+      cursor.lon,
+      cursor.lat,
+    ]);
   };
 
   function drawPreview() {
@@ -71,15 +164,26 @@ export function initPolygonTool({
           positions: cesium.Cartesian3.fromDegreesArray(flat),
           width: 2,
           clampToGround: true,
-          material: cesium.Color?.fromCssColorString?.('#8be9ff'),
+          material: color(LINE_CSS),
         },
       });
+      // The line from the last corner to the pointer reads from the cursor
+      // each frame, so a mouse move only has to ask for a render.
+      preview.entities.add({
+        polyline: {
+          positions: new cesium.CallbackProperty(rubberBand, false),
+          width: 2,
+          clampToGround: true,
+          material: color(LINE_CSS)?.withAlpha?.(0.6),
+        },
+      });
+      vertices.forEach((v, i) => preview.entities.add(dot(v, i === 0)));
     }
     viewer.scene.requestRender?.();
   }
 
   function tryClose() {
-    if (vertices.length < 3) return false;
+    if (!canFinish()) return false;
     const ring = vertices.map((v) => ({ lon: v.lon, lat: v.lat }));
     if (onRing(ring) === false) return false;
     vertices = [];
@@ -100,7 +204,17 @@ export function initPolygonTool({
       return;
     }
     vertices.push(point);
+    cursor = { lon: point.lon, lat: point.lat };
     drawPreview();
+    notify();
+  };
+
+  const onMove = (event) => {
+    if (!active || destroyed || !vertices.length) return;
+    const point = worldAt(event?.endPosition ?? event?.position);
+    if (!point) return;
+    cursor = { lon: point.lon, lat: point.lat };
+    viewer.scene.requestRender?.();
   };
 
   const onDouble = (event) => {
@@ -110,16 +224,30 @@ export function initPolygonTool({
       const last = vertices[vertices.length - 1];
       if (
         Math.hypot(event.position.x - last.x, event.position.y - last.y) <=
-        CLOSE_PX
+        DOUBLE_CLICK_PX
       ) {
         vertices.pop();
       }
     } else if (vertices.length) {
       vertices.pop();
     }
-    if (!tryClose() && vertices.length < 3) onCancel?.('short');
+    if (!tryClose() && vertices.length < MIN_CORNERS) onCancel?.('short');
     drawPreview();
+    notify();
   };
+
+  function undo() {
+    if (!active || destroyed || !vertices.length) return false;
+    vertices.pop();
+    drawPreview();
+    notify();
+    return true;
+  }
+
+  function finish() {
+    if (!active || destroyed) return false;
+    return tryClose();
+  }
 
   const onKey = (event) => {
     if (!active || destroyed) return;
@@ -129,11 +257,19 @@ export function initPolygonTool({
       cancel('escape');
       return;
     }
+    if (isTypingTarget(event)) return;
     if (event.key === 'Backspace') {
       event.preventDefault?.();
       event.stopImmediatePropagation?.();
-      vertices.pop();
-      drawPreview();
+      undo();
+      return;
+    }
+    if (event.key === 'Enter') {
+      // Consumed even with too few corners, so a focused button does not
+      // also fire (a focused DRAW POLYGON would cancel the drawing).
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+      finish();
     }
   };
 
@@ -145,6 +281,7 @@ export function initPolygonTool({
       onDouble,
       cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK,
     );
+    handler.setInputAction(onMove, cesium.ScreenSpaceEventType.MOUSE_MOVE);
     const stock = viewer.screenSpaceEventHandler;
     if (stock) {
       savedSingleClick =
@@ -205,15 +342,18 @@ export function initPolygonTool({
       }
       active = true;
       vertices = [];
+      cursor = null;
       bindScene();
     } else {
       vertices = [];
+      cursor = null;
       releaseScene();
       releasePointer(lease);
       lease = null;
       active = false;
     }
     onActive?.(active);
+    notify();
     return active;
   }
 
@@ -227,8 +367,11 @@ export function initPolygonTool({
   return {
     start: () => !destroyed && setActive(true),
     cancel,
+    finish,
+    undo,
     isActive: () => active,
     vertexCount: () => vertices.length,
+    canFinish: () => active && canFinish(),
     destroy() {
       if (destroyed) return;
       if (active) setActive(false);

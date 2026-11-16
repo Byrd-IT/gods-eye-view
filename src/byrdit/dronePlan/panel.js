@@ -36,6 +36,7 @@ import { initImageryBoxTool } from '../../ui/imageryBoxTool.js';
 import { createSlider } from '../../ui/slider.js';
 import { assembleAreaPlan, distanceToAreasM, planAreas } from './areas.js';
 import { initPolygonTool } from './polygonTool.js';
+import { initAreaEditTool } from './areaEditTool.js';
 import { validateDroneBox } from './limits.js';
 import { MAX_LISTED, checkConflicts } from './conflicts.js';
 import {
@@ -700,6 +701,7 @@ export function initDronePlan({
     },
     onActive: (active) => {
       ui.drawButton.setAttribute('aria-pressed', String(active));
+      syncAreaEditButtons();
       if (active) status(t('Press on the ground and drag a box'), 'info');
     },
   });
@@ -806,17 +808,128 @@ export function initDronePlan({
   }
 
   function showCommitted() {
-    const onlyRect = state.areas.length === 1 && state.areas[0].kind === 'rect';
+    // The area being edited is drawn live by the edit tool instead.
+    const editing = areaEditTool?.areaId() ?? null;
+    const shown = editing
+      ? state.areas.filter((item) => item.id !== editing)
+      : state.areas;
+    const onlyRect = shown.length === 1 && shown[0].kind === 'rect';
     if (onlyRect) {
-      preview.showBox(state.areas[0].box);
+      preview.showBox(shown[0].box);
       preview.showAreas(null);
     } else {
       preview.showBox(null);
-      preview.showAreas(state.areas);
+      preview.showAreas(shown);
     }
   }
 
+  /** Edit buttons of the rows on screen; renderAreas refills it. */
+  let editButtons = [];
+
+  /** Keep the draw/edit buttons in step with which tool is running. */
+  function syncAreaEditButtons() {
+    const drawing = Boolean(boxTool?.isActive() || polygonTool?.isActive());
+    const editing = areaEditTool?.areaId() ?? null;
+    for (const button of editButtons) {
+      const mine = button.getAttribute('data-edit-area') === editing;
+      button.setAttribute('aria-pressed', String(mine));
+      button.disabled = drawing;
+      button.setAttribute(
+        'title',
+        drawing
+          ? t('Finish drawing first')
+          : t('Drag the corners to reshape this area'),
+      );
+    }
+    const drawingPolygon = Boolean(polygonTool?.isActive());
+    if (ui.polygonFinish) {
+      const can = Boolean(polygonTool?.canFinish());
+      ui.polygonFinish.hidden = !drawingPolygon;
+      ui.polygonFinish.disabled = !can;
+      ui.polygonFinish.setAttribute(
+        'title',
+        can ? t('Close the polygon') : t('Needs 3 corners'),
+      );
+      ui.polygonUndo.hidden = !drawingPolygon;
+      ui.polygonUndo.disabled = !(polygonTool?.vertexCount() > 0);
+    }
+    if (ui.removeCornerButton) {
+      const editedArea = state.areas.find((item) => item.id === editing);
+      ui.removeCornerButton.hidden = editedArea?.kind !== 'polygon';
+      const can = Boolean(areaEditTool?.canRemoveCorner());
+      ui.removeCornerButton.disabled = !can;
+      ui.removeCornerButton.setAttribute(
+        'title',
+        can ? t('Remove the selected corner') : t('Click a corner first'),
+      );
+    }
+  }
+
+  /** Start or stop editing an area's shape on the globe. */
+  function editArea(id, { toggle = true } = {}) {
+    const area = state.areas.find((item) => item.id === id);
+    if (!area || !areaEditTool) return false;
+    if (boxTool?.isActive() || polygonTool?.isActive()) {
+      status(t('Finish drawing first'), 'warn');
+      return false;
+    }
+    if (areaEditTool.isActive() && areaEditTool.areaId() === id) {
+      if (!toggle) return true;
+      areaEditTool.cancel('done');
+      return false;
+    }
+    takeoffTool?.cancel('switch');
+    targetTool?.cancel('switch');
+    pathTool?.cancel('switch');
+    obstacleTool?.cancel('switch');
+    if (!areaEditTool.start(area)) {
+      status(t('Another tool is using the pointer. Close it first'), 'warn');
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * An edited shape goes through the same checks as a newly drawn area and
+   * the same replan. False refuses it (the tool puts the old shape back).
+   */
+  function commitAreaEdit(id, next) {
+    const area = state.areas.find((item) => item.id === id);
+    if (!area) return false;
+    if (next.kind === 'polygon') {
+      const probe = planAreas(
+        [{ id: 'probe', name: 'probe', kind: 'polygon', ring: next.ring }],
+        state.options,
+      );
+      if (probe.error) {
+        status(probe.message || planErrorText(probe.error), 'warn');
+        return false;
+      }
+      area.ring = next.ring.map((p) => ({ lon: p.lon, lat: p.lat }));
+      area.box = probe.box;
+    } else {
+      const checked = validateDroneBox(next.box);
+      if (!checked.ok) {
+        status(checked.message, 'warn');
+        return false;
+      }
+      area.box = checked.box;
+    }
+    state.box = state.areas.at(-1)?.box ?? null;
+    if (
+      state.takeoff &&
+      distanceToAreasM(state.areas, state.takeoff) > MAX_TAKEOFF_FROM_BOX_M
+    ) {
+      state.takeoff = null;
+    }
+    showCommitted();
+    status('');
+    schedule(0);
+    return true;
+  }
+
   function addRect(box, { replace = false, clearTakeoff = replace } = {}) {
+    if (replace) areaEditTool?.cancel('replace');
     const id = replace ? 'area-1' : areaId();
     const area = {
       id,
@@ -882,14 +995,41 @@ export function initDronePlan({
     },
     onActive: (active) => {
       ui.polygonButton?.setAttribute('aria-pressed', String(active));
+      syncAreaEditButtons();
       if (active) {
         status(
           t(
-            'Click corners on the ground. Double-click or click the first corner to close. Esc cancels. Backspace removes the last corner.',
+            'Click corners. Click the first dot, press Enter, or use FINISH to close. Backspace undoes.',
           ),
           'info',
         );
       }
+    },
+    onChange: () => syncAreaEditButtons(),
+  });
+
+  // Editing a drawn area: drag its corners or centre, add and remove corners.
+  const areaEditTool = initAreaEditTool({
+    viewer,
+    cesium,
+    documentRef: doc,
+    onCommit: (id, shape) => commitAreaEdit(id, shape),
+    onReject: (message) => status(message, 'warn'),
+    onChange: () => syncAreaEditButtons(),
+    onActive: (active) => {
+      showCommitted();
+      syncAreaEditButtons();
+      if (active) {
+        status(
+          t(
+            'Drag a corner to reshape, the middle dot to move the area. Click a small dot to add a corner. Esc finishes.',
+          ),
+          'info',
+        );
+      }
+    },
+    onExit: (reason) => {
+      if (reason === 'escape' || reason === 'done') status('');
     },
   });
 
@@ -1099,6 +1239,7 @@ export function initDronePlan({
     }
     boxTool?.cancel('switch');
     polygonTool?.cancel('switch');
+    areaEditTool?.cancel('switch');
     takeoffTool?.cancel('switch');
     targetTool?.cancel('switch');
     pathTool?.cancel('switch');
@@ -1302,6 +1443,7 @@ export function initDronePlan({
   function startObstaclePick({ toggle = true } = {}) {
     boxTool?.cancel('switch');
     polygonTool?.cancel('switch');
+    areaEditTool?.cancel('switch');
     takeoffTool?.cancel('switch');
     targetTool?.cancel('switch');
     pathTool?.cancel('switch');
@@ -1441,6 +1583,7 @@ export function initDronePlan({
     }
     boxTool?.cancel('switch');
     polygonTool?.cancel('switch');
+    areaEditTool?.cancel('switch');
     takeoffTool?.cancel('switch');
     if (targetTool?.isActive()) {
       if (!toggle) return true;
@@ -2016,6 +2159,39 @@ export function initDronePlan({
         ),
       },
     });
+    ui.polygonFinish = el(doc, 'button', host, {
+      cls: 'data-toggle-chip',
+      text: t('FINISH'),
+      attrs: {
+        type: 'button',
+        'data-action': 'finish-polygon',
+        title: t('Needs 3 corners'),
+      },
+    });
+    ui.polygonUndo = el(doc, 'button', host, {
+      cls: 'data-toggle-chip',
+      text: t('UNDO LAST CORNER'),
+      attrs: {
+        type: 'button',
+        'data-action': 'undo-polygon-corner',
+        title: t('Remove the last corner'),
+      },
+    });
+    ui.removeCornerButton = el(doc, 'button', host, {
+      cls: 'data-toggle-chip',
+      text: t('REMOVE CORNER'),
+      attrs: {
+        type: 'button',
+        'data-action': 'remove-corner',
+        title: t('Click a corner first'),
+      },
+    });
+    ui.polygonFinish.hidden = true;
+    ui.polygonFinish.disabled = true;
+    ui.polygonUndo.hidden = true;
+    ui.polygonUndo.disabled = true;
+    ui.removeCornerButton.hidden = true;
+    ui.removeCornerButton.disabled = true;
     ui.areas = el(doc, 'div', host, { cls: 'gev-dp-areas' });
     ui.library = el(doc, 'div', ui.steps.export.body, {
       cls: 'gev-dp-library-host',
@@ -3136,6 +3312,15 @@ export function initDronePlan({
     });
     ui.drawButton.addEventListener('click', () => drawBox());
     ui.polygonButton.addEventListener('click', () => drawPolygon());
+    ui.polygonFinish.addEventListener('click', () => {
+      polygonTool?.finish();
+    });
+    ui.polygonUndo.addEventListener('click', () => {
+      polygonTool?.undo();
+    });
+    ui.removeCornerButton.addEventListener('click', () => {
+      areaEditTool?.removeSelectedCorner();
+    });
     ui.closeButton.addEventListener('click', () => close());
     ui.takeoffButton.addEventListener('click', () => {
       startTakeoffPick();
@@ -5191,7 +5376,11 @@ export function initDronePlan({
 
   function renderAreas() {
     ui.areas.replaceChildren();
-    if (!state.areas.length) return;
+    editButtons = [];
+    if (!state.areas.length) {
+      syncAreaEditButtons();
+      return;
+    }
     const heading = el(doc, 'p', ui.areas, { cls: 'gev-dp-areas-label' });
     heading.textContent = t('Areas');
     for (const area of state.areas) {
@@ -5216,6 +5405,20 @@ export function initDronePlan({
       const kind = el(doc, 'span', row, { cls: 'gev-dp-area-kind' });
       kind.textContent =
         area.kind === 'polygon' ? t('Polygon') : t('Rectangle');
+      const edit = el(doc, 'button', row, {
+        cls: 'data-toggle-chip',
+        text: t('EDIT'),
+        attrs: {
+          type: 'button',
+          'data-action': 'edit-area',
+          'data-edit-area': area.id,
+          'aria-pressed': 'false',
+        },
+      });
+      edit.addEventListener('click', () => {
+        editArea(area.id);
+      });
+      editButtons.push(edit);
       const remove = el(doc, 'button', row, {
         cls: 'data-toggle-chip',
         text: t('Remove'),
@@ -5225,6 +5428,7 @@ export function initDronePlan({
         removeArea(area.id);
       });
     }
+    syncAreaEditButtons();
   }
 
   const stat = (label, value) => {
@@ -5994,6 +6198,7 @@ export function initDronePlan({
   function drawBox({ toggle = true } = {}) {
     takeoffTool?.cancel('switch');
     polygonTool?.cancel('switch');
+    areaEditTool?.cancel('switch');
     if (boxTool?.isActive()) {
       if (!toggle) return true;
       boxTool.cancel('cancel');
@@ -6009,6 +6214,7 @@ export function initDronePlan({
   function drawPolygon({ toggle = true } = {}) {
     takeoffTool?.cancel('switch');
     boxTool?.cancel('switch');
+    areaEditTool?.cancel('switch');
     if (polygonTool?.isActive()) {
       if (!toggle) return true;
       polygonTool.cancel('cancel');
@@ -6034,6 +6240,7 @@ export function initDronePlan({
     planToken += 1;
     boxTool?.cancel('close');
     polygonTool?.cancel('close');
+    areaEditTool?.cancel('close');
     takeoffTool?.cancel('close');
     targetTool?.cancel('close');
     pathTool?.cancel('close');
@@ -6087,6 +6294,7 @@ export function initDronePlan({
       state.open = false;
       boxTool?.cancel('close');
       polygonTool?.cancel('close');
+      areaEditTool?.cancel('close');
       takeoffTool?.cancel('close');
       targetTool?.cancel('close');
       pathTool?.cancel('close');
@@ -6116,6 +6324,7 @@ export function initDronePlan({
     const plan = readPlan(raw);
     boxTool?.cancel('load');
     polygonTool?.cancel('load');
+    areaEditTool?.cancel('load');
     takeoffTool?.cancel('load');
     targetTool?.cancel('load');
     pathTool?.cancel('load');
@@ -6409,6 +6618,7 @@ export function initDronePlan({
     }
     boxTool?.cancel('switch');
     polygonTool?.cancel('switch');
+    areaEditTool?.cancel('switch');
     if (takeoffTool?.isActive()) {
       if (!toggle) return true;
       takeoffTool.cancel('cancel');
@@ -6419,6 +6629,7 @@ export function initDronePlan({
 
   function removeArea(id) {
     if (!state.areas.some((item) => item.id === id)) return false;
+    if (areaEditTool?.areaId() === id) areaEditTool.cancel('remove');
     state.areas = state.areas.filter((item) => item.id !== id);
     state.box = state.areas.at(-1)?.box ?? null;
     if (
@@ -6464,6 +6675,7 @@ export function initDronePlan({
     replan,
     drawBox,
     drawPolygon,
+    editArea,
     useRecommended,
     applyOptions,
     updateOrbitTarget,
@@ -6499,6 +6711,7 @@ export function initDronePlan({
       cardObserver?.disconnect();
       boxTool?.destroy();
       polygonTool?.destroy();
+      areaEditTool?.destroy();
       takeoffTool?.destroy();
       targetTool?.destroy();
       pathTool?.destroy();
