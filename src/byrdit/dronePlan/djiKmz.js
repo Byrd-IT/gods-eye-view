@@ -115,7 +115,9 @@ function readWaypoint(mark) {
     },
     turn: {
       mode: textOf(turn, 'wpml:waypointTurnMode'),
-      dampingDistM: num(textOf(turn, 'wpml:waypointTurnDampingDist')),
+      // Absent means 0: DJI only needs the distance for a coordinate turn or a
+      // straight pass-through, and the compact export leaves out a 0.
+      dampingDistM: num(textOf(turn, 'wpml:waypointTurnDampingDist')) ?? 0,
     },
     gimbalPitchDeg: num(textOf(mark, 'wpml:waypointGimbalPitchAngle')),
     groups: kids(mark, 'wpml:actionGroup').map(readGroup),

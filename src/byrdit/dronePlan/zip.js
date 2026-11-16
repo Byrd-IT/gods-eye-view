@@ -4,6 +4,9 @@
  * needs: STORED (uncompressed) entries with a correct CRC-32, which every unzip
  * tool and DJI Fly read. The reader handles the same subset and exists so the
  * tests (and the QA script) can open what the writer produced.
+ *
+ * makeZipDeflated is the one asynchronous exception: DEFLATE entries for the
+ * opt-in compact export only. The default export still uses makeZip.
  */
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -261,6 +264,115 @@ export async function readZipAsync(bytes, { only = null } = {}) {
     at += 46 + nameLen + extraLen + commentLen;
   }
   return files;
+}
+
+async function deflateRaw(data) {
+  const stream = new Blob([data])
+    .stream()
+    .pipeThrough(new CompressionStream('deflate-raw'));
+  const reader = stream.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+}
+
+/**
+ * Build a ZIP archive with DEFLATE-compressed entries (method 8): the
+ * compressed counterpart of makeZip, for the opt-in compact export. It is
+ * asynchronous because the platform's CompressionStream is. Each entry is
+ * deflated, and kept STORED (method 0) when that is not smaller (a JPEG or an
+ * inner KMZ). The CRC-32 is always of the UNCOMPRESSED data; the local header
+ * and the central directory both carry the compressed and uncompressed size
+ * (no data descriptor). makeZip, the default export path, is untouched.
+ * @param {{ name: string, data: string | Uint8Array }[]} entries
+ * @param {Date} [when] Timestamp stored on every entry.
+ * @returns {Promise<Uint8Array>}
+ */
+export async function makeZipDeflated(entries, when = new Date()) {
+  const { time, day } = dosDateTime(when);
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  const push = (bytes) => {
+    chunks.push(bytes);
+    offset += bytes.length;
+  };
+  for (const entry of entries) {
+    const name = textEncoder.encode(entry.name);
+    const data = toBytes(entry.data);
+    const crc = crc32(data);
+    const deflated = data.length ? await deflateRaw(data) : data;
+    const method = deflated.length < data.length ? 8 : 0;
+    const packed = method === 8 ? deflated : data;
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(6, 0x0800, true); // UTF-8 names
+    local.setUint16(8, method, true);
+    local.setUint16(10, time, true);
+    local.setUint16(12, day, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, packed.length, true);
+    local.setUint32(22, data.length, true);
+    local.setUint16(26, name.length, true);
+    local.setUint16(28, 0, true);
+    central.push({
+      name,
+      crc,
+      method,
+      packed: packed.length,
+      size: data.length,
+      offset,
+    });
+    push(new Uint8Array(local.buffer));
+    push(name);
+    push(packed);
+  }
+  const centralStart = offset;
+  for (const c of central) {
+    const head = new DataView(new ArrayBuffer(46));
+    head.setUint32(0, 0x02014b50, true);
+    head.setUint16(4, 20, true);
+    head.setUint16(6, 20, true);
+    head.setUint16(8, 0x0800, true);
+    head.setUint16(10, c.method, true);
+    head.setUint16(12, time, true);
+    head.setUint16(14, day, true);
+    head.setUint32(16, c.crc, true);
+    head.setUint32(20, c.packed, true);
+    head.setUint32(24, c.size, true);
+    head.setUint16(28, c.name.length, true);
+    head.setUint32(42, c.offset, true);
+    push(new Uint8Array(head.buffer));
+    push(c.name);
+  }
+  const centralSize = offset - centralStart;
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, central.length, true);
+  end.setUint16(10, central.length, true);
+  end.setUint32(12, centralSize, true);
+  end.setUint32(16, centralStart, true);
+  push(new Uint8Array(end.buffer));
+  const out = new Uint8Array(offset);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
 }
 
 export { crc32 };

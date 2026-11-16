@@ -4677,5 +4677,8 @@
   "BROWSE DATA LIBRARY": "تصفّح مكتبة البيانات",
   "Selected and neighbors": "المحددة والمجاورة",
   "n/a": "غير متاح",
-  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "التداخل مع الصور المجاورة: الأمامية {front}، الخلفية {back}، اليسرى {left}، اليمنى {right}"
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "التداخل مع الصور المجاورة: الأمامية {front}، الخلفية {back}، اليسرى {left}، اليمنى {right}",
+  "Compact file (test it on your controller)": "ملف مضغوط (جرّبه على وحدة التحكم)",
+  "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "ملف KMZ أصغر لوحدة تحكم تتجمد مع الملفات الكبيرة: بلا مسافات فارغة، ومضغوط، مع حذف حقلين غير مستخدمين. غير مُتحقَّق منه على DJI Fly ووحدة التحكم: جرّبه إلى جانب ملف عادي.",
+  "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "الملفات المضغوطة غير مُتحقَّق منها: لم تُحمَّل بعد على وحدة تحكم DJI. أُزيلت المسافات الفارغة، والملف مضغوط، وحُذف الحقلان غير المستخدمين waypointPoiPoint وwaypointTurnDampingDist. تحتفظ كل نقطة بسرعتها وزاوية ميل الجيمبال الخاصة بها. نزّل ملفًا عاديًا أيضًا وقارن."
 }

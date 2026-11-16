@@ -13,8 +13,12 @@
  */
 import { getPreset } from './presets.js';
 import { recommend, recommendedOptions } from './recommend.js';
-import { makeZip } from './zip.js';
-import { bundleEntries } from './wpml.js';
+import { makeZip, makeZipDeflated } from './zip.js';
+import {
+  bundleEntries,
+  bundleEntriesCompact,
+  compactNoticeLines,
+} from './wpml.js';
 import { jobSlug } from './areas.js';
 
 export const SUITE_PASSES = Object.freeze([
@@ -96,8 +100,9 @@ export const passFolder = (index, pass) =>
   `pass-${index + 1}-${jobSlug(pass.id)}`;
 
 /** README for the all-passes ZIP. */
-export function suiteReadme(passes, when = new Date()) {
+export function suiteReadme(passes, when = new Date(), opts = {}) {
   const lines = [
+    ...(opts.compact === true ? compactNoticeLines() : []),
     'GEV Drone Flight Plan: all recommended passes',
     `Made: ${when.toISOString()}`,
     '',
@@ -153,4 +158,35 @@ export function buildSuiteZip(passes, opts = {}) {
   });
   entries.push({ name: 'README.txt', data: suiteReadme(passes, when) });
   return makeZip(entries, when);
+}
+
+/**
+ * buildSuiteZip for the opt-in compact export: every flight is a compact
+ * DEFLATE KMZ and every README opens with the compact notice. Asynchronous.
+ */
+export async function buildSuiteZipCompact(passes, opts = {}) {
+  const when = opts.when ? new Date(opts.when) : new Date();
+  const entries = [];
+  const flightCounter = { n: 0 };
+  const flightTotal = passes.reduce(
+    (sum, pass) => sum + (pass.result?.missions.length ?? 0),
+    0,
+  );
+  for (const [i, pass] of passes.entries()) {
+    if (!pass.result) continue;
+    const folder = passFolder(i, pass);
+    for (const e of await bundleEntriesCompact(pass.result, {
+      ...opts,
+      when,
+      flightCounter,
+      flightTotal,
+    })) {
+      entries.push({ name: `${folder}/${e.name}`, data: e.data });
+    }
+  }
+  entries.push({
+    name: 'README.txt',
+    data: suiteReadme(passes, when, { compact: true }),
+  });
+  return makeZipDeflated(entries, when);
 }

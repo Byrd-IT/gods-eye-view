@@ -106,7 +106,13 @@ import {
   minShutterDenominator,
   speedLimits,
 } from './speed.js';
-import { buildBundleZip, buildKmz, kmzFileName } from './wpml.js';
+import {
+  buildBundleZip,
+  buildBundleZipCompact,
+  buildKmz,
+  buildKmzDeflated,
+  kmzFileName,
+} from './wpml.js';
 import {
   flightCode,
   flightFileName,
@@ -116,7 +122,7 @@ import {
   labelStem,
 } from './missionLabel.js';
 import { renderThumb } from './missionThumb.js';
-import { buildSuiteZip, suiteOptions } from './suite.js';
+import { buildSuiteZip, buildSuiteZipCompact, suiteOptions } from './suite.js';
 import { readPlan, serializePlan } from './planDoc.js';
 import { importCheckMission } from './importShots.js';
 import { globeHeightM } from './globeHeight.js';
@@ -571,6 +577,9 @@ export function initDronePlan({
     // Controller mission ids (one per flight) and imported drone files.
     controllerIds: [],
     imports: [],
+    // The opt-in compact export (see wpml.js COMPACT_OMISSIONS): unverified on
+    // a controller, so off at every start and not saved with the plan.
+    exportCompact: false,
     // The 3D check on the globe: a visual aid, it detects nothing.
     check: {
       enabled: true,
@@ -2706,6 +2715,34 @@ export function initDronePlan({
     ui.stats = el(doc, 'dl', host, { cls: 'gev-dp-stats' });
     ui.warnings = el(doc, 'ul', host, { cls: 'gev-dp-warnings' });
     host = ui.steps.export.body;
+    const compactRow = el(doc, 'label', host, {
+      cls: 'gev-dp-row',
+      attrs: {
+        title: t(
+          'A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.',
+        ),
+      },
+    });
+    ui.compact = el(doc, 'input', null, {
+      attrs: { type: 'checkbox', 'data-export': 'compact' },
+    });
+    el(doc, 'span', compactRow, {
+      cls: 'gev-dp-label',
+      text: t('Compact file (test it on your controller)'),
+    });
+    el(doc, 'span', compactRow, { cls: 'gev-dp-control' }).append(ui.compact);
+    ui.compactNote = el(doc, 'p', host, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'compact-note' },
+      text: t(
+        'Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.',
+      ),
+    });
+    ui.compactNote.hidden = true;
+    ui.compact.addEventListener('change', () => {
+      state.exportCompact = Boolean(ui.compact.checked);
+      ui.compactNote.hidden = !state.exportCompact;
+    });
     ui.missions = el(doc, 'div', host, { cls: 'gev-dp-missions' });
     ui.note = el(doc, 'p', host, {
       cls: 'gev-dp-note',
@@ -5352,22 +5389,31 @@ export function initDronePlan({
     const label = planLabel();
     const finish = (pics) => {
       if (state.suite !== suite) return false; // replanned while waiting
-      const bytes = buildSuiteZip(suite.passes, {
+      const suiteOpts = {
         when,
         wpml: wpmlOverride(),
         controllerIds: state.controllerIds,
         label,
         previews: pics,
-      });
-      for (const pass of suite.passes) if (pass.result) checkBuilt(pass.result);
-      const stamp = label
-        ? labelStem(label)
-        : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
-      downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
-      if (label && pics.some((b) => !b)) {
-        status(t('The picture could not be drawn in this browser'), 'warn');
-      }
-      return true;
+      };
+      const emit = (bytes) => {
+        if (state.suite !== suite) return false; // replanned while compressing
+        for (const pass of suite.passes) {
+          if (pass.result) checkBuilt(pass.result);
+        }
+        const stamp = label
+          ? labelStem(label)
+          : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
+        downloadFile(`${stamp}-all-passes.zip`, bytes, 'application/zip');
+        if (label && pics.some((b) => !b)) {
+          status(t('The picture could not be drawn in this browser'), 'warn');
+        }
+        return true;
+      };
+      // The compact export compresses, which is asynchronous.
+      return state.exportCompact
+        ? buildSuiteZipCompact(suite.passes, suiteOpts).then(emit)
+        : emit(buildSuiteZip(suite.passes, suiteOpts));
     };
     const results = suite.passes.map((p) => p.result).filter(Boolean);
     const have = flightsOf(results).map((item) => previewFor(label, item));
@@ -5556,13 +5602,13 @@ export function initDronePlan({
     if (!downloadsAllowed() || !result.missions[index]) return false;
     const label = planLabel();
     const total = result.missions.length;
-    const bytes = buildKmz(result.missions[index], result.plan, {
+    const kmzOpts = {
       when,
       wpml: wpmlOverride(),
       name: label
         ? flightTitle(label, index, total)
         : `GEV Drone Flight Plan ${index + 1}/${total}`,
-    });
+    };
     const named = (result.jobs ?? []).length > 1;
     const mission = result.missions[index];
     const same = named
@@ -5580,9 +5626,16 @@ export function initDronePlan({
             when,
             named ? mission.jobName : '',
           );
-    downloadFile(fileName, bytes, 'application/vnd.google-earth.kmz');
-    library?.checkExport([{ bytes, name: fileName }], fileName);
-    return true;
+    const emit = (bytes) => {
+      if (state.result !== result) return false; // replanned while compressing
+      downloadFile(fileName, bytes, 'application/vnd.google-earth.kmz');
+      library?.checkExport([{ bytes, name: fileName }], fileName);
+      return true;
+    };
+    // The compact export compresses, which is asynchronous.
+    return state.exportCompact
+      ? buildKmzDeflated(mission, result.plan, kmzOpts).then(emit)
+      : emit(buildKmz(mission, result.plan, kmzOpts));
   }
 
   /**
@@ -5595,22 +5648,29 @@ export function initDronePlan({
     const label = planLabel();
     const finish = (pics) => {
       if (state.result !== result) return false; // replanned while waiting
-      const bytes = buildBundleZip(result, {
+      const bundleOpts = {
         when,
         wpml: wpmlOverride(),
         controllerIds: state.controllerIds,
         label,
         previews: pics,
-      });
-      const stamp = label
-        ? labelStem(label)
-        : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
-      downloadFile(`${stamp}-all.zip`, bytes, 'application/zip');
-      checkBuilt(result);
-      if (label && pics.some((b) => !b)) {
-        status(t('The picture could not be drawn in this browser'), 'warn');
-      }
-      return true;
+      };
+      const emit = (bytes) => {
+        if (state.result !== result) return false; // replanned while compressing
+        const stamp = label
+          ? labelStem(label)
+          : kmzFileName(0, 1, when).replace(/-m1of1\.kmz$/, '');
+        downloadFile(`${stamp}-all.zip`, bytes, 'application/zip');
+        checkBuilt(result);
+        if (label && pics.some((b) => !b)) {
+          status(t('The picture could not be drawn in this browser'), 'warn');
+        }
+        return true;
+      };
+      // The compact export compresses, which is asynchronous.
+      return state.exportCompact
+        ? buildBundleZipCompact(result, bundleOpts).then(emit)
+        : emit(buildBundleZip(result, bundleOpts));
     };
     const items = flightsOf([result]);
     const have = items.map((item) => previewFor(label, item));

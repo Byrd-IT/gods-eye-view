@@ -4485,5 +4485,8 @@
   "3,000 m and above": "3000 м и выше",
   "Selected and neighbors": "Выбранный и соседние",
   "n/a": "н/д",
-  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Перекрытие с соседними снимками: впереди {front}, позади {back}, слева {left}, справа {right}"
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Перекрытие с соседними снимками: впереди {front}, позади {back}, слева {left}, справа {right}",
+  "Compact file (test it on your controller)": "Компактный файл (проверьте на пульте)",
+  "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "Более компактный KMZ для пульта, который зависает на больших файлах: без пробелов, сжатый, без двух неиспользуемых полей. НЕ ПРОВЕРЕНО в DJI Fly и на пульте: попробуйте рядом с обычным файлом.",
+  "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "Компактные файлы НЕ ПРОВЕРЕНЫ: их ещё не загружали на пульт DJI. Пробелы убраны, файл сжат, неиспользуемые поля waypointPoiPoint и waypointTurnDampingDist опущены. Каждая точка сохраняет свою скорость и наклон подвеса. Скачайте также обычный файл и сравните."
 }

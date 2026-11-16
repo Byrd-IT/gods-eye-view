@@ -4197,5 +4197,8 @@
   "BROWSE DATA LIBRARY": "浏览数据资源库",
   "Selected and neighbors": "所选与相邻",
   "n/a": "不适用",
-  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "与相邻照片的重叠：前 {front}，后 {back}，左 {left}，右 {right}"
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "与相邻照片的重叠：前 {front}，后 {back}，左 {left}，右 {right}",
+  "Compact file (test it on your controller)": "精简文件（请在遥控器上测试）",
+  "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "适用于打开大文件就卡死的遥控器的较小 KMZ：无空白字符、已压缩，并省略两个未使用的字段。尚未在 DJI Fly 和遥控器上验证：请与普通文件一起试用。",
+  "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "精简文件尚未验证：还没有在 DJI 遥控器上加载过。已去掉空白字符并压缩文件，同时省略了未使用的 waypointPoiPoint 和 waypointTurnDampingDist 字段。每个航点仍保留自己的速度和云台俯仰角。请同时下载一个普通文件进行对比。"
 }

@@ -4389,5 +4389,8 @@
   "3,000 m and above": "3000 m o más",
   "Selected and neighbors": "Seleccionada y vecinas",
   "n/a": "n/d",
-  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Solapamiento con vecinas: delante {front}, detrás {back}, izquierda {left}, derecha {right}"
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Solapamiento con vecinas: delante {front}, detrás {back}, izquierda {left}, derecha {right}",
+  "Compact file (test it on your controller)": "Archivo compacto (pruébalo en tu mando)",
+  "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "Un KMZ más pequeño para un mando que se bloquea con archivos grandes: sin espacios en blanco, comprimido y sin dos campos que no se usan. SIN VERIFICAR en DJI Fly ni en el mando: pruébalo junto a un archivo normal.",
+  "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "Los archivos compactos están SIN VERIFICAR: aún no se han cargado en un mando DJI. Se quitan los espacios en blanco, el archivo se comprime y se omiten los campos sin uso waypointPoiPoint y waypointTurnDampingDist. Cada punto conserva su propia velocidad e inclinación del gimbal. Descarga también un archivo normal y compáralos."
 }
