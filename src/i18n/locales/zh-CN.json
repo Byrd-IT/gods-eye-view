@@ -4194,5 +4194,8 @@
   "Confirm: remove every added entry from Data Layers": "确认：从数据图层中移除所有已添加条目",
   "Remove every added entry from Data Layers": "从数据图层中移除所有已添加条目",
   "Showing {shown} of {total}": "显示 {shown} / {total}",
-  "BROWSE DATA LIBRARY": "浏览数据资源库"
+  "BROWSE DATA LIBRARY": "浏览数据资源库",
+  "Selected and neighbors": "所选与相邻",
+  "n/a": "不适用",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "与相邻照片的重叠：前 {front}，后 {back}，左 {left}，右 {right}"
 }

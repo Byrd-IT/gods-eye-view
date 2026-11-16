@@ -4482,5 +4482,8 @@
   "500–1,000 m": "500–1000 м",
   "1,000–2,000 m": "1000–2000 м",
   "2,000–3,000 m": "2000–3000 м",
-  "3,000 m and above": "3000 м и выше"
+  "3,000 m and above": "3000 м и выше",
+  "Selected and neighbors": "Выбранный и соседние",
+  "n/a": "н/д",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Перекрытие с соседними снимками: впереди {front}, позади {back}, слева {left}, справа {right}"
 }

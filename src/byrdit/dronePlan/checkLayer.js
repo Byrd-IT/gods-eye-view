@@ -11,7 +11,11 @@
  *   current    the footprint of the photo being stepped through, drawn
  *              stronger with an outline on top of the shaded ones
  *   frustums   the camera view pyramid from the drone to its footprint: ONE,
- *              stepped with an index, or a thinned set shown all at once
+ *              stepped with an index, a thinned set shown all at once, or the
+ *              stepped photo with its closest neighbours (see 'neighbors')
+ *   neighbors  with the camera view 'neighbors': the ground footprints of the
+ *              photos ahead, behind, left and right of the stepped one, drawn
+ *              lighter than it, whatever Photo footprints says
  *
  * Each of zone, curtain, footprints and the view pyramid has its own
  * see-through level (`options.alpha`), set by the panel's sliders.
@@ -20,6 +24,8 @@
  * buildings have no trees or power lines. Look at it over the Google 3D mesh.
  */
 import { makeFrame } from './geo.js';
+import { footprintOverlapPct } from './footprintOverlap.js';
+import { neighborPhotos } from './neighborPhotos.js';
 import { writtenSpacingM } from './planner.js';
 import {
   MAX_FOOTPRINTS,
@@ -42,6 +48,8 @@ export const CHECK_NAMES = Object.freeze({
   footprint: '3D check footprint',
   view: '3D check view',
   current: '3D check current photo',
+  neighborView: '3D check neighbor view',
+  neighborFootprint: '3D check neighbor footprint',
 });
 
 /** Today's look of each layer: the slider defaults. */
@@ -72,6 +80,19 @@ export function clampAlpha(layer, value) {
   return Math.min(range.max, Math.max(range.min, n));
 }
 
+/**
+ * How strong a neighbour photo is drawn next to the stepped one: its camera
+ * view and its footprint use this share of the stepped photo's fill.
+ */
+export const NEIGHBOR_ALPHA_RATIO = 0.5;
+/** The Camera view setting: one, thinned, the stepped photo and neighbours, off. */
+export const FRUSTUM_MODES = Object.freeze([
+  'one',
+  'thinned',
+  'neighbors',
+  'off',
+]);
+
 /** The Photo footprints setting: only the photo in view, every photo, none. */
 export const FOOTPRINT_MODES = Object.freeze(['selected', 'all', 'off']);
 
@@ -97,7 +118,14 @@ export const DEFAULT_CHECK_OPTIONS = Object.freeze({
   alpha: DEFAULT_ALPHA,
 });
 
-const LAYERS = ['zone', 'curtain', 'footprints', 'current', 'frustums'];
+const LAYERS = [
+  'zone',
+  'curtain',
+  'footprints',
+  'current',
+  'frustums',
+  'neighbors',
+];
 
 /** Drop consecutive duplicates and thin a path that is far too long. */
 function pathOf(waypoints) {
@@ -136,6 +164,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     footprints: [],
     current: [],
     frustums: [],
+    neighbors: [],
   };
   const keys = {};
 
@@ -219,6 +248,25 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     return out;
   }
 
+  /**
+   * Which flight line each photo of a plain mission is on (position in
+   * mission.waypoints -> leg number). The mission's legs list the same
+   * waypoints in the same order, but as other objects once the mission is
+   * shifted for drawing, so position (not identity) is the key. A mission
+   * with no legs, or legs that do not add up to its waypoints (an imported
+   * file), is one line (-1).
+   */
+  function legOfPosition(mission) {
+    const legs = mission.legs;
+    const total = mission.waypoints.length;
+    if (!legs?.length) return () => -1;
+    const owner = [];
+    legs.forEach((leg, li) => {
+      for (let k = 0; k < (leg.waypoints?.length ?? 0); k += 1) owner.push(li);
+    });
+    return owner.length === total ? (i) => owner[i] : () => -1;
+  }
+
   /** Every photo of every shown pass, in flight order. */
   function photoItems() {
     if (itemsVersion === version) return items;
@@ -229,7 +277,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
         if (
           legs?.some((leg) => leg.photoMode === 'interval' || lineStations(leg))
         ) {
-          for (const leg of legs) {
+          legs.forEach((leg, li) => {
             if (lineStations(leg)) {
               const spacing = writtenSpacingM(leg.photoSpacingM);
               for (const p of intervalPhotos(leg)) {
@@ -239,6 +287,8 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
                   mi,
                   wp: p.wp,
                   i: 0,
+                  li,
+                  kind: leg.kind,
                   headingDeg: p.headingDeg,
                   estimated: leg.captureMode === 'timed',
                   captureMode: leg.captureMode,
@@ -253,21 +303,41 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
                   mi,
                   wp: p.wp,
                   i: 0,
+                  li,
+                  kind: leg.kind,
                   headingDeg: p.headingDeg,
                 });
               }
             } else {
               leg.waypoints.forEach((wp) => {
                 if (wp.photo !== false)
-                  items.push({ pass, mission, mi, wp, i: wp.index ?? 0 });
+                  items.push({
+                    pass,
+                    mission,
+                    mi,
+                    wp,
+                    i: wp.index ?? 0,
+                    li,
+                    kind: leg.kind,
+                  });
               });
             }
-          }
+          });
           return;
         }
+        const legAt = legOfPosition(mission);
         mission.waypoints.forEach((wp, i) => {
           if (wp.photo === false) return;
-          items.push({ pass, mission, mi, wp, i });
+          const li = legAt(i);
+          items.push({
+            pass,
+            mission,
+            mi,
+            wp,
+            i,
+            li,
+            kind: mission.legs?.[li]?.kind,
+          });
         });
       });
     }
@@ -338,7 +408,13 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
 
   function buildFootprints() {
     const all = photoItems();
+    // 'Selected and neighbors' draws those photos itself: not twice.
+    const own =
+      options.frustum === 'neighbors' && all.length
+        ? new Set([clampIndex(), ...neighborIndexes()])
+        : null;
     for (const k of thinIndexes(all.length, MAX_FOOTPRINTS)) {
+      if (own?.has(k)) continue;
       const item = all[k];
       const fp = cornersOf(item);
       if (fp.empty) continue;
@@ -394,19 +470,24 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     });
   }
 
-  function buildPyramid(item) {
+  /**
+   * The camera view of one photo. `neighbor` draws it at NEIGHBOR_ALPHA_RATIO
+   * of the usual strength (the neighbours of the stepped photo).
+   */
+  function buildPyramid(item, neighbor = false) {
     const fp = cornersOf(item);
     if (fp.empty) return;
+    const name = neighbor ? CHECK_NAMES.neighborView : CHECK_NAMES.view;
     const apex = [item.wp.lon, item.wp.lat, fp.heightM];
     const base = fp.corners.map((c) => [c.lon, c.lat, fp.groundM]);
     const pos = (p) => cesium.Cartesian3.fromDegrees(p[0], p[1], p[2]);
-    const fill = level('view');
+    const fill = level('view') * (neighbor ? NEIGHBOR_ALPHA_RATIO : 1);
     const material = color(item.pass.color, fill);
     for (let k = 0; k < 4; k += 1) {
       const a = base[k];
       const b = base[(k + 1) % 4];
       add(lists.frustums, {
-        name: `${CHECK_NAMES.view}: ${item.pass.id}`,
+        name: `${name}: ${item.pass.id}`,
         polygon: {
           hierarchy: cesium.Cartesian3.fromDegreesArrayHeights(
             [apex, a, b].flat(),
@@ -418,7 +499,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
       });
     }
     add(lists.frustums, {
-      name: `${CHECK_NAMES.view}: ${item.pass.id} edges`,
+      name: `${name}: ${item.pass.id} edges`,
       polyline: {
         positions: [
           base[0],
@@ -451,7 +532,106 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
       for (const k of thinIndexes(all.length, MAX_FRUSTUMS)) {
         buildPyramid(all[k]);
       }
+    } else if (options.frustum === 'neighbors') {
+      // The stepped photo strong, the (up to) four around it lighter.
+      buildPyramid(all[clampIndex()]);
+      for (const k of neighborIndexes()) buildPyramid(all[k], true);
     }
+  }
+
+  /** Every photo of every pass as the neighbour search wants it. */
+  let neighborInput = null;
+  let neighborInputVersion = -1;
+  /** The stepped photo's front, back, left and right: item indexes or null. */
+  function neighborsOfSelected() {
+    const all = photoItems();
+    if (!all.length)
+      return { front: null, back: null, left: null, right: null };
+    if (neighborInputVersion !== version) {
+      neighborInput = all.map((it) => ({
+        lon: it.wp.lon,
+        lat: it.wp.lat,
+        scope: `${it.pass.id}#${it.mi}`,
+        leg: it.li,
+        kind: it.kind,
+      }));
+      neighborInputVersion = version;
+    }
+    return neighborPhotos(neighborInput, clampIndex());
+  }
+  /** The item indexes that exist, one each. */
+  const neighborIndexes = () => [
+    ...new Set(Object.values(neighborsOfSelected()).filter((k) => k !== null)),
+  ];
+
+  /**
+   * The ground footprints of the neighbours (the stepped photo's own is the
+   * 'current' layer): lighter than it and outlined in the pass colour, not
+   * white, so the two read apart.
+   */
+  function buildNeighbors() {
+    const all = photoItems();
+    for (const k of neighborIndexes()) {
+      const item = all[k];
+      const fp = cornersOf(item);
+      if (fp.empty) continue;
+      add(lists.neighbors, {
+        name: `${CHECK_NAMES.neighborFootprint}: ${item.pass.id}`,
+        polygon: {
+          hierarchy: cesium.Cartesian3.fromDegreesArray(
+            fp.corners.flatMap((c) => [c.lon, c.lat]),
+          ),
+          material: color(
+            item.pass.color,
+            Math.max(CURRENT_FILL_ALPHA, level('footprint')) *
+              NEIGHBOR_ALPHA_RATIO,
+          ),
+          classificationType: cesium.ClassificationType.BOTH,
+        },
+      });
+      const ring = [...fp.corners, fp.corners[0]];
+      add(lists.neighbors, {
+        name: `${CHECK_NAMES.neighborFootprint}: ${item.pass.id} outline`,
+        polyline: {
+          positions: cesium.Cartesian3.fromDegreesArray(
+            ring.flatMap((c) => [c.lon, c.lat]),
+          ),
+          width: 2,
+          clampToGround: true,
+          classificationType: cesium.ClassificationType.BOTH,
+          material: color(
+            item.pass.color,
+            CURRENT_OUTLINE_ALPHA * NEIGHBOR_ALPHA_RATIO,
+          ),
+        },
+      });
+    }
+  }
+
+  /**
+   * For the stepped photo and each existing neighbour: its item index and how
+   * much of the stepped photo's ground footprint it covers, in percent. The
+   * share is null (not known) when either footprint is empty or clipped at the
+   * horizon reach, or is not a usable quadrilateral.
+   */
+  function neighborOverlaps(all, selectedFp) {
+    const usable = (fp) => fp && !fp.empty && !fp.clipped;
+    const out = {};
+    for (const [side, k] of Object.entries(neighborsOfSelected())) {
+      if (k === null) {
+        out[side] = null;
+        continue;
+      }
+      const fp = cornersOf(all[k]);
+      out[side] = {
+        index: k,
+        overlapPct:
+          usable(selectedFp) && usable(fp)
+            ? footprintOverlapPct(selectedFp.corners, fp.corners)
+            : null,
+      };
+    }
+    return out;
   }
 
   const frameKey = () =>
@@ -475,19 +655,28 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
       curtain: on && options.curtain ? `${version}|${level('curtain')}` : '',
       footprints:
         wantFrame && options.footprints === 'all'
-          ? `${version}|${frameKey()}|${level('footprint')}`
+          ? `${version}|${frameKey()}|${level('footprint')}|${
+              options.frustum === 'neighbors' ? `n${clampIndex()}` : ''
+            }`
           : '',
       // The photo in view shows for 'selected' and 'all', whatever the camera
       // view is; only 'off' hides it.
       current:
-        wantFrame && options.footprints !== 'off'
+        wantFrame &&
+        (options.footprints !== 'off' || options.frustum === 'neighbors')
           ? `${version}|${frameKey()}|${level('footprint')}|${clampIndex()}`
           : '',
       frustums:
         wantFrame && options.frustum !== 'off'
           ? `${version}|${frameKey()}|${options.frustum}|${level('view')}|${
-              options.frustum === 'one' ? clampIndex() : ''
+              options.frustum === 'one' || options.frustum === 'neighbors'
+                ? clampIndex()
+                : ''
             }`
+          : '',
+      neighbors:
+        wantFrame && options.frustum === 'neighbors'
+          ? `${version}|${frameKey()}|${level('footprint')}|${clampIndex()}`
           : '',
     };
   }
@@ -498,6 +687,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
     footprints: buildFootprints,
     current: buildCurrent,
     frustums: buildFrustums,
+    neighbors: buildNeighbors,
   };
 
   function sync() {
@@ -537,6 +727,10 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
       return {
         count: all.length,
         index,
+        neighbors:
+          options.frustum === 'neighbors' && options.frame
+            ? neighborOverlaps(all, fp)
+            : null,
         current: {
           passId: item.pass.id,
           pitchDeg: item.wp.pitchDeg ?? null,
@@ -567,6 +761,7 @@ export function createCheckLayer({ dataSource, cesium, requestRender }) {
       footprints: lists.footprints.length,
       current: lists.current.length,
       frustums: lists.frustums.length,
+      neighbors: lists.neighbors.length,
     }),
     /** Remove every 3D check entity; the options stay. */
     clear() {

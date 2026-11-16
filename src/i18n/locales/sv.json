@@ -4290,5 +4290,8 @@
   "Confirm: remove every added entry from Data Layers": "Bekräfta: ta bort alla tillagda poster från Datalager",
   "Remove every added entry from Data Layers": "Ta bort alla tillagda poster från Datalager",
   "Showing {shown} of {total}": "Visar {shown} av {total}",
-  "BROWSE DATA LIBRARY": "BLÄDDRA I DATABIBLIOTEKET"
+  "BROWSE DATA LIBRARY": "BLÄDDRA I DATABIBLIOTEKET",
+  "Selected and neighbors": "Vald och grannar",
+  "n/a": "saknas",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Överlapp med grannar: framför {front}, bakom {back}, vänster {left}, höger {right}"
 }

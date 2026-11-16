@@ -4386,5 +4386,8 @@
   "Confirm: remove every added entry from Data Layers": "Confirmar: remover de \"Camadas de dados\" todas as entradas adicionadas",
   "Remove every added entry from Data Layers": "Remover de \"Camadas de dados\" todas as entradas adicionadas",
   "Showing {shown} of {total}": "Mostrando {shown} de {total}",
-  "BROWSE DATA LIBRARY": "EXPLORAR BIBLIOTECA DE DADOS"
+  "BROWSE DATA LIBRARY": "EXPLORAR BIBLIOTECA DE DADOS",
+  "Selected and neighbors": "Selecionada e vizinhas",
+  "n/a": "n/d",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Sobreposição com as vizinhas: à frente {front}, atrás {back}, esquerda {left}, direita {right}"
 }

@@ -1515,6 +1515,77 @@ test('3D check: the photo slider steps one pyramid through the plan and the read
   w.handle.destroy();
 });
 
+test("3D check: 'Selected and neighbors' is a Camera view choice that draws five photos and reads out the overlap", async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const view = checkBox(w, 'frustum');
+  assert.deepEqual(
+    view.children.map((o) => [o.getAttribute('value'), o.textContent]),
+    [
+      ['one', 'One at a time'],
+      ['thinned', 'Several, thinned'],
+      ['neighbors', 'Selected and neighbors'],
+      ['off', 'Off'],
+    ],
+  );
+  assert.equal(view.value, 'one', 'the default is unchanged');
+  const readout = () =>
+    w.find((n) => n.getAttribute('data-role') === 'check-readout')[0]
+      .textContent;
+  assert.doesNotMatch(readout(), /Overlap with neighbours/);
+  const slider = checkSlider(w, 'photo');
+  view.value = 'neighbors';
+  view.dispatch('change');
+  assert.equal(
+    checkBox(w, 'frustum').value,
+    'neighbors',
+    'data-check roundtrip',
+  );
+  assert.equal(slider.disabled, false, 'Step photos still steps');
+  // Step to a photo with a neighbour on every side.
+  let n = 2;
+  for (; n < Number(slider.max); n += 1) {
+    slider.value = String(n);
+    slider.dispatch('input');
+    if (checkOf(w, 'neighbor view').length === 20) break;
+  }
+  assert.equal(checkOf(w, 'view').length, 5, 'the stepped photo, strong');
+  assert.equal(checkOf(w, 'neighbor view').length, 20, 'four neighbours');
+  assert.equal(
+    checkOf(w, 'neighbor footprint').filter((e) => e.polygon).length,
+    4,
+  );
+  assert.equal(
+    checkOf(w, 'footprint').length,
+    0,
+    'no bulk footprints with Photo footprints on Selected',
+  );
+  assert.match(readout(), new RegExp(`Photo ${n} of`));
+  assert.match(
+    readout(),
+    /Overlap with neighbours: ahead \d+%, behind \d+%, left \d+%, right \d+%$/,
+  );
+  // The first photo has nothing behind it.
+  slider.value = '1';
+  slider.dispatch('input');
+  assert.match(readout(), /behind none,/);
+  // Photo footprints Off: the neighbours still show.
+  const fp = checkBox(w, 'footprints');
+  fp.value = 'off';
+  fp.dispatch('change');
+  // Photo 1 has only an ahead and a right neighbour: two footprints, each
+  // with its outline.
+  assert.equal(checkOf(w, 'neighbor footprint').length, 4);
+  assert.equal(checkOf(w, 'current').length, 2);
+  // Back to One at a time: the extras go and the readout loses the overlap.
+  view.value = 'one';
+  view.dispatch('change');
+  assert.equal(checkOf(w, 'neighbor').length, 0);
+  assert.doesNotMatch(readout(), /Overlap with neighbours/);
+  w.handle.destroy();
+});
+
 test('3D check follows each pass checkbox and goes with replan and destroy', async () => {
   const w = setup();
   w.handle.setBox(boxM(300, 200));

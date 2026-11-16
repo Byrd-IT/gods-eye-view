@@ -4674,5 +4674,8 @@
   "Confirm: remove every added entry from Data Layers": "تأكيد: إزالة كل الإدخالات المُضافة من طبقات البيانات",
   "Remove every added entry from Data Layers": "إزالة كل الإدخالات المُضافة من طبقات البيانات",
   "Showing {shown} of {total}": "عرض {shown} من {total}",
-  "BROWSE DATA LIBRARY": "تصفّح مكتبة البيانات"
+  "BROWSE DATA LIBRARY": "تصفّح مكتبة البيانات",
+  "Selected and neighbors": "المحددة والمجاورة",
+  "n/a": "غير متاح",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "التداخل مع الصور المجاورة: الأمامية {front}، الخلفية {back}، اليسرى {left}، اليمنى {right}"
 }

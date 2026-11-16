@@ -2598,6 +2598,7 @@ export function initDronePlan({
       [
         ['one', t('One at a time')],
         ['thinned', t('Several, thinned')],
+        ['neighbors', t('Selected and neighbors')],
         ['off', t('Off')],
       ],
       t('Camera view'),
@@ -3435,7 +3436,9 @@ export function initDronePlan({
     ui.checkPhoto.max = String(Math.max(1, info.count));
     ui.checkPhoto.value = String(info.index + 1);
     ui.checkPhoto.disabled =
-      !c.enabled || c.frustum !== 'one' || info.count < 1;
+      !c.enabled ||
+      (c.frustum !== 'one' && c.frustum !== 'neighbors') ||
+      info.count < 1;
     const cur = info.current;
     if (!c.enabled || !cur) {
       ui.checkReadout.textContent =
@@ -3486,6 +3489,31 @@ export function initDronePlan({
     if (fp?.clipped) {
       ui.checkReadout.textContent += ` ${t('Part of the view is above the horizon, so the far edge is cut short.')}`;
     }
+    if (c.frustum === 'neighbors' && info.neighbors) {
+      ui.checkReadout.textContent += ` ${neighborOverlapText(info.neighbors)}`;
+    }
+  }
+
+  /**
+   * How much of the stepped photo each neighbour covers (checkLayer info():
+   * null = no photo on that side, overlapPct null = not known).
+   */
+  function neighborOverlapText(neighbors) {
+    const share = (side) =>
+      !side
+        ? t('none')
+        : side.overlapPct === null
+          ? t('n/a')
+          : `${num(Math.round(side.overlapPct))}%`;
+    return t(
+      'Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}',
+      {
+        front: share(neighbors.front),
+        back: share(neighbors.back),
+        left: share(neighbors.left),
+        right: share(neighbors.right),
+      },
+    );
   }
 
   function cameraPresetName(id) {

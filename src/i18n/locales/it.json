@@ -4386,5 +4386,8 @@
   "Confirm: remove every added entry from Data Layers": "Conferma: rimuovi da Livelli dati tutte le voci aggiunte",
   "Remove every added entry from Data Layers": "Rimuovi da Livelli dati tutte le voci aggiunte",
   "Showing {shown} of {total}": "Mostrati: {shown} su {total}",
-  "BROWSE DATA LIBRARY": "ESPLORA LIBRERIA DATI"
+  "BROWSE DATA LIBRARY": "ESPLORA LIBRERIA DATI",
+  "Selected and neighbors": "Selezionata e vicine",
+  "n/a": "n/d",
+  "Overlap with neighbours: ahead {front}, behind {back}, left {left}, right {right}": "Sovrapposizione con le vicine: davanti {front}, dietro {back}, sinistra {left}, destra {right}"
 }
