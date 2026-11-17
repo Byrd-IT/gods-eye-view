@@ -533,9 +533,9 @@ body.gev-drone-box .cesium-widget canvas {
 
 /* Mapping Grid (Timed): red marks on the four linked sliders, the evenly
    spaced interval ticks and the minimum shutter line. A marked row is a grid:
-   the slider and the tick share column 1, so the tick's left offset is a
-   fraction of the slider's own width (the thumb centre travels 5px in from
-   each end). The tick is aria-hidden; the text label says the same in words. */
+   the slider and the tick share column 1, and the tick is a grid item whose
+   inline-start margin (set in panel.js) is a share of that column, i.e. of the
+   slider's own width (the thumb centre travels 5px in from each end). The tick is aria-hidden; the text label says the same in words. */
 .gev-dp-control--marks {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -558,7 +558,6 @@ body.gev-drone-box .cesium-widget canvas {
   justify-self: start;
   width: 2px;
   height: 18px;
-  margin-left: -1px;
   border-radius: 1px;
   background: #ff4d4f;
   pointer-events: none;
