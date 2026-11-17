@@ -21,6 +21,7 @@ import { attachOverlays } from './overlays.js';
 import { createOverlaysMenuPanel } from './overlaysPanel.js';
 import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
 import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
+import { cesiumViewerFor } from '../cesiumViewer.js';
 
 /**
  * Entry point used by src/app/scene.js (BASEMAP.md 4.3).
@@ -73,7 +74,7 @@ export function createNotifier(sink, intervalMs = 60_000, now = Date.now) {
 
 export async function openBasemap({
   Cesium,
-  viewer,
+  viewer: sceneViewer,
   googleApiKey = '',
   googleTokens = null,
   cesiumToken = '',
@@ -84,6 +85,7 @@ export async function openBasemap({
   notify = (message) => console.info('[Basemap]', message),
   createHealthMonitor = createBasemapHealthMonitor,
 }) {
+  const viewer = cesiumViewerFor(sceneViewer);
   if (!basemapFlagOn(doc)) return null;
   // Upstream's scene is Cesium-free (renderer seam): load it here.
   Cesium ??= await import('cesium');

@@ -6,7 +6,10 @@ import {
   fetchOpenObstacles,
   lookupBoxes,
 } from './obstacleData.js';
-import { createObstacleLayer, OBSTACLE_POINTER_OWNER } from './obstacleLayer.js';
+import {
+  createObstacleLayer,
+  OBSTACLE_POINTER_OWNER,
+} from './obstacleLayer.js';
 import {
   claimPointer,
   isPointerFree,
@@ -85,7 +88,10 @@ test('fetchOpenObstacles: a failing source is reported and the other still works
   assert.deepEqual(bad.obstacles, []);
   assert.deepEqual(bad.status, { faa: 'failed', canopy: 'failed' });
   const none = await fetchOpenObstacles([AREA], {
-    fetchImpl: async () => ({ ok: true, json: async () => ({ obstacles: [] }) }),
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ obstacles: [] }),
+    }),
   });
   assert.deepEqual(none.status, { faa: 'none', canopy: 'none' });
   const skipped = await fetchOpenObstacles([], { fetchImpl });
@@ -142,7 +148,11 @@ function fakeLayer(overrides = {}) {
     },
     Cartesian3: {
       fromDegrees: (lon, lat, h) => ({ lon, lat, h }),
-      subtract: (a, b) => ({ lon: a.lon - b.lon, lat: a.lat - b.lat, h: a.h - b.h }),
+      subtract: (a, b) => ({
+        lon: a.lon - b.lon,
+        lat: a.lat - b.lat,
+        h: a.h - b.h,
+      }),
       dot: () => 0,
     },
     Cartographic: { fromDegrees: (lon, lat) => ({ lon, lat }) },
@@ -174,8 +184,28 @@ function fakeLayer(overrides = {}) {
 test('globe: one see-through column and one handle per obstacle, labelled "<kind> <h> m"', () => {
   const { layer, values, set } = fakeLayer();
   layer.set([
-    { id: 'a', kind: 'tower', lon: -95, lat: 32.5, radiusM: 6, heightM: 60, source: 'faa', estimatedHeightM: 60, userEdited: false },
-    { id: 'b', kind: 'tree', lon: -95.1, lat: 32.5, radiusM: 12, heightM: 18, source: 'user', estimatedHeightM: null, userEdited: true },
+    {
+      id: 'a',
+      kind: 'tower',
+      lon: -95,
+      lat: 32.5,
+      radiusM: 6,
+      heightM: 60,
+      source: 'faa',
+      estimatedHeightM: 60,
+      userEdited: false,
+    },
+    {
+      id: 'b',
+      kind: 'tree',
+      lon: -95.1,
+      lat: 32.5,
+      radiusM: 12,
+      heightM: 18,
+      source: 'user',
+      estimatedHeightM: null,
+      userEdited: true,
+    },
   ]);
   assert.equal(layer.count(), 2);
   const cyl = values.filter((e) => e.cylinder);
@@ -185,7 +215,10 @@ test('globe: one see-through column and one handle per obstacle, labelled "<kind
   assert.equal(cyl[0].position.h, 100 + 30, 'sits on the terrain model ground');
   assert.ok(cyl[0].cylinder.material.a < 0.5, 'see-through');
   assert.equal(values.filter((e) => e.point).length, 2);
-  assert.deepEqual(set.at(-1).map((l) => l.title), ['tower 60 m', 'tree 18 m']);
+  assert.deepEqual(
+    set.at(-1).map((l) => l.title),
+    ['tower 60 m', 'tree 18 m'],
+  );
   layer.set([]);
   assert.equal(values.length, 0);
   assert.equal(set.at(-1), null);
@@ -197,7 +230,19 @@ test('globe: a drag only starts when the pointer is free, and gives the pointer 
   const lease = claimPointer('someone-else');
   assert.ok(lease);
   const { layer } = fakeLayer();
-  layer.set([{ id: 'a', kind: 'tower', lon: -95, lat: 32.5, radiusM: 6, heightM: 60, source: 'user', estimatedHeightM: null, userEdited: true }]);
+  layer.set([
+    {
+      id: 'a',
+      kind: 'tower',
+      lon: -95,
+      lat: 32.5,
+      radiusM: 6,
+      heightM: 60,
+      source: 'user',
+      estimatedHeightM: null,
+      userEdited: true,
+    },
+  ]);
   assert.equal(layer.isDragging(), false);
   releasePointer(lease);
   assert.equal(OBSTACLE_POINTER_OWNER, 'drone-plan-obstacle-drag');
@@ -205,9 +250,16 @@ test('globe: a drag only starts when the pointer is free, and gives the pointer 
 });
 
 test('fetchOpenObstacles: a wide area is only partly read and the status says so', async () => {
-  const wide = { id: 'w', kind: 'box', box: { west: -96, south: 31, east: -94, north: 33 } };
+  const wide = {
+    id: 'w',
+    kind: 'box',
+    box: { west: -96, south: 31, east: -94, north: 33 },
+  };
   const out = await fetchOpenObstacles([wide], {
-    fetchImpl: async () => ({ ok: true, json: async () => ({ obstacles: [faaRow] }) }),
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ obstacles: [faaRow] }),
+    }),
   });
   assert.equal(out.status.faa, 'partial');
 });
@@ -217,15 +269,34 @@ import { parseBox } from '../../../server/providers/obstacles.js';
 
 test('every box the browser sends is accepted by the server', () => {
   const areas = [
-    { id: 'a', kind: 'box', box: { west: -95.5, south: 32.1, east: -95.3, north: 32.3 } },
-    { id: 'b', kind: 'box', box: { west: -95.02, south: 32.58, east: -94.97, north: 32.63 } },
-    { id: 'c', kind: 'box', box: { west: -95.123457, south: 32.123457, east: -95.073457, north: 32.173457 } },
+    {
+      id: 'a',
+      kind: 'box',
+      box: { west: -95.5, south: 32.1, east: -95.3, north: 32.3 },
+    },
+    {
+      id: 'b',
+      kind: 'box',
+      box: { west: -95.02, south: 32.58, east: -94.97, north: 32.63 },
+    },
+    {
+      id: 'c',
+      kind: 'box',
+      box: {
+        west: -95.123457,
+        south: 32.123457,
+        east: -95.073457,
+        north: 32.173457,
+      },
+    },
   ];
   for (const area of areas) {
     for (const b of lookupBoxes([area])) {
       const q = new URLSearchParams({
-        west: b.west.toFixed(6), south: b.south.toFixed(6),
-        east: b.east.toFixed(6), north: b.north.toFixed(6),
+        west: b.west.toFixed(6),
+        south: b.south.toFixed(6),
+        east: b.east.toFixed(6),
+        north: b.north.toFixed(6),
       });
       assert.ok(parseBox(q), JSON.stringify(b));
     }
@@ -234,8 +305,15 @@ test('every box the browser sends is accepted by the server', () => {
 
 test('pickTerrainLonLat hits the terrain globe only and returns lon/lat', () => {
   const cesium = {
-    Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
-    Cartographic: { fromCartesian: (c) => ({ longitude: c.lon, latitude: c.lat }) },
+    Cartesian2: class {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+      }
+    },
+    Cartographic: {
+      fromCartesian: (c) => ({ longitude: c.lon, latitude: c.lat }),
+    },
     Math: { toDegrees: (v) => v },
     Ellipsoid: { WGS84: {} },
   };
@@ -243,17 +321,32 @@ test('pickTerrainLonLat hits the terrain globe only and returns lon/lat', () => 
   const viewer = {
     scene: {
       canvas: { clientWidth: 200, clientHeight: 100 },
-      globe: { pick: (ray) => (calls.push('globe'), ray.hit ? { lon: -97.5, lat: 30.5 } : undefined) },
-      pickPosition: () => { throw new Error('depth pick must never be used'); },
-      pick: () => { throw new Error('scene pick must never be used'); },
+      globe: {
+        pick: (ray) => (
+          calls.push('globe'),
+          ray.hit ? { lon: -97.5, lat: 30.5 } : undefined
+        ),
+      },
+      pickPosition: () => {
+        throw new Error('depth pick must never be used');
+      },
+      pick: () => {
+        throw new Error('scene pick must never be used');
+      },
     },
     camera: {
       getPickRay: (w) => ({ hit: w.x === 100 && w.y === 50 }),
       pickEllipsoid: () => (calls.push('ellipsoid'), { lon: -97.4, lat: 30.4 }),
     },
   };
-  assert.deepEqual(pickTerrainLonLat(viewer, 0.5, 0.5, cesium), { lon: -97.5, lat: 30.5 });
-  assert.deepEqual(pickTerrainLonLat(viewer, 0.1, 0.1, cesium), { lon: -97.4, lat: 30.4 });
+  assert.deepEqual(pickTerrainLonLat(viewer, 0.5, 0.5, cesium), {
+    lon: -97.5,
+    lat: 30.5,
+  });
+  assert.deepEqual(pickTerrainLonLat(viewer, 0.1, 0.1, cesium), {
+    lon: -97.4,
+    lat: 30.4,
+  });
   assert.equal(pickTerrainLonLat({}, 0.5, 0.5, cesium), null);
 });
 
@@ -261,39 +354,90 @@ test('drag: down on the handle claims the pointer, move sets a clamped height, u
   resetPointerOwnership();
   const bound = {};
   class Handler {
-    constructor() { this.destroyed = false; }
-    setInputAction(fn, type) { bound[type] = fn; }
-    destroy() { this.destroyed = true; }
+    constructor() {
+      this.destroyed = false;
+    }
+    setInputAction(fn, type) {
+      bound[type] = fn;
+    }
+    destroy() {
+      this.destroyed = true;
+    }
   }
   const heights = [];
   const controller = { enableInputs: true };
-  const ob = { id: 'a', kind: 'tower', lon: -95, lat: 32.5, radiusM: 6, heightM: 60, source: 'user', estimatedHeightM: null, userEdited: true };
-  const dataSource = { entities: { values: [], add: (e) => (dataSource.entities.values.push(e), e), remove: () => {} } };
+  const ob = {
+    id: 'a',
+    kind: 'tower',
+    lon: -95,
+    lat: 32.5,
+    radiusM: 6,
+    heightM: 60,
+    source: 'user',
+    estimatedHeightM: null,
+    userEdited: true,
+  };
+  const dataSource = {
+    entities: {
+      values: [],
+      add: (e) => (dataSource.entities.values.push(e), e),
+      remove: () => {},
+    },
+  };
   const cesium = {
     Color: { fromCssColorString: (c) => ({ withAlpha: () => c }) },
-    Cartesian3: Object.assign(function (x, y, z) { this.x = x; this.y = y; this.z = z; }, {
-      fromDegrees: (lon, lat, h) => ({ x: 0, y: 0, z: h }),
-      subtract: (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }),
-      dot: (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
-    }),
+    Cartesian3: Object.assign(
+      function (x, y, z) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+      },
+      {
+        fromDegrees: (lon, lat, h) => ({ x: 0, y: 0, z: h }),
+        subtract: (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }),
+        dot: (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
+      },
+    ),
     Cartographic: { fromDegrees: (lon, lat) => ({ lon, lat }) },
-    Ellipsoid: { WGS84: { geodeticSurfaceNormal: () => ({ x: 0, y: 0, z: 1 }) } },
+    Ellipsoid: {
+      WGS84: { geodeticSurfaceNormal: () => ({ x: 0, y: 0, z: 1 }) },
+    },
     SceneTransforms: { worldToWindowCoordinates: () => ({ x: 100, y: 100 }) },
     ScreenSpaceEventHandler: Handler,
-    ScreenSpaceEventType: { LEFT_DOWN: 'down', MOUSE_MOVE: 'move', LEFT_UP: 'up' },
+    ScreenSpaceEventType: {
+      LEFT_DOWN: 'down',
+      MOUSE_MOVE: 'move',
+      LEFT_UP: 'up',
+    },
   };
   const viewer = {
-    scene: { globe: { getHeight: () => 0 }, canvas: {}, screenSpaceCameraController: controller },
-    camera: { getPickRay: () => ({ origin: { x: 0, y: 0, z: 10 }, direction: { x: 0.6, y: 0, z: 0.8 } }) },
+    scene: {
+      globe: { getHeight: () => 0 },
+      canvas: {},
+      screenSpaceCameraController: controller,
+    },
+    camera: {
+      getPickRay: () => ({
+        origin: { x: 0, y: 0, z: 10 },
+        direction: { x: 0.6, y: 0, z: 0.8 },
+      }),
+    },
   };
   const layer = createObstacleLayer({
-    dataSource, cesium, viewer, requestRender: () => {},
+    dataSource,
+    cesium,
+    viewer,
+    requestRender: () => {},
     onHeight: (id, h) => heights.push([id, h]),
   });
   layer.set([ob]);
   assert.ok(bound.down && bound.move && bound.up);
   bound.down({ position: { x: 300, y: 300 } });
-  assert.equal(layer.isDragging(), false, 'a press away from the handle does nothing');
+  assert.equal(
+    layer.isDragging(),
+    false,
+    'a press away from the handle does nothing',
+  );
   bound.down({ position: { x: 102, y: 101 } });
   assert.equal(layer.isDragging(), true);
   assert.equal(controller.enableInputs, false);
@@ -311,23 +455,38 @@ test('drag: down on the handle claims the pointer, move sets a clamped height, u
 test('pickTerrainLonLat with the globe hidden uses an ellipsoid raised to the terrain height', () => {
   let seen = null;
   class Ellipsoid {
-    constructor(x, y, z) { this.radii = { x, y, z }; }
+    constructor(x, y, z) {
+      this.radii = { x, y, z };
+    }
   }
   Ellipsoid.WGS84 = new Ellipsoid(6378137, 6378137, 6356752);
   const cesium = {
-    Cartesian2: class { constructor(x, y) { this.x = x; this.y = y; } },
-    Cartographic: { fromCartesian: (c) => ({ longitude: c.lon, latitude: c.lat }) },
+    Cartesian2: class {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+      }
+    },
+    Cartographic: {
+      fromCartesian: (c) => ({ longitude: c.lon, latitude: c.lat }),
+    },
     Math: { toDegrees: (v) => v },
     Ellipsoid,
   };
   const viewer = {
-    scene: { canvas: { clientWidth: 10, clientHeight: 10 }, globe: { pick: () => undefined } },
+    scene: {
+      canvas: { clientWidth: 10, clientHeight: 10 },
+      globe: { pick: () => undefined },
+    },
     camera: {
       getPickRay: () => ({}),
       pickEllipsoid: (_w, e) => ((seen = e), { lon: -97, lat: 30 }),
     },
   };
-  assert.deepEqual(pickTerrainLonLat(viewer, 0.5, 0.5, cesium, 250), { lon: -97, lat: 30 });
+  assert.deepEqual(pickTerrainLonLat(viewer, 0.5, 0.5, cesium, 250), {
+    lon: -97,
+    lat: 30,
+  });
   assert.equal(seen.radii.x, 6378137 + 250);
   pickTerrainLonLat(viewer, 0.5, 0.5, cesium, 0);
   assert.equal(seen, Ellipsoid.WGS84);

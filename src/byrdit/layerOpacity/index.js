@@ -8,16 +8,18 @@ import {
   readLopFromUrl,
   writeLopToUrl,
 } from './opacityModel.js';
+import { cesiumViewerFor } from '../cesiumViewer.js';
 
 /** Layers that already carry their own opacity control. */
 export const OWN_OPACITY_LAYERS = new Set(['recent-imagery']);
 
 export function createLayerOpacity({
-  viewer,
+  viewer: sceneViewer,
   dataManager,
   locationRef = globalThis.location,
   historyRef = globalThis.history,
 }) {
+  const viewer = cesiumViewerFor(sceneViewer);
   const ids = [...dataManager.layers.keys()].filter(
     (id) => !OWN_OPACITY_LAYERS.has(id),
   );

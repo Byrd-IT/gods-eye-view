@@ -20,6 +20,7 @@ import {
   normalizeReleaseDoc,
   waybackFlagOn,
 } from './model.js';
+import { cesiumViewerFor } from '../cesiumViewer.js';
 
 export { waybackFlagOn };
 
@@ -94,7 +95,7 @@ function viewOfViewer(viewer, Cesium) {
  */
 export async function attachWayback({
   Cesium,
-  viewer,
+  viewer: sceneViewer,
   controller,
   doc = globalThis.document,
   fetchImpl = globalThis.fetch,
@@ -108,6 +109,7 @@ export async function attachWayback({
   infoMs = INFO_MS,
   swapMs = SWAP_CLEANUP_MS,
 } = {}) {
+  const viewer = cesiumViewerFor(sceneViewer);
   const off = () => {};
   if (!waybackFlagOn(doc) || !viewer || !controller) return off;
   // Upstream's scene is Cesium-free (renderer seam): load it here.

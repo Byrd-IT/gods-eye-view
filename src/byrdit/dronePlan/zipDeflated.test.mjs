@@ -4,7 +4,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { crc32, makeZip, makeZipDeflated, readZip, readZipAsync } from './zip.js';
+import {
+  crc32,
+  makeZip,
+  makeZipDeflated,
+  readZip,
+  readZipAsync,
+} from './zip.js';
 
 const WHEN = new Date(2026, 10, 16, 12, 30, 10);
 const text = (s) => new TextEncoder().encode(s);
@@ -23,7 +29,9 @@ function directory(bytes) {
     const nameLen = view.getUint16(at + 28, true);
     const localAt = view.getUint32(at + 42, true);
     out.push({
-      name: new TextDecoder().decode(bytes.subarray(at + 46, at + 46 + nameLen)),
+      name: new TextDecoder().decode(
+        bytes.subarray(at + 46, at + 46 + nameLen),
+      ),
       method: view.getUint16(at + 10, true),
       crc: view.getUint32(at + 16, true),
       packed: view.getUint32(at + 20, true),
@@ -33,13 +41,20 @@ function directory(bytes) {
       localPacked: view.getUint32(localAt + 18, true),
       localSize: view.getUint32(localAt + 22, true),
     });
-    at += 46 + nameLen + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+    at +=
+      46 +
+      nameLen +
+      view.getUint16(at + 30, true) +
+      view.getUint16(at + 32, true);
   }
   return out;
 }
 
 test('makeZipDeflated writes method 8 with the CRC of the UNCOMPRESSED data', async () => {
-  const zip = await makeZipDeflated([{ name: 'wpmz/waylines.wpml', data: body }], WHEN);
+  const zip = await makeZipDeflated(
+    [{ name: 'wpmz/waylines.wpml', data: body }],
+    WHEN,
+  );
   const [entry] = directory(zip);
   assert.equal(entry.method, 8);
   assert.equal(entry.localMethod, 8);
@@ -47,7 +62,10 @@ test('makeZipDeflated writes method 8 with the CRC of the UNCOMPRESSED data', as
   assert.equal(entry.localCrc, entry.crc);
   assert.equal(entry.size, text(body).length);
   assert.equal(entry.localSize, entry.size);
-  assert.ok(entry.packed > 0 && entry.packed < entry.size / 5, `${entry.packed}`);
+  assert.ok(
+    entry.packed > 0 && entry.packed < entry.size / 5,
+    `${entry.packed}`,
+  );
   assert.equal(entry.localPacked, entry.packed);
 });
 
@@ -59,7 +77,10 @@ test('the repo readers open what it writes (async reader inflates; sync reader r
   ];
   const zip = await makeZipDeflated(entries, WHEN);
   const files = await readZipAsync(zip);
-  assert.deepEqual([...files.keys()], entries.map((e) => e.name));
+  assert.deepEqual(
+    [...files.keys()],
+    entries.map((e) => e.name),
+  );
   for (const e of entries) {
     assert.equal(new TextDecoder().decode(files.get(e.name)), e.data);
   }
@@ -97,7 +118,9 @@ test('an entry that does not shrink (random bytes, tiny text, empty) stays STORE
   assert.equal(files.get('empty.txt').length, 0);
   // A STORED-only archive of the same entries is readable by the sync reader.
   assert.deepEqual(
-    readZip(makeZip([{ name: 'photo.jpg', data: noise }], WHEN)).get('photo.jpg'),
+    readZip(makeZip([{ name: 'photo.jpg', data: noise }], WHEN)).get(
+      'photo.jpg',
+    ),
     noise,
   );
 });
@@ -111,7 +134,10 @@ test('it is deterministic and smaller than the STORED archive', async () => {
 });
 
 test('UTF-8 entry names survive', async () => {
-  const zip = await makeZipDeflated([{ name: 'flüge/Ä-1.txt', data: body }], WHEN);
+  const zip = await makeZipDeflated(
+    [{ name: 'flüge/Ä-1.txt', data: body }],
+    WHEN,
+  );
   assert.deepEqual([...(await readZipAsync(zip)).keys()], ['flüge/Ä-1.txt']);
 });
 

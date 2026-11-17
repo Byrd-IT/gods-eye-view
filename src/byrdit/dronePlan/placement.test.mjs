@@ -106,7 +106,11 @@ const boxOf = (w, h) => ({
  * the takeoff is on the low side, so takeoff-relative and local heights differ.
  */
 function slopedPlan(aglM, options = {}) {
-  const plan = planFlight(boxOf(300, 200), { aglM, batteryMin: 60, ...options });
+  const plan = planFlight(boxOf(300, 200), {
+    aglM,
+    batteryMin: 60,
+    ...options,
+  });
   const ids = plan.legs.flatMap((l) => l.waypoints.map((w) => w.id));
   const wpM = [];
   ids.forEach((id, i) => {
@@ -179,7 +183,11 @@ test('shiftMission moves only the drawn ground height and never edits its input'
     const o = r.missions[0].waypoints[i];
     assert.equal(w.groundM, o.groundM + 25);
     assert.equal(w.aglM, o.aglM, 'height above ground unchanged');
-    assert.equal(w.relHeightM, o.relHeightM, 'takeoff-relative height unchanged');
+    assert.equal(
+      w.relHeightM,
+      o.relHeightM,
+      'takeoff-relative height unchanged',
+    );
   });
   assert.equal(shiftMission(r.missions[0], 0), r.missions[0]);
 });
@@ -206,9 +214,17 @@ test('generated plan on a slope: markers are the aircraft position, the takeoff 
   assert.equal(markers.length, wps.length);
   markers.forEach((e, i) => {
     const w = wps[i];
-    assert.equal(e.position[2], w.groundM + w.aglM, 'ground + height above ground');
+    assert.equal(
+      e.position[2],
+      w.groundM + w.aglM,
+      'ground + height above ground',
+    );
     assert.ok(e.position[2] > 150, 'in the air, not at the surface');
-    assert.equal(e.point.heightReference, undefined, 'not clamped to the ground');
+    assert.equal(
+      e.point.heightReference,
+      undefined,
+      'not clamped to the ground',
+    );
   });
   // Local ground differs along the slope, so the aircraft heights differ too.
   assert.ok(new Set(markers.map((e) => e.position[2])).size > 1);
@@ -233,9 +249,8 @@ test('changing the flight height moves markers, apex and corridor together and k
     const { preview, source } = rig();
     preview.showPlan(slopedPlan(aglM));
     const marker = markersOf(source)[0].position[2];
-    const apex = named(source, '3D check view')
-      .find((e) => e.polyline)
-      .polyline.positions[5][2];
+    const apex = named(source, '3D check view').find((e) => e.polyline).polyline
+      .positions[5][2];
     const zone = named(source, '3D check zone')[0].polylineVolume.positions
       .heights[2];
     assert.equal(apex, marker, `apex at the marker for ${aglM} m`);
@@ -266,7 +281,11 @@ test('pyramid: apex at the aircraft, base and footprints on the surface, curtain
   const apex = pts[5];
   assert.equal(apex[2], wp.groundM + wp.aglM);
   for (const base of pts.slice(0, 4)) {
-    assert.equal(base[2], wp.groundM, 'base corners on the ground under the aircraft');
+    assert.equal(
+      base[2],
+      wp.groundM,
+      'base corners on the ground under the aircraft',
+    );
   }
   // The shaded footprint polygons drape on the surface: no heights at all.
   for (const poly of named(source, '3D check current photo').filter(
@@ -282,7 +301,9 @@ test('pyramid: apex at the aircraft, base and footprints on the surface, curtain
   const wall = named(source, '3D check curtain')[0].wall;
   const top = wall.positions.heights.filter((_, i) => i % 3 === 2);
   const bottom = wall.minimumHeights;
-  top.forEach((t, i) => assert.ok(t > bottom[i], 'curtain top above its ground'));
+  top.forEach((t, i) =>
+    assert.ok(t > bottom[i], 'curtain top above its ground'),
+  );
   assert.equal(bottom[0], wp.groundM);
 });
 
@@ -309,11 +330,14 @@ test('terrain not read: the aircraft stands on the globe surface at the takeoff 
   preview.showPlan(r);
   assert.equal(r.ground.known, false);
   for (const e of markersOf(source)) {
-    assert.equal(e.position[2], 250 + 100, 'globe surface + height above takeoff');
+    assert.equal(
+      e.position[2],
+      250 + 100,
+      'globe surface + height above takeoff',
+    );
   }
-  const apex = named(source, '3D check view')
-    .find((e) => e.polyline)
-    .polyline.positions[5][2];
+  const apex = named(source, '3D check view').find((e) => e.polyline).polyline
+    .positions[5][2];
   assert.equal(apex, 350);
   assert.equal(preview.displayVerified(), true);
 });
@@ -390,26 +414,58 @@ test('import shots without a terrain read use the globe surface at the start, el
   ]);
   const s = deriveImportShots(m);
   const onGlobe = importCheckMission(s, null, { displayGroundM: 210 });
-  assert.deepEqual(onGlobe.waypoints.map((w) => flightHeightM(w)), [240, 240]);
+  assert.deepEqual(
+    onGlobe.waypoints.map((w) => flightHeightM(w)),
+    [240, 240],
+  );
   assert.equal(onGlobe.verified, true);
   const blind = importCheckMission(s, { known: false });
-  assert.deepEqual(blind.waypoints.map((w) => flightHeightM(w)), [30, 30]);
-  assert.equal(blind.verified, false, 'assumed flat at 0 is flagged, not hidden');
+  assert.deepEqual(
+    blind.waypoints.map((w) => flightHeightM(w)),
+    [30, 30],
+  );
+  assert.equal(
+    blind.verified,
+    false,
+    'assumed flat at 0 is flagged, not hidden',
+  );
 });
 
 test('import shots: WGS84 heights are absolute, follow-surface heights ride the ground, sea-level heights are not guessed', () => {
   const path = [
-    { lon: -97, lat: 30, heightM: 400, pitchDeg: -90, headingDeg: 0, photo: false, waypoint: true },
-    { lon: -97.001, lat: 30, heightM: 400, pitchDeg: -90, headingDeg: 0, photo: false, waypoint: true },
+    {
+      lon: -97,
+      lat: 30,
+      heightM: 400,
+      pitchDeg: -90,
+      headingDeg: 0,
+      photo: false,
+      waypoint: true,
+    },
+    {
+      lon: -97.001,
+      lat: 30,
+      heightM: 400,
+      pitchDeg: -90,
+      headingDeg: 0,
+      photo: false,
+      waypoint: true,
+    },
   ];
   const ground = { known: true, takeoffM: 120, wpM: [120, 200] };
   const abs = importCheckMission({ path, heightMode: 'WGS84' }, ground);
-  assert.deepEqual(abs.waypoints.map((w) => flightHeightM(w)), [400, 400]);
+  assert.deepEqual(
+    abs.waypoints.map((w) => flightHeightM(w)),
+    [400, 400],
+  );
   const follow = importCheckMission(
     { path, heightMode: 'realTimeFollowSurface' },
     ground,
   );
-  assert.deepEqual(follow.waypoints.map((w) => flightHeightM(w)), [520, 600]);
+  assert.deepEqual(
+    follow.waypoints.map((w) => flightHeightM(w)),
+    [520, 600],
+  );
   const msl = importCheckMission({ path, heightMode: 'EGM96' }, ground);
   assert.deepEqual(msl.waypoints, []);
   assert.equal(msl.verified, false);
@@ -448,7 +504,10 @@ const importPass = (id = 'imp', checkable = true) => {
     color: '#ff00ff',
     checkable,
     missions: [
-      importCheckMission({ path }, { known: true, takeoffM: 100, wpM: [100, 130, 160] }),
+      importCheckMission(
+        { path },
+        { known: true, takeoffM: 100, wpM: [100, 130, 160] },
+      ),
     ],
   };
 };
@@ -468,8 +527,14 @@ test('imported file: waypoints are the aircraft in the air once heights exist, o
     'start surface 100 + 60 above it, over ground of 100 / 130 / 160',
   );
   assert.ok(pts.every((e) => e.point.heightReference === undefined));
-  const track = source.entities.values.find((e) => e.polyline && e.name === 'imp');
-  assert.equal(track.polyline.clampToGround, true, 'the ground track stays on the surface');
+  const track = source.entities.values.find(
+    (e) => e.polyline && e.name === 'imp',
+  );
+  assert.equal(
+    track.polyline.clampToGround,
+    true,
+    'the ground track stays on the surface',
+  );
   // The 3D check of the file: corridor and curtain at the same height.
   preview.setCheck({ enabled: true, frame: FRAME, frustum: 'one' });
   const zone = named(source, '3D check zone')[0];
@@ -485,7 +550,8 @@ test('imported file with no photo action is still placed in the air but gives th
   preview.setImportCheck([importPass('imp', false)]);
   preview.setCheck({ enabled: true, frame: FRAME, frustum: 'one' });
   assert.equal(
-    source.entities.values.filter((e) => e.point && e.position[2] === 160).length,
+    source.entities.values.filter((e) => e.point && e.position[2] === 160)
+      .length,
     3,
   );
   assert.equal(named(source, '3D check').length, 0);
@@ -498,7 +564,8 @@ test('imported file: a hidden item draws no marker, clearing the check puts the 
   assert.equal(source.entities.values.filter((e) => e.point).length, 0);
   preview.showImports([lineItem()]);
   assert.equal(
-    source.entities.values.filter((e) => e.point && e.position[2] === 160).length,
+    source.entities.values.filter((e) => e.point && e.position[2] === 160)
+      .length,
     3,
   );
   preview.setImportCheck(null);
@@ -530,7 +597,9 @@ test('a generated plan wins the 3D check over an import; both stay on their own 
 function obstacleRig({ globe, sampled, hint }) {
   const values = [];
   const cesium = {
-    Color: { fromCssColorString: (css) => ({ withAlpha: (a) => ({ css, a }) }) },
+    Color: {
+      fromCssColorString: (css) => ({ withAlpha: (a) => ({ css, a }) }),
+    },
     Cartesian3: { fromDegrees: (lon, lat, h) => ({ lon, lat, h }) },
     Cartographic: { fromDegrees: (lon, lat) => ({ lon, lat }) },
   };
@@ -542,7 +611,10 @@ function obstacleRig({ globe, sampled, hint }) {
       },
     },
     cesium,
-    viewer: { scene: { globe: { getHeight: () => globe }, canvas: {} }, camera: {} },
+    viewer: {
+      scene: { globe: { getHeight: () => globe }, canvas: {} },
+      camera: {},
+    },
     requestRender: () => {},
   });
   if (hint !== undefined) layer.setGroundHint(hint);
@@ -581,7 +653,11 @@ test('obstacle ground: the globe first, then the plan own terrain read for that 
   assert.equal(b.values.find((e) => e.cylinder).position.h, 100 + 30);
   const c = obstacleRig({ globe: 300, sampled, hint: 100 });
   c.layer.set([TOWER]);
-  assert.equal(c.values.find((e) => e.cylinder).position.h, 300 + 30, 'the globe wins');
+  assert.equal(
+    c.values.find((e) => e.cylinder).position.h,
+    300 + 30,
+    'the globe wins',
+  );
   // A later terrain read moves the column to its own ground.
   b.layer.setSampledGrounds({ a: 140 });
   assert.equal(b.values.find((e) => e.cylinder).position.h, 140 + 30);
@@ -597,9 +673,17 @@ test('terrain not read on a sloping globe: apex at takeoff surface + height, bas
   preview.showPlan(r);
   const wp = r.missions[0].waypoints[0];
   const under = surface({ lat: wp.lat });
-  assert.notEqual(under, 200, 'the first waypoint is not at the takeoff height');
+  assert.notEqual(
+    under,
+    200,
+    'the first waypoint is not at the takeoff height',
+  );
   const marker = markersOf(source)[0].position[2];
-  assert.equal(marker, 200 + 100, 'takeoff surface + height above takeoff: what DJI flies');
+  assert.equal(
+    marker,
+    200 + 100,
+    'takeoff surface + height above takeoff: what DJI flies',
+  );
   const edges = named(source, '3D check view').find((e) => e.polyline);
   assert.equal(edges.polyline.positions[5][2], marker, 'apex at the aircraft');
   for (const base of edges.polyline.positions.slice(0, 4)) {
@@ -619,13 +703,26 @@ test('imported file without a terrain read: aircraft at start surface + height, 
     mark(1, east(40), LAT, { h: 40, groups: group(2, 1, 1, 'reachPoint') }),
   ]);
   const s = deriveImportShots(m);
-  const out = importCheckMission(s, { known: false }, {
-    displayGroundM: 300,
-    groundAt: (lon) => (lon === s.path[0].lon ? 300 : 320),
-  });
-  assert.deepEqual(out.waypoints.map((w) => flightHeightM(w)), [340, 340]);
-  assert.deepEqual(out.waypoints.map((w) => w.groundM), [300, 320]);
-  assert.deepEqual(out.waypoints.map((w) => w.aglM), [40, 20]);
+  const out = importCheckMission(
+    s,
+    { known: false },
+    {
+      displayGroundM: 300,
+      groundAt: (lon) => (lon === s.path[0].lon ? 300 : 320),
+    },
+  );
+  assert.deepEqual(
+    out.waypoints.map((w) => flightHeightM(w)),
+    [340, 340],
+  );
+  assert.deepEqual(
+    out.waypoints.map((w) => w.groundM),
+    [300, 320],
+  );
+  assert.deepEqual(
+    out.waypoints.map((w) => w.aglM),
+    [40, 20],
+  );
   assert.equal(out.verified, true);
 });
 
@@ -639,6 +736,10 @@ test('terrain read: the globe is never asked, a read plan is drawn from its own 
   );
   const edges = named(source, '3D check view').find((e) => e.polyline);
   for (const base of edges.polyline.positions.slice(0, 4)) {
-    assert.equal(base[2], wps[0].groundM, 'base on the plan ground, not the globe');
+    assert.equal(
+      base[2],
+      wps[0].groundM,
+      'base on the plan ground, not the globe',
+    );
   }
 });

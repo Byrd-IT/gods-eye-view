@@ -4,50 +4,123 @@ import { mountPhotoReviewPanel } from './photoReviewPanel.js';
 // Minimal DOM surface used by this section; no browser globals or network.
 function setup(reviewFiles, planned = () => ({})) {
   const nodes = [];
-  const doc = { createElement(tag) { const node = { tag, textContent: '', children: [], attrs: {}, handlers: {}, append(child) { this.children.push(child); }, setAttribute(k,v) { this.attrs[k]=v; }, replaceChildren() { this.children=[]; }, addEventListener(k,fn) { this.handlers[k]=fn; }, remove() {} }; nodes.push(node); return node; } };
+  const doc = {
+    createElement(tag) {
+      const node = {
+        tag,
+        textContent: '',
+        children: [],
+        attrs: {},
+        handlers: {},
+        append(child) {
+          this.children.push(child);
+        },
+        setAttribute(k, v) {
+          this.attrs[k] = v;
+        },
+        replaceChildren() {
+          this.children = [];
+        },
+        addEventListener(k, fn) {
+          this.handlers[k] = fn;
+        },
+        remove() {},
+      };
+      nodes.push(node);
+      return node;
+    },
+  };
   const container = doc.createElement('div');
   const downloads = [];
-  const panel = mountPhotoReviewPanel({ doc, container, host: { planned, download: (...args) => downloads.push(args) }, reviewFiles });
+  const panel = mountPhotoReviewPanel({
+    doc,
+    container,
+    host: { planned, download: (...args) => downloads.push(args) },
+    reviewFiles,
+  });
   return { panel, nodes, downloads };
 }
-const photo = { name: '<script>not markup</script>.jpg', lon: null, lat: null, review: { sampleCount: 1, score: 30, reasons: ['soft-detail'] } };
+const photo = {
+  name: '<script>not markup</script>.jpg',
+  lon: null,
+  lat: null,
+  review: { sampleCount: 1, score: 30, reasons: ['soft-detail'] },
+};
 const batch = { photos: [photo], rejected: [], skippedOver: 0 };
 
 test('local quality section renders text-only names and exports report on click only', async () => {
-  const {panel,nodes,downloads} = setup(async () => batch);
+  const { panel, nodes, downloads } = setup(async () => batch);
   const report = await panel.addFiles([{}]);
   assert.equal(report.photos.length, 1);
   assert.equal(downloads.length, 0);
-  assert.ok(nodes.some(n => n.textContent.startsWith(photo.name)));
-  nodes.find(n => n.textContent === 'SAVE QUALITY REPORT (JSON)').handlers.click();
+  assert.ok(nodes.some((n) => n.textContent.startsWith(photo.name)));
+  nodes
+    .find((n) => n.textContent === 'SAVE QUALITY REPORT (JSON)')
+    .handlers.click();
   assert.equal(downloads.length, 1);
-  assert.equal(JSON.parse(new TextDecoder().decode(downloads[0][1])).photos[0].name, photo.name);
+  assert.equal(
+    JSON.parse(new TextDecoder().decode(downloads[0][1])).photos[0].name,
+    photo.name,
+  );
   panel.clear();
   assert.equal(panel.report(), null);
 });
 
 test('rejected-only input still exports named failures and truncation count', async () => {
   const rejected = [{ name: 'broken.jpg', reason: 'header-unavailable' }];
-  const { panel, nodes, downloads } = setup(async () => ({ photos: [], rejected, skippedOver: 2 }));
+  const { panel, nodes, downloads } = setup(async () => ({
+    photos: [],
+    rejected,
+    skippedOver: 2,
+  }));
   const report = await panel.addFiles([{}]);
   assert.deepEqual(report?.rejected, rejected);
   assert.equal(report.skippedOver, 2);
-  nodes.find(n => n.textContent === 'SAVE QUALITY REPORT (JSON)').handlers.click();
-  assert.deepEqual(JSON.parse(new TextDecoder().decode(downloads[0][1])).rejected, rejected);
+  nodes
+    .find((n) => n.textContent === 'SAVE QUALITY REPORT (JSON)')
+    .handlers.click();
+  assert.deepEqual(
+    JSON.parse(new TextDecoder().decode(downloads[0][1])).rejected,
+    rejected,
+  );
 });
 
 test('partial batch coverage remains unknown on refresh and JSON download', async () => {
-  for (const info of [{ rejected: [], skippedOver: 1 }, { rejected: [{ name: 'broken.jpg', reason: 'header-unavailable' }], skippedOver: 0 }]) {
+  for (const info of [
+    { rejected: [], skippedOver: 1 },
+    {
+      rejected: [{ name: 'broken.jpg', reason: 'header-unavailable' }],
+      skippedOver: 0,
+    },
+  ]) {
     let waypointId = 1;
-    const planned = () => ({ result: { missions: [{ legs: [{ photoMode: 'waypoint', waypoints: [{ lon: -95, lat: 32, id: waypointId, photo: true }] }] }] } });
-    const { panel, nodes, downloads } = setup(async () => ({ photos: [], ...info }), planned);
+    const planned = () => ({
+      result: {
+        missions: [
+          {
+            legs: [
+              {
+                photoMode: 'waypoint',
+                waypoints: [{ lon: -95, lat: 32, id: waypointId, photo: true }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const { panel, nodes, downloads } = setup(
+      async () => ({ photos: [], ...info }),
+      planned,
+    );
     const report = await panel.addFiles([{}]);
     assert.equal(report.refly.length, 1);
     assert.equal(report.refly[0].decision, 'inspect-before-refly');
     assert.deepEqual(report.refly[0].reasons, ['coverage-unknown']);
     waypointId = 2;
     panel.refresh();
-    nodes.find(n => n.textContent === 'SAVE QUALITY REPORT (JSON)').handlers.click();
+    nodes
+      .find((n) => n.textContent === 'SAVE QUALITY REPORT (JSON)')
+      .handlers.click();
     const saved = JSON.parse(new TextDecoder().decode(downloads[0][1]));
     assert.equal(saved.coverageIncomplete, true);
     assert.equal(saved.matches.missing.length, 0);
@@ -59,21 +132,38 @@ test('partial batch coverage remains unknown on refresh and JSON download', asyn
 });
 
 test('clearing or destroying during decode prevents stale publication', async () => {
-  let resolve; let signal;
-  const {panel} = setup((files, opts) => { signal=opts.signal; return new Promise(r => {resolve=r;}); });
+  let resolve;
+  let signal;
+  const { panel } = setup((files, opts) => {
+    signal = opts.signal;
+    return new Promise((r) => {
+      resolve = r;
+    });
+  });
   const pending = panel.addFiles([{}]);
   panel.clear();
-  assert.equal(signal.aborted,true);
-  resolve(batch); await pending;
-  assert.equal(panel.report(),null);
+  assert.equal(signal.aborted, true);
+  resolve(batch);
+  await pending;
+  assert.equal(panel.report(), null);
   panel.destroy();
-  assert.equal(await panel.addFiles([{}]),null);
+  assert.equal(await panel.addFiles([{}]), null);
 });
 
 test('exceptions are hidden from the UI and leave no accepted report', async () => {
-  const secret='Bearer synthetic-private-ABC123';
-  const {panel,nodes} = setup(async () => { throw new Error(secret); });
-  assert.equal(await panel.addFiles([{}]),null);
-  assert.equal(nodes.some(n => n.textContent.includes(secret)),false);
-  assert.ok(nodes.some(n => n.textContent === 'Photo review unavailable. No results were accepted.'));
+  const secret = 'Bearer synthetic-private-ABC123';
+  const { panel, nodes } = setup(async () => {
+    throw new Error(secret);
+  });
+  assert.equal(await panel.addFiles([{}]), null);
+  assert.equal(
+    nodes.some((n) => n.textContent.includes(secret)),
+    false,
+  );
+  assert.ok(
+    nodes.some(
+      (n) =>
+        n.textContent === 'Photo review unavailable. No results were accepted.',
+    ),
+  );
 });

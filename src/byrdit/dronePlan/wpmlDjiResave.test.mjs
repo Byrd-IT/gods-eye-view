@@ -37,10 +37,14 @@ function write(input) {
   // DJI Fly's own re-save has no gimbalRotate on every waypoint, so the
   // equivalence is checked against the form without them. The form with them
   // is covered in wpmlWaypointState.test.mjs.
-  return buildMissionFiles(mission, { preset, speedMs: input.speedMs }, {
-    createdMs: 1793387368322,
-    explicitWaypointGimbal: false,
-  });
+  return buildMissionFiles(
+    mission,
+    { preset, speedMs: input.speedMs },
+    {
+      createdMs: 1793387368322,
+      explicitWaypointGimbal: false,
+    },
+  );
 }
 
 /**
@@ -70,7 +74,9 @@ function firstAsDjiFly(s) {
   const gimbal = s.slice(g, p).trimEnd().replace('actionId=1', 'actionId=2');
   const photo = PHOTO_2.replace('actionId=2', 'actionId=1');
   return (
-    s.slice(0, g).replace('actionGroupMode=sequence', 'actionGroupMode=parallel') +
+    s
+      .slice(0, g)
+      .replace('actionGroupMode=sequence', 'actionGroupMode=parallel') +
     `${photo} ${gimbal}` +
     s.slice(p + PHOTO_2.length)
   );
@@ -104,7 +110,10 @@ for (const c of CASES) {
           // DJI left it a pass-through because it was not the last one there.
           relaxed += 1;
           // ...and DJI's tilt group on it leads to that extra waypoint.
-          const theirs = y.replace(/ actionGroup\(actionGroupId=2 .*?(?= waypointGimbalHeadingParam)/, '');
+          const theirs = y.replace(
+            / actionGroup\(actionGroupId=2 .*?(?= waypointGimbalHeadingParam)/,
+            '',
+          );
           return [swapEnable(swapTurn(x, turnOf(y)), 0), theirs];
         }
         return [x, y];
@@ -113,8 +122,9 @@ for (const c of CASES) {
     assert.deepEqual(diffs, []);
     assert.equal(relaxedFirst, 1, 'only the first waypoint differs');
     if (c.lastIsDjiPass) assert.equal(relaxed, 1);
-    const photos = (waylinesWpml.match(/<wpml:actionActuatorFunc>takePhoto/g) ?? [])
-      .length;
+    const photos = (
+      waylinesWpml.match(/<wpml:actionActuatorFunc>takePhoto/g) ?? []
+    ).length;
     assert.equal(photos, c.photos, 'photo count unchanged');
   });
 }
@@ -126,16 +136,30 @@ test('waypoint positions, heights and speeds are exactly what the planner gave',
   const marks = waylinesWpml.split('<Placemark>').slice(1);
   assert.equal(marks.length, wps.length);
   marks.forEach((m, i) => {
-    const [lon, lat] = m.match(/<coordinates>\s*([^<\s]+)/)[1].split(',').map(Number);
-    assert.ok(Math.abs(lon - wps[i].lon) < 1e-8 && Math.abs(lat - wps[i].lat) < 1e-8);
-    assert.equal(Number(m.match(/<wpml:executeHeight>([^<]+)/)[1]), Math.round(wps[i].relHeightM * 10) / 10);
-    assert.equal(Number(m.match(/<wpml:waypointSpeed>([^<]+)/)[1]), input.speedMs);
+    const [lon, lat] = m
+      .match(/<coordinates>\s*([^<\s]+)/)[1]
+      .split(',')
+      .map(Number);
+    assert.ok(
+      Math.abs(lon - wps[i].lon) < 1e-8 && Math.abs(lat - wps[i].lat) < 1e-8,
+    );
+    assert.equal(
+      Number(m.match(/<wpml:executeHeight>([^<]+)/)[1]),
+      Math.round(wps[i].relHeightM * 10) / 10,
+    );
+    assert.equal(
+      Number(m.match(/<wpml:waypointSpeed>([^<]+)/)[1]),
+      input.speedMs,
+    );
   });
 });
 
 test('numbers are written the way DJI Fly writes them (no trailing .0)', () => {
   const { waylinesWpml, templateKml } = write(load('nadir', 'input'));
-  assert.doesNotMatch(waylinesWpml, /<wpml:(executeHeight|waypointSpeed|waypointHeadingAngle|gimbalPitchRotateAngle|waypointGimbalPitchAngle|globalTransitionalSpeed)>-?\d+\.0</);
+  assert.doesNotMatch(
+    waylinesWpml,
+    /<wpml:(executeHeight|waypointSpeed|waypointHeadingAngle|gimbalPitchRotateAngle|waypointGimbalPitchAngle|globalTransitionalSpeed)>-?\d+\.0</,
+  );
   assert.match(waylinesWpml, /<wpml:globalTransitionalSpeed>8</);
   assert.match(waylinesWpml, /<wpml:autoFlightSpeed>2\.5</);
   assert.match(waylinesWpml, /<wpml:distance>0</);
@@ -150,14 +174,28 @@ test('golden text: the first two placemarks of the nadir file match DJI Fly byte
   const expected = load('nadir', 'expected');
   const marks = write(input).waylinesWpml.split('<Placemark>').slice(1);
   // Order of the elements inside a placemark, exactly as DJI Fly writes them.
-  const names = (m) => [...m.matchAll(/<(\/?)(wpml:[A-Za-z]+|Point|coordinates)>/g)]
-    .filter((x) => !x[1]).map((x) => x[2]);
-  assert.deepEqual(names(marks[0]).slice(0, 6), ['Point', 'coordinates', 'wpml:index', 'wpml:executeHeight', 'wpml:waypointSpeed', 'wpml:waypointHeadingParam']);
+  const names = (m) =>
+    [...m.matchAll(/<(\/?)(wpml:[A-Za-z]+|Point|coordinates)>/g)]
+      .filter((x) => !x[1])
+      .map((x) => x[2]);
+  assert.deepEqual(names(marks[0]).slice(0, 6), [
+    'Point',
+    'coordinates',
+    'wpml:index',
+    'wpml:executeHeight',
+    'wpml:waypointSpeed',
+    'wpml:waypointHeadingParam',
+  ]);
   // The first waypoint is the one deliberate difference from DJI Fly's file:
   // a sequence group, tilt (id 1) then photo (id 2), so the first photo is
   // taken at the planned pitch (first flight: it was taken at the old one).
-  const takePhoto = marks[0].slice(marks[0].indexOf('<wpml:actionGroup>'), marks[0].indexOf('</wpml:actionGroup>'));
-  assert.equal(takePhoto, `<wpml:actionGroup>
+  const takePhoto = marks[0].slice(
+    marks[0].indexOf('<wpml:actionGroup>'),
+    marks[0].indexOf('</wpml:actionGroup>'),
+  );
+  assert.equal(
+    takePhoto,
+    `<wpml:actionGroup>
           <wpml:actionGroupId>1</wpml:actionGroupId>
           <wpml:actionGroupStartIndex>0</wpml:actionGroupStartIndex>
           <wpml:actionGroupEndIndex>0</wpml:actionGroupEndIndex>
@@ -190,9 +228,16 @@ test('golden text: the first two placemarks of the nadir file match DJI Fly byte
               <wpml:useGlobalPayloadLensIndex>0</wpml:useGlobalPayloadLensIndex>
             </wpml:actionActuatorFuncParam>
           </wpml:action>
-        `);
+        `,
+  );
   const evenly = marks[12].slice(marks[12].indexOf('<wpml:actionGroupId>2<'));
-  assert.match(evenly, /^<wpml:actionGroupId>2<\/wpml:actionGroupId>\s*<wpml:actionGroupStartIndex>12<\/wpml:actionGroupStartIndex>\s*<wpml:actionGroupEndIndex>13<\/wpml:actionGroupEndIndex>/);
-  assert.match(evenly, /<wpml:actionActuatorFunc>gimbalEvenlyRotate<\/wpml:actionActuatorFunc>\s*<wpml:actionActuatorFuncParam>\s*<wpml:gimbalPitchRotateAngle>-90<\/wpml:gimbalPitchRotateAngle>\s*<wpml:gimbalRollRotateAngle>0<\/wpml:gimbalRollRotateAngle>\s*<wpml:payloadPositionIndex>0<\/wpml:payloadPositionIndex>/);
+  assert.match(
+    evenly,
+    /^<wpml:actionGroupId>2<\/wpml:actionGroupId>\s*<wpml:actionGroupStartIndex>12<\/wpml:actionGroupStartIndex>\s*<wpml:actionGroupEndIndex>13<\/wpml:actionGroupEndIndex>/,
+  );
+  assert.match(
+    evenly,
+    /<wpml:actionActuatorFunc>gimbalEvenlyRotate<\/wpml:actionActuatorFunc>\s*<wpml:actionActuatorFuncParam>\s*<wpml:gimbalPitchRotateAngle>-90<\/wpml:gimbalPitchRotateAngle>\s*<wpml:gimbalRollRotateAngle>0<\/wpml:gimbalRollRotateAngle>\s*<wpml:payloadPositionIndex>0<\/wpml:payloadPositionIndex>/,
+  );
   assert.equal(expected.waypoints.length, 66);
 });

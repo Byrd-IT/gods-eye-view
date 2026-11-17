@@ -15,6 +15,7 @@
  */
 import * as Cesium from 'cesium';
 import { createLocalGeoJsonLayer } from '../data/localGeojsonCore.js';
+import { cesiumViewerFor } from './cesiumViewer.js';
 
 export const USGS_WATER_BASE = '/byrdit/usgs_water';
 /** Wider than this many degrees (lon or lat span) → streams wait for zoom-in. */
@@ -68,7 +69,8 @@ export function parseJsonl(text) {
  * The camera view as a degree box, or null when it cannot be expressed as one
  * (looking at space / horizon / across the antimeridian).
  */
-export function viewBoxDegrees(viewer) {
+export function viewBoxDegrees(host) {
+  const viewer = cesiumViewerFor(host);
   const rect = viewer?.camera?.computeViewRectangle?.(
     viewer.scene?.globe?.ellipsoid,
   );
@@ -203,8 +205,10 @@ export function createUsgsWaterLayers(
     layer.enable = async (viewer) => {
       lastViewer = viewer ?? lastViewer;
       await baseEnable(viewer);
-      if (!spec.viewport || moveRemover || !viewer?.camera?.moveEnd) return;
-      moveRemover = viewer.camera.moveEnd.addEventListener(() => {
+      const cesiumViewer = cesiumViewerFor(viewer);
+      if (!spec.viewport || moveRemover || !cesiumViewer?.camera?.moveEnd)
+        return;
+      moveRemover = cesiumViewer.camera.moveEnd.addEventListener(() => {
         clearTimeout(reloadTimer);
         // Settle briefly so a fling does not fetch every intermediate view.
         reloadTimer = setTimeout(() => {

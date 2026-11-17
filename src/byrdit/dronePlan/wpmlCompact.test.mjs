@@ -52,7 +52,8 @@ function build(options = {}, size = [400, 200]) {
 function tree(xml) {
   const root = { name: '#root', text: '', children: [] };
   const stack = [root];
-  const re = /<\?[^?]*\?>|<(\/?)([A-Za-z_][\w:.-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*(\/?)>|([^<]+)/g;
+  const re =
+    /<\?[^?]*\?>|<(\/?)([A-Za-z_][\w:.-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*(\/?)>|([^<]+)/g;
   let m;
   while ((m = re.exec(xml))) {
     const [full, close, name, attrs, selfClose, chars] = m;
@@ -116,7 +117,11 @@ const PLANS = {
   grid: () => build(),
   timed: () => build({ captureMode: 'timed', photoSpacingM: 25 }),
   distance: () =>
-    build({ captureMode: 'distance', photoSpacingM: 25, continuousRoute: true }),
+    build({
+      captureMode: 'distance',
+      photoSpacingM: 25,
+      continuousRoute: true,
+    }),
   orbit: () =>
     build({ pattern: 'orbit', orbitRadiusM: 50, orbitHeightsM: [30, 60] }),
 };
@@ -323,7 +328,10 @@ test('the compact KMZ is deterministic, DEFLATE, and holds the same two files', 
   const b = await buildKmzDeflated(r.missions[0], r.plan, opts);
   assert.deepEqual(a, b);
   const files = await readZipAsync(a);
-  assert.deepEqual([...files.keys()], ['wpmz/template.kml', 'wpmz/waylines.wpml']);
+  assert.deepEqual(
+    [...files.keys()],
+    ['wpmz/template.kml', 'wpmz/waylines.wpml'],
+  );
   const direct = buildMissionFiles(r.missions[0], r.plan, {
     ...opts,
     compact: true,
@@ -383,7 +391,8 @@ test('the compact README opens with the notice; the normal README is unchanged',
   assert.match(cmp, /UNVERIFIED on DJI Fly and on the remote controller/);
   assert.ok(cmp.endsWith(std), 'the rest is the normal README');
   assert.deepEqual(compactNoticeLines().slice(-1), ['']);
-  for (const o of COMPACT_OMISSIONS) assert.ok(first.includes(o.element.replace('wpml:', '')));
+  for (const o of COMPACT_OMISSIONS)
+    assert.ok(first.includes(o.element.replace('wpml:', '')));
 });
 
 test('the compact bundle: DEFLATE ZIP of DEFLATE KMZs and a README with the notice', async () => {
@@ -419,13 +428,18 @@ test('the compact bundle: DEFLATE ZIP of DEFLATE KMZs and a README with the noti
 test('the compact all-passes suite ZIP carries the notice in every README', async () => {
   const pass = (id) => ({ id, label: id, result: build() });
   const passes = [pass('nadir'), pass('oblique60')];
-  const zip = await buildSuiteZipCompact(passes, { when: WHEN, createdMs: CREATED });
+  const zip = await buildSuiteZipCompact(passes, {
+    when: WHEN,
+    createdMs: CREATED,
+  });
   const files = await readZipAsync(zip);
   const readmes = [...files.keys()].filter((n) => n.endsWith('README.txt'));
   assert.equal(readmes.length, 3);
   for (const n of readmes) {
     assert.ok(decode(files.get(n)).startsWith('COMPACT TEST FILE:'), n);
   }
-  const std = readZip(buildSuiteZip(passes, { when: WHEN, createdMs: CREATED }));
+  const std = readZip(
+    buildSuiteZip(passes, { when: WHEN, createdMs: CREATED }),
+  );
   assert.equal(decode(std.get('README.txt')).includes('COMPACT'), false);
 });

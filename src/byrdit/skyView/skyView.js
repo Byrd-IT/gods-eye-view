@@ -116,6 +116,7 @@ import {
   isDoubleTap,
   sessionStore,
 } from './clearView.js';
+import { cesiumViewerFor } from '../cesiumViewer.js';
 
 const mounted = new WeakMap();
 const PHASE_TEXT = {
@@ -2272,7 +2273,7 @@ export function skyViewFor(viewer) {
  */
 export function mountSkyViewForShell(shell) {
   return mountSkyView({
-    viewer: shell.viewer,
+    viewer: cesiumViewerFor(shell.viewer),
     lifetime: shell._lifetime,
     runNavigation: (noun, navigate) =>
       shell._navigation?.runOrientation

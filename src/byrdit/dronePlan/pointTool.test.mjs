@@ -4,7 +4,7 @@ import {
   pointerOwner,
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
-import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
+import { boxToolFakes } from './testDoubles.mjs';
 import { TAKEOFF_POINTER_OWNER, initPointTool } from './pointTool.js';
 
 function fixture() {

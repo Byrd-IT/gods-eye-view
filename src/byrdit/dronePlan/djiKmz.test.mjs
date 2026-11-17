@@ -4,7 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { checkMission, distanceM, missionIdFromFileName, parseDjiKmz } from './djiKmz.js';
+import {
+  checkMission,
+  distanceM,
+  missionIdFromFileName,
+  parseDjiKmz,
+} from './djiKmz.js';
 import { parseXml } from './xml.js';
 import { DRONE_PRESETS, getPreset } from './presets.js';
 import { assembleMissions, planFlight } from './planner.js';
@@ -29,7 +34,10 @@ test('missionIdFromFileName: UUID, browser suffixes stripped', () => {
   assert.equal(missionIdFromFileName(`${A}.kmz`), A);
   assert.equal(missionIdFromFileName(`${A.toLowerCase()} (1).kmz`), A);
   assert.equal(missionIdFromFileName(`${A}[2].kmz`), A);
-  assert.equal(missionIdFromFileName(`C:\\Users\\x\\Downloads\\${A} (12).KMZ`), A);
+  assert.equal(
+    missionIdFromFileName(`C:\\Users\\x\\Downloads\\${A} (12).KMZ`),
+    A,
+  );
   assert.equal(missionIdFromFileName('gev-drone-plan-20261028.kmz'), null);
   assert.equal(missionIdFromFileName(null), null);
 });
@@ -41,7 +49,12 @@ test('DJI Fly file 9560 (3 waypoints) is read from waylines.wpml', async () => {
   assert.equal(m.namespace, 'http://www.uav.com/wpmz/1.0.2');
   assert.equal(m.usedTemplateFallback, false);
   assert.equal(m.waypoints.length, 3);
-  assert.deepEqual(m.templateChildren, ['wpml:author', 'wpml:createTime', 'wpml:updateTime', 'wpml:missionConfig']);
+  assert.deepEqual(m.templateChildren, [
+    'wpml:author',
+    'wpml:createTime',
+    'wpml:updateTime',
+    'wpml:missionConfig',
+  ]);
   assert.equal(m.config.droneEnumValue, 68);
   assert.equal(m.config.droneSubEnumValue, 0);
   assert.equal(m.wayline.executeHeightMode, 'relativeToStartPoint');
@@ -54,10 +67,13 @@ test('DJI Fly file 9560 (3 waypoints) is read from waylines.wpml', async () => {
   assert.equal(w0.heading.mode, 'followWayline');
   assert.equal(w0.heading.poi, null);
   assert.equal(w0.turn.mode, 'toPointAndStopWithContinuityCurvature');
-  assert.deepEqual(w0.groups.map((g) => [g.id, g.mode, g.actions[0].func]), [
-    [1, 'parallel', 'gimbalRotate'],
-    [2, 'parallel', 'gimbalEvenlyRotate'],
-  ]);
+  assert.deepEqual(
+    w0.groups.map((g) => [g.id, g.mode, g.actions[0].func]),
+    [
+      [1, 'parallel', 'gimbalRotate'],
+      [2, 'parallel', 'gimbalEvenlyRotate'],
+    ],
+  );
 });
 
 test('DJI Fly file 8A05 (2 waypoints, towardPOI): POI is LAT,LON,ALT', async () => {
@@ -65,28 +81,46 @@ test('DJI Fly file 8A05 (2 waypoints, towardPOI): POI is LAT,LON,ALT', async () 
   assert.equal(m.waypoints.length, 2);
   const w0 = m.waypoints[0];
   assert.equal(w0.heading.mode, 'towardPOI');
-  assert.deepEqual(w0.heading.poi, { lat: 32.203121, lon: -95.728449, altM: 50 });
+  assert.deepEqual(w0.heading.poi, {
+    lat: 32.203121,
+    lon: -95.728449,
+    altM: 50,
+  });
   assert.equal(m.waypoints[1].heading.mode, 'followWayline');
   assert.equal(m.waypoints[1].heading.poi, null);
 });
 
 test('compatibility check: the real files are clean for a Mini 5 Pro; 8A05 is flagged far apart', async () => {
-  const a = checkMission(await parseDjiKmz(load(A), { fileName: `${A}.kmz` }), { preset: mini5 });
+  const a = checkMission(await parseDjiKmz(load(A), { fileName: `${A}.kmz` }), {
+    preset: mini5,
+  });
   assert.deepEqual(a, []);
-  const b = checkMission(await parseDjiKmz(load(B), { fileName: `${B}.kmz` }), { preset: mini5 });
+  const b = checkMission(await parseDjiKmz(load(B), { fileName: `${B}.kmz` }), {
+    preset: mini5,
+  });
   assert.deepEqual(codes(b), ['far-apart']);
   assert.ok(b[0].args.km >= 140 && b[0].args.km <= 160, `km ${b[0].args.km}`);
 });
 
 test('the file for another aircraft is flagged, a different model override too', async () => {
   const m = await parseDjiKmz(load(A), { fileName: `${A}.kmz` });
-  assert.ok(codes(checkMission(m, { preset: mini5, droneEnumValue: 77 })).includes('drone-mismatch'));
-  assert.ok(!codes(checkMission(m, { preset: mini5, droneEnumValue: 68 })).includes('drone-mismatch'));
+  assert.ok(
+    codes(checkMission(m, { preset: mini5, droneEnumValue: 77 })).includes(
+      'drone-mismatch',
+    ),
+  );
+  assert.ok(
+    !codes(checkMission(m, { preset: mini5, droneEnumValue: 68 })).includes(
+      'drone-mismatch',
+    ),
+  );
   const other = Object.values(DRONE_PRESETS).find(
     (p) => p.wpml && p.wpml.droneEnumValue !== 68,
   );
   if (other) {
-    assert.ok(codes(checkMission(m, { preset: other })).includes('drone-mismatch'));
+    assert.ok(
+      codes(checkMission(m, { preset: other })).includes('drone-mismatch'),
+    );
   }
 });
 
@@ -102,18 +136,101 @@ async function mutate(id, edit) {
 
 test('the checker flags every rule it states', async () => {
   const check = async (edit) =>
-    codes(checkMission(await parseDjiKmz(await mutate(A, edit), { fileName: `${A}.kmz` }), { preset: mini5 }));
-  const way = (fn) => (name, text) => (name.endsWith('waylines.wpml') ? fn(text) : text);
+    codes(
+      checkMission(
+        await parseDjiKmz(await mutate(A, edit), { fileName: `${A}.kmz` }),
+        { preset: mini5 },
+      ),
+    );
+  const way = (fn) => (name, text) =>
+    name.endsWith('waylines.wpml') ? fn(text) : text;
   const both = (fn) => (name, text) => fn(text);
-  assert.ok((await check(both((t) => t.replaceAll('http://www.uav.com/wpmz/1.0.2', 'http://x/1.0.1')))).includes('namespace'));
-  assert.ok((await check(way((t) => t.replace('<wpml:index>1</wpml:index>', '<wpml:index>5</wpml:index>')))).includes('index-gap'));
-  assert.ok((await check(way((t) => t.replace('relativeToStartPoint', 'EGM96')))).includes('height-mode'));
-  assert.ok((await check(way((t) => t.replace('<wpml:executeHeight>50</wpml:executeHeight>', '<wpml:executeHeight>400</wpml:executeHeight>')))).includes('height-range'));
-  assert.ok((await check(way((t) => t.replaceAll('<wpml:actionGroupMode>parallel', '<wpml:actionGroupMode>sequence').replaceAll('parallel</wpml:actionGroupMode>', 'sequence</wpml:actionGroupMode>')))).includes('group-mode'));
-  assert.ok((await check(way((t) => t.replace('<wpml:actionGroupId>1<', '<wpml:actionGroupId>0<')))).includes('group-ids'));
-  assert.ok((await check(way((t) => t.replace('<wpml:actionId>2<', '<wpml:actionId>1<')))).includes('action-ids'));
-  assert.ok((await check((name, t) => (name.endsWith('template.kml') ? t.replace('</Document>', '<Folder></Folder></Document>') : t))).includes('template-shape'));
-  assert.ok((await check(way((t) => t.replace('<wpml:waypointSpeed>2.5<', '<wpml:waypointSpeed>40<')))).includes('speed-range'));
+  assert.ok(
+    (
+      await check(
+        both((t) =>
+          t.replaceAll('http://www.uav.com/wpmz/1.0.2', 'http://x/1.0.1'),
+        ),
+      )
+    ).includes('namespace'),
+  );
+  assert.ok(
+    (
+      await check(
+        way((t) =>
+          t.replace('<wpml:index>1</wpml:index>', '<wpml:index>5</wpml:index>'),
+        ),
+      )
+    ).includes('index-gap'),
+  );
+  assert.ok(
+    (
+      await check(way((t) => t.replace('relativeToStartPoint', 'EGM96')))
+    ).includes('height-mode'),
+  );
+  assert.ok(
+    (
+      await check(
+        way((t) =>
+          t.replace(
+            '<wpml:executeHeight>50</wpml:executeHeight>',
+            '<wpml:executeHeight>400</wpml:executeHeight>',
+          ),
+        ),
+      )
+    ).includes('height-range'),
+  );
+  assert.ok(
+    (
+      await check(
+        way((t) =>
+          t
+            .replaceAll(
+              '<wpml:actionGroupMode>parallel',
+              '<wpml:actionGroupMode>sequence',
+            )
+            .replaceAll(
+              'parallel</wpml:actionGroupMode>',
+              'sequence</wpml:actionGroupMode>',
+            ),
+        ),
+      )
+    ).includes('group-mode'),
+  );
+  assert.ok(
+    (
+      await check(
+        way((t) =>
+          t.replace('<wpml:actionGroupId>1<', '<wpml:actionGroupId>0<'),
+        ),
+      )
+    ).includes('group-ids'),
+  );
+  assert.ok(
+    (
+      await check(
+        way((t) => t.replace('<wpml:actionId>2<', '<wpml:actionId>1<')),
+      )
+    ).includes('action-ids'),
+  );
+  assert.ok(
+    (
+      await check((name, t) =>
+        name.endsWith('template.kml')
+          ? t.replace('</Document>', '<Folder></Folder></Document>')
+          : t,
+      )
+    ).includes('template-shape'),
+  );
+  assert.ok(
+    (
+      await check(
+        way((t) =>
+          t.replace('<wpml:waypointSpeed>2.5<', '<wpml:waypointSpeed>40<'),
+        ),
+      )
+    ).includes('speed-range'),
+  );
   const many = await check(way((t) => t));
   assert.deepEqual(many, []);
 });
@@ -121,8 +238,13 @@ test('the checker flags every rule it states', async () => {
 test('legacy layout (waypoints in template.kml only) is read with an info note', async () => {
   const files = await readZipAsync(load(A));
   const way = new TextDecoder().decode(files.get('wpmz/waylines.wpml'));
-  const folder = way.slice(way.indexOf('<Folder>'), way.indexOf('</Folder>') + 9);
-  const tpl = new TextDecoder().decode(files.get('wpmz/template.kml')).replace('</Document>', `${folder}</Document>`);
+  const folder = way.slice(
+    way.indexOf('<Folder>'),
+    way.indexOf('</Folder>') + 9,
+  );
+  const tpl = new TextDecoder()
+    .decode(files.get('wpmz/template.kml'))
+    .replace('</Document>', `${folder}</Document>`);
   const kmz = makeZip([{ name: 'wpmz/template.kml', data: tpl }]);
   const m = await parseDjiKmz(kmz, { fileName: 'x.kmz' });
   assert.equal(m.waypoints.length, 3);
@@ -136,7 +258,10 @@ test('unreadable input comes back as an error code, never a throw', async () => 
     [new Uint8Array(), 'empty'],
     [new Uint8Array([1, 2, 3, 4]), 'not-a-kmz'],
     [makeZip([{ name: 'a.txt', data: 'x' }]), 'no-wpmz'],
-    [makeZip([{ name: 'wpmz/waylines.wpml', data: '<kml><oops></kml>' }]), 'bad-xml'],
+    [
+      makeZip([{ name: 'wpmz/waylines.wpml', data: '<kml><oops></kml>' }]),
+      'bad-xml',
+    ],
   ]) {
     const m = await parseDjiKmz(bytes, { fileName: 'x.kmz' });
     assert.equal(m.error, code);
@@ -145,10 +270,15 @@ test('unreadable input comes back as an error code, never a throw', async () => 
 });
 
 test('XML reader: entities, CDATA, nesting limit, no external entities', () => {
-  const doc = parseXml('<?xml version="1.0"?><a b="1&amp;2"><c><![CDATA[<x>]]>&lt;&#65;</c><d/></a>');
+  const doc = parseXml(
+    '<?xml version="1.0"?><a b="1&amp;2"><c><![CDATA[<x>]]>&lt;&#65;</c><d/></a>',
+  );
   // A DTD (the way external entities are declared) is refused, never processed.
   assert.throws(
-    () => parseXml('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><a>&e;</a>'),
+    () =>
+      parseXml(
+        '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><a>&e;</a>',
+      ),
     /Malformed/,
   );
   assert.equal(doc.children[0].attrs.b, '1&2');
@@ -161,12 +291,23 @@ test('XML reader: entities, CDATA, nesting limit, no external entities', () => {
 
 test('what this tool exports passes its own check and reads back', async () => {
   const m = metersPerDegree(30.27);
-  const box = { west: -97.77 - 200 / m.lon, east: -97.77 + 200 / m.lon, south: 30.27 - 100 / m.lat, north: 30.27 + 100 / m.lat };
+  const box = {
+    west: -97.77 - 200 / m.lon,
+    east: -97.77 + 200 / m.lon,
+    south: 30.27 - 100 / m.lat,
+    north: 30.27 + 100 / m.lat,
+  };
   const plan = planFlight(box, { aglM: 60, batteryMin: 60 });
   const ids = plan.legs.flatMap((l) => l.waypoints.map((w) => w.id));
-  const result = assembleMissions(plan, { known: true, takeoffM: 100, wpM: ids.map(() => 100) });
+  const result = assembleMissions(plan, {
+    known: true,
+    takeoffM: 100,
+    wpM: ids.map(() => 100),
+  });
   const mission = result.missions[0];
-  const parsed = await parseDjiKmz(buildKmz(mission, result.plan), { fileName: 'gev.kmz' });
+  const parsed = await parseDjiKmz(buildKmz(mission, result.plan), {
+    fileName: 'gev.kmz',
+  });
   assert.equal(parsed.waypoints.length, mission.waypointCount);
   assert.deepEqual(checkMission(parsed, { preset: result.plan.preset }), []);
   assert.ok(distanceM(parsed.waypoints[0], parsed.waypoints[1]) > 0);
@@ -174,7 +315,12 @@ test('what this tool exports passes its own check and reads back', async () => {
 
 test('zip bomb: total inflated size is capped and unwanted entries are never inflated', async () => {
   const chunk = new Uint8Array(15 * 1024 * 1024); // compresses to almost nothing
-  const bomb = makeZip(Array.from({ length: 4 }, (_, i) => ({ name: `junk/${i}.bin`, data: chunk })));
+  const bomb = makeZip(
+    Array.from({ length: 4 }, (_, i) => ({
+      name: `junk/${i}.bin`,
+      data: chunk,
+    })),
+  );
   await assert.rejects(() => readZipAsync(bomb), /too large/);
   const files = await readZipAsync(bomb, { only: (n) => n === 'nothing' });
   assert.equal(files.size, 0, 'skipped entries are not read');
@@ -185,5 +331,9 @@ test('zip bomb: total inflated size is capped and unwanted entries are never inf
     { name: 'wpmz/template.kml', data: '<kml/>' },
   ]);
   const m = await parseDjiKmz(kmz, { fileName: 'x.kmz' });
-  assert.notEqual(m.error, 'not-a-kmz', 'junk entries beside the mission do not trip the cap');
+  assert.notEqual(
+    m.error,
+    'not-a-kmz',
+    'junk entries beside the mission do not trip the cap',
+  );
 });

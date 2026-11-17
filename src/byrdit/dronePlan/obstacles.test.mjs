@@ -136,7 +136,10 @@ test('store: a refresh keeps the operator edits and user obstacles, drops stale 
   ]);
   const ids = store.list().map((o) => o.id);
   assert.ok(ids.includes('faa-1'), 'edited and seen again: kept');
-  assert.ok(ids.includes('faa-2'), 'an edited obstacle is never dropped by a refresh');
+  assert.ok(
+    ids.includes('faa-2'),
+    'an edited obstacle is never dropped by a refresh',
+  );
   assert.ok(!ids.includes('faa-3'));
   assert.ok(ids.includes('faa-4'));
   assert.ok(ids.includes(mine.id), 'user obstacle always survives');
@@ -181,7 +184,11 @@ test('clearance: a waypoint inside radius + margin is raised to height + 5 m', (
   );
   const [a, b, c] = out.legs[0].waypoints;
   assert.equal(a.aglM, 50 + OBSTACLE_CLEARANCE_MARGIN_M);
-  assert.equal(b.aglM, 55, 'the stretch a to b starts in the reach, so b is lifted too');
+  assert.equal(
+    b.aglM,
+    55,
+    'the stretch a to b starts in the reach, so b is lifted too',
+  );
   assert.equal(c.aglM, 40, 'the stretch b to c is clear of the column');
   assert.equal(out.raised, 2);
   assert.deepEqual(out.blocked, []);
@@ -294,8 +301,12 @@ test('plan: a grid flown at 40 m climbs over a 50 m tower and warns', () => {
   assert.ok(!done.warnings.some((w) => w.code === 'obstacle-blocked'));
   // Every waypoint within the reach of the tower is at least 55 m.
   for (const w of wps) {
-    const d = Math.hypot((w.lon - CENTER.lon) * m.lon, (w.lat - CENTER.lat) * m.lat);
-    if (d <= 6 + OBSTACLE_HORIZONTAL_MARGIN_M) assert.ok(w.aglM >= 55, `d=${d}`);
+    const d = Math.hypot(
+      (w.lon - CENTER.lon) * m.lon,
+      (w.lat - CENTER.lat) * m.lat,
+    );
+    if (d <= 6 + OBSTACLE_HORIZONTAL_MARGIN_M)
+      assert.ok(w.aglM >= 55, `d=${d}`);
   }
 });
 
@@ -323,7 +334,11 @@ test('plan: a tower too tall for the cap warns and marks the legs red', () => {
   assert.equal(warn.params.needM, 485);
   const legs = done.missions.flatMap((mi) => mi.legs);
   assert.ok(legs.some((l) => l.obstacleBlocked));
-  assert.ok(done.missions.flatMap((mi) => mi.waypoints).every((w) => w.aglM <= AGL_CAP_M));
+  assert.ok(
+    done.missions
+      .flatMap((mi) => mi.waypoints)
+      .every((w) => w.aglM <= AGL_CAP_M),
+  );
 });
 
 test('plan: orbit rings are lifted per obstacle, not just by the plan-wide height', () => {
@@ -341,23 +356,33 @@ test('plan: orbit rings are lifted per obstacle, not just by the plan-wide heigh
     ],
   });
   const done = assembleMissions(plan, { known: false });
-  const orbit = done.missions.flatMap((mi) => mi.legs).filter((l) => l.kind === 'orbit');
+  const orbit = done.missions
+    .flatMap((mi) => mi.legs)
+    .filter((l) => l.kind === 'orbit');
   assert.ok(orbit.length >= 2);
   for (const leg of orbit) {
     const tall = leg.waypoints.filter((w) => w.aglM >= 65);
     assert.ok(tall.length > 0, 'points beside the tower are lifted');
-    assert.ok(tall.length < leg.waypoints.length, 'the rest of the ring stays low');
+    assert.ok(
+      tall.length < leg.waypoints.length,
+      'the rest of the ring stays low',
+    );
   }
 });
 
 test('plan: with no obstacles nothing changes', () => {
   const opts = { pattern: 'grid', aglM: 40 };
-  const a = assembleMissions(planFlight(boxAround(160, 160), opts), { known: false });
+  const a = assembleMissions(planFlight(boxAround(160, 160), opts), {
+    known: false,
+  });
   const b = assembleMissions(
     planFlight(boxAround(160, 160), { ...opts, obstacles: [] }),
     { known: false },
   );
-  assert.deepEqual(a.missions.map((x) => x.waypoints), b.missions.map((x) => x.waypoints));
+  assert.deepEqual(
+    a.missions.map((x) => x.waypoints),
+    b.missions.map((x) => x.waypoints),
+  );
   assert.ok(!a.warnings.some((w) => w.code.startsWith('obstacle')));
 });
 
@@ -401,7 +426,10 @@ test('no obstacle code reads heights or picks from the Google 3D tiles', () => {
   );
   for (const f of others) {
     const code = readFileSync(join(dir, f), 'utf8');
-    assert.ok(!/clampToHeight|sampleHeight\b|sampleHeightMostDetailed/.test(code), f);
+    assert.ok(
+      !/clampToHeight|sampleHeight\b|sampleHeightMostDetailed/.test(code),
+      f,
+    );
   }
 });
 
@@ -449,28 +477,58 @@ test('obstacleLayer.js uses only an allow-list of Cesium and viewer calls', () =
     'viewer.scene.globe.pick',
   ]);
   const used = new Set(
-    code.match(/\b(?:viewer|cesium|dataSource)(?:\.[A-Za-z_][A-Za-z0-9_]*)+/g) ?? [],
+    code.match(
+      /\b(?:viewer|cesium|dataSource)(?:\.[A-Za-z_][A-Za-z0-9_]*)+/g,
+    ) ?? [],
   );
   assert.ok(used.size >= 10, 'the scan found the calls');
   // Bracket access gets past a dotted-path scan, so it is not allowed here.
   // Aliases (const s = viewer.scene) do too: only a reader catches those.
-  assert.ok(!/\b(?:viewer|cesium|dataSource)\s*\[/.test(code), 'no bracket access');
+  assert.ok(
+    !/\b(?:viewer|cesium|dataSource)\s*\[/.test(code),
+    'no bracket access',
+  );
   // This is a tripwire for reviewers, not proof: a human still reads the diff.
   const extra = [...used].filter((x) => !allowed.has(x));
   assert.deepEqual(extra, [], 'not on the obstacleLayer.js allow-list');
   // No other global or import may reach the tileset.
   assert.ok(!/\bimport\s[^;]*\bCesium3DTileset\b/.test(code));
-  assert.ok(!/\bscene\.(primitives|pick|drillPick|pickPosition|sampleHeight)/.test(code));
+  assert.ok(
+    !/\bscene\.(primitives|pick|drillPick|pickPosition|sampleHeight)/.test(
+      code,
+    ),
+  );
 });
 
 test('store: estimates of a source that failed to load are kept, the others are replaced', () => {
   const store = createObstacleStore();
   store.replaceEstimates([
-    { id: 'faa-1', kind: 'tower', source: 'faa', lon: -97.77, lat: 30.27, radiusM: 6, estimatedHeightM: 60, heightM: 60 },
-    { id: 'chm-1', kind: 'tree', source: 'canopy', lon: -97.77, lat: 30.28, radiusM: 20, estimatedHeightM: 18, heightM: 18 },
+    {
+      id: 'faa-1',
+      kind: 'tower',
+      source: 'faa',
+      lon: -97.77,
+      lat: 30.27,
+      radiusM: 6,
+      estimatedHeightM: 60,
+      heightM: 60,
+    },
+    {
+      id: 'chm-1',
+      kind: 'tree',
+      source: 'canopy',
+      lon: -97.77,
+      lat: 30.28,
+      radiusM: 20,
+      estimatedHeightM: 18,
+      heightM: 18,
+    },
   ]);
   store.replaceEstimates([], { keepSources: ['faa'] });
-  assert.deepEqual(store.list().map((o) => o.id), ['faa-1']);
+  assert.deepEqual(
+    store.list().map((o) => o.id),
+    ['faa-1'],
+  );
 });
 
 test('guard: the ADD tool is given the terrain-only pick, not the annotation depth pick', () => {
@@ -484,32 +542,78 @@ test('guard: the ADD tool is given the terrain-only pick, not the annotation dep
 
 test('store: an edited obstacle survives when the area moves and its ids change', () => {
   const store = createObstacleStore();
-  const row = (id, lon) => ({ id, kind: 'tree', source: 'canopy', lon, lat: 30.28, radiusM: 100, estimatedHeightM: 18, heightM: 18 });
+  const row = (id, lon) => ({
+    id,
+    kind: 'tree',
+    source: 'canopy',
+    lon,
+    lat: 30.28,
+    radiusM: 100,
+    estimatedHeightM: 18,
+    heightM: 18,
+  });
   store.replaceEstimates([row('chm-a', -97.77)]);
   store.setHeight('chm-a', 40);
   store.replaceEstimates([row('chm-b', -97.7702)]);
   const list = store.list();
-  assert.equal(list.length, 1, 'the fresh row at the same place is not added twice');
+  assert.equal(
+    list.length,
+    1,
+    'the fresh row at the same place is not added twice',
+  );
   assert.equal(list[0].heightM, 40);
   assert.equal(list[0].userEdited, true);
   store.replaceEstimates([]);
-  assert.equal(store.list()[0].heightM, 40, 'never dropped, even when nothing comes back');
+  assert.equal(
+    store.list()[0].heightM,
+    40,
+    'never dropped, even when nothing comes back',
+  );
 });
 
 test('planner: a column on the closing gap of an orbit ring is cleared too', () => {
   const m = metersPerDegree(30.27);
-  const wp = (id, x, y) => ({ id, lon: -97.77 + x / m.lon, lat: 30.27 + y / m.lat, aglM: 30 });
+  const wp = (id, x, y) => ({
+    id,
+    lon: -97.77 + x / m.lon,
+    lat: 30.27 + y / m.lat,
+    aglM: 30,
+  });
   // Ring points around (0,0) at 60 m; the gap between the last and first
   // point passes through (60, 0): put the column there, away from all points.
   const ring = [
-    wp('p0', 60, 30), wp('p1', 0, 60), wp('p2', -60, 0), wp('p3', 0, -60), wp('p4', 60, -30),
+    wp('p0', 60, 30),
+    wp('p1', 0, 60),
+    wp('p2', -60, 0),
+    wp('p3', 0, -60),
+    wp('p4', 60, -30),
   ];
-  const ob = { id: 'x', kind: 'tower', source: 'user', lon: -97.77 + 60 / m.lon, lat: 30.27, radiusM: 3, heightM: 80 };
-  const out = applyObstacleClearance([{ id: 'o', kind: 'orbit', waypoints: ring }], [ob], { capM: 120 });
+  const ob = {
+    id: 'x',
+    kind: 'tower',
+    source: 'user',
+    lon: -97.77 + 60 / m.lon,
+    lat: 30.27,
+    radiusM: 3,
+    heightM: 80,
+  };
+  const out = applyObstacleClearance(
+    [{ id: 'o', kind: 'orbit', waypoints: ring }],
+    [ob],
+    { capM: 120 },
+  );
   assert.ok(out.legs[0].waypoints[0].aglM >= 85);
   assert.ok(out.legs[0].waypoints[4].aglM >= 85);
-  const flat = applyObstacleClearance([{ id: 'o', kind: 'path', waypoints: ring }], [ob], { capM: 120 });
-  assert.equal(flat.legs[0].waypoints[0].aglM, 30, 'only a ring closes on itself');
+  const flat = applyObstacleClearance(
+    [{ id: 'o', kind: 'path', waypoints: ring }],
+    [ob],
+    { capM: 120 },
+  );
+  assert.equal(
+    flat.legs[0].waypoints[0].aglM,
+    30,
+    'only a ring closes on itself',
+  );
 });
 
 // ------------------------------------------- stretches between legs / slope --
@@ -533,8 +637,16 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
 
   test('clearance: the turn between two grid lines is checked, not only each line', () => {
     const legs = [
-      { id: 'l1', kind: 'path', waypoints: [at('a', -100, 0), at('b', 100, 0)] },
-      { id: 'l2', kind: 'path', waypoints: [at('c', 100, 60), at('d', -100, 60)] },
+      {
+        id: 'l1',
+        kind: 'path',
+        waypoints: [at('a', -100, 0), at('b', 100, 0)],
+      },
+      {
+        id: 'l2',
+        kind: 'path',
+        waypoints: [at('c', 100, 60), at('d', -100, 60)],
+      },
     ];
     // The column stands between b and c: on neither line.
     const out = applyObstacleClearance(legs, [col(100, 30)], { capM: 120 });
@@ -545,11 +657,23 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
 
   test('transit: the way out and the way home are checked against the mission ends', () => {
     const takeoff = { lon: CENTER.lon, lat: CENTER.lat };
-    const need = transitNeeds([col(100, 0)], takeoff, at('a', 200, 0), at('b', 300, 0));
+    const need = transitNeeds(
+      [col(100, 0)],
+      takeoff,
+      at('a', 200, 0),
+      at('b', 300, 0),
+    );
     assert.equal(need.first.needAglM, 85);
     assert.equal(need.last.needAglM, 85, 'the way home passes it too');
-    assert.equal(transitNeeds([col(100, 0)], null, at('a', 200, 0), at('b', 300, 0)).first, null);
-    assert.equal(transitNeeds([col(100, 90)], takeoff, at('a', 200, 0), at('b', 300, 0)).first, null);
+    assert.equal(
+      transitNeeds([col(100, 0)], null, at('a', 200, 0), at('b', 300, 0)).first,
+      null,
+    );
+    assert.equal(
+      transitNeeds([col(100, 90)], takeoff, at('a', 200, 0), at('b', 300, 0))
+        .first,
+      null,
+    );
   });
 
   test('planner: every battery mission checks its OWN way out from takeoff', () => {
@@ -558,24 +682,43 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
     const base = planFlight(box, wide);
     assert.ok(!base.error, base.error);
     const m0 = assembleMissions(base, { known: false });
-    assert.ok(m0.missions.length >= 2, `needs 2+ missions, got ${m0.missions.length}`);
+    assert.ok(
+      m0.missions.length >= 2,
+      `needs 2+ missions, got ${m0.missions.length}`,
+    );
     const second = m0.missions[1].waypoints[0];
     const mid = {
       lon: (base.takeoff.lon + second.lon) / 2,
       lat: (base.takeoff.lat + second.lat) / 2,
     };
-    const tower = { id: 'mid', kind: 'tower', source: 'user', lon: mid.lon, lat: mid.lat, radiusM: 3, heightM: 60 };
+    const tower = {
+      id: 'mid',
+      kind: 'tower',
+      source: 'user',
+      lon: mid.lon,
+      lat: mid.lat,
+      radiusM: 3,
+      heightM: 60,
+    };
     const plan = planFlight(box, { ...wide, obstacles: [tower] });
     const out = assembleMissions(plan, { known: false });
-    assert.ok(out.missions[1].waypoints[0].aglM >= 65, `lifted: ${out.missions[1].waypoints[0].aglM}`);
-    const tall = planFlight(box, { ...wide, obstacles: [{ ...tower, heightM: 380 }] });
+    assert.ok(
+      out.missions[1].waypoints[0].aglM >= 65,
+      `lifted: ${out.missions[1].waypoints[0].aglM}`,
+    );
+    const tall = planFlight(box, {
+      ...wide,
+      obstacles: [{ ...tower, heightM: 380 }],
+    });
     const blocked = assembleMissions(tall, groundWithColumn(tall, 'mid', 100));
     assert.ok(blocked.warnings.some((w) => w.code === 'obstacle-blocked'));
     assert.equal(blocked.missions[1].waypoints[0].obstacleBlocked, true);
   });
 
   test('clearance: a column on higher ground than the waypoint needs the difference on top', () => {
-    const legs = [{ id: 'l1', kind: 'path', waypoints: [at('a', -5, 0), at('b', 5, 0)] }];
+    const legs = [
+      { id: 'l1', kind: 'path', waypoints: [at('a', -5, 0), at('b', 5, 0)] },
+    ];
     const ground = { a: 100, b: 100 };
     const out = applyObstacleClearance(legs, [col(0, 0, 40)], {
       capM: 120,
@@ -589,13 +732,21 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
       groundOf: (w) => ground[w.id],
       obstacleGroundOf: () => 90,
     });
-    assert.equal(flat.legs[0].waypoints[0].aglM, 45, 'lower ground adds nothing');
+    assert.equal(
+      flat.legs[0].waypoints[0].aglM,
+      45,
+      'lower ground adds nothing',
+    );
     const capped = applyObstacleClearance(legs, [col(0, 0, 100)], {
       capM: 120,
       groundOf: (w) => ground[w.id],
       obstacleGroundOf: () => 130,
     });
-    assert.equal(capped.blocked.length, 2, 'the slope can make a column impossible to clear');
+    assert.equal(
+      capped.blocked.length,
+      2,
+      'the slope can make a column impossible to clear',
+    );
   });
 
   test('planner: obstacle ground from the terrain read lifts the real plan', () => {
@@ -607,44 +758,107 @@ test('planner: a column on the closing gap of an orbit ring is cleared too', () 
     const ids = plan.legs.flatMap((l) => l.waypoints.map((w) => w.id));
     const wpM = [];
     ids.forEach((id) => (wpM[id] = 100));
-    const flat = assembleMissions(plan, { known: true, takeoffM: 100, wpM, obstacleM: { col: 100 } });
-    const hill = assembleMissions(plan, { known: true, takeoffM: 100, wpM, obstacleM: { col: 160 } });
-    const maxAgl = (r) => Math.max(...r.missions.flatMap((mi) => mi.waypoints.map((w) => w.aglM)));
+    const flat = assembleMissions(plan, {
+      known: true,
+      takeoffM: 100,
+      wpM,
+      obstacleM: { col: 100 },
+    });
+    const hill = assembleMissions(plan, {
+      known: true,
+      takeoffM: 100,
+      wpM,
+      obstacleM: { col: 160 },
+    });
+    const maxAgl = (r) =>
+      Math.max(...r.missions.flatMap((mi) => mi.waypoints.map((w) => w.aglM)));
     assert.equal(maxAgl(flat), 40);
-    assert.equal(maxAgl(hill), 95, '30 m column + 5 m margin + 60 m higher ground');
+    assert.equal(
+      maxAgl(hill),
+      95,
+      '30 m column + 5 m margin + 60 m higher ground',
+    );
   });
 }
 
 test('store: when the cap bites, new towers beat old rows kept from a failed source', () => {
   const store = createObstacleStore();
   const old = Array.from({ length: MAX_OBSTACLES }, (_, i) => ({
-    id: `chm-old-${i}`, kind: 'tree', source: 'canopy', lon: -90 + i * 0.0001, lat: 30, radiusM: 20, estimatedHeightM: 10, heightM: 10,
+    id: `chm-old-${i}`,
+    kind: 'tree',
+    source: 'canopy',
+    lon: -90 + i * 0.0001,
+    lat: 30,
+    radiusM: 20,
+    estimatedHeightM: 10,
+    heightM: 10,
   }));
   store.replaceEstimates(old);
   assert.equal(store.list().length, MAX_OBSTACLES);
-  const tower = { id: 'faa-new', kind: 'tower', source: 'faa', lon: -97, lat: 30, radiusM: 6, estimatedHeightM: 70, heightM: 70 };
-  store.replaceEstimates([tower], { keepSources: ['canopy'], within: () => true });
+  const tower = {
+    id: 'faa-new',
+    kind: 'tower',
+    source: 'faa',
+    lon: -97,
+    lat: 30,
+    radiusM: 6,
+    estimatedHeightM: 70,
+    heightM: 70,
+  };
+  store.replaceEstimates([tower], {
+    keepSources: ['canopy'],
+    within: () => true,
+  });
   const ids = store.list().map((o) => o.id);
   assert.ok(ids.includes('faa-new'));
   assert.equal(ids.length, MAX_OBSTACLES);
-  store.replaceEstimates([tower], { keepSources: ['canopy'], within: (o) => o.lon > -50 });
-  assert.deepEqual(store.list().map((o) => o.id), ['faa-new']);
+  store.replaceEstimates([tower], {
+    keepSources: ['canopy'],
+    within: (o) => o.lon > -50,
+  });
+  assert.deepEqual(
+    store.list().map((o) => o.id),
+    ['faa-new'],
+  );
 });
 
 test('store: rows over the cap are counted, towers kept first, and the planner warns', () => {
   const store = createObstacleStore();
   const trees = Array.from({ length: 70 }, (_, i) => ({
-    id: `chm-${i}`, kind: 'tree', source: 'canopy', lon: -97 + i * 1e-4, lat: 30, radiusM: 20, estimatedHeightM: 10, heightM: 10,
+    id: `chm-${i}`,
+    kind: 'tree',
+    source: 'canopy',
+    lon: -97 + i * 1e-4,
+    lat: 30,
+    radiusM: 20,
+    estimatedHeightM: 10,
+    heightM: 10,
   }));
   const towers = Array.from({ length: 5 }, (_, i) => ({
-    id: `faa-${i}`, kind: 'tower', source: 'faa', lon: -97.1 + i * 1e-4, lat: 30, radiusM: 6, estimatedHeightM: 80, heightM: 80,
+    id: `faa-${i}`,
+    kind: 'tower',
+    source: 'faa',
+    lon: -97.1 + i * 1e-4,
+    lat: 30,
+    radiusM: 6,
+    estimatedHeightM: 80,
+    heightM: 80,
   }));
   store.replaceEstimates([...trees, ...towers]);
   assert.equal(store.list().length, MAX_OBSTACLES);
   assert.equal(store.dropped(), 15);
   assert.equal(store.list().filter((o) => o.kind === 'tower').length, 5);
-  const plan = planFlight(boxAround(160, 160), { aglM: 40, obstacles: store.list(), obstaclesDropped: store.dropped() });
-  assert.ok(plan.warnings?.some?.((w) => w.code === 'obstacle-list-cut') || assembleMissions(plan, { known: false }).warnings.some((w) => w.code === 'obstacle-list-cut'));
+  const plan = planFlight(boxAround(160, 160), {
+    aglM: 40,
+    obstacles: store.list(),
+    obstaclesDropped: store.dropped(),
+  });
+  assert.ok(
+    plan.warnings?.some?.((w) => w.code === 'obstacle-list-cut') ||
+      assembleMissions(plan, { known: false }).warnings.some(
+        (w) => w.code === 'obstacle-list-cut',
+      ),
+  );
   store.replaceEstimates([]);
   assert.equal(store.dropped(), 0);
 });
@@ -656,8 +870,13 @@ test('planner: lifting a mission end past the DJI height limit is warned about',
   const m0 = assembleMissions(base, { known: false });
   const second = m0.missions[1].waypoints[0];
   const tower = {
-    id: 'mid', kind: 'tower', source: 'user', radiusM: 3, heightM: 80,
-    lon: (base.takeoff.lon + second.lon) / 2, lat: (base.takeoff.lat + second.lat) / 2,
+    id: 'mid',
+    kind: 'tower',
+    source: 'user',
+    radiusM: 3,
+    heightM: 80,
+    lon: (base.takeoff.lon + second.lon) / 2,
+    lat: (base.takeoff.lat + second.lat) / 2,
   };
   const ids = base.legs.flatMap((l) => l.waypoints.map((w) => w.id));
   const wpM = [];
@@ -665,6 +884,12 @@ test('planner: lifting a mission end past the DJI height limit is warned about',
   const ground = { known: true, takeoffM: 100, wpM };
   const quiet = assembleMissions(base, ground);
   assert.ok(!quiet.warnings.some((w) => w.code === 'rel-height-over-limit'));
-  const lifted = assembleMissions(planFlight(box, { ...opts, obstacles: [tower] }), ground);
-  assert.ok(lifted.warnings.some((w) => w.code === 'rel-height-over-limit'), JSON.stringify(lifted.warnings.map((w) => w.code)));
+  const lifted = assembleMissions(
+    planFlight(box, { ...opts, obstacles: [tower] }),
+    ground,
+  );
+  assert.ok(
+    lifted.warnings.some((w) => w.code === 'rel-height-over-limit'),
+    JSON.stringify(lifted.warnings.map((w) => w.code)),
+  );
 });

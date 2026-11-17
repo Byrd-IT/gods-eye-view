@@ -16,7 +16,10 @@ import { checkMission, parseDjiKmz } from './djiKmz.js';
 import { CENTRE, boxAround } from './buildingFixtures.mjs';
 
 const M = metersPerDegree(CENTRE.lat);
-const at = (n, e) => ({ lon: CENTRE.lon + e / M.lon, lat: CENTRE.lat + n / M.lat });
+const at = (n, e) => ({
+  lon: CENTRE.lon + e / M.lon,
+  lat: CENTRE.lat + n / M.lat,
+});
 const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
 const target = (extra = {}) => ({
   id: 'b1',
@@ -30,7 +33,11 @@ const target = (extra = {}) => ({
   ...extra,
 });
 
-function ringMission(targets = [target()], box = boxAround(240, 240), options = {}) {
+function ringMission(
+  targets = [target()],
+  box = boxAround(240, 240),
+  options = {},
+) {
   const p = planFlight(box, {
     pattern: 'orbit',
     presetId: 'dji-mini-4-pro',
@@ -39,7 +46,11 @@ function ringMission(targets = [target()], box = boxAround(240, 240), options = 
   });
   assert.ok(!p.error, String(p.error));
   const ids = p.legs.flatMap((l) => l.waypoints.map((w) => w.id));
-  const result = assembleMissions(p, { known: true, takeoffM: 100, wpM: ids.map(() => 100) });
+  const result = assembleMissions(p, {
+    known: true,
+    takeoffM: 100,
+    wpM: ids.map(() => 100),
+  });
   return { plan: p, result };
 }
 
@@ -55,7 +66,9 @@ function marks(result, mission = result.missions[0]) {
       heading: Number(m.match(/<wpml:waypointHeadingAngle>([^<]+)</)[1]),
       pitch: Number(m.match(/<wpml:waypointGimbalPitchAngle>([^<]+)</)[1]),
       photos: (m.match(/<wpml:actionActuatorFunc>takePhoto</g) ?? []).length,
-      funcs: [...m.matchAll(/<wpml:actionActuatorFunc>(\w+)</g)].map((x) => x[1]),
+      funcs: [...m.matchAll(/<wpml:actionActuatorFunc>(\w+)</g)].map(
+        (x) => x[1],
+      ),
     }));
 }
 
@@ -72,14 +85,22 @@ test('a ring with N stops is 2N photo waypoints, each with exactly one takePhoto
   assert.equal(result.totals.waypointCount, 2 * stops);
   const m = marks(result);
   assert.equal(m.length, 2 * stops);
-  assert.ok(m.every((x) => x.photos === 1), 'exactly one takePhoto per waypoint');
-  assert.equal(m.reduce((n, x) => n + x.photos, 0), 2 * stops);
+  assert.ok(
+    m.every((x) => x.photos === 1),
+    'exactly one takePhoto per waypoint',
+  );
+  assert.equal(
+    m.reduce((n, x) => n + x.photos, 0),
+    2 * stops,
+  );
   assert.ok(m.every((x) => !x.funcs.includes('rotateYaw')));
 });
 
 test('inward waypoint faces the target at the ring pitch, outward faces away at the outward pitch', () => {
   const { plan, result } = ringMission();
-  const planned = plan.legs.filter((l) => l.kind === 'orbit').flatMap((l) => l.waypoints);
+  const planned = plan.legs
+    .filter((l) => l.kind === 'orbit')
+    .flatMap((l) => l.waypoints);
   const m = marks(result);
   planned.forEach((w, s) => {
     const inward = m[2 * s];
@@ -99,7 +120,11 @@ test('inward waypoint faces the target at the ring pitch, outward faces away at 
   flat.forEach((w, i) => {
     if (w.shot === 'in') assert.equal(flat[i + 1].shot, 'out');
     if (w.shot === 'out') assert.equal(flat[i - 1].shot, 'in');
-    assert.equal(w.outwardHeadingDeg, undefined, 'no two-photo waypoint is left');
+    assert.equal(
+      w.outwardHeadingDeg,
+      undefined,
+      'no two-photo waypoint is left',
+    );
   });
 });
 
@@ -110,15 +135,28 @@ test('the camera is tilted before the first photo of the mission and before ever
   // Waypoint 0: ONE sequence group, tilt first, at the planned pitch.
   assert.deepEqual(m[0].funcs, ['gimbalRotate', 'takePhoto']);
   assert.match(m[0].text, /<wpml:actionGroupMode>sequence</);
-  assert.equal(Number(m[0].text.match(/<wpml:gimbalPitchRotateAngle>([^<]+)</)[1]), ring);
+  assert.equal(
+    Number(m[0].text.match(/<wpml:gimbalPitchRotateAngle>([^<]+)</)[1]),
+    ring,
+  );
   // Outward waypoint: tilt to the outward pitch, then photo, same ordered group.
   assert.deepEqual(m[1].funcs.slice(0, 2), ['gimbalRotate', 'takePhoto']);
   assert.match(m[1].text, /<wpml:actionGroupMode>sequence</);
-  assert.equal(Number(m[1].text.match(/<wpml:gimbalPitchRotateAngle>([^<]+)</)[1]), -5);
+  assert.equal(
+    Number(m[1].text.match(/<wpml:gimbalPitchRotateAngle>([^<]+)</)[1]),
+    -5,
+  );
   // The next inward waypoint is reached with the tilt back to the ring pitch
   // (a gradual tilt written on the outward waypoint).
-  assert.deepEqual(m[1].funcs, ['gimbalRotate', 'takePhoto', 'gimbalEvenlyRotate']);
-  assert.match(m[1].text, /gimbalEvenlyRotate<\/wpml:actionActuatorFunc>\s*<wpml:actionActuatorFuncParam>\s*<wpml:gimbalPitchRotateAngle>-?\d+(\.\d+)?</);
+  assert.deepEqual(m[1].funcs, [
+    'gimbalRotate',
+    'takePhoto',
+    'gimbalEvenlyRotate',
+  ]);
+  assert.match(
+    m[1].text,
+    /gimbalEvenlyRotate<\/wpml:actionActuatorFunc>\s*<wpml:actionActuatorFuncParam>\s*<wpml:gimbalPitchRotateAngle>-?\d+(\.\d+)?</,
+  );
   // A plain inward waypoint in the middle states its own pitch, then photos
   // (every waypoint carries its own gimbal angle; see wpmlWaypointState.test.mjs).
   assert.deepEqual(m[2].funcs, ['gimbalRotate', 'takePhoto']);
@@ -126,32 +164,47 @@ test('the camera is tilted before the first photo of the mission and before ever
 });
 
 test('a plan without outward photos is unchanged: one waypoint per stop, one photo each', () => {
-  const { plan, result } = ringMission([target()], boxAround(240, 240), { orbitOutward: false });
-  const stops = plan.legs.filter((l) => l.kind === 'orbit').reduce((n, l) => n + l.waypoints.length, 0);
+  const { plan, result } = ringMission([target()], boxAround(240, 240), {
+    orbitOutward: false,
+  });
+  const stops = plan.legs
+    .filter((l) => l.kind === 'orbit')
+    .reduce((n, l) => n + l.waypoints.length, 0);
   assert.equal(result.missions[0].waypointCount, stops);
   assert.ok(marks(result).every((x) => x.photos === 1));
 });
 
 test('the 200-waypoint limit counts both shots and never cuts between them', () => {
   const targets = Array.from({ length: 12 }, (_, i) =>
-    target({ id: `b${i}`, ...at(i * 15, 0), radiusM: 60 }));
+    target({ id: `b${i}`, ...at(i * 15, 0), radiusM: 60 }),
+  );
   const { result } = ringMission(targets, boxAround(400, 400));
   assert.ok(result.missions.length > 2, 'split into several missions');
   for (const mission of result.missions) {
     assert.ok(mission.waypointCount <= 200, String(mission.waypointCount));
     mission.waypoints.forEach((w, i) => {
-      if (w.shot === 'in') assert.equal(mission.waypoints[i + 1]?.shot, 'out', 'a stop stays whole');
+      if (w.shot === 'in')
+        assert.equal(
+          mission.waypoints[i + 1]?.shot,
+          'out',
+          'a stop stays whole',
+        );
     });
     const written = marks(result, mission);
     assert.ok(written.every((x) => x.photos <= 1));
   }
-  const photos = result.missions.reduce((n, mission) => n + mission.photoCount, 0);
+  const photos = result.missions.reduce(
+    (n, mission) => n + mission.photoCount,
+    0,
+  );
   assert.equal(photos, result.totals.photoCount);
 });
 
 test('flight time grows with the second stop; photo totals match the waypoints', () => {
   const on = ringMission().result;
-  const off = ringMission([target()], boxAround(240, 240), { orbitOutward: false }).result;
+  const off = ringMission([target()], boxAround(240, 240), {
+    orbitOutward: false,
+  }).result;
   const stops = off.missions[0].waypointCount;
   assert.equal(on.totals.photoCount - off.totals.photoCount, stops);
   assert.ok(on.totals.durationS - off.totals.durationS >= stops * 2.4);
@@ -163,32 +216,58 @@ test('photo check expects one photo per waypoint, so 2N for a ring', () => {
   assert.equal(plannedPhotoPoints({ result }).length, result.totals.photoCount);
 });
 
-test('the exported ring KMZ passes GEV\'s own check and reads back', async () => {
+test("the exported ring KMZ passes GEV's own check and reads back", async () => {
   const { result } = ringMission();
   const mission = result.missions[0];
-  const parsed = await parseDjiKmz(buildKmz(mission, result.plan), { fileName: 'ring.kmz' });
+  const parsed = await parseDjiKmz(buildKmz(mission, result.plan), {
+    fileName: 'ring.kmz',
+  });
   assert.equal(parsed.waypoints.length, mission.waypointCount);
   assert.deepEqual(checkMission(parsed, { preset: result.plan.preset }), []);
 });
 
 test('a hand-built two-photo waypoint is split by the writer, never written as two takePhotos', () => {
   const { plan, result } = ringMission();
-  const one = plan.legs.find((l) => l.kind === 'orbit').waypoints.slice(0, 3)
+  const one = plan.legs
+    .find((l) => l.kind === 'orbit')
+    .waypoints.slice(0, 3)
     .map((w, i) => ({ ...w, index: i, relHeightM: 50, groundM: 0 }));
   assert.ok(one.every(hasOutwardShot));
-  const mission = { legs: [{ kind: 'orbit', photoMode: 'waypoint', waypoints: one, pitchDeg: one[0].pitchDeg }] };
+  const mission = {
+    legs: [
+      {
+        kind: 'orbit',
+        photoMode: 'waypoint',
+        waypoints: one,
+        pitchDeg: one[0].pitchDeg,
+      },
+    ],
+  };
   mission.waypoints = one;
   const written = marks({ plan: result.plan }, mission);
   assert.equal(written.length, 6);
   assert.ok(written.every((x) => x.photos === 1));
   // Idempotent on its own output.
-  assert.deepEqual(splitOutwardShots(splitOutwardShots(one)), splitOutwardShots(one));
+  assert.deepEqual(
+    splitOutwardShots(splitOutwardShots(one)),
+    splitOutwardShots(one),
+  );
 });
 
 test('the README says DJI Fly waypoint mode gave 4096 x 3072, for the 50 MP setting only', () => {
   const { result } = ringMission();
   const m = result.missions[0];
-  assert.ok(readmeText(result, new Date('2026-11-01T00:00:00Z')).includes(`${m.waypointCount} waypoints, ${m.photoCount} photos`));
-  assert.match(cameraChecklistLines('mapping-50mp', 500).join('\n'), /Waypoint mode[\s\S]*4096 x 3072 \(12 MP\)/);
-  assert.doesNotMatch(cameraChecklistLines("test-12mp", 500).join("\n"), /Waypoint mode/);
+  assert.ok(
+    readmeText(result, new Date('2026-11-01T00:00:00Z')).includes(
+      `${m.waypointCount} waypoints, ${m.photoCount} photos`,
+    ),
+  );
+  assert.match(
+    cameraChecklistLines('mapping-50mp', 500).join('\n'),
+    /Waypoint mode[\s\S]*4096 x 3072 \(12 MP\)/,
+  );
+  assert.doesNotMatch(
+    cameraChecklistLines('test-12mp', 500).join('\n'),
+    /Waypoint mode/,
+  );
 });

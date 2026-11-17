@@ -34,14 +34,26 @@ const photoAt = (x, y, i, extra = {}) => ({
 });
 
 test('without a plan the report still accounts for every input photo', () => {
-  const report = matchPlanPhotos([photoAt(0, 0, 1), { name: 'unlocated.JPG' }], {});
+  const report = matchPlanPhotos(
+    [photoAt(0, 0, 1), { name: 'unlocated.JPG' }],
+    {},
+  );
   assert.equal(report.reason, 'plan-has-no-shots');
-  assert.deepEqual(report.unmatchedPhotos.map((p) => p.photoName), ['DJI_0001.JPG', 'unlocated.JPG']);
-  assert.deepEqual(report.unmatchedPhotos.map((p) => p.reason), ['no-plan', 'no-position']);
+  assert.deepEqual(
+    report.unmatchedPhotos.map((p) => p.photoName),
+    ['DJI_0001.JPG', 'unlocated.JPG'],
+  );
+  assert.deepEqual(
+    report.unmatchedPhotos.map((p) => p.reason),
+    ['no-plan', 'no-position'],
+  );
 });
 
 test('matched shots expose takeoff-relative altitude difference without confusing AGL', () => {
-  const report = matchPhotosToShots([photoAt(0, 0, 1, { relAltM: 64 })], [shotAt(0, 0, { relHeightM: 60, aglM: 64 })]);
+  const report = matchPhotosToShots(
+    [photoAt(0, 0, 1, { relAltM: 64 })],
+    [shotAt(0, 0, { relHeightM: 60, aglM: 64 })],
+  );
   assert.equal(report.matches[0].altitudeOffsetM, 4);
   const unknown = matchPhotosToShots([photoAt(0, 0, 1)], [shotAt(0, 0)]);
   assert.equal(unknown.matches[0].altitudeOffsetM, null);
@@ -210,7 +222,10 @@ test('a co-located pair is unknown when the photo has no pitch or heading, and n
   );
   assert.equal(zero.shots.find((s) => s.shot === 'in').status, 'unknown');
   assert.equal(zero.shots.find((s) => s.shot === 'out').status, 'unknown');
-  assert.equal(zero.shots.find((s) => s.shot === 'out').reason, 'attitude-disagreed');
+  assert.equal(
+    zero.shots.find((s) => s.shot === 'out').reason,
+    'attitude-disagreed',
+  );
 });
 
 test('known incorrect pitch remains a disagreement even if heading is unknown', () => {

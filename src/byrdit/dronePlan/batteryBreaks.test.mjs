@@ -44,7 +44,8 @@ function atNE(eastM, northM, extra = {}) {
 
 function eastRoute(endM, stepM, extra = {}) {
   const points = [];
-  for (let east = 0; east < endM - 1e-9; east += stepM) points.push(at(east, extra));
+  for (let east = 0; east < endM - 1e-9; east += stepM)
+    points.push(at(east, extra));
   points.push(at(endM, extra));
   return points;
 }
@@ -73,8 +74,14 @@ function ladder(lines, spacingM, captureMode = 'distance') {
 }
 
 test('the module reuses planner and geo and does not cycle', () => {
-  const src = readFileSync(new URL('./batteryBreaks.js', import.meta.url), 'utf8');
-  const planner = readFileSync(new URL('./planner.js', import.meta.url), 'utf8');
+  const src = readFileSync(
+    new URL('./batteryBreaks.js', import.meta.url),
+    'utf8',
+  );
+  const planner = readFileSync(
+    new URL('./planner.js', import.meta.url),
+    'utf8',
+  );
   assert.equal((src.match(/^import /gm) || []).length, 2);
   assert.match(src, /from '\.\/geo\.js'/);
   assert.match(src, /from '\.\/planner\.js'/);
@@ -157,14 +164,25 @@ test('worked example: 20 min break includes the 45 s overhead', () => {
   );
   near(piece.durationS, marker.durationS, 1e-6);
   near(straightDuration(0, marker.groundM, 0), marker.durationS, 1e-3);
-  const past = estimateMission([at(0), at(marker.groundM + 1)], at(0), SPEED, 1);
+  const past = estimateMission(
+    [at(0), at(marker.groundM + 1)],
+    at(0),
+    SPEED,
+    1,
+  );
   assert.ok(past.durationS > 1200);
 });
 
 test('defaults are 20 usable minutes and 5 m/s, and takeoff height is ignored', () => {
   const route = [at(0), at(5000)];
-  const named = batteryBreaks(route, { takeoff: at(0), speedMs: 5, usableMin: 20 });
-  const defaults = batteryBreaks(route, { takeoff: { lon: LON0, lat: LAT, relHeightM: 999 } });
+  const named = batteryBreaks(route, {
+    takeoff: at(0),
+    speedMs: 5,
+    usableMin: 20,
+  });
+  const defaults = batteryBreaks(route, {
+    takeoff: { lon: LON0, lat: LAT, relHeightM: 999 },
+  });
   near(defaults.breaks[0].groundM, named.breaks[0].groundM, 1e-6);
   assert.equal(defaults.usableMin, 20);
   assert.equal(defaults.speedMs, 5);
@@ -173,8 +191,16 @@ test('defaults are 20 usable minutes and 5 m/s, and takeoff height is ignored', 
 
 test('a longer usable time moves the break; a large value is not clamped to 60', () => {
   const route = [at(0), at(5000)];
-  const at20 = batteryBreaks(route, { takeoff: at(0), speedMs: SPEED, usableMin: 20 });
-  const at40 = batteryBreaks(route, { takeoff: at(0), speedMs: SPEED, usableMin: 40 });
+  const at20 = batteryBreaks(route, {
+    takeoff: at(0),
+    speedMs: SPEED,
+    usableMin: 20,
+  });
+  const at40 = batteryBreaks(route, {
+    takeoff: at(0),
+    speedMs: SPEED,
+    usableMin: 40,
+  });
   // 5000 m at 5 m/s: 5000/5 + 5000/8 + 45 = 1670 s = 27.8 min, so 40 min finishes it.
   assert.equal(at40.breaks.length, 0);
   assert.equal(at40.unreachable, null);
@@ -182,7 +208,11 @@ test('a longer usable time moves the break; a large value is not clamped to 60',
   assert.equal(at40.batteryCount, 1);
   assert.equal(at20.breaks.length >= 1, true);
   assert.ok(at20.breaks[0].groundM < 5000);
-  const at90 = batteryBreaks(route, { takeoff: at(0), speedMs: SPEED, usableMin: 90 });
+  const at90 = batteryBreaks(route, {
+    takeoff: at(0),
+    speedMs: SPEED,
+    usableMin: 90,
+  });
   assert.equal(at90.usableMin, 90);
   assert.equal(at90.breaks.length, 0);
   assert.equal(at90.batteryCount, 1);
@@ -222,7 +252,10 @@ test('4 mile route at 500 ft includes overhead and does not crawl forever', () =
   const heightM = 500 * 0.3048;
   assert.equal(fourMilesM, 6437.376);
   near(heightM, 152.4, 1e-12);
-  const route = [at(0, { relHeightM: heightM }), at(fourMilesM, { relHeightM: heightM })];
+  const route = [
+    at(0, { relHeightM: heightM }),
+    at(fourMilesM, { relHeightM: heightM }),
+  ];
   const takeoff = { lon: LON0, lat: LAT };
   const before = JSON.stringify(route);
   const result = batteryBreaks(route, {
@@ -266,9 +299,16 @@ test('4 mile route with the takeoff in the middle finishes on the second battery
   const fourMilesM = 4 * 1609.344;
   const heightM = 500 * 0.3048;
   const homeEast = fourMilesM / 2;
-  const route = [at(0, { relHeightM: heightM }), at(fourMilesM, { relHeightM: heightM })];
+  const route = [
+    at(0, { relHeightM: heightM }),
+    at(fourMilesM, { relHeightM: heightM }),
+  ];
   const takeoff = at(homeEast);
-  const result = batteryBreaks(route, { takeoff, speedMs: SPEED, usableMin: 20 });
+  const result = batteryBreaks(route, {
+    takeoff,
+    speedMs: SPEED,
+    usableMin: 20,
+  });
   assert.equal(result.unreachable, null);
   assert.equal(result.covered, true);
   assert.equal(result.breaks.length, 1);
@@ -280,10 +320,7 @@ test('4 mile route with the takeoff in the middle finishes on the second battery
   assert.equal(result.pieces[1].fits, true);
   const marker = result.breaks[0];
   const piece = estimateMission(
-    [
-      route[0],
-      { lon: marker.lon, lat: marker.lat, relHeightM: heightM },
-    ],
+    [route[0], { lon: marker.lon, lat: marker.lat, relHeightM: heightM }],
     takeoff,
     SPEED,
     1,
@@ -298,7 +335,11 @@ test('4 mile route with the takeoff in the middle finishes on the second battery
 
 test('extra returns are not the single-mission time estimate', () => {
   const route = [at(0), at(5000)];
-  const result = batteryBreaks(route, { takeoff: at(0), speedMs: SPEED, usableMin: 20 });
+  const result = batteryBreaks(route, {
+    takeoff: at(0),
+    speedMs: SPEED,
+    usableMin: 20,
+  });
   // One mission: 5000/5 + 5000/8 + 45 = 1670 s.
   near(result.routeEstimate.durationS, 1670, 1e-3);
   const summed = result.pieces.reduce((sum, piece) => sum + piece.durationS, 0);
@@ -316,19 +357,33 @@ test('photo count is cumulative ground distance, and spacing is optional', () =>
   const marker = withPhotos.breaks[0];
   assert.equal(marker.photoCount, Math.floor(marker.groundM / 20 + 1e-9) + 1);
   assert.equal(marker.photoCount, linePhotoCount(marker.groundM, 20, false));
-  const noPhotos = batteryBreaks(route, { takeoff: at(0), speedMs: SPEED, usableMin: 20 });
+  const noPhotos = batteryBreaks(route, {
+    takeoff: at(0),
+    speedMs: SPEED,
+    usableMin: 20,
+  });
   assert.equal(noPhotos.breaks[0].photoCount, null);
   assert.equal(noPhotos.photoSpacingM, null);
   assert.equal(noPhotos.photoCount, null);
 });
 
 test('the route is not mutated and no waypoint is inserted', () => {
-  const route = [at(0, { relHeightM: 10, photo: true }), at(4000, { relHeightM: 10 })];
+  const route = [
+    at(0, { relHeightM: 10, photo: true }),
+    at(4000, { relHeightM: 10 }),
+  ];
   const snapshot = structuredClone(route);
-  const result = batteryBreaks(route, { takeoff: at(0), speedMs: SPEED, usableMin: 20 });
+  const result = batteryBreaks(route, {
+    takeoff: at(0),
+    speedMs: SPEED,
+    usableMin: 20,
+  });
   assert.deepEqual(route, snapshot);
   assert.equal(result.waypoints, undefined);
-  assert.equal(result.breaks.every((b) => b.addedWaypoint === false), true);
+  assert.equal(
+    result.breaks.every((b) => b.addedWaypoint === false),
+    true,
+  );
   assert.equal(route.length, 2);
 });
 
@@ -362,13 +417,18 @@ test('boundary inputs: empty, unfit round trip, and rejected numbers', () => {
 
   assert.throws(() => batteryBreaks(null, {}), /array/);
   assert.throws(() => batteryBreaks([at(0)], { speedMs: SPEED }), /takeoff/);
-  assert.throws(() => batteryBreaks([at(0)], { takeoff: at(0), speedMs: 0 }), /speedMs/);
   assert.throws(
-    () => batteryBreaks([at(0)], { takeoff: at(0), speedMs: SPEED, usableMin: 0 }),
+    () => batteryBreaks([at(0)], { takeoff: at(0), speedMs: 0 }),
+    /speedMs/,
+  );
+  assert.throws(
+    () =>
+      batteryBreaks([at(0)], { takeoff: at(0), speedMs: SPEED, usableMin: 0 }),
     /usableMin/,
   );
   assert.throws(
-    () => batteryBreaks([at(0)], { takeoff: at(0), speedMs: SPEED, usableMin: -5 }),
+    () =>
+      batteryBreaks([at(0)], { takeoff: at(0), speedMs: SPEED, usableMin: -5 }),
     /usableMin/,
   );
   assert.throws(
@@ -390,7 +450,11 @@ test('a route that comes back home is not skipped ahead to the closer end', () =
   // Out to 4000 m does not fit in 20 min (break is at 46200/13). The end, 1000 m
   // from home, is closer, but he would have to fly the bulge to get there.
   const route = [at(0), at(4000), at(1000)];
-  const result = batteryBreaks(route, { takeoff: at(0), speedMs: SPEED, usableMin: 20 });
+  const result = batteryBreaks(route, {
+    takeoff: at(0),
+    speedMs: SPEED,
+    usableMin: 20,
+  });
   near(result.breaks[0].groundM, 46200 / 13, 1e-2);
   assert.equal(result.breaks[0].segmentIndex, 0);
   assert.ok(result.breaks[0].fraction < 1);
@@ -403,7 +467,11 @@ test('a break on a segment across the antimeridian stays on the short arc', () =
   const span = groundDistanceM(a, b);
   assert.ok(span > 10000);
   assert.ok(span < 25000);
-  const result = batteryBreaks([a, b], { takeoff: a, speedMs: SPEED, usableMin: 20 });
+  const result = batteryBreaks([a, b], {
+    takeoff: a,
+    speedMs: SPEED,
+    usableMin: 20,
+  });
   const marker = result.breaks[0];
   assert.equal(marker.segmentIndex, 0);
   assert.ok(marker.fraction > 0 && marker.fraction < 1);
@@ -420,7 +488,11 @@ test('headline time matches estimateMission, including a height change', () => {
     at(1000, { relHeightM: 50, lat: LAT + 500 / M.lat }),
   ];
   const takeoff = at(0);
-  const result = batteryBreaks(route, { takeoff, speedMs: SPEED, usableMin: 90 });
+  const result = batteryBreaks(route, {
+    takeoff,
+    speedMs: SPEED,
+    usableMin: 90,
+  });
   const est = estimateMission(route, takeoff, SPEED, 1);
   near(result.routeM, est.routeM, 1e-6);
   near(result.routeEstimate.durationS, est.durationS, 1e-9);
@@ -453,16 +525,34 @@ test('vertical interpolation puts the break on the climb, at the budget', () => 
 test('leg count without lines changes the headline estimate only', () => {
   const plain = [at(0), at(5000)];
   const takeoff = at(0);
-  const one = batteryBreaks(plain, { takeoff, speedMs: SPEED, usableMin: 20, legCount: 1 });
-  const three = batteryBreaks(plain, { takeoff, speedMs: SPEED, usableMin: 20, legCount: 3 });
-  near(three.routeEstimate.durationS - one.routeEstimate.durationS, TURN_S * 2, 1e-9);
+  const one = batteryBreaks(plain, {
+    takeoff,
+    speedMs: SPEED,
+    usableMin: 20,
+    legCount: 1,
+  });
+  const three = batteryBreaks(plain, {
+    takeoff,
+    speedMs: SPEED,
+    usableMin: 20,
+    legCount: 3,
+  });
+  near(
+    three.routeEstimate.durationS - one.routeEstimate.durationS,
+    TURN_S * 2,
+    1e-9,
+  );
   near(three.breaks[0].groundM, one.breaks[0].groundM, 1e-6);
   near(three.breaks[0].durationS, one.breaks[0].durationS, 1e-6);
   assert.equal(three.legsUsed, false);
   assert.equal(three.breaks[0].turnS, 0);
 
   const dwelling = [at(0, { dwellS: 100 }), at(5000)];
-  const withDwell = batteryBreaks(dwelling, { takeoff, speedMs: SPEED, usableMin: 20 });
+  const withDwell = batteryBreaks(dwelling, {
+    takeoff,
+    speedMs: SPEED,
+    usableMin: 20,
+  });
   // Extra 100 s of dwell: s = (1155 - 100) / 0.325 = 3246.153... m.
   near(withDwell.breaks[0].groundM, 1055 / 0.325, 1e-2);
   assert.ok(withDwell.breaks[0].groundM < one.breaks[0].groundM - 50);
@@ -596,7 +686,10 @@ test('interval photos restart at each line and a continued line does not', () =>
   assert.equal(fitted.photoCount, 6);
   assert.equal(linePhotoCount(fitted.groundM, 40, false), 5);
   assert.notEqual(fitted.photoCount, linePhotoCount(fitted.groundM, 40, false));
-  assert.notEqual(fitted.photoCount, linePhotoCount(fitted.groundM, 100, false));
+  assert.notEqual(
+    fitted.photoCount,
+    linePhotoCount(fitted.groundM, 100, false),
+  );
 
   const continued = ladder(
     [
@@ -640,7 +733,9 @@ test('interval photos restart at each line and a continued line does not', () =>
 
 test('mission legs and the waypoint array agree when there is one line', () => {
   const route = [at(0), at(5000)];
-  const legs = [{ waypoints: route, captureMode: 'distance', photoSpacingM: 100 }];
+  const legs = [
+    { waypoints: route, captureMode: 'distance', photoSpacingM: 100 },
+  ];
   const viaArray = batteryBreaks(route, {
     takeoff: at(0),
     speedMs: SPEED,
@@ -682,11 +777,22 @@ test('a hover action is dwell for estimateMission when dwellS is absent', () => 
     at(5000),
   ];
   const dwelling = [at(0, { dwellS: 100 }), at(5000)];
-  const withAction = batteryBreaks(acted, { takeoff, speedMs: SPEED, usableMin: 20 });
-  const withDwell = batteryBreaks(dwelling, { takeoff, speedMs: SPEED, usableMin: 20 });
+  const withAction = batteryBreaks(acted, {
+    takeoff,
+    speedMs: SPEED,
+    usableMin: 20,
+  });
+  const withDwell = batteryBreaks(dwelling, {
+    takeoff,
+    speedMs: SPEED,
+    usableMin: 20,
+  });
   near(withAction.breaks[0].groundM, withDwell.breaks[0].groundM, 1e-2);
   near(withAction.breaks[0].groundM, 1055 / 0.325, 1e-2);
-  assert.equal(JSON.stringify(acted[0].actions), JSON.stringify([{ func: 'hover', params: { hoverTime: '100' } }]));
+  assert.equal(
+    JSON.stringify(acted[0].actions),
+    JSON.stringify([{ func: 'hover', params: { hoverTime: '100' } }]),
+  );
 });
 
 test('a supplied line length keeps the photo that rounding would drop', () => {
@@ -724,7 +830,10 @@ test('an unreachable round trip is returned, not thrown', () => {
     assert.equal(result.breaks.length, 0);
     assert.equal(result.batteryCount, 0);
     assert.equal(result.covered, false);
-    assert.equal(result.unreachable.reason, 'round-trip-exceeds-usable-minutes');
+    assert.equal(
+      result.unreachable.reason,
+      'round-trip-exceeds-usable-minutes',
+    );
     assert.ok(result.unreachable.remainingGroundM > 0);
     assert.equal(result.addsWaypoints, false);
   });

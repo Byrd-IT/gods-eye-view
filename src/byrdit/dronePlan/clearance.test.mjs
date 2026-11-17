@@ -57,7 +57,10 @@ test('surface file: encode and parse give the same grid', () => {
   const buf = encodeSurface(g.meta, g.top, g.ground);
   const back = parseSurface(buf);
   assert.equal(back.cols, g.cols);
-  assert.deepEqual(Array.from(back.top.slice(0, 30)), Array.from(g.top.slice(0, 30)));
+  assert.deepEqual(
+    Array.from(back.top.slice(0, 30)),
+    Array.from(g.top.slice(0, 30)),
+  );
   assert.equal(decodeSurfaceHeader(buf).meta.id, 'test');
   assert.throws(() => parseSurface(buf.slice(0, 40)));
   assert.throws(() => parseSurface(new ArrayBuffer(8)));
@@ -100,23 +103,41 @@ test('gap between trees: wide gap passes, narrow gap is flagged', () => {
   const rows = (gapHalf) => (x) => (Math.abs(x) >= gapHalf ? 25 : 0);
   // Trees 25 m tall on both sides; the path runs north along x = 0 at 15 m.
   const wide = makeGrid({ topAt: (x) => rows(10.5)(x) });
-  const pass = run(wide, [leg(0, [[0, -60, 15], [0, 60, 15]])]);
+  const pass = run(wide, [
+    leg(0, [
+      [0, -60, 15],
+      [0, 60, 15],
+    ]),
+  ]);
   assert.equal(pass.spanCount, 0);
   assert.ok(pass.checked > 118, 'sampled about every metre');
   assert.equal(pass.stepM, CLEARANCE_STEP_M);
   assert.equal(pass.outside, 0);
   const narrow = makeGrid({ topAt: (x) => rows(7)(x) });
-  const fail = run(narrow, [leg(0, [[0, -60, 15], [0, 60, 15]])]);
+  const fail = run(narrow, [
+    leg(0, [
+      [0, -60, 15],
+      [0, 60, 15],
+    ]),
+  ]);
   assert.equal(fail.spanCount, 1);
   // Sideways distance to the nearest tree cell, about 7 m.
-  assert.ok(fail.worst.distM > 6.5 && fail.worst.distM < 7.6, String(fail.worst.distM));
+  assert.ok(
+    fail.worst.distM > 6.5 && fail.worst.distM < 7.6,
+    String(fail.worst.distM),
+  );
   assert.ok(fail.spans[0].lengthM > 110, 'the whole gap is flagged');
 });
 
 test('a leg crossing a canopy edge flags only the stretch near the trees', () => {
   // Open ground for x < 0, 20 m trees for x >= 0; the leg flies east at 12 m.
   const grid = makeGrid({ topAt: (x) => (x >= 0 ? 20 : 0) });
-  const r = run(grid, [leg(0, [[-60, 0, 12], [30, 0, 12]])]);
+  const r = run(grid, [
+    leg(0, [
+      [-60, 0, 12],
+      [30, 0, 12],
+    ]),
+  ]);
   assert.equal(r.spanCount, 1);
   const s = r.spans[0];
   // At 12 m the drone is 8 m below the tops, so the sideways distance to the
@@ -127,7 +148,13 @@ test('a leg crossing a canopy edge flags only the stretch near the trees', () =>
   assert.ok(endX > 29, String(endX));
   assert.equal(s.atWaypoint, true, 'the span reaches the last waypoint');
   // Climbing to 30 m over the same canopy clears it (10 m above the tops).
-  const high = run(grid, [leg(0, [[-60, 0, 12], [-12, 0, 30], [30, 0, 30]])]);
+  const high = run(grid, [
+    leg(0, [
+      [-60, 0, 12],
+      [-12, 0, 30],
+      [30, 0, 30],
+    ]),
+  ]);
   assert.equal(high.spanCount, 0);
 });
 
@@ -138,19 +165,45 @@ test('terrain rise: clearance follows the ground of the surface', () => {
     topAt: (x) => 100 + x / 10 + 18,
   });
   // A drone 30 m AGL stays 12 m above the tops everywhere on that slope.
-  assert.equal(run(grid, [leg(0, [[-80, 0, 30], [80, 0, 30]])]).spanCount, 0);
-  assert.equal(run(grid, [leg(0, [[-80, 0, 25], [80, 0, 25]])]).spanCount, 1);
+  assert.equal(
+    run(grid, [
+      leg(0, [
+        [-80, 0, 30],
+        [80, 0, 30],
+      ]),
+    ]).spanCount,
+    0,
+  );
+  assert.equal(
+    run(grid, [
+      leg(0, [
+        [-80, 0, 25],
+        [80, 0, 25],
+      ]),
+    ]).spanCount,
+    1,
+  );
 });
 
 test('outside the model there is no verdict, and it is counted', () => {
   const grid = makeGrid({ size: 100, topAt: () => 20 });
-  const r = run(grid, [leg(0, [[-40, 0, 5], [400, 0, 5]])]);
+  const r = run(grid, [
+    leg(0, [
+      [-40, 0, 5],
+      [400, 0, 5],
+    ]),
+  ]);
   assert.ok(r.outside > 300);
   assert.ok(r.covered > 70 && r.covered < 120);
   assert.ok(r.covered + r.outside === r.checked);
   // No surface at all: nothing is checked, nothing is flagged.
   const none = checkClearance({
-    legs: [leg(0, [[0, 0, 5], [10, 0, 5]])],
+    legs: [
+      leg(0, [
+        [0, 0, 5],
+        [10, 0, 5],
+      ]),
+    ],
     model: createSurfaceModel([]),
     minClearanceM: 6,
     errorMarginM: 3,
@@ -282,7 +335,12 @@ test('spans are capped but the count stays exact', () => {
     topAt: (x, y) =>
       Math.abs(y) < 1 && ((Math.round(x) % 20) + 20) % 20 === 0 ? 30 : 0,
   });
-  const r = run(grid, [leg(0, [[-90, 0, 12], [90, 0, 12]])]);
+  const r = run(grid, [
+    leg(0, [
+      [-90, 0, 12],
+      [90, 0, 12],
+    ]),
+  ]);
   assert.ok(r.spanCount >= 8);
   assert.ok(r.spans.length <= 200);
   assert.ok(r.spans[0].minDistM <= r.spans[r.spans.length - 1].minDistM);
@@ -307,22 +365,59 @@ test('a drone next to a hole in the data is not checked, never "clear"', () => {
 
 test('a drone just inside the model edge is not checked either', () => {
   const grid = makeGrid({ size: 100, topAt: () => 0 });
-  assert.equal(run(grid, [leg(0, [[48, 0, 5]])]).covered, 0, '2 m inside the edge');
-  assert.equal(run(grid, [leg(0, [[30, 0, 5]])]).covered, 1, 'clear of the edge');
+  assert.equal(
+    run(grid, [leg(0, [[48, 0, 5]])]).covered,
+    0,
+    '2 m inside the edge',
+  );
+  assert.equal(
+    run(grid, [leg(0, [[30, 0, 5]])]).covered,
+    1,
+    'clear of the edge',
+  );
   const probe = createSurfaceProbe(createSurfaceModel([grid]), 9.144);
   const edge = ll(45, 0);
   assert.equal(probe.ringFloor(edge.lon, edge.lat, 3).covered, 'none');
 });
 
 test('two surfaces side by side: the seam is not a hole', () => {
-  const west = makeGrid({ id: 'w', origin: { lon: LON - 98 / M.lon, lat: LAT }, size: 200, topAt: () => 0 });
-  const east = makeGrid({ id: 'e', origin: { lon: LON + 98 / M.lon, lat: LAT }, size: 200, topAt: (x) => (x > 2 && x < 6 ? 25 : 0) });
+  const west = makeGrid({
+    id: 'w',
+    origin: { lon: LON - 98 / M.lon, lat: LAT },
+    size: 200,
+    topAt: () => 0,
+  });
+  const east = makeGrid({
+    id: 'e',
+    origin: { lon: LON + 98 / M.lon, lat: LAT },
+    size: 200,
+    topAt: (x) => (x > 2 && x < 6 ? 25 : 0),
+  });
   // the grids overlap by a few metres around x = 0 (a real gap would be a hole); a tree stands at x = 100..104 in the east grid.
-  const seam = run([west, east], [leg(0, [[-5, 0, 20], [5, 0, 20]])]);
+  const seam = run(
+    [west, east],
+    [
+      leg(0, [
+        [-5, 0, 20],
+        [5, 0, 20],
+      ]),
+    ],
+  );
   assert.equal(seam.outside, 0);
   assert.equal(seam.spanCount, 0);
-  const tree = run([west, east], [leg(0, [[90, 0, 20], [96, 0, 20]])]);
-  assert.ok(tree.spanCount >= 1, 'the tree in the east grid warns from the west side of the seam');
+  const tree = run(
+    [west, east],
+    [
+      leg(0, [
+        [90, 0, 20],
+        [96, 0, 20],
+      ]),
+    ],
+  );
+  assert.ok(
+    tree.spanCount >= 1,
+    'the tree in the east grid warns from the west side of the seam',
+  );
 });
 
 test('a ring over the point cap is sampled further apart and asks for more clearance', () => {
@@ -346,7 +441,12 @@ test('a very long route widens the search by half the extra sample gap', () => {
     topAt: (x, y) => (Math.abs(x + 40) < 1 && Math.abs(y - 15) < 1 ? 20 : 0),
   });
   const model = createSurfaceModel([grid]);
-  const legs = [leg(0, [[-140, 0, 20], [140, 0, 20]])];
+  const legs = [
+    leg(0, [
+      [-140, 0, 20],
+      [140, 0, 20],
+    ]),
+  ];
   const args = { legs, model, minClearanceM: 6, errorMarginM: 3 };
   const fine = checkClearance(args);
   const coarse = checkClearance({ ...args, maxSamples: 14 });

@@ -43,6 +43,9 @@ import {
   waybackDriver,
   weatherDriver,
 } from './clockRows.js';
+import { cesiumViewerFor } from '../cesiumViewer.js';
+
+const viewerOf = (shell) => cesiumViewerFor(shell?.viewer);
 
 const SCRUB_SELECTOR = '.gev-hist-scrub';
 
@@ -69,11 +72,12 @@ export function mountHistoryForShell(
     ...(doc ? { document: doc } : {}),
     ...(historyHost ? { parent: historyHost, embedded: true } : {}),
     chips,
-    tileOutlines: shell?.viewer ? createTileOutlines(shell.viewer) : null,
+    tileOutlines: viewerOf(shell) ? createTileOutlines(viewerOf(shell)) : null,
   });
   if (handle.router) return handle; // already mounted on this host
   // FIRMS asks its slice with the camera view (D7, B12b)
-  const getViewBox = () => (shell?.viewer ? cameraViewBox(shell.viewer) : null);
+  const getViewBox = () =>
+    viewerOf(shell) ? cameraViewBox(viewerOf(shell)) : null;
   router = createHistoryRouter({ target: win, getViewBox });
   // N5 (B12f): the gate goes in first, so the router sits above it
   const liveDraw = createLiveFeedDraw({
@@ -83,9 +87,9 @@ export function mountHistoryForShell(
   });
   liveDraw.install();
   router.install();
-  const painter = shell?.viewer
+  const painter = viewerOf(shell)
     ? createGreyPainter({
-        viewer: shell.viewer,
+        viewer: viewerOf(shell),
         modeOf: (layerId) => liveDraw.paintModeOf(layerId),
       })
     : null;
@@ -161,7 +165,7 @@ export function mountHistoryForShell(
   let offMoveEnd = null;
   try {
     offMoveEnd =
-      shell?.viewer?.camera?.moveEnd?.addEventListener?.(onMoveEnd) ?? null;
+      viewerOf(shell)?.camera?.moveEnd?.addEventListener?.(onMoveEnd) ?? null;
   } catch {
     offMoveEnd = null;
   }

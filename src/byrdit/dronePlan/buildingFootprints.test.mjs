@@ -8,7 +8,13 @@ import {
   parseBuildings,
   parseHeightM,
 } from './buildingFootprints.js';
-import { downtownPayload, okResponse, rectArea, relation, way } from './buildingFixtures.mjs';
+import {
+  downtownPayload,
+  okResponse,
+  rectArea,
+  relation,
+  way,
+} from './buildingFixtures.mjs';
 
 test('parseHeightM: metres, units, feet, junk', () => {
   assert.equal(parseHeightM('12'), 12);
@@ -27,8 +33,16 @@ test('buildingHeightM: height tag wins, then levels x 3 m, else null', () => {
 });
 
 test('buildingsQuery: bbox of ways and relations, bounded timeout and count', () => {
-  const q = buildingsQuery({ west: -97.8, south: 30.2, east: -97.7, north: 30.3 });
-  assert.match(q, /way\["building"\]\(30\.200000,-97\.800000,30\.300000,-97\.700000\)/);
+  const q = buildingsQuery({
+    west: -97.8,
+    south: 30.2,
+    east: -97.7,
+    north: 30.3,
+  });
+  assert.match(
+    q,
+    /way\["building"\]\(30\.200000,-97\.800000,30\.300000,-97\.700000\)/,
+  );
   assert.match(q, /relation\["building"\]/);
   assert.match(q, /\[timeout:20\]/);
   assert.match(q, /out tags geom 2000;/);
@@ -47,12 +61,27 @@ test('parseBuildings: rings plus height/name/id; skips non-buildings, open multi
   assert.equal(byId['way-102'].heightM, 12);
   assert.equal(byId['way-103'].heightM, null);
   assert.ok(Math.abs(byId['relation-201'].heightM - 9.144) < 1e-9);
-  assert.equal(byId['relation-201'].ring.length, 4, 'inner ring ignored, closing point dropped');
-  assert.deepEqual(Object.keys(byId['way-101']).sort(), ['heightM', 'label', 'osmId', 'ring']);
+  assert.equal(
+    byId['relation-201'].ring.length,
+    4,
+    'inner ring ignored, closing point dropped',
+  );
+  assert.deepEqual(Object.keys(byId['way-101']).sort(), [
+    'heightM',
+    'label',
+    'osmId',
+    'ring',
+  ]);
 });
 
 test('parseBuildings: capped, largest first', () => {
-  const payload = { elements: [way(1, 0, 0, 10, 10), way(2, 50, 0, 40, 40), way(3, 90, 0, 20, 20)] };
+  const payload = {
+    elements: [
+      way(1, 0, 0, 10, 10),
+      way(2, 50, 0, 40, 40),
+      way(3, 90, 0, 20, 20),
+    ],
+  };
   assert.deepEqual(
     parseBuildings(payload, { max: 2 }).map((f) => f.osmId),
     ['way-2', 'way-3'],
@@ -78,7 +107,16 @@ test('areasBox: union of rects and polygons; antimeridian rects unsupported', ()
   assert.equal(box.north, 30.31);
   assert.equal(box.west, a.box.west);
   assert.equal(areasBox([]), null);
-  assert.equal(areasBox([{ id: 'x', kind: 'rect', box: { west: 179, east: -179, south: 0, north: 1 } }]), null);
+  assert.equal(
+    areasBox([
+      {
+        id: 'x',
+        kind: 'rect',
+        box: { west: 179, east: -179, south: 0, north: 1 },
+      },
+    ]),
+    null,
+  );
 });
 
 test('provider: posts to /api/overpass and returns footprints', async () => {
@@ -103,15 +141,25 @@ test('provider: fails soft with a reason (HTTP error, rate limit, remark, throw,
     [async () => ({ ok: false, status: 500 }), 'unavailable'],
     [async () => ({ ok: false, status: 429 }), 'rate-limited'],
     [async () => ({ ok: false, status: 504 }), 'timeout'],
-    [async () => okResponse({ elements: [], remark: 'runtime error' }), 'incomplete'],
-    [async () => { throw new Error('offline'); }, 'offline'],
+    [
+      async () => okResponse({ elements: [], remark: 'runtime error' }),
+      'incomplete',
+    ],
+    [
+      async () => {
+        throw new Error('offline');
+      },
+      'offline',
+    ],
   ];
   for (const [fetchImpl, reason] of cases) {
     const provider = createBuildingFootprintProvider({ fetchImpl });
     assert.deepEqual(await provider([rectArea(300, 200)]), []);
     assert.deepEqual(provider.lastStatus, { ok: false, reason, count: 0 });
   }
-  const p = createBuildingFootprintProvider({ fetchImpl: async () => okResponse({ elements: [] }) });
+  const p = createBuildingFootprintProvider({
+    fetchImpl: async () => okResponse({ elements: [] }),
+  });
   assert.deepEqual(await p([]), []);
   assert.equal(p.lastStatus.reason, 'no-area');
   assert.deepEqual(await p([rectArea(20000, 20000)]), []);

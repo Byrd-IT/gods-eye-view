@@ -257,10 +257,7 @@ test('a point in a later area is not given to the first area', () => {
   assert.equal(areaIndexForPoint({ x: 40, y: 40 }, [first, second]), 0);
   assert.equal(areaIndexForPoint({ x: 150, y: 40 }, [first, second]), -1);
   assert.equal(
-    areaIndexForPoint({ x: 250, y: 40 }, [
-      first,
-      { ring: second, margin: 8 },
-    ]),
+    areaIndexForPoint({ x: 250, y: 40 }, [first, { ring: second, margin: 8 }]),
     1,
   );
 });
@@ -272,7 +269,12 @@ test('a long line still clips a small margin exactly', () => {
     { x: 2510, y: 10 },
     { x: 2500, y: 10 },
   ];
-  const pieces = clipSegmentToMargin({ x: 0, y: 5 }, { x: 4000, y: 5 }, ring, 8);
+  const pieces = clipSegmentToMargin(
+    { x: 0, y: 5 },
+    { x: 4000, y: 5 },
+    ring,
+    8,
+  );
   assert.equal(pieces.length, 1);
   nearPt(pieces[0].start, 2492, 5, 0.05);
   nearPt(pieces[0].end, 2518, 5, 0.05);

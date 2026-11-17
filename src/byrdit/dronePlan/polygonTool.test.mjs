@@ -4,7 +4,7 @@ import {
   pointerOwner,
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
-import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
+import { boxToolFakes } from './testDoubles.mjs';
 import {
   POLYGON_CLOSE_PX,
   POLYGON_POINTER_OWNER,
@@ -57,10 +57,10 @@ function fixture(onRing = () => true, { project } = {}) {
   const stock = (type) =>
     fakes.viewer.screenSpaceEventHandler.getInputAction(fakes.types[type]);
   const click = (x, y) => fakes.fire('LEFT_CLICK', { position: { x, y } });
-  const move = (x, y) =>
-    fakes.fire('MOUSE_MOVE', { endPosition: { x, y } });
+  const move = (x, y) => fakes.fire('MOUSE_MOVE', { endPosition: { x, y } });
   /** The preview data source's entities, or [] when none is attached. */
-  const entities = () => fakes.viewer.dataSources.sources[0]?.entities.values ?? [];
+  const entities = () =>
+    fakes.viewer.dataSources.sources[0]?.entities.values ?? [];
   const dots = () => entities().filter((e) => e.point);
   const lines = () => entities().filter((e) => e.polyline);
   return {

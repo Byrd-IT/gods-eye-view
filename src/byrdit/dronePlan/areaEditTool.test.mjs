@@ -6,7 +6,7 @@ import {
   releasePointer,
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
-import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
+import { boxToolFakes } from './testDoubles.mjs';
 import { moveArea } from './areaEdit.js';
 import {
   AREA_EDIT_POINTER_OWNER,

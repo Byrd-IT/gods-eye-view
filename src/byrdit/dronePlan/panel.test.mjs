@@ -1,3 +1,4 @@
+import '../../render/cesium/unbound.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import http from 'node:http';
@@ -15,7 +16,7 @@ import {
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
 import * as RealCesium from 'cesium';
-import { boxToolFakes } from '../../layers/recentImagery/testDoubles.mjs';
+import { boxToolFakes } from './testDoubles.mjs';
 import {
   initDronePlan,
   planSummary,
@@ -456,7 +457,10 @@ test('Compact file option: off by default, then a deflated KMZ and zip with the 
   assert.equal(box.checked, false, 'default OFF');
   const row = box.parentNode.parentNode;
   assert.match(row.textContent, /Compact file \(test it on your controller\)/);
-  assert.match(row.getAttribute('title'), /UNVERIFIED on DJI Fly and the controller/);
+  assert.match(
+    row.getAttribute('title'),
+    /UNVERIFIED on DJI Fly and the controller/,
+  );
   const note = () =>
     w.find((n) => n.getAttribute('data-role') === 'compact-note')[0];
   assert.equal(note().hidden, true);
@@ -2478,11 +2482,13 @@ function drawingWorld() {
     up(...to);
   };
   const action = (name) =>
-    w.buttons('data-action').find((b) => b.getAttribute('data-action') === name);
+    w
+      .buttons('data-action')
+      .find((b) => b.getAttribute('data-action') === name);
   const editButton = (id) =>
-    w.buttons('data-edit-area').find(
-      (b) => b.getAttribute('data-edit-area') === id,
-    );
+    w
+      .buttons('data-edit-area')
+      .find((b) => b.getAttribute('data-edit-area') === id);
   const ringAt = (...pts) =>
     pts.map(([x, y]) => ({ lon: lonAtPx(x), lat: latAtPx(y) }));
   const ringPx = (ring) => ring.map((p) => [pxOfLon(p.lon), pxOfLat(p.lat)]);
@@ -6065,7 +6071,10 @@ test('timing: the capture readout figures follow the interval, not a stale spaci
 
 // ----------------------------------------- Mapping Grid (Timed) and sizes --
 const optionsOf = (control) =>
-  control.children.map((c) => [c.getAttribute('value') ?? c.value, c.textContent]);
+  control.children.map((c) => [
+    c.getAttribute('value') ?? c.value,
+    c.textContent,
+  ]);
 const roleList = (w, role) =>
   w.find((n) => n.getAttribute('data-role') === role);
 const hiddenNow = (n) => {
@@ -6155,15 +6164,40 @@ test('Timed hides exactly the controls with no effect; Waypoints shows them agai
 test('size: the quick-fill buttons and slider ticks follow the camera size, aircraft and mode', async () => {
   const w = await timedWorld();
   assert.deepEqual(timedChips(w), ['5', '7', '10', '15', '20', '30', '60']);
-  assert.deepEqual(tickLabels(w), ['5 s', '7 s', '10 s', '15 s', '20 s', '30 s', '60 s']);
+  assert.deepEqual(tickLabels(w), [
+    '5 s',
+    '7 s',
+    '10 s',
+    '15 s',
+    '20 s',
+    '30 s',
+    '60 s',
+  ]);
   const slider = roleList(w, 'interval-slider')[0];
   assert.equal(slider.max, '6');
   pick(w, 'Camera settings preset', 'test-12mp');
-  assert.deepEqual(timedChips(w), ['2', '3', '5', '7', '10', '15', '20', '30', '60']);
-  assert.deepEqual(
-    tickLabels(w),
-    ['2 s', '3 s', '5 s', '7 s', '10 s', '15 s', '20 s', '30 s', '60 s'],
-  );
+  assert.deepEqual(timedChips(w), [
+    '2',
+    '3',
+    '5',
+    '7',
+    '10',
+    '15',
+    '20',
+    '30',
+    '60',
+  ]);
+  assert.deepEqual(tickLabels(w), [
+    '2 s',
+    '3 s',
+    '5 s',
+    '7 s',
+    '10 s',
+    '15 s',
+    '20 s',
+    '30 s',
+    '60 s',
+  ]);
   assert.equal(slider.max, '8');
   // An aircraft with no size choice keeps today's examples.
   pick(w, 'Aircraft', 'dji-mavic-3');
@@ -6242,8 +6276,10 @@ test('red marks: the overlap mark is what speed x interval gives, and the speed 
   const given = (1 - (o.speedMs * 10) / along) * 100;
   const tick = roleList(w, 'redmark-overlap')[0];
   assert.ok(Math.abs(Number(tick.getAttribute('data-value')) - given) < 1e-6);
-  const speedMark = Number(roleList(w, 'redmark-speed')[0].getAttribute('data-value'));
-  assert.ok(Math.abs((1 - (speedMark * 10) / along) - 0.8) < 1e-9);
+  const speedMark = Number(
+    roleList(w, 'redmark-speed')[0].getAttribute('data-value'),
+  );
+  assert.ok(Math.abs(1 - (speedMark * 10) / along - 0.8) < 1e-9);
   w.handle.destroy();
 });
 
@@ -6251,7 +6287,10 @@ test('red marks: out of range pins at the end and the label says which end', asy
   const w = await timedWorld({ frontOverlap: 98, timedIntervalS: 60 });
   const speed = roleList(w, 'redmark-speed')[0];
   assert.equal(speed.getAttribute('data-status'), 'below');
-  assert.match(roleList(w, 'redmark-speed-label')[0].textContent, /below the start of this slider/);
+  assert.match(
+    roleList(w, 'redmark-speed-label')[0].textContent,
+    /below the start of this slider/,
+  );
   assert.equal(Number(speed.getAttribute('data-fraction')), 0);
   w.handle.destroy();
 });
@@ -6272,9 +6311,13 @@ test('red marks: the labels follow the ft/m switch', async () => {
 test('minimum shutter: the line follows speed, height and photo size, and says it is an estimate', async () => {
   const w = await timedWorld();
   const main = () => roleList(w, 'min-shutter-main')[0].textContent;
-  const exact = () => Number(roleList(w, 'min-shutter')[0].getAttribute('data-exact'));
+  const exact = () =>
+    Number(roleList(w, 'min-shutter')[0].getAttribute('data-exact'));
   assert.match(main(), /^Use 1\/\d+ s or faster at this speed and height$/);
-  assert.match(roleList(w, 'min-shutter-note')[0].textContent, /Estimate from the planner blur limit, not a DJI figure\. Exact figure 1\/\d+ s\./);
+  assert.match(
+    roleList(w, 'min-shutter-note')[0].textContent,
+    /Estimate from the planner blur limit, not a DJI figure\. Exact figure 1\/\d+ s\./,
+  );
   const e50 = exact();
   pick(w, 'Camera settings preset', 'test-12mp');
   assert.ok(exact() < e50, '12 MP allows a slower shutter');
@@ -6289,7 +6332,10 @@ test('minimum shutter: the line follows speed, height and photo size, and says i
   speed.value = '15';
   speed.dispatch('input');
   await w.handle.replan();
-  assert.equal(roleList(w, 'min-shutter-main')[0].getAttribute('data-tone'), 'bad');
+  assert.equal(
+    roleList(w, 'min-shutter-main')[0].getAttribute('data-tone'),
+    'bad',
+  );
   assert.match(main(), /faster than the camera can do \(1\/8,000 s\)/);
   w.handle.destroy();
 });
@@ -6302,7 +6348,11 @@ test('Continuous route stays available in Timed: it decides whether the file is 
   assert.equal(w.handle.getResult().plan.options.continuousRoute, true);
   pick(w, 'Mode', 'mapping-grid');
   await w.handle.replan();
-  assert.equal(w.handle.getResult().plan.options.continuousRoute, false, 'Stop capture cannot be continuous');
+  assert.equal(
+    w.handle.getResult().plan.options.continuousRoute,
+    false,
+    'Stop capture cannot be continuous',
+  );
   w.handle.destroy();
 });
 
@@ -6310,7 +6360,9 @@ test('USE RECOMMENDED works for Timed and sets an interval from the camera list'
   const w = setup();
   w.handle.setBox(boxM(400, 300));
   pick(w, 'Mode', 'mapping-grid-timed');
-  w.buttons('data-action').find((b) => b.getAttribute('data-action') === 'use-recommended').click();
+  w.buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'use-recommended')
+    .click();
   await w.handle.replan();
   const o = w.handle.getResult().plan.options;
   assert.equal(o.captureMode, 'timed');

@@ -94,7 +94,7 @@ export function createFlightState({ source, services }) {
 
   flightState._motionClock = null;
 
-  flightState._scratchMotionNow = new Cesium.JulianDate();
+  flightState._scratchMotionNow = { dayNumber: 0, secondsOfDay: 0 };
 
   flightState._scratchMotionDate = new Date(0);
 

@@ -57,17 +57,41 @@ test('round trip: apply the marked speed and the overlap equals the wanted one',
 test('unreadable or impossible inputs give no figure', () => {
   const bad = [0, -1, NaN, null, undefined, '', 'x', Infinity];
   for (const x of bad) {
-    assert.equal(frontOverlapPct({ alongM: x, speedMs: 5, intervalS: 5 }), null);
-    assert.equal(frontOverlapPct({ alongM: 80, speedMs: x, intervalS: 5 }), null);
-    assert.equal(frontOverlapPct({ alongM: 80, speedMs: 5, intervalS: x }), null);
-    assert.equal(speedForOverlap({ alongM: x, wantedPct: 80, intervalS: 5 }), null);
-    assert.equal(speedForOverlap({ alongM: 80, wantedPct: 80, intervalS: x }), null);
-    assert.equal(intervalForOverlap({ alongM: 80, wantedPct: 80, speedMs: x }), null);
+    assert.equal(
+      frontOverlapPct({ alongM: x, speedMs: 5, intervalS: 5 }),
+      null,
+    );
+    assert.equal(
+      frontOverlapPct({ alongM: 80, speedMs: x, intervalS: 5 }),
+      null,
+    );
+    assert.equal(
+      frontOverlapPct({ alongM: 80, speedMs: 5, intervalS: x }),
+      null,
+    );
+    assert.equal(
+      speedForOverlap({ alongM: x, wantedPct: 80, intervalS: 5 }),
+      null,
+    );
+    assert.equal(
+      speedForOverlap({ alongM: 80, wantedPct: 80, intervalS: x }),
+      null,
+    );
+    assert.equal(
+      intervalForOverlap({ alongM: 80, wantedPct: 80, speedMs: x }),
+      null,
+    );
   }
   // A wanted overlap of 0, 100 or more has no spacing to solve for.
   for (const w of [0, -5, 100, 120, NaN, null]) {
-    assert.equal(speedForOverlap({ alongM: 80, wantedPct: w, intervalS: 5 }), null);
-    assert.equal(intervalForOverlap({ alongM: 80, wantedPct: w, speedMs: 5 }), null);
+    assert.equal(
+      speedForOverlap({ alongM: 80, wantedPct: w, intervalS: 5 }),
+      null,
+    );
+    assert.equal(
+      intervalForOverlap({ alongM: 80, wantedPct: w, speedMs: 5 }),
+      null,
+    );
   }
 });
 
@@ -119,14 +143,24 @@ test('height: pins at the slider ends and says which', () => {
 
 test('height: no solution for an unreadable input or a throwing footprint', () => {
   const alongAt = alongAtHeightFn(mini, 0);
-  const base = { alongAt, minM: 10, maxM: 100, speedMs: 5, intervalS: 5, wantedPct: 80 };
+  const base = {
+    alongAt,
+    minM: 10,
+    maxM: 100,
+    speedMs: 5,
+    intervalS: 5,
+    wantedPct: 80,
+  };
   assert.equal(heightForOverlap({ ...base, speedMs: 0 }), null);
   assert.equal(heightForOverlap({ ...base, intervalS: null }), null);
   assert.equal(heightForOverlap({ ...base, wantedPct: 100 }), null);
   assert.equal(heightForOverlap({ ...base, minM: 100, maxM: 10 }), null);
   assert.equal(heightForOverlap({ ...base, alongAt: undefined }), null);
   // A tilt that reaches the horizon throws in footprint(): no mark, no throw.
-  assert.equal(heightForOverlap({ ...base, alongAt: alongAtHeightFn(mini, 80) }), null);
+  assert.equal(
+    heightForOverlap({ ...base, alongAt: alongAtHeightFn(mini, 80) }),
+    null,
+  );
 });
 
 test('12 MP changes nothing in the height solution (same field of view)', () => {
@@ -138,7 +172,10 @@ test('12 MP changes nothing in the height solution (same field of view)', () => 
 
 test('even tick scale: position by interpolation between neighbouring ticks', () => {
   assert.deepEqual(tickPosition(OPTIONS_12, 2), { index: 0, status: 'inside' });
-  assert.deepEqual(tickPosition(OPTIONS_12, 60), { index: 8, status: 'inside' });
+  assert.deepEqual(tickPosition(OPTIONS_12, 60), {
+    index: 8,
+    status: 'inside',
+  });
   assert.deepEqual(tickPosition(OPTIONS_12, 3), { index: 1, status: 'inside' });
   // 6.2 s lies between 5 s (index 2) and 7 s (index 3): 2 + 1.2/2 = 2.6.
   const p = tickPosition(OPTIONS_12, 6.2);

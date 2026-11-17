@@ -242,8 +242,9 @@ test("'neighbors' strong vs light styles: stepped photo full, neighbours at the 
   const weak = named('3D check neighbor view').find((e) => e.polygon);
   assert.equal(strong.polygon.material.a, DEFAULT_ALPHA.view);
   assert.ok(
-    Math.abs(weak.polygon.material.a - DEFAULT_ALPHA.view * NEIGHBOR_ALPHA_RATIO) <
-      1e-12,
+    Math.abs(
+      weak.polygon.material.a - DEFAULT_ALPHA.view * NEIGHBOR_ALPHA_RATIO,
+    ) < 1e-12,
   );
   const edges = (list) => list.find((e) => e.polyline);
   assert.ok(
@@ -306,7 +307,7 @@ test("'neighbors' overlap is real: along-track spacing sets ahead/behind, line s
   assert.ok(Math.abs(n.right.overlapPct - 70) < 8, String(n.right.overlapPct));
 });
 
-test("other camera views are unchanged by the new mode", () => {
+test('other camera views are unchanged by the new mode', () => {
   for (const [frustum, views, neighbors] of [
     ['one', 5, 0],
     ['off', 0, 0],
@@ -410,7 +411,12 @@ test("'neighbors' on a file without flight lines gives ahead and behind only", (
   layer.setData([
     { id: 'import-1', color: '#39d0ff', missions: [{ waypoints: wps }] },
   ]);
-  layer.setOptions({ enabled: true, frame: FRAME, frustum: 'neighbors', index: 1 });
+  layer.setOptions({
+    enabled: true,
+    frame: FRAME,
+    frustum: 'neighbors',
+    index: 1,
+  });
   const n = layer.info().neighbors;
   assert.equal(n.front.index, 2);
   assert.equal(n.back.index, 0);
@@ -438,7 +444,12 @@ test("'neighbors' overlap is null (n/a) for a clipped footprint, with the footpr
   layer.setData([
     { id: 'import-1', color: '#39d0ff', missions: [{ waypoints: wps }] },
   ]);
-  layer.setOptions({ enabled: true, frame: FRAME, frustum: 'neighbors', index: 1 });
+  layer.setOptions({
+    enabled: true,
+    frame: FRAME,
+    frustum: 'neighbors',
+    index: 1,
+  });
   const info = layer.info();
   assert.equal(info.current.footprint.clipped, true);
   assert.equal(info.neighbors.front.overlapPct, null);

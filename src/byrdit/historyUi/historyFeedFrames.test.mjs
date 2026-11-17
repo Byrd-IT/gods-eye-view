@@ -16,6 +16,7 @@
  * and cards of the previous time stayed (one-statement touch point in
  * src/layers/firms/rendering.js).
  */
+import '../../render/cesium/unbound.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';

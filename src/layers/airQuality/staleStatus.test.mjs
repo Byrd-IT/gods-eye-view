@@ -1,3 +1,4 @@
+import '../../render/cesium/unbound.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAirQualityLayer } from './index.js';

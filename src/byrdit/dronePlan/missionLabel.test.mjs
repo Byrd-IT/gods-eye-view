@@ -23,11 +23,7 @@ import {
   thumbFrame,
   tileUrl,
 } from './missionThumb.js';
-import {
-  cheatSheetHtml,
-  cheatSheetText,
-  numberedPlans,
-} from './cheatSheet.js';
+import { cheatSheetHtml, cheatSheetText, numberedPlans } from './cheatSheet.js';
 
 const decode = (b) => new TextDecoder().decode(b);
 
@@ -56,7 +52,10 @@ test('codes: M7, M7-2 for flight 2 of several, padded for files', () => {
   assert.equal(flightCode(7, 1, 3), 'M7-2');
   assert.equal(flightCodePadded(7), 'M07');
   assert.equal(flightCodePadded(12, 0, 2), 'M12-1');
-  assert.equal(flightTitle({ no: 7, name: 'Byrd Ranch ring A' }), 'M07 Byrd Ranch ring A');
+  assert.equal(
+    flightTitle({ no: 7, name: 'Byrd Ranch ring A' }),
+    'M07 Byrd Ranch ring A',
+  );
   assert.equal(
     flightTitle({ no: 7, name: 'ring A' }, 1, 3),
     'M07-2 ring A (2 of 3)',
@@ -75,7 +74,10 @@ test('file names: M07_ring-A.kmz, plain ASCII, never a path', () => {
     flightFileName({ no: 9, name: '../../etc/pässwd & <x>\n' }),
     'M09_etc-passwd-x.kmz',
   );
-  assert.match(flightFileName({ no: 1, name: 'x'.repeat(200) }), /^M01_x{40}\.kmz$/);
+  assert.match(
+    flightFileName({ no: 1, name: 'x'.repeat(200) }),
+    /^M01_x{40}\.kmz$/,
+  );
   assert.equal(labelStem({ no: 7, name: 'ring A' }), 'M07_ring-A');
   assert.equal(hasLabel({ no: 7, name: '' }), true);
   assert.equal(hasLabel({ no: 0 }), false);
@@ -119,9 +121,17 @@ test('thumbnail frame keeps every point inside the picture, with a margin', () =
   assert.equal(thumbFrame([]), null);
   assert.equal(thumbFrame([{ lat: NaN, lon: 1 }]), null);
   // One point does not blow up: it sits in the middle.
-  const one = thumbFrame([{ lat: 30, lon: -97 }]).project({ lat: 30, lon: -97 });
-  assert.ok(Math.abs(one.x - THUMB_W / 2) < 1 && Math.abs(one.y - THUMB_H / 2) < 1);
-  assert.match(tileUrl(f), /^https:\/\/services\.arcgisonline\.com\/.*bboxSR=3857.*size=400,300/);
+  const one = thumbFrame([{ lat: 30, lon: -97 }]).project({
+    lat: 30,
+    lon: -97,
+  });
+  assert.ok(
+    Math.abs(one.x - THUMB_W / 2) < 1 && Math.abs(one.y - THUMB_H / 2) < 1,
+  );
+  assert.match(
+    tileUrl(f),
+    /^https:\/\/services\.arcgisonline\.com\/.*bboxSR=3857.*size=400,300/,
+  );
 });
 
 test('the picture draws the route, the takeoff and the big code', () => {
@@ -139,8 +149,13 @@ test('the picture draws the route, the takeoff and the big code', () => {
   assert.ok(texts.includes('M7'), 'the code is written');
   assert.ok(texts.includes('ring A'), 'the name is written without its code');
   assert.ok(texts.includes('H'), 'the takeoff is marked');
-  assert.ok(calls.some((c) => c[0] === 'lineTo'), 'the route is stroked');
-  const codeFont = calls.find((c) => c[0] === 'font' && /bold 1\d\dpx/.test(c[1]));
+  assert.ok(
+    calls.some((c) => c[0] === 'lineTo'),
+    'the route is stroked',
+  );
+  const codeFont = calls.find(
+    (c) => c[0] === 'font' && /bold 1\d\dpx/.test(c[1]),
+  );
   assert.ok(codeFont, 'the code is big (100px+)');
   // A long code shrinks so it still fits the plate.
   const long = recorder();
@@ -156,7 +171,10 @@ function fakeCanvas({ taint = false } = {}) {
       if (taint && rec.calls.some((c) => c[0] === 'drawImage')) {
         throw new Error('SecurityError: tainted canvas');
       }
-      cb({ arrayBuffer: async () => new Uint8Array([0xff, 0xd8, 0xff, 0xd9, type.length]).buffer });
+      cb({
+        arrayBuffer: async () =>
+          new Uint8Array([0xff, 0xd8, 0xff, 0xd9, type.length]).buffer,
+      });
     },
   };
   return { canvas, rec };
@@ -189,7 +207,10 @@ const spec = {
 
 test('renderThumb: tile first, JPEG bytes out', async () => {
   const f = fakeCanvas();
-  const out = await renderThumb(spec, { createCanvas: () => f.canvas, createImage: okImage });
+  const out = await renderThumb(spec, {
+    createCanvas: () => f.canvas,
+    createImage: okImage,
+  });
   assert.equal(out.tile, true);
   assert.deepEqual([...out.bytes.slice(0, 2)], [0xff, 0xd8]);
   assert.ok(f.rec.calls.some((c) => c[0] === 'drawImage'));
@@ -197,7 +218,10 @@ test('renderThumb: tile first, JPEG bytes out', async () => {
 
 test('renderThumb: a tile that will not load, or taints the canvas, still gives a labelled picture', async () => {
   const noTile = fakeCanvas();
-  const a = await renderThumb(spec, { createCanvas: () => noTile.canvas, createImage: badImage });
+  const a = await renderThumb(spec, {
+    createCanvas: () => noTile.canvas,
+    createImage: badImage,
+  });
   assert.equal(a.tile, false);
   assert.ok(noTile.rec.calls.some((c) => c[0] === 'fillText' && c[1] === 'M7'));
   const tainted = fakeCanvas({ taint: true });
@@ -215,18 +239,42 @@ test('renderThumb: a tile that will not load, or taints the canvas, still gives 
   assert.equal(made.length, 2);
   assert.ok(tainted);
   // No canvas at all: null, never a throw.
-  assert.equal(await renderThumb(spec, { createCanvas: () => null, createImage: badImage }), null);
+  assert.equal(
+    await renderThumb(spec, {
+      createCanvas: () => null,
+      createImage: badImage,
+    }),
+    null,
+  );
 });
 
 test('cheat sheet: M numbers, flown state and date, trash left out', () => {
   const plans = [
-    { id: 'b', missionNo: 2, name: 'Shop <roof>', status: 'flown', flownAt: Date.UTC(2026, 10, 3, 18) },
-    { id: 'a', missionNo: 1, name: 'Ring A', status: 'planned', site: 'Byrd Ranch' },
+    {
+      id: 'b',
+      missionNo: 2,
+      name: 'Shop <roof>',
+      status: 'flown',
+      flownAt: Date.UTC(2026, 10, 3, 18),
+    },
+    {
+      id: 'a',
+      missionNo: 1,
+      name: 'Ring A',
+      status: 'planned',
+      site: 'Byrd Ranch',
+    },
     { id: 'c', missionNo: 3, name: 'Gone', status: 'planned', deletedAt: 5 },
     { id: 'd', name: 'no number yet', status: 'planned' },
   ];
-  assert.deepEqual(numberedPlans(plans).map((p) => p.missionNo), [1, 2]);
-  const text = cheatSheetText(plans, { when: new Date(2026, 10, 3), user: 'brandon' });
+  assert.deepEqual(
+    numberedPlans(plans).map((p) => p.missionNo),
+    [1, 2],
+  );
+  const text = cheatSheetText(plans, {
+    when: new Date(2026, 10, 3),
+    user: 'brandon',
+  });
   assert.match(text, /\[ \] M1 +Ring A @ Byrd Ranch +- not flown/);
   assert.match(text, /\[x\] M2 +Shop <roof> +- FLOWN 2026-11-0[34]/);
   assert.doesNotMatch(text, /Gone|no number yet/);
@@ -238,18 +286,29 @@ test('cheat sheet: M numbers, flown state and date, trash left out', () => {
   assert.match(cheatSheetText([]), /No saved plans yet/);
 });
 
-test('export with a label: M07 file names, picture, README; still DJI Fly\'s form', async () => {
+test("export with a label: M07 file names, picture, README; still DJI Fly's form", async () => {
   const result = build();
   const label = { no: 7, name: 'Byrd Ranch ring A' };
   const pic = new Uint8Array([0xff, 0xd8, 1, 2, 0xff, 0xd9]);
   const files = readZip(
-    buildBundleZip(result, { label, previews: [pic], when: new Date(2026, 10, 3) }),
+    buildBundleZip(result, {
+      label,
+      previews: [pic],
+      when: new Date(2026, 10, 3),
+    }),
   );
   const names = [...files.keys()];
   const total = result.missions.length;
   assert.ok(names.includes(flightFileName(label, 0, total)), names.join());
-  assert.ok(names.includes(`${flightFileName(label, 0, total, 'jpg').replace(/\.jpg$/, '')}_preview.jpg`));
-  assert.deepEqual([...files.get(names.find((n) => n.endsWith('_preview.jpg')))], [...pic]);
+  assert.ok(
+    names.includes(
+      `${flightFileName(label, 0, total, 'jpg').replace(/\.jpg$/, '')}_preview.jpg`,
+    ),
+  );
+  assert.deepEqual(
+    [...files.get(names.find((n) => n.endsWith('_preview.jpg')))],
+    [...pic],
+  );
   const readme = decode(files.get('README.txt'));
   assert.match(readme, /MISSION LABELS/);
   assert.match(readme, new RegExp(`M7${total > 1 ? '-1' : ''} +M07`));
@@ -259,12 +318,16 @@ test('export with a label: M07 file names, picture, README; still DJI Fly\'s for
   const parsed = await parseDjiKmz(files.get(kmzName), { fileName: kmzName });
   const findings = checkMission(parsed, { droneEnumValue: 68 });
   assert.deepEqual(
-    findings.filter((f) => f.code === 'template-shape' || f.code === 'namespace'),
+    findings.filter(
+      (f) => f.code === 'template-shape' || f.code === 'namespace',
+    ),
     [],
   );
   assert.equal(parsed.meta.author, flightTitle(label, 0, total));
   // The waypoints are not touched by the label.
-  const plain = readZip(buildBundleZip(result, { when: new Date(2026, 10, 3) }));
+  const plain = readZip(
+    buildBundleZip(result, { when: new Date(2026, 10, 3) }),
+  );
   const plainKmz = [...plain.keys()].find((n) => n.endsWith('.kmz'));
   const way = (zip, n) => decode(readZip(zip.get(n)).get('wpmz/waylines.wpml'));
   assert.equal(way(files, kmzName), way(plain, plainKmz));
@@ -284,14 +347,26 @@ test('export with a label and controller ids: <UUID>.kmz stays, picture also goe
   const names = [...files.keys()];
   assert.ok(names.includes(`${uuid}.kmz`));
   assert.ok(names.includes(`map_preview/${uuid}/${uuid}.jpg`));
-  assert.match(decode(files.get('README.txt')), new RegExp(`waypoint/${uuid}/${uuid}\\.kmz`));
+  assert.match(
+    decode(files.get('README.txt')),
+    new RegExp(`waypoint/${uuid}/${uuid}\\.kmz`),
+  );
 });
 
 test('export without a label is exactly what it was (no pictures, no label block)', () => {
   const result = build();
-  const files = readZip(buildBundleZip(result, { when: new Date(2026, 10, 3, 15, 30) }));
+  const files = readZip(
+    buildBundleZip(result, { when: new Date(2026, 10, 3, 15, 30) }),
+  );
   const names = [...files.keys()];
-  assert.ok(names.every((n) => n === 'README.txt' || /^gev-drone-plan-20261103-1530-m\dof\d\.kmz$/.test(n)), names.join());
+  assert.ok(
+    names.every(
+      (n) =>
+        n === 'README.txt' ||
+        /^gev-drone-plan-20261103-1530-m\dof\d\.kmz$/.test(n),
+    ),
+    names.join(),
+  );
   assert.doesNotMatch(decode(files.get('README.txt')), /MISSION LABELS/);
 });
 
@@ -302,17 +377,24 @@ test('suite zip: flights are numbered across the passes', () => {
     { id: 'a', label: 'nadir', result: r1 },
     { id: 'b', label: 'oblique', result: r2 },
   ];
-  const files = readZip(buildSuiteZip(passes, { label: { no: 5, name: 'field' } }));
+  const files = readZip(
+    buildSuiteZip(passes, { label: { no: 5, name: 'field' } }),
+  );
   const kmz = [...files.keys()].filter((n) => n.endsWith('.kmz'));
   const total = r1.missions.length + r2.missions.length;
   const base = new Set(kmz.map((n) => n.split('/').pop()));
   assert.equal(base.size, total, 'every flight has its own M05-n file name');
-  assert.ok(kmz.every((n) => /\/M05(-\d+)?_field\.kmz$/.test(n)), kmz.join());
+  assert.ok(
+    kmz.every((n) => /\/M05(-\d+)?_field\.kmz$/.test(n)),
+    kmz.join(),
+  );
 });
 
 test('buildKmz with a label writes the title as the author and nothing else changes', async () => {
   const result = build();
-  const bytes = buildKmz(result.missions[0], result.plan, { name: 'M07 ring A' });
+  const bytes = buildKmz(result.missions[0], result.plan, {
+    name: 'M07 ring A',
+  });
   const parsed = await parseDjiKmz(bytes);
   assert.equal(parsed.meta.author, 'M07 ring A');
 });
@@ -327,22 +409,43 @@ test('a crafted controller id never becomes a path in the zip', () => {
     }),
   );
   const names = [...files.keys()];
-  assert.ok(names.every((n) => !n.includes('..') && !n.startsWith('/')), names.join());
-  assert.ok(names.some((n) => /^M03_x\.kmz$|^M03-1_x\.kmz$/.test(n)), 'falls back to the label name');
+  assert.ok(
+    names.every((n) => !n.includes('..') && !n.startsWith('/')),
+    names.join(),
+  );
+  assert.ok(
+    names.some((n) => /^M03_x\.kmz$|^M03-1_x\.kmz$/.test(n)),
+    'falls back to the label name',
+  );
   assert.ok(!names.some((n) => n.startsWith('map_preview/')));
 });
 
 test('a controller id that is not a UUID adds no <UUID>.kmz note to the README; a null image never throws', async () => {
   const result = build();
   const files = readZip(
-    buildBundleZip(result, { label: { no: 3, name: 'x' }, controllerIds: ['../../x'] }),
+    buildBundleZip(result, {
+      label: { no: 3, name: 'x' },
+      controllerIds: ['../../x'],
+    }),
   );
   assert.doesNotMatch(decode(files.get('README.txt')), /waypoint\/\.\./);
   assert.doesNotMatch(decode(files.get('README.txt')), /<UUID>|map_preview/);
-  const out = await renderThumb(spec0, { createCanvas: () => null, createImage: () => null });
+  const out = await renderThumb(spec0, {
+    createCanvas: () => null,
+    createImage: () => null,
+  });
   assert.equal(out, null);
   const f = fakeCanvas();
-  const plain = await renderThumb(spec0, { createCanvas: () => f.canvas, createImage: () => null });
+  const plain = await renderThumb(spec0, {
+    createCanvas: () => f.canvas,
+    createImage: () => null,
+  });
   assert.equal(plain.tile, false);
 });
-const spec0 = { code: 'M7', points: [{ lat: 30.27, lon: -97.77 }, { lat: 30.271, lon: -97.769 }] };
+const spec0 = {
+  code: 'M7',
+  points: [
+    { lat: 30.27, lon: -97.77 },
+    { lat: 30.271, lon: -97.769 },
+  ],
+};

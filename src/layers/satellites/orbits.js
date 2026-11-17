@@ -414,7 +414,6 @@ export function createOrbits({ state: layerState, services, parts, source }) {
     return orbitTrackFromRecord(sat.name, sat.satrec);
   }
   return {
-    orbitFrameModelMatrix,
     parseGP,
     propagatePosition,
     orbitalPeriodSeconds,

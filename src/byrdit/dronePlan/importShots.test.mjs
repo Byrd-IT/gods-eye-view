@@ -241,7 +241,11 @@ test('importCheckMission: height above the ground under each station, flat when 
   });
   // The file flies 150 m up from the start (ground 100) over ground of 200:
   // it is under the terrain and is drawn there, not lifted onto the ground.
-  assert.equal(high.waypoints[1].aglM, -50, 'below the ground is kept, not hidden');
+  assert.equal(
+    high.waypoints[1].aglM,
+    -50,
+    'below the ground is kept, not hidden',
+  );
   assert.equal(high.waypoints[1].groundM + high.waypoints[1].aglM, 150);
   assert.ok(
     hilly.waypoints.every(

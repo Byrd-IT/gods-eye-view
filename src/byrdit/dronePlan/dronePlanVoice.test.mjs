@@ -185,7 +185,10 @@ test('a secret aircraft string is not repeated', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.error, 'No aircraft matched.');
   assert.equal(JSON.stringify(result).includes(SECRET), false);
-  assert.equal(calls.some((call) => call[0] === 'applyOptions'), false);
+  assert.equal(
+    calls.some((call) => call[0] === 'applyOptions'),
+    false,
+  );
 });
 
 test('options sets a catalog aircraft and a height inside the slider range', async () => {
@@ -208,7 +211,10 @@ test('voice options cannot forward intervalTriggerProven', async () => {
   const voice = createDronePlanVoice(handle);
   const onlyFlag = await voice.options({ intervalTriggerProven: true });
   assert.equal(onlyFlag.ok, false);
-  assert.equal(calls.some((call) => call[0] === 'applyOptions'), false);
+  assert.equal(
+    calls.some((call) => call[0] === 'applyOptions'),
+    false,
+  );
   const spoken = await voice.options({ intervalTriggerProven: true, aglM: 80 });
   assert.equal(spoken.ok, true);
   const patch = calls.find((call) => call[0] === 'applyOptions')[1];
@@ -248,7 +254,9 @@ test('options forwards a timed-shot interval in seconds and refuses an unusable 
   const voice = createDronePlanVoice(handle);
   const ok = await voice.options({ timedIntervalS: 7 });
   assert.equal(ok.ok, true);
-  assert.deepEqual(calls.find((c) => c[0] === 'applyOptions')[1], { timedIntervalS: 7 });
+  assert.deepEqual(calls.find((c) => c[0] === 'applyOptions')[1], {
+    timedIntervalS: 7,
+  });
   // The same rule as the panel field: a small positive number is usable.
   const small = await voice.options({ timedIntervalS: 0.05 });
   assert.equal(small.ok, true);
@@ -256,7 +264,10 @@ test('options forwards a timed-shot interval in seconds and refuses an unusable 
   const before = calls.length;
   await voice.options({ timedIntervalS: null });
   assert.equal(
-    calls.slice(before).filter((c) => c[0] === 'applyOptions' && 'timedIntervalS' in c[1]).length,
+    calls
+      .slice(before)
+      .filter((c) => c[0] === 'applyOptions' && 'timedIntervalS' in c[1])
+      .length,
     0,
   );
   for (const bad of [0, -2, 'seven', 4000, NaN, true]) {
@@ -271,7 +282,12 @@ test('options forwards a timed-shot interval in seconds and refuses an unusable 
 test('box sets coordinates and a refused box does not echo them', async () => {
   const good = fakeHandle();
   const voice = createDronePlanVoice(good.handle);
-  const set = await voice.box({ west: -97.8, south: 30.2, east: -97.7, north: 30.3 });
+  const set = await voice.box({
+    west: -97.8,
+    south: 30.2,
+    east: -97.7,
+    north: 30.3,
+  });
   assert.equal(set.ok, true);
   assert.equal(set.areaCount, 1);
   const refused = fakeHandle({
@@ -319,7 +335,10 @@ test('suite refuses to start with no area', async () => {
   const voice = createDronePlanVoice(handle);
   const result = await voice.suite();
   assert.equal(result.error, 'Draw an area first');
-  assert.equal(calls.some((call) => call[0] === 'planSuite'), false);
+  assert.equal(
+    calls.some((call) => call[0] === 'planSuite'),
+    false,
+  );
 });
 
 test('remove does not echo an area id that is not on the panel', async () => {
@@ -380,7 +399,10 @@ test('a takeoff point needs an area', async () => {
     lon: -94.9,
   });
   assert.equal(result.error, 'Draw an area first');
-  assert.equal(calls.some((call) => call[0] === 'setTakeoff'), false);
+  assert.equal(
+    calls.some((call) => call[0] === 'setTakeoff'),
+    false,
+  );
 });
 
 test('an orbit height above the planner cap is refused', async () => {
@@ -452,11 +474,17 @@ test('recommend takes the Mapping Grid (Timed) mode and refuses an unknown one',
   const voice = createDronePlanVoice(handle);
   const ok = await voice.recommend('mapping-grid-timed');
   assert.equal(ok.ok, true);
-  assert.equal(calls.find((c) => c[0] === 'useRecommended')[1], 'mapping-grid-timed');
+  assert.equal(
+    calls.find((c) => c[0] === 'useRecommended')[1],
+    'mapping-grid-timed',
+  );
   const bad = await voice.recommend('mapping-grid-faster');
   assert.equal(bad.ok, false);
   assert.match(bad.error, /mapping-grid-timed/);
   const patch = await voice.options({ mode: 'mapping-grid-timed' });
   assert.equal(patch.ok, true);
-  assert.equal(calls.filter((c) => c[0] === 'applyOptions').at(-1)[1].mode, 'mapping-grid-timed');
+  assert.equal(
+    calls.filter((c) => c[0] === 'applyOptions').at(-1)[1].mode,
+    'mapping-grid-timed',
+  );
 });

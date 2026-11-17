@@ -33,6 +33,7 @@ import {
   TOP_DOWN_PITCH,
   ZOOM_FRACTION,
 } from './navMath.js';
+import { cesiumViewerFor } from '../cesiumViewer.js';
 
 /**
  * A centre pick can come back wild while tiles are still streaming (a far
@@ -348,7 +349,7 @@ function build(doc) {
  * @param {Object} [options.timers] `{setTimeout, clearTimeout}` (tests inject).
  */
 export function mountNavControl({
-  viewer,
+  viewer: sceneViewer,
   parent,
   document: doc = globalThis.document,
   runNavigation = (_noun, navigate) => navigate(),
@@ -356,6 +357,7 @@ export function mountNavControl({
   now = () => globalThis.performance?.now?.() ?? Date.now(),
   timers = globalThis,
 } = {}) {
+  const viewer = cesiumViewerFor(sceneViewer);
   if (!viewer?.camera || !viewer?.scene)
     throw new TypeError('A viewer with a camera and scene is required');
   const existing = mounted.get(viewer);

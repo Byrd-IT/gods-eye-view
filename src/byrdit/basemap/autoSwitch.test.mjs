@@ -1,3 +1,4 @@
+import '../../render/cesium/unbound.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MapSourceController } from '../../maps/controller.js';

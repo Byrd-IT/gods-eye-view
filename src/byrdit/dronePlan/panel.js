@@ -190,6 +190,7 @@ import {
   writeAlpha,
   writeStepsOpen,
 } from './prefs.js';
+import { cesiumViewerFor } from '../cesiumViewer.js';
 
 export const PANEL_ID = 'drone-plan-panel';
 export const BODY_ID = 'drone-plan-panel-body';
@@ -515,7 +516,7 @@ export function continuousBatteryLines(result, usableBatteryMin) {
  *   downloadFile?: (name: string, bytes: Uint8Array, type: string) => void }} deps
  */
 export function initDronePlan({
-  viewer,
+  viewer: sceneViewer,
   cesium = Cesium,
   document: doc = globalThis.document,
   downloadFile = browserDownload,
@@ -534,6 +535,7 @@ export function initDronePlan({
     clear: () => clearOverlaySource(BATTERY_PAUSE_SOURCE),
   },
 } = {}) {
+  const viewer = cesiumViewerFor(sceneViewer);
   const panel = doc?.getElementById?.(PANEL_ID);
   const body = doc?.getElementById?.(BODY_ID);
   if (!viewer?.scene || !panel || !body) return null;

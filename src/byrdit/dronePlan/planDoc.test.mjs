@@ -14,13 +14,36 @@ import { getPreset } from './presets.js';
 
 const state = () => ({
   areas: [
-    { id: 'area-1', name: 'Area 1', kind: 'rect', box: { west: -97.1, east: -97.09, south: 30.1, north: 30.11 } },
-    { id: 'area-2', name: 'Roof', kind: 'polygon', ring: [{ lon: -97, lat: 30 }, { lon: -96.99, lat: 30 }, { lon: -96.99, lat: 30.01 }], box: { west: -97, east: -96.99, south: 30, north: 30.01 } },
+    {
+      id: 'area-1',
+      name: 'Area 1',
+      kind: 'rect',
+      box: { west: -97.1, east: -97.09, south: 30.1, north: 30.11 },
+    },
+    {
+      id: 'area-2',
+      name: 'Roof',
+      kind: 'polygon',
+      ring: [
+        { lon: -97, lat: 30 },
+        { lon: -96.99, lat: 30 },
+        { lon: -96.99, lat: 30.01 },
+      ],
+      box: { west: -97, east: -96.99, south: 30, north: 30.01 },
+    },
   ],
   nextArea: 3,
   jobGrouping: 'whole',
   takeoff: { lon: -97.1, lat: 30.1 },
-  options: { presetId: 'dji-mini-5-pro', aglM: 70, pattern: 'grid', speedMs: 4, orbitTargets: [], obstacles: [], junk: 'x' },
+  options: {
+    presetId: 'dji-mini-5-pro',
+    aglM: 70,
+    pattern: 'grid',
+    speedMs: 4,
+    orbitTargets: [],
+    obstacles: [],
+    junk: 'x',
+  },
   orbitTargetsTouched: true,
   orbitsPlanned: true,
   wpml: { droneEnumValue: null, droneSubEnumValue: null },
@@ -29,39 +52,81 @@ const state = () => ({
 });
 
 test('serialize then read keeps everything editable and drops unknown keys', () => {
-  const doc = serializePlan(state(), { controllerIds: ['9560f7b3-daa9-481a-b2f5-37ccf3b8b996', 'nope', null] });
+  const doc = serializePlan(state(), {
+    controllerIds: ['9560f7b3-daa9-481a-b2f5-37ccf3b8b996', 'nope', null],
+  });
   assert.equal(doc.options.junk, undefined);
   const back = readPlan(JSON.parse(JSON.stringify(doc)));
   assert.equal(back.areas.length, 2);
   assert.equal(back.areas[1].kind, 'polygon');
-  assert.deepEqual(back.areas[1].box, { west: -97, east: -96.99, south: 30, north: 30.01 });
+  assert.deepEqual(back.areas[1].box, {
+    west: -97,
+    east: -96.99,
+    south: 30,
+    north: 30.01,
+  });
   assert.equal(back.jobGrouping, 'whole');
   assert.deepEqual(back.takeoff, { lon: -97.1, lat: 30.1 });
   assert.equal(back.options.aglM, 70);
   assert.equal(back.orbitTargetsTouched, true);
   assert.equal(back.suite.planned, true);
   assert.deepEqual(back.suite.hidden, ['nadir']);
-  assert.deepEqual(back.controllerIds, ['9560F7B3-DAA9-481A-B2F5-37CCF3B8B996', null, null]);
+  assert.deepEqual(back.controllerIds, [
+    '9560F7B3-DAA9-481A-B2F5-37CCF3B8B996',
+    null,
+    null,
+  ]);
 });
 
 test('readPlan refuses documents that are not plans or are too new', () => {
-  for (const bad of [null, [], 'x', {}, { schema: 'gevplan' }, { schema: 'other', version: 1, areas: [] }]) {
+  for (const bad of [
+    null,
+    [],
+    'x',
+    {},
+    { schema: 'gevplan' },
+    { schema: 'other', version: 1, areas: [] },
+  ]) {
     assert.throws(() => readPlan(bad), /not-a-plan/);
   }
-  assert.throws(() => readPlan({ schema: 'gevplan', version: 99, areas: [] }), /newer-version/);
-  assert.throws(() => readPlan({ schema: 'gevplan', version: 1, areas: new Array(21).fill({}) }), /bad-areas/);
+  assert.throws(
+    () => readPlan({ schema: 'gevplan', version: 99, areas: [] }),
+    /newer-version/,
+  );
+  assert.throws(
+    () =>
+      readPlan({
+        schema: 'gevplan',
+        version: 1,
+        areas: new Array(21).fill({}),
+      }),
+    /bad-areas/,
+  );
 });
 
 test('hostile content is cleaned or refused, never trusted', () => {
-  const doc = { schema: 'gevplan', version: 1, areas: [{ kind: 'rect', box: { west: 1e9, east: 2, south: 0, north: 1 } }] };
+  const doc = {
+    schema: 'gevplan',
+    version: 1,
+    areas: [{ kind: 'rect', box: { west: 1e9, east: 2, south: 0, north: 1 } }],
+  };
   assert.throws(() => readPlan(doc), /bad-areas/);
   const ring = Array.from({ length: 501 }, () => ({ lon: 1, lat: 1 }));
-  assert.throws(() => readPlan({ ...doc, areas: [{ kind: 'polygon', ring }] }), /bad-areas/);
+  assert.throws(
+    () => readPlan({ ...doc, areas: [{ kind: 'polygon', ring }] }),
+    /bad-areas/,
+  );
   const ok = readPlan({
     schema: 'gevplan',
     version: 1,
     areas: [],
-    options: { presetId: '__proto__', aglM: 'big', speedMs: 3, pattern: 'zigzag', evil: 1 },
+    options: {
+      presetId: '__proto__',
+      aglM: 'big',
+      speedMs: 3,
+      pattern: 'zigzag',
+      evil: 1,
+    },
     wpml: { droneEnumValue: 'x' },
     controllerIds: ['../../etc/passwd'],
     imports: [{ waypoints: [{ lon: 999, lat: 0 }] }],
@@ -72,31 +137,65 @@ test('hostile content is cleaned or refused, never trusted', () => {
   assert.deepEqual(ok.controllerIds, [null]);
   assert.deepEqual(ok.imports, []);
   assert.equal(ok.nextArea, 1);
-  assert.equal(cleanImport({ waypoints: [{ lon: 1, lat: 1, heightM: 'a' }], uuid: 'x'.repeat(5) }).uuid, null);
+  assert.equal(
+    cleanImport({
+      waypoints: [{ lon: 1, lat: 1, heightM: 'a' }],
+      uuid: 'x'.repeat(5),
+    }).uuid,
+    null,
+  );
   assert.deepEqual(cleanControllerIds('x'), []);
 });
 
 test('.gevplan file: round trip, size and version checks', () => {
   const plan = serializePlan(state());
-  const text = buildGevPlanFile({ name: 'Barn', site: 'Farm', status: 'flown' }, plan);
+  const text = buildGevPlanFile(
+    { name: 'Barn', site: 'Farm', status: 'flown' },
+    plan,
+  );
   const got = parseGevPlanFile(text);
   assert.equal(got.details.name, 'Barn');
   assert.equal(got.details.status, 'flown');
   assert.equal(got.plan.areas.length, 2);
   assert.throws(() => parseGevPlanFile('{'), /not-a-plan/);
-  assert.throws(() => parseGevPlanFile(JSON.stringify({ schema: 'gevplan', version: 1, kind: 'x' })), /not-a-plan/);
-  assert.throws(() => parseGevPlanFile(text.replace('"version": 1,\n "kind"', '"version": 9,\n "kind"')), /newer-version/);
-  assert.throws(() => parseGevPlanFile('x'.repeat(26 * 1024 * 1024)), /too-large/);
+  assert.throws(
+    () =>
+      parseGevPlanFile(
+        JSON.stringify({ schema: 'gevplan', version: 1, kind: 'x' }),
+      ),
+    /not-a-plan/,
+  );
+  assert.throws(
+    () =>
+      parseGevPlanFile(
+        text.replace('"version": 1,\n "kind"', '"version": 9,\n "kind"'),
+      ),
+    /newer-version/,
+  );
+  assert.throws(
+    () => parseGevPlanFile('x'.repeat(26 * 1024 * 1024)),
+    /too-large/,
+  );
 });
 
 test('openDroneFile: gevplan, kmz, junk', async () => {
   const text = buildGevPlanFile({ name: 'N' }, serializePlan(state()));
   const g = await openDroneFile(new TextEncoder().encode(text), 'a.gevplan');
   assert.equal(g.kind, 'gevplan');
-  assert.equal((await openDroneFile(new TextEncoder().encode('{}'), 'a.gevplan')).code, 'not-a-plan');
-  assert.equal((await openDroneFile(new Uint8Array([1, 2, 3]), 'a.kmz')).code, 'not-a-kmz');
+  assert.equal(
+    (await openDroneFile(new TextEncoder().encode('{}'), 'a.gevplan')).code,
+    'not-a-plan',
+  );
+  assert.equal(
+    (await openDroneFile(new Uint8Array([1, 2, 3]), 'a.kmz')).code,
+    'not-a-kmz',
+  );
   assert.equal((await openDroneFile(new Uint8Array(), 'a.kmz')).code, 'empty');
-  const d = drawableFor('p', '#fff', readPlan(JSON.parse(JSON.stringify(serializePlan(state())))));
+  const d = drawableFor(
+    'p',
+    '#fff',
+    readPlan(JSON.parse(JSON.stringify(serializePlan(state())))),
+  );
   assert.equal(d.rings.length, 2);
   assert.equal(d.rings[0].length, 4);
   void getPreset;
@@ -106,7 +205,12 @@ test('libraryClient sends the CSRF header, scopes owner, and maps errors', async
   const calls = [];
   const fetchImpl = async (url, init) => {
     calls.push({ url, init });
-    if (url.includes('bad')) return { ok: false, status: 404, json: async () => ({ error: 'not-found', message: 'No such plan' }) };
+    if (url.includes('bad'))
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not-found', message: 'No such plan' }),
+      };
     return { ok: true, status: 200, json: async () => ({ ok: true }) };
   };
   const c = createLibraryClient({ fetchImpl });
@@ -117,10 +221,26 @@ test('libraryClient sends the CSRF header, scopes owner, and maps errors', async
   assert.equal(calls[1].url, '/api/byrdit/plans/?scope=all&trash=1');
   await c.save('p_1', { a: 1 }, { name: 'n' });
   assert.equal(calls[2].init.method, 'PUT');
-  assert.deepEqual(JSON.parse(calls[2].init.body), { name: 'n', plan: { a: 1 } });
-  await assert.rejects(() => c.open('bad'), (e) => e instanceof LibraryClientError && e.code === 'not-found' && e.status === 404);
-  const off = createLibraryClient({ fetchImpl: async () => { throw new Error('net'); } });
-  await assert.rejects(() => off.me(), (e) => e.code === 'offline');
+  assert.deepEqual(JSON.parse(calls[2].init.body), {
+    name: 'n',
+    plan: { a: 1 },
+  });
+  await assert.rejects(
+    () => c.open('bad'),
+    (e) =>
+      e instanceof LibraryClientError &&
+      e.code === 'not-found' &&
+      e.status === 404,
+  );
+  const off = createLibraryClient({
+    fetchImpl: async () => {
+      throw new Error('net');
+    },
+  });
+  await assert.rejects(
+    () => off.me(),
+    (e) => e.code === 'offline',
+  );
 });
 
 test('the camera preset round-trips and an unknown one is dropped', () => {
@@ -130,7 +250,11 @@ test('the camera preset round-trips and an unknown one is dropped', () => {
   assert.equal(back.options.cameraPresetId, 'test-12mp');
   const bad = state();
   bad.options.cameraPresetId = 'nope';
-  assert.equal(readPlan(JSON.parse(JSON.stringify(serializePlan(bad)))).options.cameraPresetId, undefined);
+  assert.equal(
+    readPlan(JSON.parse(JSON.stringify(serializePlan(bad)))).options
+      .cameraPresetId,
+    undefined,
+  );
 });
 
 test('interval capture settings round-trip; legacy plans do not grow defaults', () => {
@@ -173,7 +297,16 @@ test('interval capture settings round-trip; legacy plans do not grow defaults', 
   assert.equal(legacy.options.speedMs, 4);
   assert.equal(legacy.options.photoMode, 'waypoint');
   assert.equal(legacy.options.batteryMin, 25);
-  for (const key of ['captureMode', 'photoSpacingM', 'continuousRoute', 'usableBatteryMin', 'maxWaypoints', 'intervalTriggerProven', 'minPhotoIntervalS', 'timedIntervalS']) {
+  for (const key of [
+    'captureMode',
+    'photoSpacingM',
+    'continuousRoute',
+    'usableBatteryMin',
+    'maxWaypoints',
+    'intervalTriggerProven',
+    'minPhotoIntervalS',
+    'timedIntervalS',
+  ]) {
     assert.equal(Object.hasOwn(legacy.options, key), false, key);
   }
 
@@ -214,7 +347,10 @@ test('a forged intervalTriggerProven true is dropped from a plan and a .gevplan 
 
   const filed = parseGevPlanFile(buildGevPlanFile({ name: 'forged' }, forged));
   assert.equal(filed.plan.options.captureMode, 'distance');
-  assert.equal(Object.hasOwn(filed.plan.options, 'intervalTriggerProven'), false);
+  assert.equal(
+    Object.hasOwn(filed.plan.options, 'intervalTriggerProven'),
+    false,
+  );
 
   const rawFile = JSON.stringify({
     schema: 'gevplan',
@@ -230,7 +366,10 @@ test('a forged intervalTriggerProven true is dropped from a plan and a .gevplan 
   });
   const parsed = parseGevPlanFile(rawFile);
   assert.equal(parsed.plan.options.captureMode, 'distance');
-  assert.equal(Object.hasOwn(parsed.plan.options, 'intervalTriggerProven'), false);
+  assert.equal(
+    Object.hasOwn(parsed.plan.options, 'intervalTriggerProven'),
+    false,
+  );
 });
 
 test('a chosen Timed-shot interval round-trips; an old plan has none; bad values are dropped', () => {
@@ -255,7 +394,11 @@ test('a chosen Timed-shot interval round-trips; an old plan has none; bad values
     options: { speedMs: 4, captureMode: 'timed', minPhotoIntervalS: 5 },
   });
   assert.equal(Object.hasOwn(old.options, 'timedIntervalS'), false);
-  assert.equal(old.options.minPhotoIntervalS, 5, 'the camera minimum is a different setting');
+  assert.equal(
+    old.options.minPhotoIntervalS,
+    5,
+    'the camera minimum is a different setting',
+  );
 
   for (const bad of [0, -2, 3601, NaN, '7', true, null]) {
     const dirty = state();
@@ -271,7 +414,11 @@ test('a chosen Timed-shot interval round-trips; an old plan has none; bad values
       areas: [],
       options: { timedIntervalS: bad, speedMs: 4 },
     });
-    assert.equal(Object.hasOwn(read.options, 'timedIntervalS'), false, `read ${bad}`);
+    assert.equal(
+      Object.hasOwn(read.options, 'timedIntervalS'),
+      false,
+      `read ${bad}`,
+    );
     assert.equal(read.options.speedMs, 4);
   }
 });
@@ -302,7 +449,11 @@ test('a custom camera minimum round-trips; invalid values are dropped', () => {
       options: { minPhotoIntervalS: bad, speedMs: 4 },
     };
     const read = readPlan(forged);
-    assert.equal(Object.hasOwn(read.options, 'minPhotoIntervalS'), false, `read ${bad}`);
+    assert.equal(
+      Object.hasOwn(read.options, 'minPhotoIntervalS'),
+      false,
+      `read ${bad}`,
+    );
     assert.equal(read.options.speedMs, 4);
   }
 });

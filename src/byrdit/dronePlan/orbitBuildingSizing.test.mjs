@@ -15,11 +15,19 @@ import {
   planFlight,
   targetRingHeights,
 } from './planner.js';
-import { downtownPayload, rectArea, way, boxAround } from './buildingFixtures.mjs';
+import {
+  downtownPayload,
+  rectArea,
+  way,
+  boxAround,
+} from './buildingFixtures.mjs';
 
 const area = rectArea(300, 200);
 const recommend = (elements, opts = {}) =>
-  recommendOrbitTargets([area], { footprints: parseBuildings({ elements }), ...opts });
+  recommendOrbitTargets([area], {
+    footprints: parseBuildings({ elements }),
+    ...opts,
+  });
 
 test('sizing: radius = farthest corner + max(10 m, half the size), clamped 10-300', () => {
   const [fp] = parseBuildings({ elements: [way(1, 0, 0, 30, 20)] });
@@ -95,20 +103,39 @@ test('caps: live cap of 5 recommendations; largest first; area centre kept as fa
     targets.map((t) => t.areaM2),
     [...targets.map((t) => t.areaM2)].sort((x, y) => y - x),
   );
-  assert.deepEqual(recommend([]).map((t) => t.source), ['area']);
-  assert.equal(recommend([]).at(0).radiusM, undefined, 'centre fallback keeps the plan radius');
+  assert.deepEqual(
+    recommend([]).map((t) => t.source),
+    ['area'],
+  );
+  assert.equal(
+    recommend([]).at(0).radiusM,
+    undefined,
+    'centre fallback keeps the plan radius',
+  );
 });
 
 test('rings: max(requested, roof + 15, obstacle + 5) within AGL min/cap', () => {
-  const { options } = normalizeOptions({ pattern: 'orbit', orbitHeightsM: [20, 30], obstacleHeightM: 15 });
+  const { options } = normalizeOptions({
+    pattern: 'orbit',
+    orbitHeightsM: [20, 30],
+    obstacleHeightM: 15,
+  });
   const rings = options.orbitHeightsM; // [20, 30]: already above the 15 + 5 floor
   const tall = targetRingHeights({ roofHeightM: 40 }, rings, 15);
   assert.deepEqual(tall.heights, [55]);
   assert.equal(tall.belowRoofClearance, false);
   const low = targetRingHeights({ roofHeightM: 6 }, rings, 15);
-  assert.deepEqual(low.heights, [21, 30], 'roof + 15 = 21 beats the 20 m ring, 30 stays');
+  assert.deepEqual(
+    low.heights,
+    [21, 30],
+    'roof + 15 = 21 beats the 20 m ring, 30 stays',
+  );
   const tallObstacle = targetRingHeights({ roofHeightM: 6 }, [10, 40], 30);
-  assert.deepEqual(tallObstacle.heights, [35, 40], 'obstacle floor 35 beats roof + 15 = 21');
+  assert.deepEqual(
+    tallObstacle.heights,
+    [35, 40],
+    'obstacle floor 35 beats roof + 15 = 21',
+  );
   const none = targetRingHeights({ roofHeightM: null }, rings, 15);
   assert.deepEqual(none.heights, rings, 'no roof: live behaviour');
   const over = targetRingHeights({ roofHeightM: 500 }, rings, 15);
@@ -124,10 +151,34 @@ test('rings: max(requested, roof + 15, obstacle + 5) within AGL min/cap', () => 
 test('planner: building targets orbit at their own radius and rings; others keep the plan radius', () => {
   const box = boxAround(300, 200);
   const stops = [
-    { id: 'b', lon: -97.77, lat: 30.27, label: 'Tower', source: 'building', active: true, heightM: 20, roofHeightM: 40, radiusM: 60 },
-    { id: 'u', lon: -97.7695, lat: 30.2705, label: 'Spot', source: 'custom', active: true, heightM: null },
+    {
+      id: 'b',
+      lon: -97.77,
+      lat: 30.27,
+      label: 'Tower',
+      source: 'building',
+      active: true,
+      heightM: 20,
+      roofHeightM: 40,
+      radiusM: 60,
+    },
+    {
+      id: 'u',
+      lon: -97.7695,
+      lat: 30.2705,
+      label: 'Spot',
+      source: 'custom',
+      active: true,
+      heightM: null,
+    },
   ];
-  const plan = planFlight(box, { pattern: 'orbit', orbitRadiusM: 30, orbitHeightsM: [20, 30], obstacleHeightM: 15, orbitTargets: stops });
+  const plan = planFlight(box, {
+    pattern: 'orbit',
+    orbitRadiusM: 30,
+    orbitHeightsM: [20, 30],
+    obstacleHeightM: 15,
+    orbitTargets: stops,
+  });
   assert.equal(plan.error, undefined);
   const [tb, tu] = plan.orbit.targets;
   assert.equal(tb.radiusM, 60);
@@ -135,10 +186,20 @@ test('planner: building targets orbit at their own radius and rings; others keep
   assert.equal(tu.radiusM, 30);
   assert.deepEqual(tu.ringsAglM, [20, 30]);
   const orbitLegs = plan.legs.filter((l) => l.kind === 'orbit');
-  const aglsOf = (id) => [...new Set(orbitLegs.filter((l) => l.targetId === id).flatMap((l) => l.waypoints.map((w) => w.aglM)))];
+  const aglsOf = (id) => [
+    ...new Set(
+      orbitLegs
+        .filter((l) => l.targetId === id)
+        .flatMap((l) => l.waypoints.map((w) => w.aglM)),
+    ),
+  ];
   assert.deepEqual(aglsOf('b'), [55]);
   assert.deepEqual(aglsOf('u'), [20, 30]);
-  assert.equal(plan.orbit.transitAglM, 55, 'crossing between targets clears the tall roof');
+  assert.equal(
+    plan.orbit.transitAglM,
+    55,
+    'crossing between targets clears the tall roof',
+  );
   assert.ok(plan.orbit.minAglM <= 20, 'live obstacle floor unchanged');
   // The sized orbit really is 60 m wide: first-ring waypoints sit 60 m out.
   assert.ok(orbitLegs.find((l) => l.targetId === 'b').waypoints.length > 12);

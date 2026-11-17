@@ -47,7 +47,8 @@ function smearAxis(img, radius, axis) {
     let n = 0;
     for (let d = -radius; d <= radius; d += 1) {
       const xx = axis === 'x' ? Math.min(img.width - 1, Math.max(0, x + d)) : x;
-      const yy = axis === 'y' ? Math.min(img.height - 1, Math.max(0, y + d)) : y;
+      const yy =
+        axis === 'y' ? Math.min(img.height - 1, Math.max(0, y + d)) : y;
       const o = (yy * img.width + xx) * 4;
       r += img.data[o];
       g += img.data[o + 1];
@@ -164,7 +165,10 @@ test('blur thresholds are configurable and non-finite overrides are ignored', ()
   assert.equal(raised.code, 'low-edge-energy');
   const ignored = analyzeBlur(sharp, { blurSharpMin: Number.NaN });
   assert.equal(ignored.status, 'sharp');
-  const resolved = normalizeThresholds({ blurScoreFull: 1e18, clipNearWhite: 'nope' });
+  const resolved = normalizeThresholds({
+    blurScoreFull: 1e18,
+    clipNearWhite: 'nope',
+  });
   assert.equal(resolved.blurScoreFull, 1e18);
   assert.equal(resolved.clipNearWhite, DEFAULT_THRESHOLDS.clipNearWhite);
   assert.equal(resolved.blurSharpMin, DEFAULT_THRESHOLDS.blurSharpMin);
@@ -175,7 +179,10 @@ test('spread edges with contrast left are scored as soft, not left unknown', () 
   assert.equal(soft.status, 'soft');
   assert.equal(soft.code, 'soft-detail');
   assert.equal(soft.countsTowardScore, true);
-  assert.equal(soft.score, Math.min(99, Math.round(100 * soft.metrics.acutance)));
+  assert.equal(
+    soft.score,
+    Math.min(99, Math.round(100 * soft.metrics.acutance)),
+  );
   assert.ok(soft.score > 0 && soft.score < 60);
   assert.match(soft.reason, /not a focus/i);
   assert.doesNotMatch(soft.reason, /out of focus/i);
@@ -192,9 +199,13 @@ test('spread edges with contrast left are scored as soft, not left unknown', () 
   assert.equal(smearedBars.countsTowardScore, true);
   assert.ok(smearedBars.score < 40);
 
-  const loosened = analyzeBlur(smearBoth(checker(), 3), { blurAcutanceSoft: 0.05 });
+  const loosened = analyzeBlur(smearBoth(checker(), 3), {
+    blurAcutanceSoft: 0.05,
+  });
   assert.notEqual(loosened.status, 'soft');
-  const nanIgnored = analyzeBlur(smearBoth(checker(), 3), { blurAcutanceSoft: Number.NaN });
+  const nanIgnored = analyzeBlur(smearBoth(checker(), 3), {
+    blurAcutanceSoft: Number.NaN,
+  });
   assert.equal(nanIgnored.status, 'soft');
   const graded = analyzePhotoQuality(smearBoth(checker(), 3));
   assert.equal(graded.metrics.blur.status, 'soft');
@@ -227,11 +238,13 @@ test('directional smear is scored only when both axes have texture, and never as
   const smeared = analyzeDirectionalMotion(smearX(checker(), 5));
   const facade = analyzeDirectionalMotion(barsV());
   const blank = analyzeDirectionalMotion(flat());
-  const lintel = analyzeDirectionalMotion(image(64, 64, (x, y) => {
-    const bar = Math.floor(x / 8) % 2 === 0;
-    const line = y % 32 < 1;
-    return gray(bar || line ? 20 : 220);
-  }));
+  const lintel = analyzeDirectionalMotion(
+    image(64, 64, (x, y) => {
+      const bar = Math.floor(x / 8) % 2 === 0;
+      const line = y % 32 < 1;
+      return gray(bar || line ? 20 : 220);
+    }),
+  );
   const smearedBars = analyzeDirectionalMotion(smearX(barsV(), 5));
 
   assert.equal(none.metrics.observation, 'balanced');
@@ -243,8 +256,9 @@ test('directional smear is scored only when both axes have texture, and never as
   assert.equal(smeared.code, 'directional-softness');
   assert.equal(smeared.warning, null);
   assert.equal(smeared.countsTowardScore, true);
-  const ratio = Math.min(smeared.metrics.acutanceX, smeared.metrics.acutanceY)
-    / Math.max(smeared.metrics.acutanceX, smeared.metrics.acutanceY);
+  const ratio =
+    Math.min(smeared.metrics.acutanceX, smeared.metrics.acutanceY) /
+    Math.max(smeared.metrics.acutanceX, smeared.metrics.acutanceY);
   assert.ok(ratio < DEFAULT_THRESHOLDS.motionPeakRatio);
   assert.equal(smeared.score, Math.round(100 * ratio));
   assert.ok(smeared.score > 0 && smeared.score < 50);
@@ -265,22 +279,31 @@ test('directional smear is scored only when both axes have texture, and never as
   assert.ok(lintel.metrics.acutanceX >= DEFAULT_THRESHOLDS.motionAcutanceMin);
   assert.ok(lintel.metrics.acutanceY >= DEFAULT_THRESHOLDS.motionAcutanceMin);
 
-  const hidden = analyzeDirectionalMotion(smearX(checker(8, 128), 5), { maxSampleEdge: 32 });
+  const hidden = analyzeDirectionalMotion(smearX(checker(8, 128), 5), {
+    maxSampleEdge: 32,
+  });
   assert.equal(hidden.metrics.sampledWidth <= 32, true);
   assert.equal(hidden.status, 'possible');
   assert.equal(hidden.warning, null);
   assert.equal(hidden.countsTowardScore, true);
 
-  const tightened = analyzeDirectionalMotion(smearX(checker(), 5), { motionPeakRatio: 0.05 });
+  const tightened = analyzeDirectionalMotion(smearX(checker(), 5), {
+    motionPeakRatio: 0.05,
+  });
   assert.equal(tightened.status, 'unknown');
-  const nanIgnored = analyzeDirectionalMotion(smearX(checker(), 5), { motionPeakRatio: Number.NaN });
+  const nanIgnored = analyzeDirectionalMotion(smearX(checker(), 5), {
+    motionPeakRatio: Number.NaN,
+  });
   assert.equal(nanIgnored.status, 'possible');
 
   const graded = analyzePhotoQuality(smearX(checker(), 5));
   assert.ok(graded.findings.includes('directionalMotion'));
   assert.equal(graded.unknown.includes('directionalMotion'), false);
   assert.equal(graded.metrics.directionalMotion.warning, null);
-  assert.equal(analyzePhotoQuality(barsV()).unknown.includes('directionalMotion'), true);
+  assert.equal(
+    analyzePhotoQuality(barsV()).unknown.includes('directionalMotion'),
+    true,
+  );
   assertNoOverclaim(graded);
 });
 
@@ -329,14 +352,18 @@ test('shadows describe dark pixels and do not infer crushed shadows or underexpo
   const kept = analyzeShadows(detailed);
   assert.equal(kept.status, 'ok');
   assert.equal(kept.code, 'dark-areas-have-contrast');
-  assert.ok(kept.metrics.darkLocalContrast >= DEFAULT_THRESHOLDS.shadowLocalMin);
+  assert.ok(
+    kept.metrics.darkLocalContrast >= DEFAULT_THRESHOLDS.shadowLocalMin,
+  );
 
   const crushed = analyzeShadows(image(64, 64, () => gray(8)));
   assert.equal(crushed.status, 'unknown');
   assert.equal(crushed.score, null);
   assert.equal(crushed.code, 'dark-contrast-unknown');
   assert.match(crushed.reason, /not inferred|neither is inferred/i);
-  assert.ok(crushed.metrics.darkFraction > DEFAULT_THRESHOLDS.shadowFractionMin);
+  assert.ok(
+    crushed.metrics.darkFraction > DEFAULT_THRESHOLDS.shadowFractionMin,
+  );
 });
 
 test('noise is estimated only from flat blocks, otherwise unknown', () => {
@@ -391,10 +418,15 @@ test('glare is a heuristic and is withheld when the cue is the whole frame or ha
 
 test('a soft-detail score caps the composite even when noise findings change', () => {
   const sample = smearBoth(checker(8, 64), 3);
-  const result = analyzePhotoQuality(sample, { thresholds: { clipFractionWarn: 0 } });
+  const result = analyzePhotoQuality(sample, {
+    thresholds: { clipFractionWarn: 0 },
+  });
   assert.equal(result.metrics.blur.status, 'soft');
   assert.equal(result.metrics.clipping.status, 'clipped');
-  assert.ok(result.score <= result.metrics.blur.score, `composite ${result.score} exceeds soft-detail score ${result.metrics.blur.score}`);
+  assert.ok(
+    result.score <= result.metrics.blur.score,
+    `composite ${result.score} exceeds soft-detail score ${result.metrics.blur.score}`,
+  );
 });
 
 test('the composite scores only sharpness readings and defect findings', () => {

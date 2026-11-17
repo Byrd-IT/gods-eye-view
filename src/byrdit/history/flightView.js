@@ -20,6 +20,7 @@
  * Pure and portable: no DOM, no Node built-ins, no Cesium import (the
  * camera's computeViewRectangle() result is read as plain radians).
  */
+import { cesiumViewerFor } from '../cesiumViewer.js';
 
 export const VIEW_MIN_INTERVAL_MS = 5_000;
 export const VIEW_MARGIN = 0.1;
@@ -158,7 +159,7 @@ let tabTracker = null;
 /** Touch point for src/layers/flights/controller.js (one tracker per tab). */
 export function flightViewQuery(viewer) {
   tabTracker ??= createFlightViewTracker();
-  return tabTracker.query(viewer);
+  return tabTracker.query(cesiumViewerFor(viewer));
 }
 
 /** Touch point for src/sources/live/standalone.js: add view/vsid params. */

@@ -8,6 +8,7 @@ import * as Cesium from 'cesium';
 import { pickGroundPosition } from '../../input/dispatcher.js';
 import { createSolunarPanel } from './panel.js';
 import { addDays, localDateOf, localDayStartMs } from './zone.js';
+import { cesiumViewerFor } from '../cesiumViewer.js';
 
 export const SOLUNAR_ID = 'solunar-panel';
 export const SOLUNAR_BODY_ID = 'gev-solunar-body';
@@ -61,7 +62,7 @@ export function mountSolunarForShell(
 ) {
   const root = doc?.getElementById?.(SOLUNAR_ID);
   const body = doc?.getElementById?.(SOLUNAR_BODY_ID);
-  const viewer = shell?.viewer;
+  const viewer = cesiumViewerFor(shell?.viewer);
   if (!root || !body || !viewer) return null;
   if (root.dataset?.solunarMounted === '1') return null;
   root.dataset.solunarMounted = '1';

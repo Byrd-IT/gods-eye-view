@@ -1,4 +1,5 @@
 // Byrd-IT: USGS water layers — split by class, streams loaded by viewport tile.
+import '../render/cesium/unbound.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';

@@ -265,7 +265,12 @@ test('fit speed: after the 0.1 m rounding the written spacing never exceeds the 
     for (const frontOverlapPct of [60, 70, 75, 80, 85, 90])
       for (const timedIntervalS of [0.5, 1, 2, 2.5, 3, 5, 7, 10, 13.7]) {
         const speedMs = 15;
-        const f = timingFigures({ alongM, speedMs, frontOverlapPct, timedIntervalS });
+        const f = timingFigures({
+          alongM,
+          speedMs,
+          frontOverlapPct,
+          timedIntervalS,
+        });
         const fit = f.chosen.fitSpeedMs;
         if (fit == null) {
           // Only when even 0.1 m/s writes more than the wanted spacing.
@@ -277,8 +282,16 @@ test('fit speed: after the 0.1 m rounding the written spacing never exceeds the 
           continue;
         }
         const label = `${alongM} ${frontOverlapPct} ${timedIntervalS} -> ${fit}`;
-        assert.ok(writtenSpacingM(fit * timedIntervalS) <= f.desiredSpacingM + 1e-9, label);
-        const after = timingFigures({ alongM, speedMs: fit, frontOverlapPct, timedIntervalS });
+        assert.ok(
+          writtenSpacingM(fit * timedIntervalS) <= f.desiredSpacingM + 1e-9,
+          label,
+        );
+        const after = timingFigures({
+          alongM,
+          speedMs: fit,
+          frontOverlapPct,
+          timedIntervalS,
+        });
         assert.equal(after.chosen.state, 'meets', label);
         // And it is the fastest step: 0.1 m/s faster would be short.
         const fasterMs = Number((fit + 0.1).toFixed(1));
@@ -289,8 +302,8 @@ test('fit speed: after the 0.1 m rounding the written spacing never exceeds the 
           timedIntervalS,
         });
         assert.ok(
-          writtenSpacingM(fasterMs * timedIntervalS) > f.desiredSpacingM + 1e-9 ||
-            faster.chosen.state === 'meets',
+          writtenSpacingM(fasterMs * timedIntervalS) >
+            f.desiredSpacingM + 1e-9 || faster.chosen.state === 'meets',
           label,
         );
         checked++;
@@ -308,7 +321,10 @@ test('fit speed: a small footprint where rounding up used to leave the plan shor
     timedIntervalS: 1.017,
   });
   assert.ok(Math.abs(f.desiredSpacingM - 10.07) < 1e-9);
-  assert.ok(writtenSpacingM(9.9 * 1.017) > f.desiredSpacingM, 'the old fit of 9.9 m/s wrote 10.1 m');
+  assert.ok(
+    writtenSpacingM(9.9 * 1.017) > f.desiredSpacingM,
+    'the old fit of 9.9 m/s wrote 10.1 m',
+  );
   assert.ok(f.chosen.fitSpeedMs < 9.9, String(f.chosen.fitSpeedMs));
   const after = timingFigures({
     alongM: 50.35,
@@ -384,13 +400,23 @@ test('suite rows: each pass is read with the interval it was planned with', () =
   assert.equal(own.ten.plannedIntervalS, 10);
   assert.ok(Math.abs(own.seven.frontPct - (1 - 21 / nadir) * 100) < 0.2);
   assert.ok(Math.abs(own.ten.frontPct - (1 - 30 / nadir) * 100) < 0.2);
-  assert.equal(own.stop.plannedIntervalS, null, 'stop capture ignores the interval');
+  assert.equal(
+    own.stop.plannedIntervalS,
+    null,
+    'stop capture ignores the interval',
+  );
   assert.equal(own.stop.frontPct, null);
   assert.equal(own.none.frontPct, null);
   assert.ok(own.none.recommendedIntervalS > 0);
   // An explicit interval is still a what-if for every pass.
-  const asked = Object.fromEntries(suiteTimingRows(passes, 7).map((r) => [r.id, r]));
+  const asked = Object.fromEntries(
+    suiteTimingRows(passes, 7).map((r) => [r.id, r]),
+  );
   assert.ok(Math.abs(asked.ten.frontPct - (1 - 21 / nadir) * 100) < 0.2);
-  assert.equal(asked.ten.plannedIntervalS, 10, 'the planned interval is still reported');
+  assert.equal(
+    asked.ten.plannedIntervalS,
+    10,
+    'the planned interval is still reported',
+  );
   assert.equal(suiteTimingRows(passes, null)[0].frontPct, null);
 });

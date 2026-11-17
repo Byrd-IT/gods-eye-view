@@ -184,8 +184,15 @@ test('photo at every waypoint: one group per waypoint, tilt on the first, gradua
       assert.equal(textOf(g, 'wpml:actionTriggerType'), 'reachPoint');
       // Every photo waypoint: rotate and photo are one ORDERED group (rotate
       // first). The gradual tilt group is parallel.
-      assert.equal(textOf(g, 'wpml:actionGroupMode'), n === 0 ? 'sequence' : 'parallel');
-      assert.equal(textOf(g, 'wpml:actionGroupId'), String(n + 1), 'group ids restart at 1');
+      assert.equal(
+        textOf(g, 'wpml:actionGroupMode'),
+        n === 0 ? 'sequence' : 'parallel',
+      );
+      assert.equal(
+        textOf(g, 'wpml:actionGroupId'),
+        String(n + 1),
+        'group ids restart at 1',
+      );
     });
     const first = groups[0];
     assert.equal(textOf(first, 'wpml:actionGroupStartIndex'), String(i));
@@ -198,7 +205,10 @@ test('photo at every waypoint: one group per waypoint, tilt on the first, gradua
     if (groups[1]) {
       assert.equal(groups.length, 2);
       assert.equal(textOf(groups[1], 'wpml:actionGroupStartIndex'), String(i));
-      assert.equal(textOf(groups[1], 'wpml:actionGroupEndIndex'), String(i + 1));
+      assert.equal(
+        textOf(groups[1], 'wpml:actionGroupEndIndex'),
+        String(i + 1),
+      );
       assert.deepEqual(
         all(groups[1], 'wpml:actionActuatorFunc').map((n) => n.text.trim()),
         ['gimbalEvenlyRotate'],
@@ -208,11 +218,20 @@ test('photo at every waypoint: one group per waypoint, tilt on the first, gradua
   // The tilt of a leg sits on the waypoint BEFORE the leg's first waypoint.
   const starts = mission.legs.slice(1).map((l) => l.waypoints[0].index - 1);
   const withTilt = marks
-    .map((m, i) => (all(m, 'wpml:actionActuatorFunc').some((n) => n.text.trim() === 'gimbalEvenlyRotate') ? i : -1))
+    .map((m, i) =>
+      all(m, 'wpml:actionActuatorFunc').some(
+        (n) => n.text.trim() === 'gimbalEvenlyRotate',
+      )
+        ? i
+        : -1,
+    )
     .filter((i) => i >= 0);
   assert.deepEqual(withTilt, starts);
   assert.equal(all(doc, 'wpml:gimbalPitchRotateAngle')[0].text.trim(), '-90');
-  assert.equal((waylinesWpml.match(/<wpml:useGlobalPayloadLensIndex>0</g) ?? []).length, mission.photoCount);
+  assert.equal(
+    (waylinesWpml.match(/<wpml:useGlobalPayloadLensIndex>0</g) ?? []).length,
+    mission.photoCount,
+  );
 });
 
 test('interval mode: one distance-triggered photo group per leg', () => {
@@ -241,16 +260,24 @@ test('interval mode: one distance-triggered photo group per leg', () => {
   assert.equal(textOf(first[1], 'wpml:actionTriggerType'), 'multipleDistance');
   const evenly = marks.flatMap((m, i) =>
     all(m, 'wpml:actionGroup')
-      .filter((x) => textOf(x, 'wpml:actionActuatorFunc') === 'gimbalEvenlyRotate')
-      .map((x) => [i, textOf(x, 'wpml:actionGroupStartIndex'), textOf(x, 'wpml:actionGroupEndIndex')]),
+      .filter(
+        (x) => textOf(x, 'wpml:actionActuatorFunc') === 'gimbalEvenlyRotate',
+      )
+      .map((x) => [
+        i,
+        textOf(x, 'wpml:actionGroupStartIndex'),
+        textOf(x, 'wpml:actionGroupEndIndex'),
+      ]),
   );
   assert.deepEqual(
     evenly,
-    mission.legs.slice(1).map((l) => [
-      l.waypoints[0].index - 1,
-      String(l.waypoints[0].index - 1),
-      String(l.waypoints[0].index),
-    ]),
+    mission.legs
+      .slice(1)
+      .map((l) => [
+        l.waypoints[0].index - 1,
+        String(l.waypoints[0].index - 1),
+        String(l.waypoints[0].index),
+      ]),
   );
 });
 
@@ -419,8 +446,9 @@ test('distance capture writes one unverified multipleDistance group per line', (
   assert.equal(textOf(groups[0], 'wpml:actionGroupEndIndex'), '1');
   assert.equal(textOf(groups[0], 'wpml:actionActuatorFunc'), 'takePhoto');
   assert.equal(
-    all(doc, 'wpml:actionActuatorFunc').filter((node) => node.text.trim() === 'takePhoto')
-      .length,
+    all(doc, 'wpml:actionActuatorFunc').filter(
+      (node) => node.text.trim() === 'takePhoto',
+    ).length,
     mission.legs.length,
   );
   assert.equal(xml.includes('multipleTiming'), false);
@@ -432,7 +460,11 @@ test('distance capture writes one unverified multipleDistance group per line', (
 });
 
 test('timed capture keeps the gimbal and writes no photo action', () => {
-  const result = build({ captureMode: 'timed', photoSpacingM: 25, batteryMin: 60 });
+  const result = build({
+    captureMode: 'timed',
+    photoSpacingM: 25,
+    batteryMin: 60,
+  });
   const mission = result.missions[0];
   const xml = buildMissionFiles(mission, result.plan).waylinesWpml;
   const doc = parseXml(xml);
@@ -445,7 +477,9 @@ test('timed capture keeps the gimbal and writes no photo action', () => {
     all(marks[0], 'wpml:actionActuatorFunc').map((node) => node.text.trim()),
     ['gimbalRotate'],
   );
-  const pitches = all(doc, 'wpml:gimbalPitchRotateAngle').map((node) => node.text.trim());
+  const pitches = all(doc, 'wpml:gimbalPitchRotateAngle').map((node) =>
+    node.text.trim(),
+  );
   assert.ok(pitches.includes('-90'));
   assert.ok(
     marks.some((mark) =>
@@ -467,7 +501,9 @@ test('stop captureMode leaves legacy interval WPML groups alone', () => {
   assert.equal(textOf(groups[0], 'wpml:actionTriggerParam'), '20.0');
   assert.ok(mission.legs[0].waypoints.length > 2);
   const marks = all(doc, 'Placemark');
-  assert.ok(marks.every((mark) => textOf(mark, 'wpml:useStraightLine') === '0'));
+  assert.ok(
+    marks.every((mark) => textOf(mark, 'wpml:useStraightLine') === '0'),
+  );
 });
 
 test('distance lines fly straight and action bounds support the action', () => {
@@ -482,7 +518,9 @@ test('distance lines fly straight and action bounds support the action', () => {
   const xml = buildMissionFiles(mission, result.plan).waylinesWpml;
   const doc = parseXml(xml);
   const marks = all(doc, 'Placemark');
-  assert.ok(marks.every((mark) => textOf(mark, 'wpml:useStraightLine') === '1'));
+  assert.ok(
+    marks.every((mark) => textOf(mark, 'wpml:useStraightLine') === '1'),
+  );
   marks.forEach((mark, i) => {
     const turn = textOf(mark, 'wpml:waypointTurnMode');
     const damping = Number(textOf(mark, 'wpml:waypointTurnDampingDist'));
@@ -495,13 +533,17 @@ test('distance lines fly straight and action bounds support the action', () => {
     }
   });
   for (let i = 0; i < marks.length - 1; i += 1) {
-    const seg = Number(textOf(marks[i], 'wpml:waypointTurnDampingDist'))
-      + Number(textOf(marks[i + 1], 'wpml:waypointTurnDampingDist'));
+    const seg =
+      Number(textOf(marks[i], 'wpml:waypointTurnDampingDist')) +
+      Number(textOf(marks[i + 1], 'wpml:waypointTurnDampingDist'));
     const a = mission.waypoints[i];
     const b = mission.waypoints[i + 1];
     const dx = (b.lon - a.lon) * 111320 * Math.cos((a.lat * Math.PI) / 180);
     const dy = (b.lat - a.lat) * 110540;
-    assert.ok(Math.hypot(dx, dy) > seg, 'segment longer than the two turn intercepts');
+    assert.ok(
+      Math.hypot(dx, dy) > seg,
+      'segment longer than the two turn intercepts',
+    );
   }
   const groups = all(doc, 'wpml:actionGroup').filter(
     (group) => textOf(group, 'wpml:actionTriggerType') === 'multipleDistance',
@@ -526,7 +568,9 @@ test('distance lines fly straight and action bounds support the action', () => {
     parseXml(buildMissionFiles(legacy.missions[0], legacy.plan).waylinesWpml),
     'Placemark',
   );
-  assert.ok(legacyMarks.every((mark) => textOf(mark, 'wpml:useStraightLine') === '0'));
+  assert.ok(
+    legacyMarks.every((mark) => textOf(mark, 'wpml:useStraightLine') === '0'),
+  );
 });
 
 test('foot spacing round-trips through parseDjiKmz and deriveImportShots', async () => {
@@ -547,7 +591,8 @@ test('foot spacing round-trips through parseDjiKmz and deriveImportShots', async
     assert.equal(
       mission.photoCount,
       mission.legs.reduce(
-        (sum, leg) => sum + linePhotoCount(leg.lengthM, written, leg.continued === true),
+        (sum, leg) =>
+          sum + linePhotoCount(leg.lengthM, written, leg.continued === true),
         0,
       ),
     );
@@ -556,7 +601,10 @@ test('foot spacing round-trips through parseDjiKmz and deriveImportShots', async
     const groups = all(doc, 'wpml:actionGroup').filter(
       (group) => textOf(group, 'wpml:actionTriggerType') === 'multipleDistance',
     );
-    assert.equal(textOf(groups[0], 'wpml:actionTriggerParam'), written.toFixed(1));
+    assert.equal(
+      textOf(groups[0], 'wpml:actionTriggerParam'),
+      written.toFixed(1),
+    );
     const parsed = await parseDjiKmz(buildKmz(mission, result.plan), {
       fileName: 'feet.kmz',
     });
@@ -600,7 +648,10 @@ test('each file README lists settings, and continuous distance lists battery bre
   assert.match(stopReadme, /Camera settings \(set in DJI Fly/);
   assert.match(stopReadme, /Pause markers are not estimated/);
   assert.doesNotMatch(stopReadme, /UNREACHABLE/);
-  assert.equal(stop.options?.usableBatteryMin ?? stop.plan.options.usableBatteryMin, 20);
+  assert.equal(
+    stop.options?.usableBatteryMin ?? stop.plan.options.usableBatteryMin,
+    20,
+  );
 
   const distance = build({
     captureMode: 'distance',
@@ -673,7 +724,9 @@ test('a long continuous file lists break lat/lon and an unreachable warning', ()
     speedMs: 5,
     presetId: 'dji-mini-5-pro',
   });
-  const ids = planBreaks.legs.flatMap((leg) => leg.waypoints.map((wp) => wp.id));
+  const ids = planBreaks.legs.flatMap((leg) =>
+    leg.waypoints.map((wp) => wp.id),
+  );
   const ground = { known: true, takeoffM: 100, wpM: ids.map(() => 100) };
   const broken = readmeText(assembleMissions(planBreaks, ground));
   assert.match(broken, /Requested mode: B distance/);
@@ -700,7 +753,9 @@ test('a long continuous file lists break lat/lon and an unreachable warning', ()
     speedMs: 15,
     presetId: 'dji-mini-5-pro',
   });
-  const stuckIds = planStuck.legs.flatMap((leg) => leg.waypoints.map((wp) => wp.id));
+  const stuckIds = planStuck.legs.flatMap((leg) =>
+    leg.waypoints.map((wp) => wp.id),
+  );
   const stuck = readmeText(
     assembleMissions(planStuck, {
       known: true,
@@ -724,7 +779,10 @@ test('reading a mission back refuses interval photos (one leg or several)', asyn
   const xml = buildMissionFiles(result.missions[0], result.plan).waylinesWpml;
   assert.throws(() => missionFromWaylines(xml), /interval-photo/);
   // One leg: the interval group sits behind the tilt group on waypoint 0.
-  const one = { ...result.missions[0], legs: result.missions[0].legs.slice(0, 1) };
+  const one = {
+    ...result.missions[0],
+    legs: result.missions[0].legs.slice(0, 1),
+  };
   const oneXml = buildMissionFiles(one, result.plan).waylinesWpml;
   assert.throws(() => missionFromWaylines(oneXml), /interval-photo/);
 });
@@ -742,10 +800,18 @@ test('README shutter safety uses the blur minimum rounded up, not the chosen shu
     presetId: 'dji-mini-5-pro',
   });
   const preset = getPreset('dji-mini-5-pro');
-  const raw = minShutterDenominator(preset, result.plan.gsdCm, result.plan.speedMs);
+  const raw = minShutterDenominator(
+    preset,
+    result.plan.gsdCm,
+    result.plan.speedMs,
+  );
   const standard = SHUTTER_DENOMINATORS.find((d) => d >= raw);
   assert.ok(raw > 500 && raw <= 1000, `raw ${raw}`);
-  assert.equal(standard, 1000, '500 ft at 7.8 m/s rounds up to 1/1000, not 1/500');
+  assert.equal(
+    standard,
+    1000,
+    '500 ft at 7.8 m/s rounds up to 1/1000, not 1/500',
+  );
   const readme = readmeText(result);
   assert.match(readme, /Shutter required: 1\/1000 s or faster/);
   assert.match(readme, /Shutter chosen: 1\/500 s/);
@@ -797,7 +863,10 @@ test('a forged intervalTriggerProven true does not drop the Mini 5 Pro unproven 
   assert.doesNotMatch(readme, /real-world proven/i);
   assert.doesNotMatch(readme, /trigger is proven/i);
   assert.match(readme, /not proven to continue after a resume/);
-  assert.match(readme, /estimated photos if the unproven distance trigger fires/);
+  assert.match(
+    readme,
+    /estimated photos if the unproven distance trigger fires/,
+  );
   const bundled = new TextDecoder().decode(
     readZip(buildBundleZip(result, { when })).get('README.txt'),
   );

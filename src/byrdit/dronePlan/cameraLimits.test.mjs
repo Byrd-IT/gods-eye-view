@@ -22,11 +22,16 @@ test('the 12 MP preset is called "12 MP, 4:3" and keeps its stored id', () => {
   const p = cameraPresetOrDefault('test-12mp');
   assert.equal(p.id, 'test-12mp');
   assert.equal(p.name, '12 MP, 4:3');
-  assert.equal(cameraPresetOrDefault('mapping-50mp').name, '50 MP, 4:3 (mapping)');
+  assert.equal(
+    cameraPresetOrDefault('mapping-50mp').name,
+    '50 MP, 4:3 (mapping)',
+  );
 });
 
-test("only aircraft with both photo sizes (Mini 5 Pro, Air 3S) get a size choice", () => {
-  const withSizes = listPresets().filter((p) => hasPhotoSizes(p)).map((p) => p.id);
+test('only aircraft with both photo sizes (Mini 5 Pro, Air 3S) get a size choice', () => {
+  const withSizes = listPresets()
+    .filter((p) => hasPhotoSizes(p))
+    .map((p) => p.id);
   assert.deepEqual(withSizes.sort(), ['dji-air-3s', 'dji-mini-5-pro']);
 });
 
@@ -62,7 +67,11 @@ test('other aircraft keep their own preset exactly (same object, no list)', () =
 test('the effective preset: pixel size and default interval follow the size', () => {
   const e50 = effectivePreset(mini, 'mapping-50mp');
   const e12 = effectivePreset(mini, 'test-12mp');
-  assert.equal(e50, mini, 'the default 50 MP plan uses the aircraft preset object');
+  assert.equal(
+    e50,
+    mini,
+    'the default 50 MP plan uses the aircraft preset object',
+  );
   assert.deepEqual(
     [e12.imageWidthPx, e12.imageHeightPx, e12.minPhotoIntervalS],
     [4096, 3072, 2],
@@ -195,7 +204,10 @@ test('shutter advice rounds up to a standard stop and flags what the camera cann
   assert.ok(slow.standard >= slow.exact);
   assert.equal(slow.beyondCamera, false);
   const fast = shutterAdvice(e, g, 15);
-  assert.equal(fast.beyondCamera, fast.exact > CAMERA_FASTEST_SHUTTER_DENOMINATOR);
+  assert.equal(
+    fast.beyondCamera,
+    fast.exact > CAMERA_FASTEST_SHUTTER_DENOMINATOR,
+  );
   const veryFast = shutterAdvice(e, g / 20, 15);
   assert.equal(veryFast.beyondTable, true);
   assert.equal(veryFast.standard, null);
