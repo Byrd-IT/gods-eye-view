@@ -6,7 +6,7 @@
  * import, so node tests can drive them with plain fakes. Upstream files call
  * in through small marked hooks (search "Byrd-IT visibility").
  */
-import { horizonOccluder } from '../render/cesium/iconOrientation.js';
+import { horizonFrom } from '../geo/horizon.js';
 import { cesiumViewerFor } from './cesiumViewer.js';
 
 /** Per-camera ground refinement (terrain lookups + mesh sampling) only runs
@@ -73,7 +73,9 @@ export function screenPointInView(
  * in the Cesium adapter, so a layer asks here instead of importing it.
  */
 export function horizonOccluderOf(host) {
-  return horizonOccluder(cesiumViewerFor(host).camera);
+  // Cesium-free (geo/horizon.js runs the same EllipsoidalOccluder test), so
+  // CCTV presentation code loads in node without the renderer.
+  return horizonFrom(cesiumViewerFor(host).camera.positionWC);
 }
 
 export function createViewTest(host, occluder, margin = VISIBILITY_MARGIN) {

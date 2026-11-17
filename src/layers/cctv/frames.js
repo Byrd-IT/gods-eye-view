@@ -14,6 +14,7 @@ import {
   createViewTest,
   horizonOccluderOf,
 } from '../../byrdit/liveVisibility.js';
+import { cesiumViewerFor } from '../../byrdit/cesiumViewer.js';
 
 /**
  * Contain-fits a source frame into the projection canvas: scaled to the
@@ -248,7 +249,8 @@ export function createFrames({ state: layerState, services, parts, source }) {
    */
   function activeRecordInView(record) {
     const viewer = layerState._viewer;
-    if (!viewer?.scene || !record?.position) return true;
+    // The scene object has no scene of its own: look at the viewer behind it.
+    if (!cesiumViewerFor(viewer)?.scene || !record?.position) return true;
     try {
       return createViewTest(
         viewer,

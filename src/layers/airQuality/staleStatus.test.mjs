@@ -1,4 +1,4 @@
-import '../../render/cesium/unbound.js';
+import { bindFakeDraw } from '../../testSupport/fakeDrawPort.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAirQualityLayer } from './index.js';
@@ -11,6 +11,8 @@ function harness(source) {
       remove() {},
     },
   };
+  // The layer draws through the scene's draw port (upstream #1760).
+  bindFakeDraw(viewer);
   const layer = createAirQualityLayer({
     source,
     overlayHost: {

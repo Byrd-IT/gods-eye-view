@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { bindFakeDraw } from '../../testSupport/fakeDrawPort.mjs';
 import test from 'node:test';
 import { createGhostMapsLayer } from './index.js';
 
@@ -103,17 +104,15 @@ function setup(t, sourceOver = {}) {
   t.mock.method(URL, 'createObjectURL', () => 'blob:x');
   t.mock.method(URL, 'revokeObjectURL', () => {});
   t.mock.method(console, 'warn', () => {});
-  const mounted = new Set();
-  const viewer = {
-    scene: { requestRender() {} },
-    dataSources: {
-      async add(ds) {
-        mounted.add(ds);
-        return ds;
-      },
-      remove(ds) {
-        return mounted.delete(ds);
-      },
+  const viewer = { scene: { requestRender() {} } };
+  // Upstream (#1760) draws each edition in draw-port sets of its own; an
+  // edition on the globe is its live shapes set.
+  const { draw } = bindFakeDraw(viewer);
+  const mounted = {
+    get size() {
+      return [...draw.sets.entries()].filter(
+        ([id, set]) => id.endsWith(':shapes') && !set.disposed,
+      ).length;
     },
   };
   const calls = [];

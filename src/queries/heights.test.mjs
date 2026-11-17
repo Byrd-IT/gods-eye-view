@@ -278,6 +278,18 @@ test('height queries go through the service', () => {
     'src/layers/alpr/presentation.js',
     'src/layers/streetLevel/cameraFraming.js',
     'src/layers/streetLevel/view.js',
+    // Byrd-IT fork debt, pinned: fork modules that sample heights on the
+    // Cesium viewer directly (they predate heightsOf, #1760). None is to be
+    // added; each is to move onto heightsOf.
+    'src/byrdit/basemap/autoSwitch.js',
+    'src/byrdit/basemap/odm3d.js',
+    'src/byrdit/basemap/overlays.js',
+    'src/byrdit/dronePlan/globeHeight.js',
+    'src/byrdit/dronePlan/obstacleLayer.js',
+    'src/byrdit/dronePlan/terrain.js',
+    'src/byrdit/navControl/navControl.js',
+    'src/byrdit/skyView/horizonProfile.js',
+    'src/byrdit/skyView/observer.js',
   ]);
   const NAMES =
     'sampleHeight|sampleHeightNow|clampToSurface|clampToHeight|sampleHeightMostDetailed|clampToHeightMostDetailed|getHeight';
