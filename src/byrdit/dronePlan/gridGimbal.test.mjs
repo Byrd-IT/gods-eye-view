@@ -38,7 +38,7 @@ test('shallowest grid angle: on the 5 degree step, never past the horizon limit'
   for (const preset of listPresets()) {
     const p = shallowestGridPitchDeg(preset);
     assert.ok(p <= -30 && p >= -90, `${preset.id}: ${p}`);
-    assert.equal(p % 5, 0);
+    assert.equal(Math.abs(p % 5), 0);
     assert.doesNotThrow(() => footprint(preset, 80, 90 + p), preset.id);
     // One step shallower would reach the horizon (or pass -30).
     if (p < -30) {
@@ -102,9 +102,17 @@ test('planFlight: a tilted grid flies the set angle, uses the tilted footprint a
   const fp30 = footprint(getPreset('dji-mini-5-pro'), 80, 30);
   assert.ok(fp30.acrossM > fp0.acrossM);
   assert.ok(tilted.legs.length <= nadir.legs.length);
-  // Lines are lengthened by the look-ahead (80 m * tan 30 deg = 46 m).
-  const len = (p) => Math.max(...p.legs.map((l) => l.lengthM));
-  assert.ok(len(tilted) > len(nadir) + 40, `${len(tilted)} vs ${len(nadir)}`);
+  // Lines are shifted back by the look-ahead (80 m * tan 30 deg = 46 m), so
+  // the camera, not the drone, covers the box edge.
+  const m = metersPerDegree(30.27);
+  const outsideM = (p) =>
+    Math.max(
+      ...waypointsOf(p).map((w) =>
+        Math.max(0, box.west - w.lon, w.lon - box.east) * m.lon,
+      ),
+    );
+  assert.ok(outsideM(nadir) < 1, String(outsideM(nadir)));
+  assert.ok(outsideM(tilted) > 40, String(outsideM(tilted)));
 });
 
 test('KMZ: every waypoint of a tilted timed grid writes the set gimbal pitch', () => {

@@ -6413,9 +6413,9 @@ test('gimbal: a plain grid has a Gimbal angle, -90 by default, shown only for th
   const gimbal = w.control('Gimbal angle');
   assert.ok(gimbal, 'the control exists');
   assert.equal(rowOf(gimbal).hidden, false);
-  assert.equal(gimbal.min, '-90');
-  assert.equal(gimbal.max, '-35', 'Mini 5 Pro: shallower reaches the horizon');
-  assert.equal(gimbal.value, '-90');
+  assert.equal(String(gimbal.min), '-90');
+  assert.equal(String(gimbal.max), '-35', 'Mini 5 Pro: shallower reaches the horizon');
+  assert.equal(String(gimbal.value), '-90');
   assert.match(w.stats().Gimbal, /^-90° straight down$/);
   for (const wp of w.handle.getResult().missions.flatMap((m) =>
     m.legs.flatMap((l) => l.waypoints),
