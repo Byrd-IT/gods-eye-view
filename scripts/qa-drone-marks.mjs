@@ -9,6 +9,8 @@
  * viewport. Exits 1 if any gap exceeds QA_MAX_GAP_PX (default 1.5).
  *
  *   QA_BASE_URL   app to test (default http://127.0.0.1:5231)
+ *   QA_MAX_GAP_PX largest allowed gap between a mark and its thumb position, px (default 1.5)
+ *   QA_DIR        'rtl' forces dir=rtl on the page to check right-to-left (default: leave as is)
  */
 import puppeteer from 'puppeteer';
 
@@ -48,6 +50,7 @@ async function boot(page, viewport) {
     viewer.scene.requestRender();
   }, VIEW);
   await wait(6000);
+  if (process.env.QA_DIR === 'rtl') await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
 }
 
 const measure = (page) =>
@@ -67,7 +70,8 @@ const measure = (page) =>
       const frac = (Number(slider.value) - min) / (max - min);
       const thumbX = sr.left + 5 + (sr.width - 10) * frac;
       const wantFrac = Number(tick.getAttribute('data-fraction'));
-      const wantX = sr.left + 5 + (sr.width - 10) * wantFrac;
+      const rtl = getComputedStyle(slider).direction === 'rtl';
+      const wantX = rtl ? sr.right - 5 - (sr.width - 10) * wantFrac : sr.left + 5 + (sr.width - 10) * wantFrac;
       out.push({
         name,
         sliderLeft: Math.round(sr.left * 10) / 10,

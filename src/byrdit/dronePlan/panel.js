@@ -4590,7 +4590,9 @@ export function initDronePlan({
       // A grid item's percentage margin is a share of its grid area, which is column 1:
       // exactly the slider's width (the value text is in column 2). The old absolute
       // `left` took its percentage from the whole row, so every mark sat right of its thumb.
-      tick.style.marginLeft = `calc(5px + (100% - 10px) * ${mark.fraction} - 1px)`;
+      // margin-inline-start, not margin-left: a range input runs right-to-left under dir=rtl, so the mark must too.
+      // This inline margin owns the -1 px (half the mark's 2 px width); the stylesheet sets no margin of its own.
+      tick.style.marginInlineStart = `calc(5px + (100% - 10px) * ${mark.fraction} - 1px)`;
       const wording = mark.matches ? t('matches') : words(mark);
       text.textContent = wording;
       for (const node of [tick, text]) {
