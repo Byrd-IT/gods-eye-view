@@ -225,6 +225,11 @@ function world({
       },
     },
     imageryLayers: { add() {}, remove() {} },
+    // A Cesium Viewer's credit display is the scene's; upstream (#1760)
+    // reaches it as the viewer's, through the credits port.
+    get creditDisplay() {
+      return this.scene.frameState.creditDisplay;
+    },
   };
   fakeFrames(viewer.scene, primitives);
   const config = normalizeBasemapConfig(served);

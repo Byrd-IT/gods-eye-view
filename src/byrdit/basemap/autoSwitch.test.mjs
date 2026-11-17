@@ -221,6 +221,11 @@ function world({
       },
       remove: (layer) => imagery.splice(imagery.indexOf(layer), 1),
     },
+    // A Cesium Viewer's credit display is the scene's; upstream (#1760)
+    // reaches it as the viewer's, through the credits port.
+    get creditDisplay() {
+      return this.scene.frameState.creditDisplay;
+    },
   };
   fakeFrames(viewer.scene, primitives);
   const config = normalizeBasemapConfig(served);
@@ -328,7 +333,9 @@ function world({
       camera.moveEnd.raise();
       await settle();
     },
-    creditHtml: () => [...credits].map((c) => c.html),
+    // The credits port (#1760) shows each credit wrapped in one span.
+    creditHtml: () =>
+      [...credits].map((c) => c.html.replace(/^<span>([^]*)<\/span>$/, '$1')),
   };
   return w;
 }
