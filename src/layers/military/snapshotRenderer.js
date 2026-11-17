@@ -79,7 +79,9 @@ export function createMilitarySnapshotRenderer({
     const receiptNowMs = snapshot.observedAtMs;
     records.beginSnapshot(snapshot.observedAtMs);
     // Live, the display delay follows how late this delivery's reports are.
-    if (!replace && !followsClock(flightState))
+    // Byrd-IT: a history frame is not a live delivery (its reports are hours
+    // old by design), so it never moves the delay.
+    if (!replaceFrame && !followsClock(flightState))
       noteDelivery(flightState, snapshot);
     // Field-test fix (RS46): coarse floor cells to warm for the below-ground
     // clamp — collected during the loop (low airborne contacts only),

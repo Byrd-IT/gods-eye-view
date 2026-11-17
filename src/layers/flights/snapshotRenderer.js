@@ -89,7 +89,9 @@ export function createFlightSnapshotRenderer({
     const floorWarmPoints = [];
     records.beginSnapshot(snapshot.observedAtMs);
     // Live, the display delay follows how late this delivery's reports are.
-    if (!replace && !followsClock(flightState))
+    // Byrd-IT: a history frame is not a live delivery (its reports are hours
+    // old by design), so it never moves the delay.
+    if (!replaceFrame && !followsClock(flightState))
       noteDelivery(flightState, snapshot);
 
     // Classification and display policy consume source-independent observations.

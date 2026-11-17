@@ -20,6 +20,7 @@ import flightsLayer, {
 import militaryLayer, {
   _setTrackedMilitaryRefreshStateForTest,
 } from '../../data/militaryFlights.js';
+import { bindFakeDraw } from '../../testSupport/fakeDrawPort.mjs';
 import { createHistoryRouter } from './historyRouter.js';
 import { createRefreshDriver } from './historyRefresh.js';
 import { fakeDocument, fakeWindow, jsonResponse } from './fakeDom.mjs';
@@ -146,15 +147,23 @@ function stack({ frames, trackFor = b10Body }) {
     releaseDebounceMs: 0,
     playPollMs: 3_600_000,
   });
-  /** The trail body polyline (not the head segment) of the layer. */
-  const trailPositions = (prefix) => {
-    const trails = added.filter(
-      (e) =>
-        typeof e?.id === 'string' &&
-        e.id.startsWith('gev-trail:') &&
-        !e.id.startsWith(prefix),
-    );
-    return trails.map((e) => e.polyline.positions.getValue());
+  // Upstream (#1760): trails draw through the draw port as line sets.
+  const { draw } = bindFakeDraw(viewer);
+  /** The trail body lines (not the head segment) of the layer. */
+  const trailPositions = () => {
+    const lines = [];
+    for (const set of draw.sets.values()) {
+      if (set.kind !== 'lines' || set.disposed) continue;
+      for (const item of set.items.values())
+        if (
+          typeof item.id === 'string' &&
+          item.id.startsWith('gev-trail:') &&
+          !item.id.endsWith(':head') &&
+          item.show !== false
+        )
+          lines.push(item.positions);
+    }
+    return lines;
   };
   return {
     router,
@@ -204,12 +213,12 @@ test('flights B12e: the TRACKED aircraft asks its recorded track [t-6h, t] on ea
   _setTrackedFlightRefreshStateForTest({
     icao24: 'a00001',
     entity: { gevLabelModel: { title: 'OLD', details: [] } },
-    billboard: {
+    icon: {
       show: false,
       position: Cesium.Cartesian3.fromDegrees(-97, 30, 10_000),
       color: Cesium.Color.WHITE,
     },
-    billboardCollection: billboardCollection(),
+    iconLayer: { show: true, remove() {} },
     viewer: s.viewer,
     meta: { callsign: 'HIST1', rawLat: 30, rawLon: -97, onGround: false },
   });
@@ -271,8 +280,8 @@ test('flights B12e: nothing tracked -> no track request on history frames (no pr
   _setTrackedFlightRefreshStateForTest({
     icao24: 'seed00',
     entity: null,
-    billboard: { show: false, position: Cesium.Cartesian3.fromDegrees(0, 0) },
-    billboardCollection: billboardCollection(),
+    icon: { show: false, position: Cesium.Cartesian3.fromDegrees(0, 0) },
+    iconLayer: { show: true, remove() {} },
     viewer: s.viewer,
     meta: { rawLat: 0, rawLon: 0, onGround: false },
     tracked: false,
@@ -308,12 +317,12 @@ test('military B12e: the TRACKED military aircraft asks feed=military [t-6h, t] 
   _setTrackedMilitaryRefreshStateForTest({
     icao24: 'ae1000',
     entity: { gevLabelModel: { title: 'OLD', details: [] } },
-    billboard: {
+    icon: {
       show: false,
       position: Cesium.Cartesian3.fromDegrees(-97, 30, 7_000),
       color: Cesium.Color.WHITE,
     },
-    billboardCollection: billboardCollection(),
+    iconLayer: { show: true, remove() {} },
     viewer: s.viewer,
     meta: { callsign: 'HMIL1', rawLat: 30, rawLon: -97, onGround: false },
   });

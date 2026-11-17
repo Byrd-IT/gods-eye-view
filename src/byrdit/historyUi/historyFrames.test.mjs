@@ -188,8 +188,8 @@ test('flights R1+R3: each frame replaces the other time (same icao forward/back,
   _setTrackedFlightRefreshStateForTest({
     icao24: 'seed00',
     entity: null,
-    billboard: { show: false, position: Cesium.Cartesian3.fromDegrees(0, 0) },
-    billboardCollection: bbs,
+    icon: { show: false, position: Cesium.Cartesian3.fromDegrees(0, 0) },
+    iconLayer: { show: true, remove() {} },
     viewer: s.viewer,
     meta: { rawLat: 0, rawLon: 0, onGround: false },
     tracked: false,
@@ -237,12 +237,12 @@ test('flights R1: a TRACKED aircraft absent from the frame is released and remov
   _setTrackedFlightRefreshStateForTest({
     icao24: 'f00ba4',
     entity,
-    billboard: {
+    icon: {
       show: false,
       position: Cesium.Cartesian3.fromDegrees(-97.7, 30.2, 9_000),
       color: Cesium.Color.WHITE,
     },
-    billboardCollection: billboardCollection(),
+    iconLayer: { show: true, remove() {} },
     viewer: s.viewer,
     meta: { callsign: 'OLD1', rawLat: 30.2, rawLon: -97.7, onGround: false },
   });
@@ -267,8 +267,8 @@ test('flights R3 paused: the history motion clock freezes dead reckoning; playin
   _setTrackedFlightRefreshStateForTest({
     icao24: 'seed00',
     entity: null,
-    billboard: { show: false, position: Cesium.Cartesian3.fromDegrees(0, 0) },
-    billboardCollection: billboardCollection(),
+    icon: { show: false, position: Cesium.Cartesian3.fromDegrees(0, 0) },
+    iconLayer: { show: true, remove() {} },
     viewer: s.viewer,
     meta: { rawLat: 0, rawLon: 0, onGround: false },
     tracked: false,
@@ -326,8 +326,8 @@ test('military R1+R3: same hex moved by a frame of another time; a gap removes i
   _setTrackedMilitaryRefreshStateForTest({
     icao24: 'seed01',
     entity: null,
-    billboard: { show: false, position: Cesium.Cartesian3.fromDegrees(0, 0) },
-    billboardCollection: billboardCollection(),
+    icon: { show: false, position: Cesium.Cartesian3.fromDegrees(0, 0) },
+    iconLayer: { show: true, remove() {} },
     viewer: s.viewer,
     meta: { rawLat: 0, rawLon: 0, onGround: false },
     tracked: false,
