@@ -327,7 +327,10 @@ function flatLegs(legs, wpM, takeoffM) {
     const g = wpM[w.id];
     return typeof g === 'number' && Number.isFinite(g) ? g : null;
   };
-  let last = legs.flatMap((leg) => leg.waypoints).map(readOf).find((g) => g != null);
+  let last = legs
+    .flatMap((leg) => leg.waypoints)
+    .map(readOf)
+    .find((g) => g != null);
   last ??= takeoffM;
   return legs.map((leg) => {
     const grid = leg.kind === 'grid';
@@ -614,8 +617,7 @@ export function shallowestGridPitchDeg(preset) {
 /** A grid gimbal pitch for `preset`: on the step, -90 .. the shallowest. */
 export function cleanGridPitchDeg(value, preset) {
   const n = num(value, GRID_PITCH_DEFAULT_DEG);
-  const stepped =
-    Math.round(n / GRID_PITCH_STEP_DEG) * GRID_PITCH_STEP_DEG;
+  const stepped = Math.round(n / GRID_PITCH_STEP_DEG) * GRID_PITCH_STEP_DEG;
   return clamp(stepped, GRID_PITCH_MIN_DEG, shallowestGridPitchDeg(preset));
 }
 
@@ -2276,7 +2278,9 @@ export function heightSummary(missions, { flat, known, takeoffM, takeoffSet }) {
   const aglOf = (w) => round(w.relHeightM + takeoffM - w.groundM, 1);
   const agl = known
     ? wps
-        .filter((w) => Number.isFinite(w.relHeightM) && Number.isFinite(w.groundM))
+        .filter(
+          (w) => Number.isFinite(w.relHeightM) && Number.isFinite(w.groundM),
+        )
         .map(aglOf)
     : [];
   return {

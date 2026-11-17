@@ -26,9 +26,15 @@ import { readPlan, serializePlan } from './planDoc.js';
 import { suiteOptions } from './suite.js';
 import { warningText, warningTone, takeoffUnsetText } from './format.js';
 
-const WHEN = { when: new Date('2026-01-01T12:00:00Z'), createdMs: 1767268800000 };
+const WHEN = {
+  when: new Date('2026-01-01T12:00:00Z'),
+  createdMs: 1767268800000,
+};
 const BOX = { west: -95.158, east: -95.15, south: 32.687, north: 32.693 };
-const CENTRE = { lon: (BOX.west + BOX.east) / 2, lat: (BOX.south + BOX.north) / 2 };
+const CENTRE = {
+  lon: (BOX.west + BOX.east) / 2,
+  lat: (BOX.south + BOX.north) / 2,
+};
 const frame = makeFrame(CENTRE.lon, CENTRE.lat);
 const area = (box = BOX) => [{ id: 'a', name: 'Field', kind: 'rect', box }];
 
@@ -54,7 +60,9 @@ function kmzHeights(result) {
   for (const mission of result.missions) {
     const files = readZip(buildKmz(mission, result.plan, WHEN));
     const xml = new TextDecoder().decode(files.get('wpmz/waylines.wpml'));
-    for (const m of xml.matchAll(/<wpml:executeHeight>([-\d.]+)<\/wpml:executeHeight>/g))
+    for (const m of xml.matchAll(
+      /<wpml:executeHeight>([-\d.]+)<\/wpml:executeHeight>/g,
+    ))
       out.push(Number(m[1]));
     assert.equal(
       (xml.match(/<Placemark>/g) ?? []).length,
@@ -185,8 +193,7 @@ test('Flat: an obstacle column is cleared using the real height above the ground
     .flatMap((m) => m.waypoints)
     .filter((w) => w.relHeightM > 50.05);
   assert.ok(lifted.length > 0);
-  for (const w of lifted)
-    assert.ok(w.relHeightM + 140 - w.groundM >= 45 - 0.1); // 40 + 5 margin
+  for (const w of lifted) assert.ok(w.relHeightM + 140 - w.groundM >= 45 - 0.1); // 40 + 5 margin
 });
 
 test('Above ground stays byte-identical: no setting, terrain, and a spacing that does not apply', () => {
@@ -202,7 +209,11 @@ test('Above ground stays byte-identical: no setting, terrain, and a spacing that
   ]) {
     const plan = planAreas(area(), { ...base, ...extra });
     assert.equal(plan.terrainPoints, undefined);
-    assert.equal(kmzHash(assembleAreaPlan(plan, g)), hash, JSON.stringify(extra));
+    assert.equal(
+      kmzHash(assembleAreaPlan(plan, g)),
+      hash,
+      JSON.stringify(extra),
+    );
   }
   // Timed without the spacing set: lines stay two points.
   const timed = planAreas(area(), { ...base, captureMode: 'timed' });
@@ -235,7 +246,10 @@ test('terrain points: timed lines follow curved ground within 0.5 m, photos and 
       [before.waypoints[0].lon, before.waypoints[1].lon],
     );
     assert.equal(leg.photoCount, before.photoCount);
-    assert.equal(leg.photoCount, linePhotoCount(leg.lengthM, leg.photoSpacingM));
+    assert.equal(
+      leg.photoCount,
+      linePhotoCount(leg.lengthM, leg.photoSpacingM),
+    );
     for (let k = 1; k < leg.waypoints.length; k += 1) {
       const p = frame.toXY(leg.waypoints[k - 1].lon, leg.waypoints[k - 1].lat);
       const q = frame.toXY(leg.waypoints[k].lon, leg.waypoints[k].lat);
@@ -249,7 +263,10 @@ test('terrain points: timed lines follow curved ground within 0.5 m, photos and 
   assert.equal(plan.terrainPoints.added, expected);
   assert.ok(expected > 0);
   const ids = plan.legs.flatMap((l) => l.waypoints.map((w) => w.id));
-  assert.deepEqual(ids, ids.map((_, i) => i));
+  assert.deepEqual(
+    ids,
+    ids.map((_, i) => i),
+  );
 
   const g = groundFor(plan, wavy);
   const result = assembleAreaPlan(plan, g);
@@ -295,7 +312,10 @@ test('terrain points: timed lines follow curved ground within 0.5 m, photos and 
   const readme = new TextDecoder().decode(
     readZip(buildBundleZip(result, WHEN)).get('README.txt'),
   );
-  assert.match(readme, new RegExp(`${expected} terrain points added, every 25\\.0 m`));
+  assert.match(
+    readme,
+    new RegExp(`${expected} terrain points added, every 25\\.0 m`),
+  );
 });
 
 test('terrain points count against the waypoint cap and the mission split', () => {
@@ -314,7 +334,10 @@ test('terrain points count against the waypoint cap and the mission split', () =
   const on = assembleAreaPlan(onPlan, groundFor(onPlan, wavy));
   assert.ok(on.missions.length > off.missions.length);
   for (const m of on.missions) assert.ok(m.waypointCount <= 20);
-  assert.ok(on.totals.waypointCount >= off.totals.waypointCount + onPlan.terrainPoints.added);
+  assert.ok(
+    on.totals.waypointCount >=
+      off.totals.waypointCount + onPlan.terrainPoints.added,
+  );
   // Distance photos: one trigger group per line still spans the whole line.
   for (const m of on.missions) {
     const xml = new TextDecoder().decode(
@@ -366,7 +389,12 @@ test('saved plans: the setting round-trips; an older plan without it loads as Ab
     nextArea: 2,
     jobGrouping: 'per-area',
     takeoff: null,
-    options: { presetId: 'dji-mini-5-pro', aglM: 60, heightMode: 'flat', terrainStepM: 50 },
+    options: {
+      presetId: 'dji-mini-5-pro',
+      aglM: 60,
+      heightMode: 'flat',
+      terrainStepM: 50,
+    },
     wpml: {},
   };
   const doc = JSON.parse(JSON.stringify(serializePlan(state)));
@@ -377,7 +405,10 @@ test('saved plans: the setting round-trips; an older plan without it loads as Ab
   delete doc.options.terrainStepM;
   const old = readPlan(doc);
   assert.equal('heightMode' in old.options, false);
-  assert.equal(normalizeOptions(old.options, BOX).options.heightMode, 'terrain');
+  assert.equal(
+    normalizeOptions(old.options, BOX).options.heightMode,
+    'terrain',
+  );
   // Junk from a file is dropped.
   doc.options.heightMode = 'sideways';
   doc.options.terrainStepM = 3;
@@ -388,7 +419,10 @@ test('saved plans: the setting round-trips; an older plan without it loads as Ab
   const oldPlan = planAreas(area(), { ...old.options, takeoff: old.takeoff });
   const before = planAreas(area(), { presetId: 'dji-mini-5-pro', aglM: 60 });
   const g = groundFor(before, slope);
-  assert.equal(kmzHash(assembleAreaPlan(oldPlan, g)), kmzHash(assembleAreaPlan(before, g)));
+  assert.equal(
+    kmzHash(assembleAreaPlan(oldPlan, g)),
+    kmzHash(assembleAreaPlan(before, g)),
+  );
 });
 
 test('PLAN ALL passes keep the height mode and terrain spacing', () => {
