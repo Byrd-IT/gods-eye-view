@@ -6,6 +6,7 @@
  * import, so node tests can drive them with plain fakes. Upstream files call
  * in through small marked hooks (search "Byrd-IT visibility").
  */
+import { horizonOccluder } from '../render/cesium/iconOrientation.js';
 
 /** Per-camera ground refinement (terrain lookups + mesh sampling) only runs
  * when the viewer is low enough for frustum/card detail to matter (street to
@@ -66,6 +67,14 @@ export function screenPointInView(
  * @param {number} [margin]
  * @returns {(position:Object) => boolean}
  */
+/**
+ * The camera's horizon occluder (Byrd-IT): upstream's renderer seam keeps it
+ * in the Cesium adapter, so a layer asks here instead of importing it.
+ */
+export function horizonOccluderOf(viewer) {
+  return horizonOccluder(viewer.camera);
+}
+
 export function createViewTest(viewer, occluder, margin = VISIBILITY_MARGIN) {
   const scene = viewer?.scene;
   const canvas = scene?.canvas;

@@ -5,7 +5,7 @@
  * the spot while the card is open. Fork module (DESIGN.md 4.1).
  */
 import * as Cesium from 'cesium';
-import { pickGroundPosition } from '../../data/scenePick.js';
+import { pickGroundPosition } from '../../input/dispatcher.js';
 import { createSolunarPanel } from './panel.js';
 import { addDays, localDateOf, localDayStartMs } from './zone.js';
 

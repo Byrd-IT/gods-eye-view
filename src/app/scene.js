@@ -260,12 +260,10 @@ export async function createApplicationScene({
   // page with GEV_BYRDIT_WAYBACK=1; never blocks startup.
   let detachWayback = null;
   defer(() => detachWayback?.());
-  attachWayback({ viewer, controller: mapStackController }).then(
-    (detach) => {
-      if (signal.aborted) detach();
-      else detachWayback = detach;
-    },
-  );
+  attachWayback({ viewer, controller: mapStackController }).then((detach) => {
+    if (signal.aborted) detach();
+    else detachWayback = detach;
+  });
 
   signal.throwIfAborted();
   return {

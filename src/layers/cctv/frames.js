@@ -9,10 +9,10 @@ import {
   PROJECTION_IDLE_REFRESH_MS,
   PLACEHOLDER_REPAINT_MS,
 } from './policy.js';
-import { horizonOccluder } from '../../data/iconOrientation.js';
 import {
   ACTIVE_CAMERA_MARGIN,
   createViewTest,
+  horizonOccluderOf,
 } from '../../byrdit/liveVisibility.js';
 
 /**
@@ -252,7 +252,7 @@ export function createFrames({ state: layerState, services, parts, source }) {
     try {
       return createViewTest(
         viewer,
-        horizonOccluder(viewer.camera),
+        horizonOccluderOf(viewer),
         ACTIVE_CAMERA_MARGIN,
       )(record.position);
     } catch {

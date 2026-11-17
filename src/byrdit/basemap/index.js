@@ -1,6 +1,6 @@
 import { createDefaultMapSources } from '../../maps/defaultSources.js';
-import { createKeylessTerrain } from '../../maps/terrain.js';
-import { loadPhotorealisticTileset } from '../../maps/google3d.js';
+import { createKeylessTerrain } from '../../render/cesium/mapTerrain.js';
+import { loadPhotorealisticTileset } from '../../render/cesium/google3d.js';
 import { basemapFlagOn, loadBasemapConfig } from './config.js';
 import {
   createBasemapMapSource,
