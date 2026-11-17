@@ -17,6 +17,10 @@ function harness({ voiceOverrides = {}, sky = undefined } = {}) {
   const viewer = {
     clock: { onTick: { addEventListener: () => () => {} } },
     scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    // A Cesium viewer has its own canvas; upstream reads it there (#1760).
+    get canvas() {
+      return this.scene.canvas;
+    },
     camera: { moveEnd: { addEventListener() {} } },
   };
   const calls = [];
@@ -131,6 +135,10 @@ test('control_sky without a Sky view in this host says so', async () => {
   const viewer = {
     clock: { onTick: { addEventListener: () => () => {} } },
     scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    // A Cesium viewer has its own canvas; upstream reads it there (#1760).
+    get canvas() {
+      return this.scene.canvas;
+    },
     camera: { moveEnd: { addEventListener() {} } },
   };
   const dataManager = { layers: new Map(), getAll: () => [] };

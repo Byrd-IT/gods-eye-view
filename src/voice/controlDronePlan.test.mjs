@@ -14,6 +14,10 @@ globalThis.window = globalThis.window || {
 const VIEWER = {
   clock: { onTick: { addEventListener: () => () => {} } },
   scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+  // A Cesium viewer has its own canvas; upstream reads it there (#1760).
+  get canvas() {
+    return this.scene.canvas;
+  },
   camera: { moveEnd: { addEventListener() {} } },
 };
 
@@ -67,7 +71,10 @@ test('control_droneplan is the last Realtime tool and does not reorder control_i
 
 test('control_droneplan dispatches to the panel adapter and wraps the action', async () => {
   const { runner } = harness();
-  assert.equal((await runner('control_droneplan', { action: 'open' })).open, true);
+  assert.equal(
+    (await runner('control_droneplan', { action: 'open' })).open,
+    true,
+  );
   assert.equal(
     (await runner('control_droneplan', { action: 'close' })).cleared,
     true,
@@ -77,8 +84,12 @@ test('control_droneplan dispatches to the panel adapter and wraps the action', a
     'DJI Mini 5 Pro',
   );
   assert.equal(
-    (await runner('control_droneplan', { action: 'download', which: 'mission' }))
-      .downloaded,
+    (
+      await runner('control_droneplan', {
+        action: 'download',
+        which: 'mission',
+      })
+    ).downloaded,
     false,
   );
 });

@@ -13,6 +13,10 @@ globalThis.window = globalThis.window || {
 const VIEWER = {
   clock: { onTick: { addEventListener: () => () => {} } },
   scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+  // A Cesium viewer has its own canvas; upstream reads it there (#1760).
+  get canvas() {
+    return this.scene.canvas;
+  },
   camera: { moveEnd: { addEventListener() {} } },
 };
 

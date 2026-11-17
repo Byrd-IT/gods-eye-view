@@ -1,3 +1,4 @@
+import { bindRenderer } from '../../render/rendererOf.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -54,6 +55,16 @@ function fakeViewer({ hit = onGlobe } = {}) {
     },
   };
   viewer.scene.owner = viewer;
+  // Upstream (#1760) picks the ground through the renderer's query port.
+  bindRenderer(viewer, {
+    canvas,
+    query: {
+      pickPosition: () => null,
+      pickEllipsoid: (x, y) => hit(x, y),
+      pickRay: () => null,
+      pickGlobe: () => null,
+    },
+  });
   return viewer;
 }
 

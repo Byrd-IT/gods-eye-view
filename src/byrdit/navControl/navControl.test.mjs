@@ -1,3 +1,4 @@
+import '../../render/cesium/unbound.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as Cesium from 'cesium';
@@ -103,9 +104,13 @@ function createViewer({ pick = GROUND, ground = GROUND } = {}) {
     pixelRatio: 1,
     pickPositionSupported: false,
     pickPosition: () => null,
+    // Upstream's query port (#1760) needs a scene that can pick.
+    pick: () => undefined,
+    drillPick: () => [],
     requestRender: () => {},
     preRender: new Cesium.Event(),
     preUpdate: new Cesium.Event(),
+    postUpdate: new Cesium.Event(),
   };
   scene.canvas.clientWidth = 1200;
   scene.canvas.clientHeight = 800;
@@ -118,6 +123,7 @@ function createViewer({ pick = GROUND, ground = GROUND } = {}) {
   const viewer = {
     camera,
     scene,
+    canvas: scene.canvas,
     trackedEntity: undefined,
     trackedEntityChanged: new Cesium.Event(),
   };
@@ -263,7 +269,9 @@ test('every control is a focusable, labelled element', () => {
   const ring = controls.find((n) => n.getAttribute('data-nav') === 'ring');
   assert.equal(ring.getAttribute('role'), 'slider');
   assert.equal(ring.getAttribute('tabindex'), '0');
-  const slider = controls.find((n) => n.getAttribute('data-nav') === 'tilt-slider');
+  const slider = controls.find(
+    (n) => n.getAttribute('data-nav') === 'tilt-slider',
+  );
   assert.equal(slider.getAttribute('type'), 'range');
   assert.equal(slider.getAttribute('max'), '79');
 });
@@ -372,7 +380,12 @@ test('dragging the ring a quarter turn clockwise turns the heading by 90 degrees
   });
   const ring = button('ring');
   // Ring centre is (140,140). Start at 3 o'clock, end at 6 o'clock.
-  ring.fire('pointerdown', { button: 0, clientX: 180, clientY: 140, pointerId: 7 });
+  ring.fire('pointerdown', {
+    button: 0,
+    clientX: 180,
+    clientY: 140,
+    pointerId: 7,
+  });
   assert.deepEqual(ring.captured, [7], 'the ring captures the pointer');
   assert.equal(handle.root.getAttribute('data-dragging'), 'ring');
   ring.fire('pointermove', { clientX: 170, clientY: 168 });
@@ -434,9 +447,8 @@ test('look around turns the gaze without moving the camera', () => {
     'camera stays where it is',
   );
   assert.ok(
-    Math.abs(
-      Cesium.Math.toDegrees(headingBefore - viewer.camera.heading) - 3,
-    ) < 0.05,
+    Math.abs(Cesium.Math.toDegrees(headingBefore - viewer.camera.heading) - 3) <
+      0.05,
   );
 });
 
@@ -481,12 +493,19 @@ test('a wild centre pick falls back to the ground under the centre', () => {
 test('with no ground under the centre the control works in place', () => {
   const { button, viewer, settle } = setup({
     viewer: { pick: null, ground: null },
-    view: { heading: 90, pitch: -30 },
+  });
+  // Looking above the horizon: upstream's query port (#1760) intersects the
+  // ellipsoid itself, so a downward view always has ground under its centre.
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(-97.74, 30.27, 1_000),
+    orientation: { heading: 90 * DEG, pitch: 5 * DEG, roll: 0 },
   });
   const before = Cesium.Cartesian3.clone(viewer.camera.positionWC);
   button('north').fire('click', { detail: 0 });
   settle();
-  assert.ok(Cesium.Cartesian3.distance(before, viewer.camera.positionWC) < 1e-3);
+  assert.ok(
+    Cesium.Cartesian3.distance(before, viewer.camera.positionWC) < 1e-3,
+  );
   assert.ok(
     Cesium.Math.toDegrees(viewer.camera.heading) < 0.05 ||
       Cesium.Math.toDegrees(viewer.camera.heading) > 359.95,
@@ -512,5 +531,7 @@ test('destroy stops animation, hold timers and listeners', () => {
   assert.equal(clock.pendingCount, 0);
   const position = Cesium.Cartesian3.clone(viewer.camera.positionWC);
   viewer.scene.preUpdate.raiseEvent();
-  assert.ok(Cesium.Cartesian3.distance(position, viewer.camera.positionWC) < 1e-6);
+  assert.ok(
+    Cesium.Cartesian3.distance(position, viewer.camera.positionWC) < 1e-6,
+  );
 });
