@@ -801,7 +801,8 @@ test('satellites time of propagation: the layer propagates to the WALL clock, so
   const { createOrbits } = await import('../../layers/satellites/orbits.js');
   const { createRendering } =
     await import('../../layers/satellites/rendering.js');
-  const point = { position: null };
+  // Upstream (#1760): a dot is reckoned from its orbit sample into pos.
+  const point = { show: true, pos: { x: 0, y: 0, z: 0 } };
   const state = {
     _catalog: new Map([[25544, { name: 'ISS', satrec, group: 'stations' }]]),
     _points: new Map([[25544, point]]),
@@ -822,10 +823,13 @@ test('satellites time of propagation: the layer propagates to the WALL clock, so
   mock.timers.enable({ apis: ['Date'], now: t + 2 * HOUR });
   try {
     assert.equal(rendering._propagateAll(), 1);
+    rendering._reckonPoints(Date.now());
   } finally {
     mock.timers.reset();
   }
-  const drawn = Cesium.Cartographic.fromCartesian(point.position);
+  const drawn = Cesium.Cartographic.fromCartesian(
+    new Cesium.Cartesian3(point.pos.x, point.pos.y, point.pos.z),
+  );
   const [latT, lonT] = at(t);
   const [latNow, lonNow] = at(t + 2 * HOUR);
   const near = (a, b) => Math.abs(a - b) < 1e-6;

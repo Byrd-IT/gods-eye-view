@@ -61,16 +61,19 @@ function fakeEs(docsByIndex) {
     async search(index, body) {
       calls.push({ index, body });
       const docs = docsByIndex[index] ?? [];
-      if (body.size === 0 && body.aggs?.first)
-        {return {
+      if (body.size === 0 && body.aggs?.first) {
+        return {
           aggregations: {
             first: {
               value: Math.min(
-                ...docs.map((d) => asMs(get(d, Object.values(body.aggs.first.min)[0]))),
+                ...docs.map((d) =>
+                  asMs(get(d, Object.values(body.aggs.first.min)[0])),
+                ),
               ),
             },
           },
-        };}
+        };
+      }
       let hits = docs.filter((d) => matches(d, body.query));
       const [sf, sd] = Object.entries(body.sort?.[0] ?? {})[0] ?? [];
       if (sf)
@@ -88,7 +91,9 @@ function fakeEs(docsByIndex) {
         });
       }
       return {
-        hits: { hits: hits.slice(0, body.size).map((_source) => ({ _source })) },
+        hits: {
+          hits: hits.slice(0, body.size).map((_source) => ({ _source })),
+        },
       };
     },
     async searchAll(index, { query, maxRows }) {
@@ -138,7 +143,12 @@ test('AQHI slice: newest observation per station inside the window, change-only'
     ],
   });
   const { sliceAqhi } = createAirGnssSlices({ es, now: () => T0 + 5 * HOUR });
-  const r = await sliceAqhi({ t: T0, bbox: null, maxRows: 100, windowMs: 6 * HOUR });
+  const r = await sliceAqhi({
+    t: T0,
+    bbox: null,
+    maxRows: 100,
+    windowMs: 6 * HOUR,
+  });
   const byId = Object.fromEntries(r.body.features.map((f) => [f.id, f]));
   assert.deepEqual(Object.keys(byId).sort(), ['A', 'D']);
   assert.equal(byId.A.properties.aqhi, 5.6);
@@ -149,7 +159,12 @@ test('AQHI slice: newest observation per station inside the window, change-only'
 test('AQHI slice: before the first recording is a 404 not_recorded with the start', async () => {
   const es = fakeEs({ [HISTORY_INDICES.aqhi]: [aq('A', T0, 2)] });
   const { sliceAqhi } = createAirGnssSlices({ es, now: () => T0 });
-  const r = await sliceAqhi({ t: T0 - 24 * HOUR, bbox: null, maxRows: 10, windowMs: 6 * HOUR });
+  const r = await sliceAqhi({
+    t: T0 - 24 * HOUR,
+    bbox: null,
+    maxRows: 10,
+    windowMs: 6 * HOUR,
+  });
   assert.equal(r.status, 404);
   assert.equal(r.headers['X-History-Empty-Reason'], 'before_recording_start');
   assert.equal(r.headers['X-History-Recording-Start'], iso(T0));
@@ -170,7 +185,10 @@ test('GNSS slice: cells of the newest snapshot at or before t, nothing later', a
   const { sliceGnss } = createAirGnssSlices({ es, now: () => T0 + HOUR });
   const r = await sliceGnss({ t: T0, bbox: null, maxRows: 100 });
   assert.equal(r.body.snap, s2);
-  assert.deepEqual(r.body.cells.map((c) => c.cell), ['2:2', '3:3']);
+  assert.deepEqual(
+    r.body.cells.map((c) => c.cell),
+    ['2:2', '3:3'],
+  );
   assert.equal(r.headers['X-History-Gnss-Population'], 'military-aircraft');
   // a time with no snapshot in 15 min is a gap, not another time's data
   const gap = await sliceGnss({ t: T0 + 65 * MIN, bbox: null, maxRows: 100 });
@@ -285,7 +303,9 @@ test('GNSS expansion reproduces the recorded cells through the layer rules', () 
   const recorded = [
     { cell: '229:462', lat: 24.75, lon: 51.25, total: 6, bad: 3 },
     { cell: '230:462', lat: 25.25, lon: 51.25, total: 3, bad: 0 },
-    { cell: '231:462', lat: 25.75, lon: 51.25, total: 2, bad: 2 }, // below 3
+    // Upstream (fa6d9547) shows every cell with an aircraft, as gpsjam.org
+    // does (no three-aircraft minimum any more).
+    { cell: '231:462', lat: 25.75, lon: 51.25, total: 2, bad: 2 },
   ];
   const t = T0 - 3 * 24 * HOUR;
   const snap = t - 4 * MIN;
@@ -305,6 +325,7 @@ test('GNSS expansion reproduces the recorded cells through the layer rules', () 
     [
       [6, 3],
       [3, 0],
+      [2, 2],
     ],
   );
   // the level is the layer's own rule applied to the recorded counts
@@ -348,7 +369,12 @@ test('AQHI slice honours maxRows (truncated flag) and the bbox', async () => {
   }));
   const es = fakeEs({ [HISTORY_INDICES.aqhi]: docs });
   const { sliceAqhi } = createAirGnssSlices({ es, now: () => T0 + HOUR });
-  const r = await sliceAqhi({ t: T0, bbox: null, maxRows: 2, windowMs: 6 * HOUR });
+  const r = await sliceAqhi({
+    t: T0,
+    bbox: null,
+    maxRows: 2,
+    windowMs: 6 * HOUR,
+  });
   assert.equal(r.body.features.length, 2);
   assert.equal(r.headers['X-History-Truncated'], '1');
   const b = await sliceAqhi({
@@ -357,6 +383,8 @@ test('AQHI slice honours maxRows (truncated flag) and the bbox', async () => {
     maxRows: 10,
     windowMs: 6 * HOUR,
   });
-  assert.ok(es.calls.at(-1).body.query.bool.filter.some((f) => f.geo_bounding_box));
+  assert.ok(
+    es.calls.at(-1).body.query.bool.filter.some((f) => f.geo_bounding_box),
+  );
   assert.ok(b.body.features.length >= 0);
 });
