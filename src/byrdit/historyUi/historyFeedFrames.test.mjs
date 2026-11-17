@@ -36,6 +36,28 @@ import {
   gbfsStatusStation,
 } from '../history/historyRows.js';
 import { ALL_HISTORY_ADAPTERS } from './historyEventAdapters.js';
+import { bindFakeCesiumCamera } from '../../testSupport/fakeCameraPort.mjs';
+import { fakeScenePorts } from '../../testSupport/fakeCesiumScene.mjs';
+import { fakeInput } from '../../input/testDoubles.mjs';
+import { fakeGlobePort } from '../../testSupport/fakeGlobePort.mjs';
+
+/** Each test viewer's fake draw and globe ports. */
+const drawPorts = new WeakMap();
+const globePorts = new WeakMap();
+
+/** The live (not disposed) draw sets of `viewer` whose id ends in `suffix`. */
+function liveSets(viewer, suffix) {
+  return [...drawPorts.get(viewer).sets.values()].filter(
+    (set) => !set.disposed && set.spec.id.endsWith(suffix),
+  );
+}
+
+/** The shown items of `viewer`'s live sets ending in `suffix`. */
+function shownItems(viewer, suffix) {
+  return liveSets(viewer, suffix).flatMap((set) =>
+    [...set.items.values()].filter((item) => item.show !== false),
+  );
+}
 import { createHistoryRouter } from './historyRouter.js';
 import { createRefreshDriver } from './historyRefresh.js';
 import { fakeDocument, fakeWindow, flush, jsonResponse } from './fakeDom.mjs';
@@ -93,7 +115,7 @@ function transitSnapshot(feedId, vehicles, fetchedAt) {
 }
 
 function sceneViewer({ at, altitude, primitives = [] }) {
-  return {
+  const viewer = {
     camera: {
       changed: new Cesium.Event(),
       percentageChanged: 0.5,
@@ -130,6 +152,18 @@ function sceneViewer({ at, altitude, primitives = [] }) {
       },
     },
   };
+  // Upstream (#1760): layers reach the camera, draw, query and frame
+  // through the scene's ports.
+  const ports = fakeScenePorts(viewer);
+  // Draped imagery (the FIRMS heat map) goes on the globe port.
+  ports.globe = fakeGlobePort();
+  globePorts.set(viewer, ports.globe);
+  bindFakeCesiumCamera(viewer, ports);
+  // Clicks reach layers through the scene's input dispatcher on a fake
+  // handler (Cesium's own needs a DOM canvas).
+  fakeInput(viewer);
+  drawPorts.set(viewer, ports.draw);
+  return viewer;
 }
 
 const baseServices = (sprites) => ({
@@ -540,12 +574,11 @@ function bikeHarness(t) {
     if (originalDocument === undefined) delete globalThis.document;
     else globalThis.document = originalDocument;
   });
-  const points = () => {
-    const c = sprites.get('bikeshare');
-    const ids = [];
-    for (let i = 0; i < c.length; i++) ids.push(c.get(i).id);
-    return ids.sort();
-  };
+  // Upstream (#1760): the stations are items of the layer's points set.
+  const points = () =>
+    shownItems(viewer, ':stations')
+      .map((item) => item.id)
+      .sort();
   return { ...stack, layer, viewer, points, reloads: () => reloads };
 }
 
@@ -814,21 +847,24 @@ function firmsHarness(t, { altitude }) {
     if (originalDocument === undefined) delete globalThis.document;
     else globalThis.document = originalDocument;
   });
-  const billboards = () => sprites.get('firms');
+  // Upstream (#1760): the glow sprites are an icons set, the heat cells a
+  // shapes set, both through the draw port.
+  const iconSets = () => liveSets(viewer, ':icons');
   return {
     ...stack,
     layer,
     viewer,
     /** the draped heat-map layers: [{show}] (one once painted, none before) */
-    heat: () => heatLayers,
+    // Upstream (#1760): the heat map is a layer on the globe port.
+    heat: () => globePorts.get(viewer).layers,
     /** whether the glow-sprite collection is visible (the hand-off fade) */
-    markersShown: () => billboards()?.show,
+    markersShown: () => iconSets().some((set) => set.show),
     /** what the layer draws right now, beyond its count */
     drawn: () => ({
       count: layer.getStats().count,
       cards: (overlay.get(FIRMS_OVERLAY_SOURCE_ID) ?? []).length,
-      sprites: billboards()?.length ?? 0,
-      cells: dataSources[0]?.entities.values.length ?? 0,
+      sprites: shownItems(viewer, ':icons').length,
+      cells: shownItems(viewer, ':cells').length,
       context: store.entities.size,
     }),
   };
@@ -879,7 +915,11 @@ for (const [band, altitude, drawnAt] of [
     // ... and no old heat is left behind: B12b renders on an empty answer and
     // the empty shown set hides the heat map (upstream de87aaf8)
     if (band === 'cells')
-      assert.equal(app.heat().length, 1, 'the heat map was painted before the gap');
+      assert.equal(
+        app.heat().length,
+        1,
+        'the heat map was painted before the gap',
+      );
     for (const layer of app.heat())
       assert.equal(layer.show, false, 'no heat map in the recorded gap');
     // a camera move in the gap must not bring the old cards back
