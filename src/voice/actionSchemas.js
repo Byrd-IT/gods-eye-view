@@ -433,6 +433,14 @@ const schemas = [
     },
   },
   {
+    name: 'open_stories',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
     name: 'control_scene',
     parameters: {
       type: 'object',

@@ -185,6 +185,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'find_imagery',
         'osm_query',
         'show_street_level',
+        'open_stories',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by

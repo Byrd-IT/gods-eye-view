@@ -1,0 +1,38 @@
+import { createAircraftIcons } from '../../data/aircraftIconLayer.js';
+import { placeAircraftAt } from '../flights/placed.js';
+import {
+  COCKPIT_CONTACT_SIZE_PX,
+  COURSE_MAX_DPS,
+  STALE_ALPHA,
+  followsClock,
+} from './policy.js';
+
+/** The military layer's contacts as one icon set (`createAircraftIcons`). */
+export function createIcons({ flightState, services, parts }) {
+  return createAircraftIcons({
+    state: flightState,
+    services,
+    parts,
+    layerId: 'military',
+    displayDelay: flightState._displayDelay,
+    followsClock: () => followsClock(flightState),
+    // Byrd-IT history seam (B12a): the History driver's clock, NaN on live.
+    historyNowMs: () =>
+      flightState._motionClock?.(flightState._historyFrameAppliedAtMs) ?? NaN,
+    staleAlpha: STALE_ALPHA,
+    courseMaxDps: COURSE_MAX_DPS,
+    cockpitContactSizePx: COCKPIT_CONTACT_SIZE_PX,
+    // A host-supplied placement, if any, draws a live contact where it places it.
+    placeAt: services.placement
+      ? (icao24, wallMs, info, history, out) =>
+          placeAircraftAt(
+            services.placement,
+            icao24,
+            wallMs,
+            info,
+            history,
+            out,
+          )
+      : null,
+  });
+}

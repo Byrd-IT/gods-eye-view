@@ -27,14 +27,15 @@ function gpSet(name, noradId, objectId = '1998-067A') {
   return [HEADER, gpRow(name, noradId, objectId)].join('\r\n');
 }
 
+// Orbit tracks hand their path to the renderer; positions pass through here.
+const orbitParts = {
+  rendering: { _rendererPositions: (positions) => positions },
+};
+
 function ingestionFor(catalogText, { source: sourceExtras = {} } = {}) {
   const state = {
     _trackingRefreshEpoch: 0,
     _activeUpdateControllers: new Set(),
-    _pointCollection: {
-      removeAll() {},
-      add: (point) => point,
-    },
     _points: new Map(),
     _orbitPaths: new Map(),
     _catalog: new Map(),
@@ -66,7 +67,20 @@ function ingestionFor(catalogText, { source: sourceExtras = {} } = {}) {
         state.rowNotified = (state.rowNotified || 0) + 1;
       },
     },
-    rendering: { _showOrbitPath() {} },
+    rendering: {
+      _clearPoints() {
+        state._points.clear();
+      },
+      _clearOrbitPaths() {
+        state._orbitPaths.clear();
+      },
+      _addPoint(noradId, position, style, show = true) {
+        state._points.set(noradId, { position, show });
+      },
+      _setPointStyle() {},
+      _showOrbitPath() {},
+      _setOrbitPathShown() {},
+    },
     tracking: {
       async _reconcileTrackedSubjectContext() {},
       _applyPendingTrackingRestore() {},
@@ -82,7 +96,7 @@ function ingestionFor(catalogText, { source: sourceExtras = {} } = {}) {
     ...sourceExtras,
   };
   const { methods } = createIngestion({ state, services: {}, parts, source });
-  return { state, update: () => methods.update({ scene: {} }) };
+  return { state, update: () => methods.update({}) };
 }
 
 test('every 6-digit (Alpha-5 range) satellite keeps its own catalog entry through dedupe', async (t) => {
@@ -117,7 +131,7 @@ test('a mission payload does not match a loaded satellite from another launch ye
     [HEADER, gpRow('SXM-11', 69728, '2026-148A')].join('\r\n'),
   );
   await update();
-  const { getSatelliteOrbitTrack } = createOrbits({ state });
+  const { getSatelliteOrbitTrack } = createOrbits({ state, parts: orbitParts });
   const track = (launchTime) =>
     getSatelliteOrbitTrack('Sirius SXM-11', { launchTime });
   assert.equal(track('2026-06-29T02:25:00Z')?.noradId, 69728);
@@ -131,7 +145,10 @@ test('a satellite with a blank designator keeps matching by name', async (t) => 
     [HEADER, gpRow('SXM-11', 69728, '')].join('\r\n'),
   );
   await update();
-  const { getSatelliteOrbitTrack, gpLaunchYear } = createOrbits({ state });
+  const { getSatelliteOrbitTrack, gpLaunchYear } = createOrbits({
+    state,
+    parts: orbitParts,
+  });
   assert.equal(gpLaunchYear({ OBJECT_ID: '' }), null);
   assert.equal(
     getSatelliteOrbitTrack('Sirius SXM-11', {

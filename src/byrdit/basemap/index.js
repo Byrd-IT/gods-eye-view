@@ -85,6 +85,8 @@ export async function openBasemap({
   createHealthMonitor = createBasemapHealthMonitor,
 }) {
   if (!basemapFlagOn(doc)) return null;
+  // Upstream's scene is Cesium-free (renderer seam): load it here.
+  Cesium ??= await import('cesium');
   if (loaderStatus)
     loaderStatus.textContent = 'Loading the Byrd-IT Open map...';
   const config = await loadBasemapConfig({ fetchImpl, signal });

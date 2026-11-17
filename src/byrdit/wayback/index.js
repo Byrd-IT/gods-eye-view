@@ -110,6 +110,8 @@ export async function attachWayback({
 } = {}) {
   const off = () => {};
   if (!waybackFlagOn(doc) || !viewer || !controller) return off;
+  // Upstream's scene is Cesium-free (renderer seam): load it here.
+  Cesium ??= await import('cesium');
 
   let doc_ = null;
   try {

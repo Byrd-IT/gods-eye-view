@@ -1,4 +1,3 @@
-import * as Cesium from 'cesium';
 import {
   gstime,
   propagate,
@@ -10,6 +9,7 @@ import {
 import { findNextSatellitePass } from '../../data/satellitePass.js';
 import { parseGP } from '../../byrdit/gpCsv.js'; // Byrd-IT: shared
 import { noradIdFromSatnum } from '../../sources/tle.js';
+import { fromDegrees } from '../../geo/ellipsoid.js';
 import { ORBIT_PATH_STEPS, ISS_NORAD } from './policy.js';
 
 /** The Earth's rotation rate, rad/s (WGS84). */
@@ -65,32 +65,7 @@ export function groundTrackBearingDeg(
 
 export function createOrbits({ state: layerState, services, parts, source }) {
   /**
-   * Build the rigid ECEF transform that keeps an orbit path baked at one GMST
-   * aligned with live SGP4 positions propagated at another epoch.
-   * @param {number} gmstAtBake GMST used when the path positions were baked.
-   * @param {Date} nowDate Epoch whose rotating-Earth frame should be displayed.
-   * @param {Cesium.Matrix4} [result] Optional matrix to update in place.
-   * @returns {Cesium.Matrix4} Z-rotation from bake-time ECEF to current ECEF.
-   */
 
-  function orbitFrameModelMatrix(
-    gmstAtBake,
-    nowDate,
-    result = new Cesium.Matrix4(),
-  ) {
-    const deltaGmst = gstime(nowDate) - gmstAtBake;
-    const rotation = Cesium.Matrix3.fromRotationZ(
-      -deltaGmst,
-      layerState._scratchRingRotation,
-    );
-    return Cesium.Matrix4.fromRotationTranslation(
-      rotation,
-      Cesium.Cartesian3.ZERO,
-      result,
-    );
-  }
-
-  /**
    * Propagate satellite position at a given JS Date.
    * Returns geodetic position plus inertial speed from the same SGP4 propagation
    * epoch, or null on error.
@@ -137,7 +112,7 @@ export function createOrbits({ state: layerState, services, parts, source }) {
   }
 
   /**
-   * Compute full orbital path as array of Cartesian3 positions.
+   * Compute full orbital path as ECEF `{x, y, z}` positions, metres.
    * Steps around one full orbit based on the satellite's mean motion.
    */
 
@@ -159,7 +134,7 @@ export function createOrbits({ state: layerState, services, parts, source }) {
         if (!posVel.position || typeof posVel.position === 'boolean') continue;
         const geo = eciToGeodetic(posVel.position, fixedGmst);
         positions.push(
-          Cesium.Cartesian3.fromDegrees(
+          fromDegrees(
             degreesLong(geo.longitude),
             degreesLat(geo.latitude),
             geo.height * 1000,
@@ -348,7 +323,10 @@ export function createOrbits({ state: layerState, services, parts, source }) {
       name: String(name || '').trim(),
       current,
       periodSec: orbitalPeriodSeconds(satrec),
-      orbitPath: computeOrbitPath(satrec, referenceDate),
+      // Handed to the renderer's own polylines by the launches layer.
+      orbitPath: parts.rendering._rendererPositions(
+        computeOrbitPath(satrec, referenceDate),
+      ),
       gmstAtBake: gstime(referenceDate),
       positionAt: (date) => propagatePosition(satrec, date),
     };
@@ -363,7 +341,7 @@ export function createOrbits({ state: layerState, services, parts, source }) {
    * @param {string} catalogText CelesTrak GP CSV text (FORMAT=csv).
    * @param {string} query Mission or payload name.
    * @param {{launchTime?: string|null}} [options] Optional launch epoch for namesake rejection.
-   * @returns {{noradId:number,name:string,current:object,periodSec:number,orbitPath:Cesium.Cartesian3[],positionAt:function(Date):object|null}|null}
+   * @returns {{noradId:number,name:string,current:object,periodSec:number,orbitPath:Array<{x:number,y:number,z:number}>,positionAt:function(Date):object|null}|null}
    */
 
   function findSatelliteOrbitTrackInGpCatalog(
@@ -401,7 +379,7 @@ export function createOrbits({ state: layerState, services, parts, source }) {
    * Return the current propagated position and one-orbit path for a catalog satellite.
    * @param {string|number} query NORAD id or mission/payload name.
    * @param {{launchTime?: string|null}} [options] Optional launch epoch used to reject namesakes from another launch year.
-   * @returns {{noradId:number,name:string,current:object,periodSec:number,orbitPath:Cesium.Cartesian3[],positionAt:function(Date):object|null}|null}
+   * @returns {{noradId:number,name:string,current:object,periodSec:number,orbitPath:Array<{x:number,y:number,z:number}>,positionAt:function(Date):object|null}|null}
    */
 
   function getSatelliteOrbitTrack(query, options = {}) {

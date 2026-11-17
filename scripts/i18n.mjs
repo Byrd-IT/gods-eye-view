@@ -481,7 +481,8 @@ function readMarkup(file) {
 
 // Text that never reaches the page as UI: tool results and descriptions for
 // AI clients (MCP and the voice model).
-const NOT_UI = [/^src\/tools\//];
+// The conformance suite's check titles are developer output, not UI.
+const NOT_UI = [/^src\/tools\//, /^src\/render\/conformance\//];
 
 // Byrd-IT fork: fork-only UI under src/byrdit/** (Sky view, History, nav
 // control, Byrd-IT Open base map, USGS water) is English-only and not yet
