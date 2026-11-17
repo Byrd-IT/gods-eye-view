@@ -83,7 +83,10 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // aa95c2c2: show_street_level (query, latitude, longitude, provider, referent;
     // no pattern or other Unicode-property construct) adds exactly one tool; the
     // pin before it, 194f9966..., is reproduced when that tool is left out.
-    'bec0ddca27173cb668a1a9ceb164b8830e454f536e472596d233f1efbaaff9fc',
+    // Upstream merge fa6d9547 (2026-11-17): upstream's open_stories joins the
+    // fork's 39 tools (40); upstream's own pin moved 0c27f620... -> 5a2deb65...
+    // over its renderer-seam work. The fork pin before the merge was bec0ddca....
+    '5f94528fbbb5297f1b9b00fdaa770eee0f8915fc87a67adbfc0f798b8a1a862a',
   );
 });
 

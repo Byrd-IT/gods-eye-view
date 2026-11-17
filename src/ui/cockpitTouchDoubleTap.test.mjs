@@ -14,6 +14,9 @@ import {
   routeTouchDoubleTap,
 } from './cockpitInput.js';
 import { CockpitViewController } from './cockpitController.js';
+import { bindRenderer } from '../render/rendererOf.js';
+import { entityFollowTarget } from '../data/followed.js';
+import { fakeInput } from '../input/testDoubles.mjs';
 
 /** A canvas that records listeners and lets a test dispatch pointer events. */
 function fakeCanvas() {
@@ -213,9 +216,33 @@ test('a viewer without a canvas gets a no-op route', () => {
   remove();
 });
 
+/**
+ * Bind `viewer` a renderer whose camera follows an aircraft and whose query
+ * port draws it at (100, 100), as upstream's ports answer (#1760).
+ */
+function followTrackAt100(viewer, ports = {}) {
+  const entity = {
+    id: 'flights:abc',
+    position: { getValue: () => new Cesium.Cartesian3(1, 2, 3) },
+  };
+  const camera = { followed: null, on: () => () => {} };
+  camera.followed = entityFollowTarget(entity, {
+    position: () => entity.position.getValue(),
+    frame: 'enu',
+    viewFrom: { x: 0, y: -1000, z: 500 },
+  });
+  bindRenderer(viewer, {
+    ...ports,
+    camera,
+    query: { project: () => ({ x: 100, y: 100 }), pick: () => null },
+  });
+}
+
 /** A Cockpit stand-in with a followed aircraft drawn at (100, 100). */
 function cockpitWithTrackAt100() {
   const entered = [];
+  const viewer = { clock: { currentTime: 0 } };
+  followTrackAt100(viewer);
   return {
     entered,
     active: false,
@@ -224,19 +251,7 @@ function cockpitWithTrackAt100() {
     enter() {
       entered.push(true);
     },
-    viewer: {
-      trackedEntity: {
-        position: { getValue: () => new Cesium.Cartesian3(1, 2, 3) },
-      },
-      clock: { currentTime: 0 },
-      scene: {
-        cartesianToCanvasCoordinates: (_world, result) => {
-          result.x = 100;
-          result.y = 100;
-          return result;
-        },
-      },
-    },
+    viewer,
   };
 }
 
@@ -297,42 +312,32 @@ function controllerEnvironment() {
     },
   };
   const canvas = fakeCanvas();
-  const handlerActions = new Map();
-  const stockCalls = [];
-  handlerActions.set(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK, (e) =>
-    stockCalls.push(e),
-  );
   const viewer = {
     canvas,
     scene: {
       canvas,
       preUpdate: event,
       screenSpaceCameraController: { enableInputs: false },
-      cartesianToCanvasCoordinates: (_world, result) => {
-        result.x = 100;
-        result.y = 100;
-        return result;
-      },
-    },
-    trackedEntityChanged: event,
-    entities: { contains: () => false },
-    trackedEntity: {
-      position: { getValue: () => new Cesium.Cartesian3(1, 2, 3) },
     },
     clock: { currentTime: 0 },
-    screenSpaceEventHandler: {
-      getInputAction: (type) => handlerActions.get(type),
-      setInputAction: (fn, type) => handlerActions.set(type, fn),
-      removeInputAction: (type) => handlerActions.delete(type),
-      isDestroyed: () => false,
-    },
   };
+  // Upstream (#1760): the camera, frame and query ports, and the scene's
+  // input dispatcher on a fake handler (its dblclick is what Cesium raises).
+  followTrackAt100(viewer, {
+    canvas,
+    frame: {
+      time: () => Date.now(),
+      on: (phase, fn) =>
+        phase === 'preUpdate' ? event.addEventListener(fn) : () => {},
+    },
+  });
+  const input = fakeInput(viewer);
   return {
     viewer,
     canvas,
-    handlerActions,
-    stockCalls,
+    input,
     restore() {
+      input.destroy();
       Object.assign(globalThis, original);
     },
   };
@@ -341,10 +346,11 @@ function controllerEnvironment() {
 test('the Cockpit controller listens for a touch double-tap and releases it on dispose', () => {
   const env = controllerEnvironment();
   try {
+    const before = env.canvas.count();
     const owner = new CockpitViewController(env.viewer, { services: {} });
-    assert.ok(env.canvas.count() > 0, 'canvas listeners attached');
+    assert.ok(env.canvas.count() > before, 'canvas listeners attached');
     owner.dispose();
-    assert.equal(env.canvas.count(), 0, 'canvas listeners released');
+    assert.equal(env.canvas.count(), before, 'canvas listeners released');
   } finally {
     env.restore();
   }
@@ -396,7 +402,7 @@ test('through the controller, a fingertip double-tap on the track enters once', 
   }
 });
 
-test('a dblclick right after a touch entry does not reach the stock handler', () => {
+test('a dblclick right after a touch entry is not a second gesture', () => {
   const env = controllerEnvironment();
   try {
     const owner = new CockpitViewController(env.viewer, {
@@ -406,17 +412,15 @@ test('a dblclick right after a touch entry does not reach the stock handler', ()
     owner.enter = () => {
       owner.active = true;
     };
-    const routed = env.handlerActions.get(
-      Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK,
-    );
-    assert.equal(typeof routed, 'function');
+    const orbital = [];
+    owner.onOrbitalDoubleClick = (position) => orbital.push(position);
     let clock = 5000;
     const realNow = performance.now;
     performance.now = () => clock;
     try {
-      // A plain dblclick away from the track still goes to Cesium.
-      routed({ position: { x: 900, y: 900 } });
-      assert.equal(env.stockCalls.length, 1);
+      // A plain dblclick away from the track is the orbital double-click.
+      env.input.dblclick({ x: 900, y: 900 });
+      assert.equal(orbital.length, 1);
       const base = {
         pointerType: 'touch',
         pointerId: 1,
@@ -430,12 +434,12 @@ test('a dblclick right after a touch entry does not reach the stock handler', ()
       }
       assert.equal(owner.active, true);
       // The dblclick some touch devices add after the double-tap is swallowed.
-      routed({ position: { x: 100, y: 100 } });
-      assert.equal(env.stockCalls.length, 1);
-      // Later, with the guard expired, a dblclick is Cesium's again.
+      env.input.dblclick({ x: 100, y: 100 });
+      assert.equal(orbital.length, 1);
+      // Later, with the guard expired, a dblclick is a gesture again.
       clock += 2000;
-      routed({ position: { x: 900, y: 900 } });
-      assert.equal(env.stockCalls.length, 2);
+      env.input.dblclick({ x: 900, y: 900 });
+      assert.equal(orbital.length, 2);
     } finally {
       performance.now = realNow;
     }

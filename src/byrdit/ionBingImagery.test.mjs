@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
-import { createIonImagery } from '../maps/imagery.js';
+import { createIonImagery } from '../render/cesium/mapImagery.js';
 import { ION_SERVER_MANAGED } from './serverKeys.js';
 
 test('server-managed ion: Bing endpoint document comes from /api/ion/ with no token', async (t) => {
