@@ -969,7 +969,7 @@ export function createLocalGeoJsonLayer(
     );
   }
 
-  return {
+  const layer = {
     id,
     name,
     icon,
@@ -1393,12 +1393,12 @@ export function createLocalGeoJsonLayer(
         _reloadQueued = true;
         return;
       }
-      releaseDataSource(viewer);
+      releaseDrawn();
       _cachedFeatures = null;
       await coreEnable(viewer);
       if (_reloadQueued && _enabled && !_destroyed) {
         _reloadQueued = false;
-        releaseDataSource(viewer);
+        releaseDrawn();
         await coreEnable(viewer);
       }
     },
@@ -1538,6 +1538,9 @@ export function createLocalGeoJsonLayer(
       _error = null;
     },
   };
+  // Byrd-IT: reload() rebuilds through the layer's own enable.
+  const coreEnable = layer.enable;
+  return layer;
 }
 
 /**

@@ -237,7 +237,9 @@ test('the attempt list never contains google-ion, whatever is configured', async
     );
   }
   const src = await import('node:fs').then((fs) =>
-    fs.readFileSync(new URL('./maps/google3d.js', import.meta.url), 'utf8'),
+    ['./render/cesium/google3d.js', './maps/startupRoute.js']
+      .map((f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8'))
+      .join('\n'),
   );
   assert.equal(src.includes('2275207'), false);
   assert.equal(src.includes("'google-ion'"), false);

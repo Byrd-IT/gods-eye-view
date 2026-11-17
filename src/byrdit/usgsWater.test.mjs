@@ -1,5 +1,7 @@
 // Byrd-IT: USGS water layers — split by class, streams loaded by viewport tile.
 import '../render/cesium/unbound.js';
+import { fakeInput } from '../input/testDoubles.mjs';
+import { bindFakeDraw } from '../testSupport/fakeDrawPort.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
@@ -98,7 +100,7 @@ const MANIFEST = {
 function fakeViewer(boxRef) {
   const moveEnd = new Cesium.Event();
   const sources = [];
-  return {
+  const viewer = {
     moveEnd,
     sources,
     camera: {
@@ -120,6 +122,11 @@ function fakeViewer(boxRef) {
       remove: (s) => { const i = sources.indexOf(s); if (i >= 0) sources.splice(i, 1); return true; },
     },
   };
+  // Upstream (#1760): the layer draws through the draw port and takes
+  // clicks through the scene input dispatcher.
+  viewer.draw = bindFakeDraw(viewer).draw;
+  fakeInput(viewer);
+  return viewer;
 }
 
 function fakeFetch(log) {
@@ -153,6 +160,11 @@ test('rivers layer loads only the in-view tiles, then reloads on camera settle',
   assert.equal(rivers.getStats().count, 1);
   assert.deepEqual(rivers.getViewportDiagnostics(), { status: 'ok', tiles: ['20_30'] });
 
+  // Upstream (#1760) draws through the draw port, not data sources.
+  const liveSets = () =>
+    [...viewer.draw.sets.values()].filter((set) => !set.disposed).length;
+  const setsBefore = liveSets();
+
   // Pan east: settle -> only the newly visible tile set is fetched.
   log.length = 0;
   boxRef.box = { west: -96, south: 33, east: -94, north: 35 };
@@ -162,7 +174,7 @@ test('rivers layer loads only the in-view tiles, then reloads on camera settle',
   await new Promise((r) => setImmediate(r));
   assert.deepEqual(log.filter((u) => u.startsWith('stream/')), ['stream/21_31.geojsonl']);
   assert.deepEqual(rivers.getViewportDiagnostics().tiles, ['21_31']);
-  assert.equal(viewer.sources.length, 1, 'old tile entities released, not stacked');
+  assert.equal(liveSets(), setsBefore, 'old tile sets released, not stacked');
 
   // Same view again: no refetch.
   log.length = 0;

@@ -273,6 +273,7 @@ test('the box preview draws a ground fill and a draped dashed edge, hidden rathe
 });
 
 test('a dateline box drapes one layer on each side of ±180 and removes both', () => {
+  // Byrd-IT: one imagery spec per side of the antimeridian.
   const { renderer, globe } = fixture();
   const box = { west: 179, south: 0, east: -179, north: 1 };
   assert.equal(
@@ -282,42 +283,39 @@ test('a dateline box drapes one layer on each side of ±180 and removes both', (
   assert.equal(renderer.ownedCount(), 1);
   assert.equal(globe.layers.length, 2);
   assert.deepEqual(
-    globe.layers.map((item) => item.provider.options.rectangle),
+    globe.layers.map((layer) => layer.spec.rectangle),
     [
       { west: 179, south: 0, east: 180, north: 1 },
       { west: -180, south: 0, east: -179, north: 1 },
     ],
   );
-  assert.equal(globe.layers[0].alpha, 0.4);
-  assert.equal(globe.layers[1].alpha, 0.4);
-  assert.equal(globe.layers[0].splitDirection, -1);
-  assert.equal(globe.layers[1].splitDirection, -1);
+  assert.deepEqual(
+    globe.layers.map((layer) => [layer.alpha, layer.split]),
+    [
+      [0.4, 'left'],
+      [0.4, 'left'],
+    ],
+  );
   renderer.setAlpha('a', 0.2);
-  assert.equal(globe.layers[0].alpha, 0.2);
-  assert.equal(globe.layers[1].alpha, 0.2);
-  renderer.showSlot('a', S30, box, { alpha: 0.2 });
+  assert.deepEqual(
+    globe.layers.map((layer) => layer.alpha),
+    [0.2, 0.2],
+  );
+  renderer.showSlot('a', S30, box, { alpha: 0.2, splitDirection: 'left' });
   assert.equal(globe.layers.length, 2, 'the same box does not remount');
   renderer.hideSlot('a');
   assert.equal(globe.layers.length, 0);
 });
 
-test('a dateline provider that fails on the second half adds no layer', () => {
+test('a dateline box whose second half fails to add leaves no layer', () => {
+  const { renderer, globe } = fixture();
+  const add = globe.imagery.add;
   let built = 0;
-  const base = fakeCesium();
-  const Provider = base.UrlTemplateImageryProvider;
-  base.UrlTemplateImageryProvider = class extends Provider {
-    constructor(options) {
-      built += 1;
-      if (built === 2) throw new Error('provider failed');
-      super(options);
-    }
+  globe.imagery.add = (spec, index) => {
+    built += 1;
+    if (built === 2) throw new Error('provider failed');
+    return add(spec, index);
   };
-  const renderer = createRecentImageryRenderer({
-    cesium: base,
-    requestRender: () => {},
-  });
-  const globe = fakeCollection();
-  renderer.rebind({ collection: globe, kind: 'globe' });
   assert.throws(
     () =>
       renderer.showSlot('a', S30, {

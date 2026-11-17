@@ -13,9 +13,12 @@
  * each is a few hundred KB — but still re-fetch on every enable so the
  * 30-minute refresh shows up without a page reload.
  */
-import * as Cesium from 'cesium';
 import { createLocalGeoJsonLayer } from '../data/localGeojsonCore.js';
 import { cesiumViewerFor } from './cesiumViewer.js';
+
+// Radians to degrees without Cesium: the infrastructure package reaches no
+// Cesium of its own (upstream #1760).
+const toDegrees = (radians) => (radians * 180) / Math.PI;
 
 export const USGS_WATER_BASE = '/byrdit/usgs_water';
 /** Wider than this many degrees (lon or lat span) → streams wait for zoom-in. */
@@ -76,10 +79,10 @@ export function viewBoxDegrees(host) {
   );
   if (!rect) return null;
   const box = {
-    west: Cesium.Math.toDegrees(rect.west),
-    south: Cesium.Math.toDegrees(rect.south),
-    east: Cesium.Math.toDegrees(rect.east),
-    north: Cesium.Math.toDegrees(rect.north),
+    west: toDegrees(rect.west),
+    south: toDegrees(rect.south),
+    east: toDegrees(rect.east),
+    north: toDegrees(rect.north),
   };
   if (!Object.values(box).every(Number.isFinite)) return null;
   if (box.north <= box.south || box.east <= box.west) return null;

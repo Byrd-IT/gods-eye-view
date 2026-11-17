@@ -207,6 +207,10 @@ test('consumer build includes only infrastructure code and resolves assets under
   // renderer bound draws once the caller has loaded
   // `./render/cesium/unbound`.
   assert.deepEqual(sources.map((id) => id.split('/').at(-1)).sort(), [
+    // Byrd-IT fork: USGS water reads its camera through the viewer behind
+    // the scene object (byrdit/cesiumViewer.js -> render/cesium/viewers.js,
+    // neither of which imports Cesium).
+    'cesiumViewer.js',
     'color.js',
     'dispatcher.js',
     'ellipsoid.js',
@@ -231,6 +235,7 @@ test('consumer build includes only infrastructure code and resolves assets under
     'usgsWater.js',
     'usgsWaterCopy.js',
     'vector.js',
+    'viewers.js',
   ]);
   assert.deepEqual(entry.imports, [], 'it reaches no Cesium of its own');
   for (const name of ['datacenters', 'dams']) {
