@@ -16,7 +16,7 @@ import {
   resetPointerOwnership,
 } from '../../data/inputOwnership.js';
 import * as RealCesium from 'cesium';
-import { boxToolFakes } from './testDoubles.mjs';
+import { bindDroneRenderer, boxToolFakes } from './testDoubles.mjs';
 import {
   initDronePlan,
   planSummary,
@@ -255,6 +255,8 @@ function makeWorld({ sample, wrapPositions = false }) {
     ...fakes.viewer,
     terrainProvider: { requestTileGeometry() {} },
   };
+  // The area box preview draws through the scene draw port (#1760).
+  bindDroneRenderer(viewer);
   return { viewer, cesium, fakes };
 }
 
@@ -703,15 +705,18 @@ test('the aircraft code field overrides the preset, and clearing it returns to t
   w.handle.destroy();
 });
 
-test('picking a takeoff point says so when another tool holds the pointer', async () => {
+test('picking a takeoff point takes the pointer over from another tool', async () => {
+  // Upstream (#1760): the newest claim takes over; the other holder is told.
   const w = setup();
   w.handle.setBox(boxM(300, 200));
   await w.handle.replan();
-  const lease = claimPointer('draw');
+  let lost = 0;
+  const lease = claimPointer('draw', { onLost: () => (lost += 1) });
   const set = w.buttons('title').find((b) => b.textContent === 'SET');
   set.click();
-  assert.match(w.status(), /Another tool is using the pointer/);
-  releasePointer(lease);
+  assert.match(w.status(), /Click the ground where you will take off/);
+  assert.equal(lost, 1, 'the other tool heard it lost the pointer');
+  assert.equal(releasePointer(lease), false, 'its stale lease frees nothing');
   w.handle.destroy();
 });
 

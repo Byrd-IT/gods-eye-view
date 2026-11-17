@@ -61,7 +61,7 @@ test('a sky click keeps the session; Escape cancels and gives everything back', 
   assert.equal(f.points.length, 0);
 });
 
-test('a held pointer refuses the session and borrows nothing', () => {
+test('a newer session takes the pointer over and the older one turns off', () => {
   const f = fixture();
   const other = fixture;
   void other;
@@ -75,15 +75,15 @@ test('a held pointer refuses the session and borrows nothing', () => {
     owner: 'draw',
   });
   assert.equal(first.start(), true);
-  assert.equal(f.tool.start(), false);
-  assert.deepEqual(f.cancels, ['pointer-busy']);
-  assert.equal(
-    f.stock('LEFT_CLICK'),
-    undefined,
-    'the first tool still holds the borrow',
-  );
-  first.destroy();
+  // Upstream (#1760): the newest claim takes over; the first tool hears
+  // onLost and turns off, handing its borrow back.
+  assert.equal(f.tool.start(), true);
+  assert.equal(first.isActive(), false);
+  assert.equal(f.tool.isActive(), true);
+  f.tool.cancel();
   assert.equal(f.stock('LEFT_CLICK'), f.originalClick);
+  assert.equal(pointerOwner(), null);
+  first.destroy();
 });
 
 test('destroy mid-session releases everything and is idempotent', () => {

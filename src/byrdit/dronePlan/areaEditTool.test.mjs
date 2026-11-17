@@ -175,11 +175,16 @@ test('a box gets its 4 corners and a centre handle', () => {
   f.tool.destroy();
 });
 
-test('start is refused while another tool holds the pointer, or for no area', () => {
+test('a newer claim takes the pointer over; start is refused for no area', () => {
+  // Upstream (#1760): the newest claim takes over and the old holder hears
+  // onLost, so the edit tool turns itself off rather than holding on.
   const f = fixture();
   const lease = claimPointer('someone-else');
-  assert.equal(f.tool.start(polygonArea()), false);
-  assert.equal(f.tool.isActive(), false);
+  assert.equal(f.tool.start(polygonArea()), true);
+  const other = claimPointer('someone-else');
+  assert.equal(f.tool.isActive(), false, 'the newer claim turned the tool off');
+  assert.equal(pointerOwner(), 'someone-else');
+  releasePointer(other);
   releasePointer(lease);
   assert.equal(f.tool.start({ id: 'x', kind: 'polygon', ring: [] }), false);
   assert.equal(f.tool.start(null), false);

@@ -702,7 +702,9 @@ export function initDronePlan({
     return false;
   };
   const boxTool = initImageryBoxTool({
-    viewer,
+    // The scene object, not the Cesium viewer behind it: input dispatchers
+    // are kept per scene object, and one port must have one (#1760).
+    viewer: sceneViewer,
     cesium,
     owner: BOX_OWNER,
     previewName: 'gev-drone-plan-box-preview',

@@ -570,7 +570,14 @@ export function initAreaEditTool({
       notify();
       return true;
     }
-    lease = claimPointer(owner);
+    // Upstream (#1760): the newest claim takes the pointer; when a newer
+    // one ends ours, turn off as if the person had (reason 'pointer-lost').
+    lease = claimPointer(owner, {
+      onLost: () => {
+        lease = null;
+        cancel('pointer-lost');
+      },
+    });
     if (!lease) return false;
     active = true;
     areaId = area.id;

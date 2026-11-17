@@ -6,6 +6,29 @@
  * moved to the renderer's input port (#1760).
  */
 
+import { bindFakeDraw } from '../../testSupport/fakeDrawPort.mjs';
+import { fakeInput } from '../../input/testDoubles.mjs';
+
+/**
+ * Bind the drone tools' renderer double to `viewer`: upstream's draw port
+ * fake, and a query port that picks the ground through `viewer.camera`
+ * (read on each pick, so a test may set the camera after setup).
+ * @returns {{draw: object, unbind: () => void}}
+ */
+export function bindDroneRenderer(viewer) {
+  // The imagery box tool takes input from the scene dispatcher (#1760).
+  fakeInput(viewer);
+  const ecef = (c) => (c ? { x: c.x, y: c.y, z: c.z } : null);
+  return bindFakeDraw(viewer, {
+    query: {
+      pickPosition: () => null,
+      pickEllipsoid: (x, y) => ecef(viewer.camera?.pickEllipsoid?.({ x, y })),
+      pickRay: () => null,
+      pickGlobe: () => null,
+    },
+  });
+}
+
 const EVENT_TYPES = {
   LEFT_DOWN: 'down',
   MOUSE_MOVE: 'move',

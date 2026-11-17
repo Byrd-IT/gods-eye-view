@@ -335,7 +335,14 @@ export function initPolygonTool({
   function setActive(next) {
     if (next === active) return active;
     if (next) {
-      lease = claimPointer(owner);
+      // Upstream (#1760): the newest claim takes the pointer; when a newer
+      // one ends ours, turn off as if the person had (reason 'pointer-lost').
+      lease = claimPointer(owner, {
+        onLost: () => {
+          lease = null;
+          cancel('pointer-lost');
+        },
+      });
       if (!lease) {
         onCancel?.('pointer-busy');
         return active;
