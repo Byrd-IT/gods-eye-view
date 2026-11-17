@@ -25,6 +25,7 @@ import {
   linePhotoCount,
   normalizeOptions,
   planFlight,
+  surveyTiltDeg,
   takeoffDistanceFromBoxM,
   VLOS_WARN_M,
 } from './planner.js';
@@ -190,15 +191,15 @@ function withJob(plan, areas, grouping) {
 
 function marginM(preset, options, hasPolygon) {
   if (!hasPolygon || options.pattern === 'orbit') return 0;
-  const tilt = options.pattern === 'double' ? 90 + options.tiltPitchDeg : 0;
+  const tilt = surveyTiltDeg(options);
   const fp = footprint(preset, options.aglM, tilt);
   return Math.max(fp.acrossM, fp.alongM) / 2;
 }
 
 /** Metres the camera looks ahead of the drone. Zero for a nadir grid. */
 function lookAheadM(options) {
-  if (options.pattern !== 'double') return 0;
-  const tilt = ((90 + options.tiltPitchDeg) * Math.PI) / 180;
+  if (options.pattern === 'orbit') return 0;
+  const tilt = (surveyTiltDeg(options) * Math.PI) / 180;
   const ahead = options.aglM * Math.tan(tilt);
   return Number.isFinite(ahead) && ahead > 0 ? ahead : 0;
 }

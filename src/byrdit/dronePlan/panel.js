@@ -94,8 +94,14 @@ import {
   captureSpacingM,
   cleanMinPhotoIntervalS,
   cleanTimedIntervalS,
+  cleanGridPitchDeg,
+  GRID_PITCH_MIN_DEG,
+  GRID_PITCH_STEP_DEG,
   presetWithPhotoInterval,
+  shallowestGridPitchDeg,
   spacing,
+  surveyPitchDeg,
+  surveyTiltDeg,
   takeoffDistanceFromBoxM,
   writtenSpacingM,
 } from './planner.js';
@@ -286,11 +292,38 @@ export function cleanPhotoSpacingM(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Degrees from nadir, matching planFlight's pass tilt. Grid and orbit are 0. */
+/**
+ * Degrees from nadir, matching planFlight's pass tilt: the Camera tilt for a
+ * double grid, the Gimbal angle for a plain grid, 0 for an orbit.
+ */
 export function captureTiltDeg(options) {
-  if (options?.pattern !== 'double') return 0;
-  const tilt = 90 + Number(options.tiltPitchDeg);
+  const tilt = surveyTiltDeg(options);
   return Number.isFinite(tilt) ? tilt : 0;
+}
+
+/**
+ * The Gimbal line of the Recommended list: the angle THIS plan will fly, not
+ * the mode's default, so it can never say -90 while the plan is tilted. When
+ * it differs from the recommendation, the recommended angle is named too.
+ * @param {object} options The panel options (pattern, tiltPitchDeg, gridPitchDeg).
+ * @param {number|null} recommendedDeg The mode's recommended pitch (null: orbit).
+ */
+export function gimbalSummaryText(options, recommendedDeg) {
+  const pitch = surveyPitchDeg(options);
+  if (pitch == null || recommendedDeg === null) return t('on the centre');
+  const deg = `${num(pitch)}°`;
+  let text;
+  if (options.pattern === 'double') {
+    text = t('{deg} on both crossing passes (no straight-down pass)', { deg });
+  } else if (pitch === -90) {
+    text = t('{deg} straight down', { deg });
+  } else {
+    text = t('{deg} tilted forward on every line', { deg });
+  }
+  if (Number.isFinite(recommendedDeg) && recommendedDeg !== pitch) {
+    text += ` · ${t('recommended {deg}', { deg: `${num(recommendedDeg)}°` })}`;
+  }
+  return text;
 }
 
 export function captureStepLabel(mode) {
@@ -557,6 +590,7 @@ export function initDronePlan({
       pattern: 'grid',
       direction: 'auto',
       tiltPitchDeg: -60,
+      gridPitchDeg: -90,
       speedMs: getPreset(DEFAULT_PRESET_ID).defaultSpeedMs,
       photoMode: 'waypoint',
       captureMode: 'stop',
@@ -2378,7 +2412,7 @@ export function initDronePlan({
 
     ui.pattern = select(
       [
-        ['grid', t('Grid, straight down')],
+        ['grid', t('Grid')],
         ['double', t('Double grid, tilted')],
         ['orbit', t('Orbit the centre')],
       ],
@@ -2398,6 +2432,26 @@ export function initDronePlan({
     }));
     ui.tilt = slider(t('Camera tilt'), -80, -45, 5);
     ({ row: ui.tiltRow, out: ui.tiltOut } = field(t('Camera tilt'), ui.tilt));
+    // Plain grid gimbal: -90 (straight down) to the aircraft's shallowest
+    // angle (max set per aircraft in render, -35 on a Mini 5 Pro).
+    ui.gridPitch = slider(
+      t('Gimbal angle'),
+      GRID_PITCH_MIN_DEG,
+      shallowestGridPitchDeg(getPreset(DEFAULT_PRESET_ID)),
+      GRID_PITCH_STEP_DEG,
+    );
+    ui.gridPitch.setAttribute?.('data-role', 'grid-pitch');
+    ({ row: ui.gridPitchRow, out: ui.gridPitchOut } = field(
+      t('Gimbal angle'),
+      ui.gridPitch,
+    ));
+    ui.gimbalNote = el(doc, 'p', host, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'gimbal-note' },
+      text: t(
+        'Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.',
+      ),
+    });
     into('orbits');
     ui.radius = lslider(t('Orbit radius'), {
       minM: 10,
@@ -3148,6 +3202,14 @@ export function initDronePlan({
       schedule();
     });
     onInput(ui.tilt, () => (o.tiltPitchDeg = Number(ui.tilt.value)));
+    onInput(
+      ui.gridPitch,
+      () =>
+        (o.gridPitchDeg = cleanGridPitchDeg(
+          Number(ui.gridPitch.value),
+          getPreset(o.presetId),
+        )),
+    );
     onInput(ui.radius, () => (o.orbitRadiusM = lengthToM(ui.radius.value)));
     onInput(
       ui.targetHeight,
@@ -3686,11 +3748,18 @@ export function initDronePlan({
         ? `${num(rec.frontOverlap)}%`
         : `${num(rec.frontOverlap)}% / ${num(rec.sideOverlap)}%`,
     );
+    // The angle THIS plan flies (Camera tilt for a double grid, Gimbal angle
+    // for a grid), with the mode's recommended angle when they differ.
     row(
       t('Gimbal'),
-      rec.gimbalPitchDeg === null
-        ? t('on the centre')
-        : `${num(rec.gimbalPitchDeg)}°`,
+      gimbalSummaryText(
+        state.options,
+        rec.gimbalPitchDeg === null
+          ? null
+          : state.options.pattern === 'double'
+            ? rec.tiltPitchDeg
+            : rec.gimbalPitchDeg,
+      ),
     );
     row(
       t('Camera'),
@@ -4044,6 +4113,21 @@ export function initDronePlan({
     ui.direction.value = String(o.direction);
     ui.tilt.value = String(o.tiltPitchDeg);
     ui.tiltOut.textContent = `${num(o.tiltPitchDeg)}°`;
+    {
+      // The shallowest grid angle depends on the aircraft's view.
+      const gridPreset = getPreset(o.presetId) ?? preset;
+      ui.gridPitch.max = String(shallowestGridPitchDeg(gridPreset));
+      o.gridPitchDeg = cleanGridPitchDeg(o.gridPitchDeg, gridPreset);
+      ui.gridPitch.value = String(o.gridPitchDeg);
+      ui.gridPitchOut.textContent =
+        o.gridPitchDeg === -90
+          ? t('{deg} straight down', { deg: `${num(o.gridPitchDeg)}°` })
+          : `${num(o.gridPitchDeg)}°`;
+      ui.gridPitchRow.title = t(
+        '-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.',
+        { deg: `${num(shallowestGridPitchDeg(gridPreset))}°` },
+      );
+    }
     const radius =
       o.orbitRadiusM ?? state.result?.plan?.options?.orbitRadiusM ?? 40;
     ui.radius.value = lengthField(radius);
@@ -4148,6 +4232,8 @@ export function initDronePlan({
     // applies to the grid patterns.
     ui.photoRow.hidden = orbit || timedMode;
     ui.tiltRow.hidden = o.pattern !== 'double';
+    ui.gridPitchRow.hidden = o.pattern !== 'grid';
+    ui.gimbalNote.hidden = orbit;
     ui.radiusRow.hidden = !orbit;
     ui.ringsRow.hidden = !orbit;
     ui.anglesRow.hidden = !orbit;
@@ -6440,6 +6526,9 @@ export function initDronePlan({
     state.takeoff = plan.takeoff;
     // A plan saved before the camera preset existed gets the default one.
     state.options.cameraPresetId = DEFAULT_CAMERA_PRESET_ID;
+    // A plan saved before the grid gimbal existed flies straight down, not
+    // the angle left over from the plan open before it.
+    state.options.gridPitchDeg = -90;
     Object.assign(state.options, plan.options);
     state.options.captureMode = cleanCaptureMode(state.options.captureMode);
     state.options.continuousRoute = state.options.continuousRoute === true;

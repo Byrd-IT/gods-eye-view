@@ -3380,7 +3380,6 @@
   "Height above ground": "Quota dal suolo",
   "Front overlap": "Sovrapposizione frontale",
   "Side overlap": "Sovrapposizione laterale",
-  "Grid, straight down": "Griglia, dritto in basso",
   "Double grid, tilted": "Doppia griglia, inclinata",
   "Orbit the centre": "Orbita intorno al centro",
   "Pattern": "Schema",
@@ -4425,5 +4424,12 @@
   "Compact file (test it on your controller)": "File compatto (provalo sul tuo radiocomando)",
   "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "Un KMZ più piccolo per un radiocomando che si blocca con i file grandi: senza spazi, compresso e senza due campi inutilizzati. NON VERIFICATO su DJI Fly e sul radiocomando: provalo accanto a un file normale.",
   "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "I file compatti sono NON VERIFICATI: non ancora caricati su un radiocomando DJI. Gli spazi sono rimossi, il file è compresso e i campi inutilizzati waypointPoiPoint e waypointTurnDampingDist sono omessi. Ogni waypoint mantiene la propria velocità e l'inclinazione del gimbal. Scarica anche un file normale e confronta.",
-  "The file could not be saved": "Impossibile salvare il file"
+  "The file could not be saved": "Impossibile salvare il file",
+  "Gimbal angle": "Angolo del gimbal",
+  "Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.": "Ogni waypoint del file imposta questo angolo del gimbal. DJI Fly potrebbe non mantenerlo: controlla l'angolo del gimbal sul radiocomando prima di avviare ogni missione.",
+  "{deg} on both crossing passes (no straight-down pass)": "{deg} su entrambi i passaggi incrociati (nessun passaggio in verticale)",
+  "{deg} straight down": "{deg} in verticale verso il basso",
+  "{deg} tilted forward on every line": "{deg} inclinato in avanti su ogni linea",
+  "recommended {deg}": "consigliato {deg}",
+  "-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.": "-90 è in verticale verso il basso. Una griglia inclinata guarda in avanti lungo ogni linea. L'angolo più piatto per questo drone è {deg}: più piatto e il bordo superiore della foto raggiunge l'orizzonte."
 }

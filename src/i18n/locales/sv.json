@@ -3745,7 +3745,6 @@
   "Plan every recommended capture pass for a Gaussian splat over your areas at once: nadir grid, two oblique grids and orbits": "Planera alla rekommenderade fotograferingspass för en Gaussian splat över dina områden på en gång: nadirrutnät, två sneda rutnät och orbitflygningar",
   "Height above ground": "Höjd över marken",
   "Side overlap": "Sidoöverlappning",
-  "Grid, straight down": "Rutnät, rakt nedåt",
   "Double grid, tilted": "Dubbelt rutnät, lutande",
   "Orbit the centre": "Flyg runt mitten",
   "Pattern": "Mönster",
@@ -4329,5 +4328,12 @@
   "Compact file (test it on your controller)": "Kompakt fil (testa på din fjärrkontroll)",
   "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "En mindre KMZ för en fjärrkontroll som hänger sig med stora filer: utan blanksteg, komprimerad och utan två oanvända fält. OVERIFIERAD i DJI Fly och på fjärrkontrollen: testa den bredvid en vanlig fil.",
   "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "Kompakta filer är OVERIFIERADE: de har inte laddats på en DJI-fjärrkontroll än. Blanksteg är borttagna, filen är komprimerad och de oanvända fälten waypointPoiPoint och waypointTurnDampingDist är utelämnade. Varje waypoint behåller sin egen hastighet och gimbalvinkel. Ladda också ner en vanlig fil och jämför.",
-  "The file could not be saved": "Filen kunde inte sparas"
+  "The file could not be saved": "Filen kunde inte sparas",
+  "Gimbal angle": "Gimbalvinkel",
+  "Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.": "Varje waypoint i filen ställer in den här gimbalvinkeln. DJI Fly kanske inte håller den: kontrollera gimbalvinkeln på kontrollen innan du startar varje uppdrag.",
+  "{deg} on both crossing passes (no straight-down pass)": "{deg} på båda korsande passen (inget pass rakt ner)",
+  "{deg} straight down": "{deg} rakt ner",
+  "{deg} tilted forward on every line": "{deg} lutad framåt på varje linje",
+  "recommended {deg}": "rekommenderat {deg}",
+  "-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.": "-90 är rakt ner. Ett lutat rutnät tittar framåt längs varje linje. Den flackaste vinkeln för den här drönaren är {deg}: flackare och bildens överkant når horisonten."
 }

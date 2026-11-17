@@ -45,6 +45,8 @@ const OPTION_TYPES = Object.freeze({
   pattern: (v) => ['grid', 'double', 'orbit'].includes(v),
   direction: (v) => v === 'auto' || finite(v) || typeof v === 'string',
   tiltPitchDeg: finite,
+  // Plain grid gimbal, degrees (-90 straight down). Absent in older plans.
+  gridPitchDeg: finite,
   speedMs: finite,
   photoMode: (v) => ['waypoint', 'interval'].includes(v),
   captureMode: (v) => CAPTURE_MODES.includes(v),

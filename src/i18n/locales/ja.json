@@ -3230,7 +3230,6 @@
   "Height above ground": "対地高度",
   "Front overlap": "進行方向の重複",
   "Side overlap": "側面の重複",
-  "Grid, straight down": "グリッド、真下",
   "Double grid, tilted": "二重グリッド、傾け",
   "Orbit the centre": "中心を周回",
   "Pattern": "パターン",
@@ -4233,5 +4232,12 @@
   "Compact file (test it on your controller)": "コンパクトファイル（送信機で試してください）",
   "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "大きなファイルでフリーズする送信機向けの小さなKMZ：空白なし、圧縮済み、未使用の2項目を省略。DJI Flyと送信機では未検証です。通常のファイルと並べて試してください。",
   "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "コンパクトファイルは未検証です。DJIの送信機にはまだ読み込んでいません。空白を除き、ファイルを圧縮し、未使用の waypointPoiPoint と waypointTurnDampingDist の項目を省いています。各ウェイポイントは自分の速度とジンバルのピッチを保持します。通常のファイルも保存して比べてください。",
-  "The file could not be saved": "ファイルを保存できませんでした"
+  "The file could not be saved": "ファイルを保存できませんでした",
+  "Gimbal angle": "ジンバル角度",
+  "Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.": "ファイル内のすべてのウェイポイントがこのジンバル角度を設定します。DJI Fly が保持しない場合があります。各ミッションの開始前に送信機でジンバル角度を確認してください。",
+  "{deg} on both crossing passes (no straight-down pass)": "交差する2つのパスとも {deg}（真下のパスなし）",
+  "{deg} straight down": "{deg} 真下",
+  "{deg} tilted forward on every line": "各ラインで前方に {deg} 傾斜",
+  "recommended {deg}": "推奨 {deg}",
+  "-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.": "-90 は真下です。傾けたグリッドは各ラインに沿って前方を見ます。この機体で最も浅い角度は {deg} です。これより浅いと写真の上端が地平線に達します。"
 }

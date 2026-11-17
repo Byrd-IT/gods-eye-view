@@ -3238,7 +3238,6 @@
   "Height above ground": "對地高度",
   "Front overlap": "航向重疊",
   "Side overlap": "旁向重疊",
-  "Grid, straight down": "網格，垂直向下",
   "Double grid, tilted": "雙網格，傾斜",
   "Orbit the centre": "環繞中心",
   "Pattern": "圖案",
@@ -4233,5 +4232,12 @@
   "Compact file (test it on your controller)": "精簡檔案（請在遙控器上測試）",
   "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "適用於開啟大檔案就當機的遙控器的較小 KMZ：無空白字元、已壓縮，並省略兩個未使用的欄位。尚未在 DJI Fly 和遙控器上驗證：請與一般檔案一併試用。",
   "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "精簡檔案尚未驗證：還沒有在 DJI 遙控器上載入過。已去除空白字元並壓縮檔案，同時省略未使用的 waypointPoiPoint 和 waypointTurnDampingDist 欄位。每個航點仍保留自己的速度和雲台俯仰角。請同時下載一個一般檔案進行比對。",
-  "The file could not be saved": "無法儲存檔案"
+  "The file could not be saved": "無法儲存檔案",
+  "Gimbal angle": "雲台角度",
+  "Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.": "檔案中的每個航點都會設定此雲台角度。DJI Fly 可能不會保持該角度：每次任務開始前請在遙控器上檢查雲台角度。",
+  "{deg} on both crossing passes (no straight-down pass)": "兩次交叉航線皆為 {deg}（無垂直向下航線）",
+  "{deg} straight down": "{deg} 垂直向下",
+  "{deg} tilted forward on every line": "每條航線前傾 {deg}",
+  "recommended {deg}": "建議 {deg}",
+  "-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.": "-90 表示垂直向下。傾斜網格沿每條航線向前看。此機型最平的角度為 {deg}：再平的話，照片上緣會到達地平線。"
 }

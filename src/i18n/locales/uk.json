@@ -3455,7 +3455,6 @@
   "Height above ground": "Висота над землею",
   "Front overlap": "Поздовжнє перекриття",
   "Side overlap": "Поперечне перекриття",
-  "Grid, straight down": "Сітка, прямо вниз",
   "Double grid, tilted": "Подвійна сітка, з нахилом",
   "Orbit the centre": "Орбіта навколо центру",
   "Pattern": "Схема",
@@ -4521,5 +4520,12 @@
   "Compact file (test it on your controller)": "Компактний файл (перевірте на пульті)",
   "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "Менший KMZ для пульта, який зависає на великих файлах: без пропусків, стиснутий, без двох невикористаних полів. НЕ ПЕРЕВІРЕНО в DJI Fly і на пульті: спробуйте поруч зі звичайним файлом.",
   "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "Компактні файли НЕ ПЕРЕВІРЕНО: їх ще не завантажували на пульт DJI. Пропуски прибрано, файл стиснуто, а невикористані поля waypointPoiPoint і waypointTurnDampingDist пропущено. Кожна точка зберігає власну швидкість і нахил підвісу. Завантажте також звичайний файл і порівняйте.",
-  "The file could not be saved": "Не вдалося зберегти файл"
+  "The file could not be saved": "Не вдалося зберегти файл",
+  "Gimbal angle": "Кут підвісу",
+  "Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.": "Кожна точка маршруту у файлі задає цей кут підвісу. DJI Fly може його не втримати: перевірте кут підвісу на пульті перед початком кожної місії.",
+  "{deg} on both crossing passes (no straight-down pass)": "{deg} на обох перехресних проходах (без проходу строго вниз)",
+  "{deg} straight down": "{deg} строго вниз",
+  "{deg} tilted forward on every line": "{deg} з нахилом уперед на кожній лінії",
+  "recommended {deg}": "рекомендовано {deg}",
+  "-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.": "-90 — строго вниз. Похила сітка дивиться вперед уздовж кожної лінії. Найпологіший кут для цього дрона — {deg}: положистіше, і верхній край знімка сягає горизонту."
 }

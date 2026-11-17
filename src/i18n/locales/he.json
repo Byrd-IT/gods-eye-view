@@ -3799,7 +3799,6 @@
   "Plan every recommended capture pass for a Gaussian splat over your areas at once: nadir grid, two oblique grids and orbits": "תכנן בבת אחת כל מעבר צילום מומלץ ל-Gaussian splat מעל האזורים שלך: רשת ישרה כלפי מטה, שתי רשתות אלכסוניות והקפות",
   "Height above ground": "גובה מעל הקרקע",
   "Side overlap": "חפיפה צדדית",
-  "Grid, straight down": "רשת, ישר כלפי מטה",
   "Double grid, tilted": "רשת כפולה, מוטה",
   "Orbit the centre": "הקפת המרכז",
   "Pattern": "תבנית",
@@ -4425,5 +4424,12 @@
   "Compact file (test it on your controller)": "קובץ קומפקטי (בדקו אותו בשלט שלכם)",
   "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "קובץ KMZ קטן יותר לשלט שנתקע בקבצים גדולים: בלי רווחים, דחוס, וללא שני שדות שאינם בשימוש. לא אומת ב-DJI Fly ובשלט: נסו אותו לצד קובץ רגיל.",
   "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "קבצים קומפקטיים אינם מאומתים: טרם נטענו בשלט של DJI. הרווחים הוסרו, הקובץ דחוס, והשדות שאינם בשימוש waypointPoiPoint ו-waypointTurnDampingDist הושמטו. כל נקודת ציון שומרת על המהירות ועל זווית הגימבל שלה. הורידו גם קובץ רגיל והשוו.",
-  "The file could not be saved": "לא ניתן היה לשמור את הקובץ"
+  "The file could not be saved": "לא ניתן היה לשמור את הקובץ",
+  "Gimbal angle": "זווית הג'ימבל",
+  "Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.": "כל נקודת ציון בקובץ קובעת את זווית הג'ימבל הזו. ייתכן ש-DJI Fly לא ישמור עליה: בדקו את זווית הג'ימבל בשלט לפני תחילת כל משימה.",
+  "{deg} on both crossing passes (no straight-down pass)": "{deg} בשני המעברים המצטלבים (ללא מעבר ישר למטה)",
+  "{deg} straight down": "{deg} ישר למטה",
+  "{deg} tilted forward on every line": "{deg} מוטה קדימה בכל קו",
+  "recommended {deg}": "מומלץ {deg}",
+  "-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.": "-90 הוא ישר למטה. רשת מוטה מביטה קדימה לאורך כל קו. הזווית השטוחה ביותר לכלי טיס זה היא {deg}: שטוח יותר, והחלק העליון של התמונה מגיע לאופק."
 }

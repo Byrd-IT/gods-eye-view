@@ -3305,7 +3305,6 @@
   "Height above ground": "Höhe über Grund",
   "Front overlap": "Überlappung in Flugrichtung",
   "Side overlap": "Seitliche Überlappung",
-  "Grid, straight down": "Raster, senkrecht nach unten",
   "Double grid, tilted": "Doppelraster, geneigt",
   "Orbit the centre": "Die Mitte umkreisen",
   "Pattern": "Muster",
@@ -4329,5 +4328,12 @@
   "Compact file (test it on your controller)": "Kompakte Datei (an Ihrer Fernsteuerung testen)",
   "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "Eine kleinere KMZ für eine Fernsteuerung, die bei großen Dateien hängt: ohne Leerraum, komprimiert und mit zwei ungenutzten Feldern weniger. NICHT VERIFIZIERT in DJI Fly und auf der Fernsteuerung: neben einer normalen Datei ausprobieren.",
   "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "Kompakte Dateien sind NICHT VERIFIZIERT: noch nicht auf einer DJI-Fernsteuerung geladen. Leerraum ist entfernt, die Datei ist komprimiert, und die ungenutzten Felder waypointPoiPoint und waypointTurnDampingDist fehlen. Jeder Wegpunkt behält seine eigene Geschwindigkeit und Gimbal-Neigung. Laden Sie zusätzlich eine normale Datei herunter und vergleichen Sie.",
-  "The file could not be saved": "Die Datei konnte nicht gespeichert werden"
+  "The file could not be saved": "Die Datei konnte nicht gespeichert werden",
+  "Gimbal angle": "Gimbalwinkel",
+  "Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.": "Jeder Wegpunkt in der Datei setzt diesen Gimbalwinkel. DJI Fly hält ihn eventuell nicht: Prüfe den Gimbalwinkel an der Fernsteuerung, bevor du jede Mission startest.",
+  "{deg} on both crossing passes (no straight-down pass)": "{deg} auf beiden Kreuzflügen (kein Flug senkrecht nach unten)",
+  "{deg} straight down": "{deg} senkrecht nach unten",
+  "{deg} tilted forward on every line": "{deg} auf jeder Linie nach vorn geneigt",
+  "recommended {deg}": "empfohlen {deg}",
+  "-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.": "-90 ist senkrecht nach unten. Ein geneigtes Raster blickt entlang jeder Linie nach vorn. Der flachste Winkel für dieses Fluggerät ist {deg}: flacher, und der obere Bildrand erreicht den Horizont."
 }

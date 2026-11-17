@@ -2092,6 +2092,7 @@ test('Steps: nine numbered collapsible steps hold every control in the planned o
   assert.equal(stepOf(w.control('Height above ground')), 3);
   assert.equal(stepOf(w.control('Front overlap')), 3);
   assert.equal(stepOf(w.control('Camera tilt')), 3);
+  assert.equal(stepOf(w.control('Gimbal angle')), 3);
   assert.equal(stepOf(w.control('Flight direction')), 3);
   assert.equal(stepOf(w.control('Photos')), 3);
   assert.equal(stepOf(w.control('Orbit radius')), 4);
@@ -6375,4 +6376,183 @@ test('a compact export that cannot compress says so and downloads nothing', asyn
     globalThis.CompressionStream = real;
     w.handle.destroy();
   }
+});
+
+// ------------------------------------------------------- gimbal angle --
+// Brandon 2026-11-17: the plan showed "Gimbal -90°" with no way to change it.
+// A plain grid now has its own Gimbal angle; the Gimbal line of the
+// Recommended list shows the angle the plan flies; every waypoint of the
+// exported file carries that angle.
+
+/** Every waypoint's pitch in a downloaded KMZ (param and its own rotate). */
+function kmzPitches(bytes) {
+  const xml = new TextDecoder().decode(readZip(bytes).get('wpmz/waylines.wpml'));
+  const marks = xml.split('<Placemark>').slice(1);
+  return marks.map((m) => ({
+    param: m.match(
+      /<wpml:waypointGimbalPitchAngle>([^<]+)<\/wpml:waypointGimbalPitchAngle>/,
+    )?.[1],
+    rotates: [
+      ...m.matchAll(
+        /<wpml:gimbalPitchRotateAngle>([^<]+)<\/wpml:gimbalPitchRotateAngle>/g,
+      ),
+    ].map((x) => x[1]),
+  }));
+}
+
+const slide = (w, label, value) => {
+  const c = w.control(label);
+  c.value = String(value);
+  c.dispatch('input');
+};
+
+test('gimbal: a plain grid has a Gimbal angle, -90 by default, shown only for the grid', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const gimbal = w.control('Gimbal angle');
+  assert.ok(gimbal, 'the control exists');
+  assert.equal(rowOf(gimbal).hidden, false);
+  assert.equal(gimbal.min, '-90');
+  assert.equal(gimbal.max, '-35', 'Mini 5 Pro: shallower reaches the horizon');
+  assert.equal(gimbal.value, '-90');
+  assert.match(w.stats().Gimbal, /^-90° straight down$/);
+  for (const wp of w.handle.getResult().missions.flatMap((m) =>
+    m.legs.flatMap((l) => l.waypoints),
+  ))
+    assert.equal(wp.pitchDeg, -90);
+  pick(w, 'Pattern', 'double');
+  assert.equal(rowOf(gimbal).hidden, true);
+  assert.equal(rowOf(w.control('Camera tilt')).hidden, false);
+  pick(w, 'Pattern', 'orbit');
+  assert.equal(rowOf(gimbal).hidden, true);
+  w.handle.destroy();
+});
+
+test('gimbal: a set grid angle sticks through redraws and other sliders, and the plan and KMZ fly it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'mapping-grid-timed');
+  await w.handle.replan();
+  slide(w, 'Gimbal angle', -60);
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.gridPitchDeg, -60);
+  slide(w, 'Front overlap', 75);
+  await w.handle.replan();
+  assert.equal(w.control('Gimbal angle').value, '-60', 'after another slider');
+  assert.equal(w.handle.getState().options.gridPitchDeg, -60);
+  const r = w.handle.getResult();
+  assert.equal(r.plan.options.gridPitchDeg, -60);
+  assert.equal(r.plan.options.captureMode, 'timed');
+  assert.equal(
+    w.stats().Gimbal,
+    '-60° tilted forward on every line · recommended -90°',
+  );
+  for (const wp of r.missions.flatMap((m) => m.legs.flatMap((l) => l.waypoints)))
+    assert.equal(wp.pitchDeg, -60);
+  r.missions.forEach((_, i) => w.handle.downloadMission(i));
+  assert.equal(w.downloads.length, r.missions.length);
+  for (const dl of w.downloads) {
+    const marks = kmzPitches(dl.bytes);
+    assert.ok(marks.length >= 2);
+    for (const m of marks) {
+      assert.equal(m.param, '-60', 'waypointGimbalPitchAngle');
+      assert.ok(m.rotates.length >= 1, 'its own gimbalRotate');
+      for (const p of m.rotates) assert.equal(p, '-60');
+    }
+  }
+  // A shallower value than the aircraft allows is held at its limit.
+  slide(w, 'Gimbal angle', -20);
+  assert.equal(w.handle.getState().options.gridPitchDeg, -35);
+  w.handle.destroy();
+});
+
+test('gimbal: the Gimbal line follows the double grid Camera tilt, and its KMZ uses it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'mapping-grid-timed');
+  pick(w, 'Pattern', 'double');
+  slide(w, 'Camera tilt', -75);
+  await w.handle.replan();
+  assert.equal(
+    w.stats().Gimbal,
+    '-75° on both crossing passes (no straight-down pass) · recommended -60°',
+  );
+  slide(w, 'Camera tilt', -60);
+  assert.equal(
+    w.stats().Gimbal,
+    '-60° on both crossing passes (no straight-down pass)',
+  );
+  slide(w, 'Camera tilt', -50);
+  await w.handle.replan();
+  const r = w.handle.getResult();
+  w.handle.downloadMission(0);
+  for (const m of kmzPitches(w.downloads[0].bytes)) {
+    assert.equal(m.param, '-50');
+    for (const p of m.rotates) assert.equal(p, '-50');
+  }
+  assert.ok(r.missions.length >= 1);
+  w.handle.destroy();
+});
+
+test('gimbal: USE RECOMMENDED puts the grid back straight down and the tilt at -60, only when pressed', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  slide(w, 'Gimbal angle', -45);
+  w.handle.getState().options.tiltPitchDeg = -75;
+  await w.handle.replan();
+  slide(w, 'Height above ground', 70);
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.gridPitchDeg, -45, 'not reset by other changes');
+  w.buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'use-recommended')
+    .click();
+  await w.handle.replan();
+  const o = w.handle.getState().options;
+  assert.equal(o.gridPitchDeg, -90);
+  assert.equal(o.tiltPitchDeg, -60);
+  assert.equal(w.control('Gimbal angle').value, '-90');
+  w.handle.destroy();
+});
+
+test('gimbal: a saved plan reopens with its grid angle; an older plan without one flies straight down', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  slide(w, 'Gimbal angle', -50);
+  await w.handle.replan();
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  assert.equal(doc.options.gridPitchDeg, -50);
+  const w2 = setup();
+  await w2.handle.loadPlan(doc);
+  assert.equal(w2.handle.getState().options.gridPitchDeg, -50);
+  assert.equal(w2.control('Gimbal angle').value, '-50');
+  assert.equal(
+    w2.handle.getResult().plan.options.gridPitchDeg,
+    -50,
+    're-planned with it',
+  );
+  // The same panel then opens a plan saved before the setting existed.
+  const old = JSON.parse(JSON.stringify(doc));
+  delete old.options.gridPitchDeg;
+  await w2.handle.loadPlan(old);
+  assert.equal(w2.handle.getState().options.gridPitchDeg, -90);
+  for (const wp of w2.handle
+    .getResult()
+    .missions.flatMap((m) => m.legs.flatMap((l) => l.waypoints)))
+    assert.equal(wp.pitchDeg, -90);
+  w.handle.destroy();
+  w2.handle.destroy();
+});
+
+test('gimbal: the DJI Fly check note shows for the grid patterns, not for an orbit', () => {
+  const w = setup();
+  const note = w.find((n) => n.getAttribute('data-role') === 'gimbal-note')[0];
+  assert.ok(note);
+  assert.match(note.textContent, /check the gimbal angle on the controller/);
+  assert.equal(note.hidden, false);
+  pick(w, 'Pattern', 'double');
+  assert.equal(note.hidden, false);
+  pick(w, 'Pattern', 'orbit');
+  assert.equal(note.hidden, true);
+  w.handle.destroy();
 });

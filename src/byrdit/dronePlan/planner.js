@@ -333,6 +333,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
   pattern: 'grid',
   direction: 'auto',
   tiltPitchDeg: -60,
+  gridPitchDeg: -90,
   speedMs: 5,
   photoMode: 'waypoint',
   captureMode: 'stop',
@@ -416,6 +417,64 @@ export function footprint(preset, aglM, tiltDeg = 0) {
     alongM: aglM * (Math.tan(far) - Math.tan(near)),
     gsdCm: (centreRange * pitchMm * 100) / f,
   };
+}
+
+/** Gimbal pitch of a plain grid: -90 is straight down (the default). */
+export const GRID_PITCH_DEFAULT_DEG = -90;
+/** The steepest a grid gimbal can point: straight down. */
+export const GRID_PITCH_MIN_DEG = -90;
+/** Shallowest grid gimbal before the aircraft's own limit is applied. */
+export const GRID_PITCH_MAX_DEG = -30;
+/** Grid gimbal steps, degrees (the slider and the planner agree on it). */
+export const GRID_PITCH_STEP_DEG = 5;
+
+/**
+ * The shallowest grid gimbal pitch for `preset`, on the 5 degree grid. The
+ * top edge of the photo must stay under 85 degrees from straight down, or the
+ * footprint reaches the horizon and the overlap cannot be worked out
+ * (footprint() throws). Mini 5 Pro: half the vertical view is 26.6 degrees,
+ * so the shallowest is -35 degrees. Never shallower than GRID_PITCH_MAX_DEG.
+ */
+export function shallowestGridPitchDeg(preset) {
+  const h = Number(preset?.sensorHeightMm);
+  const f = Number(preset?.focalMm);
+  if (!(h > 0) || !(f > 0)) return GRID_PITCH_MAX_DEG;
+  const halfVDeg = (Math.atan(h / (2 * f)) * 180) / Math.PI;
+  // Largest tilt from straight down with the far edge strictly under 85.
+  const maxTilt = 85 - halfVDeg - 1e-6;
+  // Round toward straight down, so 90 + pitch never passes maxTilt.
+  const pitch =
+    Math.floor((maxTilt - 90) / GRID_PITCH_STEP_DEG) * GRID_PITCH_STEP_DEG;
+  return Math.max(GRID_PITCH_MIN_DEG, Math.min(GRID_PITCH_MAX_DEG, pitch));
+}
+
+/** A grid gimbal pitch for `preset`: on the step, -90 .. the shallowest. */
+export function cleanGridPitchDeg(value, preset) {
+  const n = num(value, GRID_PITCH_DEFAULT_DEG);
+  const stepped =
+    Math.round(n / GRID_PITCH_STEP_DEG) * GRID_PITCH_STEP_DEG;
+  return clamp(stepped, GRID_PITCH_MIN_DEG, shallowestGridPitchDeg(preset));
+}
+
+/**
+ * The gimbal pitch every photo of a survey pattern is taken at: the Camera
+ * tilt for a double grid, the grid gimbal for a plain grid. Null for an orbit
+ * (the camera follows the ring). Reads normalized options.
+ */
+export function surveyPitchDeg(options) {
+  if (options?.pattern === 'orbit') return null;
+  if (options?.pattern === 'double') {
+    const p = Number(options.tiltPitchDeg);
+    return Number.isFinite(p) ? p : -60;
+  }
+  const p = Number(options?.gridPitchDeg);
+  return Number.isFinite(p) ? p : GRID_PITCH_DEFAULT_DEG;
+}
+
+/** Degrees from straight down for a survey pattern's photos (0 = nadir). */
+export function surveyTiltDeg(options) {
+  const pitch = surveyPitchDeg(options);
+  return pitch == null ? 0 : 90 + pitch;
 }
 
 /** Spacing between flight lines and between photos along a line, metres. */
@@ -557,6 +616,9 @@ export function normalizeOptions(raw = {}, box = null) {
     o.pattern !== 'orbit' && isContinuousCapture(o.captureMode);
   o.continuousRoute = continuousEligible && raw?.continuousRoute === true;
   o.tiltPitchDeg = clamp(num(o.tiltPitchDeg, -60), -80, -45);
+  // Plain grid gimbal. Absent (every plan saved before it existed) stays
+  // straight down, so old plans and their files do not change.
+  o.gridPitchDeg = cleanGridPitchDeg(o.gridPitchDeg, preset);
   o.speedMs = clamp(
     num(o.speedMs, preset.defaultSpeedMs),
     MIN_PLAN_SPEED_MS,
@@ -1376,7 +1438,15 @@ export function planFlight(box, rawOptions = {}) {
               turn: 90,
             },
           ]
-        : [{ tiltDeg: 0, pitch: -90, turn: 0 }];
+        : [
+            {
+              // Straight down by default; a tilted grid looks ahead along
+              // each line, like one pass of the double grid.
+              tiltDeg: 90 + options.gridPitchDeg,
+              pitch: options.gridPitchDeg,
+              turn: 0,
+            },
+          ];
     let baseAngle;
     if (options.direction === 'auto') baseAngle = hw >= hh ? 0 : 90;
     else baseAngle = options.direction;

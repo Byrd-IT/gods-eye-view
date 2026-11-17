@@ -3623,7 +3623,6 @@
   "Height above ground": "الارتفاع فوق الأرض",
   "Front overlap": "التداخل الأمامي",
   "Side overlap": "التداخل الجانبي",
-  "Grid, straight down": "شبكة، للأسفل مباشرة",
   "Double grid, tilted": "شبكة مزدوجة، مائلة",
   "Orbit the centre": "مدار حول المركز",
   "Pattern": "النمط",
@@ -4713,5 +4712,12 @@
   "Compact file (test it on your controller)": "ملف مضغوط (جرّبه على وحدة التحكم)",
   "A smaller KMZ for a controller that locks up on big files: no whitespace, compressed, and two unused fields left out. UNVERIFIED on DJI Fly and the controller: try it next to a normal file.": "ملف KMZ أصغر لوحدة تحكم تتجمد مع الملفات الكبيرة: بلا مسافات فارغة، ومضغوط، مع حذف حقلين غير مستخدمين. غير مُتحقَّق منه على DJI Fly ووحدة التحكم: جرّبه إلى جانب ملف عادي.",
   "Compact files are UNVERIFIED: not yet loaded on a DJI controller. Whitespace is removed, the file is compressed, and the unused waypointPoiPoint and waypointTurnDampingDist fields are left out. Every waypoint keeps its own speed and gimbal pitch. Download a normal file as well and compare.": "الملفات المضغوطة غير مُتحقَّق منها: لم تُحمَّل بعد على وحدة تحكم DJI. أُزيلت المسافات الفارغة، والملف مضغوط، وحُذف الحقلان غير المستخدمين waypointPoiPoint وwaypointTurnDampingDist. تحتفظ كل نقطة بسرعتها وزاوية ميل الجيمبال الخاصة بها. نزّل ملفًا عاديًا أيضًا وقارن.",
-  "The file could not be saved": "تعذّر حفظ الملف"
+  "The file could not be saved": "تعذّر حفظ الملف",
+  "Gimbal angle": "زاوية الجيمبال",
+  "Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.": "كل نقطة طريق في الملف تضبط زاوية الجيمبال هذه. قد لا يحافظ عليها DJI Fly: تحقق من زاوية الجيمبال في وحدة التحكم قبل بدء كل مهمة.",
+  "{deg} on both crossing passes (no straight-down pass)": "{deg} في كلا المسارين المتقاطعين (بلا مسار عمودي للأسفل)",
+  "{deg} straight down": "{deg} عموديًا للأسفل",
+  "{deg} tilted forward on every line": "{deg} مائلة للأمام في كل خط",
+  "recommended {deg}": "الموصى به {deg}",
+  "-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.": "-90 تعني عموديًا للأسفل. الشبكة المائلة تنظر للأمام على طول كل خط. أقل زاوية ميلًا لهذه الطائرة هي {deg}: أي ميل أقل يجعل أعلى الصورة يصل إلى الأفق."
 }

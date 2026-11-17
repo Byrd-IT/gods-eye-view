@@ -1091,6 +1091,29 @@ function readmeChecklist(plan) {
   return out;
 }
 
+/**
+ * The gimbal pitch(es) a mission file writes, for the README, with the check
+ * the pilot must make: DJI Fly may not hold the angle the file gives.
+ */
+function gimbalReadmeLine(mission) {
+  const pitches = [];
+  for (const leg of mission.legs ?? []) {
+    for (const wp of leg.waypoints ?? []) {
+      const p = Number(wp.pitchDeg);
+      if (Number.isFinite(p) && !pitches.includes(p)) pitches.push(p);
+    }
+  }
+  const check =
+    'Check the gimbal angle in DJI Fly before you start: it may not hold the angle in the file.';
+  if (!pitches.length) return `Gimbal: unknown. ${check}`;
+  if (pitches.length > 1) {
+    const lo = Math.min(...pitches);
+    const hi = Math.max(...pitches);
+    return `Gimbal: ${pitchText(lo)} to ${pitchText(hi)} deg (changes along the route). ${check}`;
+  }
+  return `Gimbal: ${pitchText(pitches[0])} deg at every waypoint. ${check}`;
+}
+
 /** One block per mission file: the settings the pilot has to see before flying. */
 function fileReadmeLines(result, system) {
   const { plan, missions } = result;
@@ -1110,6 +1133,7 @@ function fileReadmeLines(result, system) {
       `  Height: ${fmt1(plan.options?.aglM)} m above ground (requested)`,
     );
     lines.push(`  ${speedLine(plan, capture, system)}`);
+    lines.push(`  ${gimbalReadmeLine(mission)}`);
     lines.push(
       '  Every waypoint states the plan speed and its own gimbal pitch, so a resumed file does not depend on an earlier waypoint. Not verified in DJI Fly.',
     );
