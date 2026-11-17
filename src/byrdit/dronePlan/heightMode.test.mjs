@@ -153,6 +153,12 @@ test('Flat: rising ground under the route warns with the real lowest height', ()
   assert.ok(warn.params.count > 0);
   assert.equal(warningTone('flat-low-clearance'), 'bad');
   assert.match(warningText(warn), /only .* above the ground/);
+  // The export README gives the same pilot sentence, not a code dump.
+  const readme = new TextDecoder().decode(
+    readZip(buildBundleZip(result, WHEN)).get('README.txt'),
+  );
+  assert.ok(readme.includes(`  - ${warningText(warn, 'metric')}`));
+  assert.doesNotMatch(readme, /flat-low-clearance \{/);
   // Same plan Above ground: no such warning.
   const terrain = assembleAreaPlan(
     planAreas(area(), { aglM: 30 }),
@@ -348,7 +354,31 @@ test('terrain points count against the waypoint cap and the mission split; a lin
   // A ~750 m line wants 30 pieces at 25 m; the cap is 20 per file, so its
   // points are spread wider and the line still fits one file whole.
   assert.ok(onPlan.terrainPoints.widenedLines > 0);
+  assert.ok(onPlan.terrainPoints.maxGapM > 25);
   for (const leg of onPlan.legs) assert.ok(leg.waypoints.length <= 20);
+  // README says the spacing was widened and gives the real gap.
+  const widenedReadme = new TextDecoder().decode(
+    readZip(buildBundleZip(on, WHEN)).get('README.txt'),
+  );
+  assert.match(
+    widenedReadme,
+    /spread wider to fit the waypoint cap \(up to \d+(\.\d)? m apart\)/,
+  );
+  // Not widened: no such sentence.
+  assert.doesNotMatch(
+    new TextDecoder().decode(
+      readZip(
+        buildBundleZip(
+          assembleAreaPlan(
+            planAreas(area(), { ...base, maxWaypoints: 200, terrainStepM: 25 }),
+            groundFor(onPlan, wavy),
+          ),
+          WHEN,
+        ),
+      ).get('README.txt'),
+    ),
+    /spread wider/,
+  );
   assert.ok(on.missions.length > off.missions.length);
   for (const m of on.missions) assert.ok(m.waypointCount <= 20);
   assert.ok(

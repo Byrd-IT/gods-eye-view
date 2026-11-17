@@ -263,6 +263,7 @@ export function addTerrainPoints(plan) {
   );
   let added = 0;
   let widened = 0;
+  let maxGapM = 0;
   const legs = plan.legs.map((leg) => {
     if (
       leg.kind !== 'grid' ||
@@ -284,6 +285,12 @@ export function addTerrainPoints(plan) {
       widened += 1;
       const scale = room / extra;
       pieces = want.map((p) => 1 + Math.floor((p - 1) * scale));
+      for (let i = 1; i < wps.length; i += 1) {
+        maxGapM = Math.max(
+          maxGapM,
+          groundDistanceM(wps[i - 1], wps[i]) / pieces[i - 1],
+        );
+      }
     }
     const out = [wps[0]];
     for (let i = 1; i < wps.length; i += 1) {
@@ -322,7 +329,7 @@ export function addTerrainPoints(plan) {
     ...plan,
     legs: numbered,
     waypointCount: nextId,
-    terrainPoints: { added, stepM, widenedLines: widened },
+    terrainPoints: { added, stepM, widenedLines: widened, maxGapM },
   };
 }
 

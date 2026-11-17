@@ -1138,9 +1138,12 @@ function heightLine(plan, mission) {
     return `Height: ${set} m above the takeoff point (Flat, requested).${range} Height above the ground changes with the ground.`;
   }
   const extra = plan.terrainPoints;
-  return extra?.added > 0
-    ? `Height: ${set} m above ground (requested); ${extra.added} terrain points added, every ${fmt1(extra.stepM)} m along the lines`
-    : `Height: ${set} m above ground (requested)`;
+  if (!(extra?.added > 0)) return `Height: ${set} m above ground (requested)`;
+  const widened =
+    extra.widenedLines > 0
+      ? `; on ${extra.widenedLines} line${extra.widenedLines === 1 ? '' : 's'} they were spread wider to fit the waypoint cap (up to ${fmt1(extra.maxGapM)} m apart), so height follows the ground less closely there`
+      : '';
+  return `Height: ${set} m above ground (requested); ${extra.added} terrain points added, every ${fmt1(extra.stepM)} m along the lines${widened}`;
 }
 
 /** One block per mission file: the settings the pilot has to see before flying. */
@@ -1270,7 +1273,8 @@ export function readmeText(result, when = new Date(), opts = {}) {
     lines.push('', 'Warnings:');
     for (const w of warnings) {
       const speedWarning =
-        typeof w.code === 'string' && w.code.startsWith('speed-')
+        (typeof w.code === 'string' && w.code.startsWith('speed-')) ||
+        w.code === 'flat-low-clearance'
           ? pilotWarningText(w, unitSystem)
           : w.code === 'takeoff-unset'
             ? 'No takeoff point was set: every height in these files is measured from the box centre. Take off there, or set the launch spot in GEV and export again.'
