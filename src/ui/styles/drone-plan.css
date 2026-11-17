@@ -551,10 +551,11 @@ body.gev-drone-box .cesium-widget canvas {
   grid-row: 1;
 }
 .gev-dp-redmark {
-  position: absolute;
+  position: relative;
   grid-column: 1;
   grid-row: 1;
-  top: 0;
+  align-self: start;
+  justify-self: start;
   width: 2px;
   height: 18px;
   margin-left: -1px;
