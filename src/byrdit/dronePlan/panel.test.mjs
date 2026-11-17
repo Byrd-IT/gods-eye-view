@@ -6591,6 +6591,11 @@ test('height mode: Above ground by default; Flat relabels the height and writes 
   assert.equal(items[0].getAttribute('data-code'), 'takeoff-unset');
   assert.match(items[0].textContent, /heights are measured from the box centre/);
   assert.equal(items[0].style.color, WARNING_TONE_COLOR.warn);
+  assert.equal(items[0].style.fontWeight, '600');
+  assert.equal(
+    items.filter((n) => n.getAttribute('data-code') === 'takeoff-unset').length,
+    1,
+  );
 
   mode.value = 'flat';
   mode.dispatch('change');
@@ -6658,5 +6663,31 @@ test('height mode: hidden for orbit; terrain points only for Above ground with d
   w.control('Height mode').value = 'flat';
   w.control('Height mode').dispatch('change');
   assert.equal(stepRow.hidden, true);
+  w.handle.destroy();
+});
+
+test('height mode: a saved spacing outside the choices gets one entry, dropped with the next plan', async () => {
+  const w = setup({ sample: async (c) => sloped(c) });
+  w.handle.setBox(boxM(600, 300));
+  w.handle.applyOptions({ captureMode: 'timed' }, { planNow: true });
+  await w.handle.replan();
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  const step = () => w.control('Terrain points on lines');
+  const values = () => step().children.map((n) => n.getAttribute('value'));
+  const labels = () => step().children.map((n) => n.textContent);
+  const base = values();
+  doc.options.terrainStepM = 30;
+  await w.handle.loadPlan(doc);
+  assert.equal(w.control('Terrain points on lines').value, '30');
+  assert.deepEqual(values(), [...base, '30']);
+  assert.equal(labels().at(-1), 'Every 30 m');
+  doc.options.terrainStepM = 40;
+  await w.handle.loadPlan(doc);
+  assert.equal(w.control('Terrain points on lines').value, '40');
+  assert.deepEqual(values(), [...base, '40']);
+  delete doc.options.terrainStepM;
+  await w.handle.loadPlan(doc);
+  assert.equal(w.control('Terrain points on lines').value, '');
+  assert.deepEqual(values(), base);
   w.handle.destroy();
 });

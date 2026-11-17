@@ -12,7 +12,7 @@
  *
  * Pure apart from the library calls in seedLibrary(); no DOM, no Cesium.
  */
-import { assembleMissions, planFlight } from './planner.js';
+import { addTerrainPoints, assembleMissions, planFlight } from './planner.js';
 import { serializePlan } from './planDoc.js';
 import { DEFAULT_CAMERA_PRESET_ID } from './cameraSettings.js';
 import { MPH_PER_MS } from './timing.js';
@@ -111,7 +111,10 @@ export function buildState(spec, entry) {
 export function planStats(spec, entry) {
   const state = buildState(spec, entry);
   const area = state.areas[0].box;
-  const plan = planFlight(area, { ...state.options, takeoff: state.takeoff });
+  // The panel plans through planAreas, which adds the terrain points.
+  const plan = addTerrainPoints(
+    planFlight(area, { ...state.options, takeoff: state.takeoff }),
+  );
   if (plan.error) return { error: plan.error };
   const assembled = assembleMissions(plan, { known: false });
   const wps = assembled.missions.flatMap((m) => m.waypoints);

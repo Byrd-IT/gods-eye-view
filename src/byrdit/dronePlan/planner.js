@@ -254,7 +254,15 @@ export function addTerrainPoints(plan) {
   const options = plan.options ?? {};
   if (!terrainPointsApply(options)) return plan;
   const stepM = cleanTerrainStepM(options.terrainStepM);
+  // A line with terrain points is never cut into two files (see the mission
+  // split), so it must fit one file: a line that would pass the cap gets
+  // its points spread wider.
+  const capWaypoints = Math.max(
+    2,
+    Math.floor(Number(options.maxWaypoints) || MAX_WAYPOINTS_PER_MISSION),
+  );
   let added = 0;
+  let widened = 0;
   const legs = plan.legs.map((leg) => {
     if (
       leg.kind !== 'grid' ||
@@ -263,14 +271,27 @@ export function addTerrainPoints(plan) {
     ) {
       return leg;
     }
-    const out = [leg.waypoints[0]];
-    for (let i = 1; i < leg.waypoints.length; i += 1) {
-      const a = leg.waypoints[i - 1];
-      const b = leg.waypoints[i];
-      const d = groundDistanceM(a, b);
-      const pieces = Math.ceil(d / stepM - 1e-9);
-      for (let k = 1; k < pieces; k += 1) {
-        const f = k / pieces;
+    const wps = leg.waypoints;
+    const want = [];
+    for (let i = 1; i < wps.length; i += 1) {
+      const d = groundDistanceM(wps[i - 1], wps[i]);
+      want.push(Math.max(1, Math.ceil(d / stepM - 1e-9)));
+    }
+    const extra = want.reduce((s, p) => s + p - 1, 0);
+    const room = Math.max(0, capWaypoints - wps.length);
+    let pieces = want;
+    if (extra > room) {
+      widened += 1;
+      const scale = room / extra;
+      pieces = want.map((p) => 1 + Math.floor((p - 1) * scale));
+    }
+    const out = [wps[0]];
+    for (let i = 1; i < wps.length; i += 1) {
+      const a = wps[i - 1];
+      const b = wps[i];
+      const n = pieces[i - 1];
+      for (let k = 1; k < n; k += 1) {
+        const f = k / n;
         out.push({
           ...a,
           lon: wrapLon(a.lon + lonDelta(a.lon, b.lon) * f),
@@ -282,9 +303,9 @@ export function addTerrainPoints(plan) {
       }
       out.push(b);
     }
-    return out.length === leg.waypoints.length
+    return out.length === wps.length
       ? leg
-      : { ...leg, waypoints: out };
+      : { ...leg, waypoints: out, terrainPointLine: true };
   });
   let nextId = 0;
   const numbered = legs.map((leg) => ({
@@ -301,7 +322,7 @@ export function addTerrainPoints(plan) {
     ...plan,
     legs: numbered,
     waypointCount: nextId,
-    terrainPoints: { added, stepM },
+    terrainPoints: { added, stepM, widenedLines: widened },
   };
 }
 
@@ -1828,6 +1849,10 @@ export function assembleMissions(plan, ground) {
   const warnings = [...plan.notes];
   const known = ground?.known === true;
   if (!known) warnings.push({ code: 'terrain-unknown', params: {} });
+  // Every height in the files is measured from the takeoff point; with none
+  // set it is the box / area centre, which is rarely where the pilot stands.
+  if (takeoff?.custom !== true)
+    warnings.push({ code: 'takeoff-unset', params: {} });
   const takeoffM = known ? ground.takeoffM : 0;
   const flat = isFlatHeight(options);
   // Flat: every survey waypoint flies at the set height above the TAKEOFF
@@ -2015,7 +2040,18 @@ export function assembleMissions(plan, ground) {
       pending.unshift(leg);
       continue;
     }
-    // The leg alone exceeds a mission: cut it at the largest feasible piece.
+    // The leg alone exceeds a mission. A line with terrain points stays
+    // whole and unchanged, as it did when it was only its two ends: a cut
+    // would restart the distance trigger mid-line and move the photos.
+    // addTerrainPoints keeps such a line within the waypoint cap, so only
+    // the battery time can be short, and that is warned like any long line.
+    if (leg.terrainPointLine === true) {
+      current.push(leg);
+      if (!feasible(current)) overBudget = true;
+      close();
+      continue;
+    }
+    // Otherwise cut it at the largest feasible piece.
     let take = 2;
     while (
       take < leg.waypoints.length &&

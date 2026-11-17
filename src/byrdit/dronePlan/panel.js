@@ -168,7 +168,6 @@ import {
   planErrorText,
   speedText,
   speedWithMphText,
-  takeoffUnsetText,
   warningText,
   warningTone,
 } from './format.js';
@@ -4170,22 +4169,32 @@ export function initDronePlan({
       const stepOptions = () => [
         ...(ui.terrainStep.options ?? ui.terrainStep.children ?? []),
       ];
-      for (const option of stepOptions()) {
-        if (option.value)
-          option.textContent = t('Every {spacing}', {
-            spacing: lengthText(Number(option.value)),
-          });
-      }
       // A saved spacing that is not one of the choices gets its own entry,
-      // so the select never shows Off for a plan that has points on.
+      // so the select never shows Off for a plan that has points on. Only the
+      // current one is kept: the list is rebuilt (with new option nodes) when
+      // the entries it needs change, so one from an earlier plan goes.
       const wanted = o.terrainStepM == null ? '' : String(o.terrainStepM);
-      if (wanted && !stepOptions().some((x) => x.value === wanted)) {
-        el(doc, 'option', ui.terrainStep, {
-          text: t('Every {spacing}', {
-            spacing: lengthText(o.terrainStepM),
-          }),
-          attrs: { value: wanted },
-        });
+      const choices = ['', ...TERRAIN_STEP_CHOICES_M.map(String)];
+      const desired =
+        wanted && !choices.includes(wanted) ? [...choices, wanted] : choices;
+      // The value attribute is what the option was built with.
+      const valueOf = (x) => x.getAttribute?.('value') ?? x.value ?? '';
+      const have = stepOptions().map(valueOf);
+      if (have.join('|') !== desired.join('|')) {
+        ui.terrainStep.replaceChildren(
+          ...desired.map((value) =>
+            el(doc, 'option', null, {
+              text: value ? value : t('Off (line ends only)'),
+              attrs: { value },
+            }),
+          ),
+        );
+      }
+      for (const option of stepOptions()) {
+        if (valueOf(option))
+          option.textContent = t('Every {spacing}', {
+            spacing: lengthText(Number(valueOf(option))),
+          });
       }
       ui.terrainStep.value = wanted;
       const lines = !orbitOnly && isContinuousCapture(o.captureMode);
@@ -5814,15 +5823,13 @@ export function initDronePlan({
     if (plan.terrainPoints) {
       stat(t('Terrain points added'), num(plan.terrainPoints.added));
     }
-    if (h && !h.takeoffSet) {
-      const node = el(doc, 'li', ui.warnings, {
-        text: takeoffUnsetText(),
-        attrs: { 'data-code': 'takeoff-unset', 'data-tone': 'warn' },
-      });
-      node.style.color = WARNING_TONE_COLOR.warn;
-      node.style.fontWeight = '600';
-    }
-    for (const w of warnings) {
+    // The no-takeoff warning goes first: every height DJI Fly shows hangs on
+    // the takeoff point.
+    const ordered = [
+      ...warnings.filter((w) => w.code === 'takeoff-unset'),
+      ...warnings.filter((w) => w.code !== 'takeoff-unset'),
+    ];
+    for (const w of ordered) {
       const text = warningText(w);
       if (!text) continue;
       const tone = warningTone(w.code);
@@ -5835,6 +5842,7 @@ export function initDronePlan({
       });
       if (tone && WARNING_TONE_COLOR[tone])
         node.style.color = WARNING_TONE_COLOR[tone];
+      if (w.code === 'takeoff-unset') node.style.fontWeight = '600';
     }
     const kmz = kmzOk();
     if (!kmz.ok) {

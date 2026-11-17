@@ -198,6 +198,8 @@ export function warningText(warning, system) {
         '{count} stretches cross steep ground; DJI Fly curves between waypoints, so height above ground can drift there',
         { count: fixed(p.count) },
       );
+    case 'takeoff-unset':
+      return takeoffUnsetText();
     case 'flat-low-clearance':
       return t(
         'Flat height: over the highest ground this route is only {min} above the ground ({count} waypoints under {need}, the tree / obstacle height plus the margin). Raise the height, take off from higher ground or use Above ground',

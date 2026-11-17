@@ -1117,13 +1117,25 @@ function gimbalReadmeLine(mission) {
 
 /**
  * The README height line. Above ground keeps the line every earlier export
- * had; Flat says the height is above the takeoff point. Extra terrain points
- * are named when the plan added any.
+ * had; Flat gives the requested height above the takeoff point and the range
+ * this file really writes (obstacle and transit lifts can raise some
+ * waypoints). Extra terrain points are named when the plan added any.
  */
-function heightLine(plan) {
+function heightLine(plan, mission) {
   const set = fmt1(plan.options?.aglM);
   if (isFlatHeight(plan.options)) {
-    return `Height: ${set} m above the takeoff point at every waypoint (Flat). Height above the ground changes with the ground.`;
+    const rel = (mission?.waypoints ?? [])
+      .map((w) => Number(w.relHeightM))
+      .filter(Number.isFinite);
+    const lo = rel.length ? Math.min(...rel) : null;
+    const hi = rel.length ? Math.max(...rel) : null;
+    const range =
+      lo == null
+        ? ''
+        : lo === hi
+          ? ` This file: ${fmt1(lo)} m above the takeoff point at every waypoint.`
+          : ` This file: ${fmt1(lo)} to ${fmt1(hi)} m above the takeoff point (obstacle or transit lifts).`;
+    return `Height: ${set} m above the takeoff point (Flat, requested).${range} Height above the ground changes with the ground.`;
   }
   const extra = plan.terrainPoints;
   return extra?.added > 0
@@ -1146,7 +1158,7 @@ function fileReadmeLines(result, system) {
     lines.push(`File ${index + 1}:`);
     lines.push(`  ${requestedModeText(capture, marked)}`);
     lines.push(`  Waypoint cap: ${plan.options?.maxWaypoints ?? 200}`);
-    lines.push(`  ${heightLine(plan)}`);
+    lines.push(`  ${heightLine(plan, mission)}`);
     lines.push(`  ${speedLine(plan, capture, system)}`);
     lines.push(`  ${gimbalReadmeLine(mission)}`);
     lines.push(
@@ -1260,7 +1272,9 @@ export function readmeText(result, when = new Date(), opts = {}) {
       const speedWarning =
         typeof w.code === 'string' && w.code.startsWith('speed-')
           ? pilotWarningText(w, unitSystem)
-          : '';
+          : w.code === 'takeoff-unset'
+            ? 'No takeoff point was set: every height in these files is measured from the box centre. Take off there, or set the launch spot in GEV and export again.'
+            : '';
       lines.push(
         speedWarning
           ? `  - ${speedWarning}`

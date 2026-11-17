@@ -318,7 +318,22 @@ test('terrain points: timed lines follow curved ground within 0.5 m, photos and 
   );
 });
 
-test('terrain points count against the waypoint cap and the mission split', () => {
+/** The distance trigger groups of a mission KMZ: [start, end, spacing]. */
+function distanceGroups(mission, plan) {
+  const xml = new TextDecoder().decode(
+    readZip(buildKmz(mission, plan, WHEN)).get('wpmz/waylines.wpml'),
+  );
+  const out = [];
+  for (const g of xml.matchAll(
+    /<wpml:actionGroupStartIndex>(\d+)<\/wpml:actionGroupStartIndex>\s*<wpml:actionGroupEndIndex>(\d+)<\/wpml:actionGroupEndIndex>[\s\S]*?<wpml:actionTriggerType>([a-zA-Z]+)<\/wpml:actionTriggerType>(?:\s*<wpml:actionTriggerParam>([\d.]+)<\/wpml:actionTriggerParam>)?/g,
+  )) {
+    if (g[3] === 'multipleDistance')
+      out.push([Number(g[1]), Number(g[2]), g[4]]);
+  }
+  return out;
+}
+
+test('terrain points count against the waypoint cap and the mission split; a line is never cut', () => {
   const base = {
     aglM: 60,
     captureMode: 'distance',
@@ -326,26 +341,83 @@ test('terrain points count against the waypoint cap and the mission split', () =
     maxWaypoints: 20,
     photoSpacingM: 20,
   };
-  const off = assembleAreaPlan(
-    planAreas(area(), base),
-    groundFor(planAreas(area(), base), wavy),
-  );
+  const offPlan = planAreas(area(), base);
+  const off = assembleAreaPlan(offPlan, groundFor(offPlan, wavy));
   const onPlan = planAreas(area(), { ...base, terrainStepM: 25 });
   const on = assembleAreaPlan(onPlan, groundFor(onPlan, wavy));
+  // A ~750 m line wants 30 pieces at 25 m; the cap is 20 per file, so its
+  // points are spread wider and the line still fits one file whole.
+  assert.ok(onPlan.terrainPoints.widenedLines > 0);
+  for (const leg of onPlan.legs) assert.ok(leg.waypoints.length <= 20);
   assert.ok(on.missions.length > off.missions.length);
   for (const m of on.missions) assert.ok(m.waypointCount <= 20);
   assert.ok(
     on.totals.waypointCount >=
       off.totals.waypointCount + onPlan.terrainPoints.added,
   );
-  // Distance photos: one trigger group per line still spans the whole line.
-  for (const m of on.missions) {
-    const xml = new TextDecoder().decode(
-      readZip(buildKmz(m, on.plan, WHEN)).get('wpmz/waylines.wpml'),
+  // Same lines, same ends, same photos, same trigger spacing.
+  const lines = (r) =>
+    r.missions.flatMap((m) =>
+      m.legs
+        .filter((l) => l.kind === 'grid')
+        .map((l) => ({
+          a: [l.waypoints[0].lon, l.waypoints[0].lat],
+          b: [l.waypoints.at(-1).lon, l.waypoints.at(-1).lat],
+          photos: l.photoCount,
+          continued: l.continued === true,
+        })),
     );
-    const groups = (xml.match(/multipleDistance/g) ?? []).length;
-    assert.equal(groups, m.legs.length);
-  }
+  assert.deepEqual(lines(on), lines(off));
+  assert.ok(lines(on).every((l) => !l.continued));
+  assert.equal(on.totals.photoCount, off.totals.photoCount);
+  // Distance photos: one trigger group per line spans the whole line, with
+  // the same spacing as without terrain points.
+  const groups = (r) =>
+    r.missions.flatMap((m) => {
+      const gs = distanceGroups(m, r.plan);
+      assert.equal(gs.length, m.legs.filter((l) => l.kind === 'grid').length);
+      return gs.map(([s, e, spacing], i) => {
+        assert.equal(
+          e - s + 1,
+          m.legs.filter((l) => l.kind === 'grid')[i].waypoints.length,
+        );
+        return spacing;
+      });
+    });
+  assert.deepEqual(groups(on), groups(off));
+});
+
+test('terrain points: a line over the battery time stays whole (warned), it is not cut', () => {
+  const base = {
+    aglM: 60,
+    captureMode: 'distance',
+    batteryMin: 1,
+    photoSpacingM: 20,
+  };
+  const offPlan = planAreas(area(), base);
+  const off = assembleAreaPlan(offPlan, groundFor(offPlan, wavy));
+  const onPlan = planAreas(area(), { ...base, terrainStepM: 25 });
+  const on = assembleAreaPlan(onPlan, groundFor(onPlan, wavy));
+  assert.ok(onPlan.terrainPoints.added > 0);
+  const codes = (r) => r.warnings.map((w) => w.code);
+  assert.ok(codes(on).includes('mission-over-budget'));
+  assert.equal(
+    codes(on).includes('mission-over-budget'),
+    codes(off).includes('mission-over-budget'),
+  );
+  const ends = (r) =>
+    r.missions.flatMap((m) =>
+      m.legs
+        .filter((l) => l.kind === 'grid')
+        .map((l) => [
+          l.waypoints[0].lon,
+          l.waypoints.at(-1).lon,
+          l.photoCount,
+          l.continued === true,
+        ]),
+    );
+  assert.deepEqual(ends(on), ends(off));
+  assert.equal(on.totals.photoCount, off.totals.photoCount);
 });
 
 test('Flat ignores terrain points (they would do nothing) and orbit ignores both', () => {
@@ -368,12 +440,27 @@ test('takeoff: unset is reported (box centre), a set point is not', () => {
   assert.equal(r.heights.takeoffSet, false);
   assert.match(takeoffUnsetText(), /box centre/);
   assert.equal(warningTone('takeoff-unset'), 'warn');
+  // It is a plan warning: the panel lists it and the export README says it.
+  assert.ok(r.warnings.some((w) => w.code === 'takeoff-unset'));
+  assert.equal(
+    warningText({ code: 'takeoff-unset', params: {} }),
+    takeoffUnsetText(),
+  );
+  const readme = new TextDecoder().decode(
+    readZip(buildBundleZip(r, WHEN)).get('README.txt'),
+  );
+  assert.match(
+    readme,
+    /No takeoff point was set: every height in these files is measured from the box centre/,
+  );
+  assert.doesNotMatch(readme, /takeoff-unset \{/);
   const set = planAreas(area(), {
     aglM: 60,
     takeoff: { lon: BOX.west + 0.001, lat: BOX.south + 0.001 },
   });
   const rs = assembleAreaPlan(set, groundFor(set, slope));
   assert.equal(rs.heights.takeoffSet, true);
+  assert.ok(!rs.warnings.some((w) => w.code === 'takeoff-unset'));
   // Above ground: DJI Fly's numbers are 60 + ground - takeoff ground.
   const heights = kmzHeights(rs);
   assert.equal(Math.min(...heights), rs.heights.relMinM);
@@ -436,4 +523,27 @@ test('PLAN ALL passes keep the height mode and terrain spacing', () => {
     assert.equal(p.options.heightMode, 'flat');
     assert.equal(p.options.terrainStepM, 50);
   }
+});
+
+test('README: Flat names the requested height and the range the file writes', () => {
+  const plan = planAreas(area(), {
+    aglM: 60,
+    heightMode: 'flat',
+    takeoff: { lon: BOX.west + 0.001, lat: BOX.south + 0.001 },
+  });
+  const r = assembleAreaPlan(plan, groundFor(plan, slope));
+  const readme = new TextDecoder().decode(
+    readZip(buildBundleZip(r, WHEN)).get('README.txt'),
+  );
+  assert.match(
+    readme,
+    /Height: 60(\.0)? m above the takeoff point \(Flat, requested\)\. This file: 60(\.0)? m above the takeoff point at every waypoint\./,
+  );
+  // An Above-ground plan keeps the line every earlier export had.
+  const above = planAreas(area(), { aglM: 60 });
+  const ra = assembleAreaPlan(above, groundFor(above, slope));
+  const readmeA = new TextDecoder().decode(
+    readZip(buildBundleZip(ra, WHEN)).get('README.txt'),
+  );
+  assert.match(readmeA, /\n  Height: 60(\.0)? m above ground \(requested\)\n/);
 });
