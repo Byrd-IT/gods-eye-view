@@ -43,6 +43,12 @@ export const ROOT = path.resolve(
 );
 export const CESIUM_LIST = 'src/render/cesiumAllowList.json';
 export const BASELINE = 'src/render/viewerAccessAllowList.json';
+/**
+ * Byrd-IT: the fork's Cesium list and viewer-access record, beside
+ * upstream's (which only shrink against upstream's own history).
+ */
+export const FORK_CESIUM_LIST = 'src/byrdit/cesiumAllowList.json';
+export const FORK_BASELINE = 'src/byrdit/viewerAccessAllowList.json';
 /** How to lower the baseline once files stop reaching through the viewer. */
 export const UPDATE_COMMAND = 'node scripts/viewer-access-baseline.mjs';
 
@@ -231,9 +237,10 @@ export function fileHits(file, root = ROOT) {
  * adapter, not tests.
  */
 export function countedFiles(root = ROOT) {
-  const cesiumList = new Set(
-    JSON.parse(readFileSync(path.join(root, CESIUM_LIST), 'utf8')),
-  );
+  const cesiumList = new Set([
+    ...JSON.parse(readFileSync(path.join(root, CESIUM_LIST), 'utf8')),
+    ...JSON.parse(readFileSync(path.join(root, FORK_CESIUM_LIST), 'utf8')),
+  ]);
   return execFileSync(
     'git',
     [
@@ -272,4 +279,9 @@ export function currentHits(root = ROOT) {
 /** The committed baseline: file → hits allowed. */
 export function readBaseline(root = ROOT) {
   return JSON.parse(readFileSync(path.join(root, BASELINE), 'utf8'));
+}
+
+/** Byrd-IT: the fork's viewer-access record (see FORK_BASELINE). */
+export function readForkBaseline(root = ROOT) {
+  return JSON.parse(readFileSync(path.join(root, FORK_BASELINE), 'utf8'));
 }

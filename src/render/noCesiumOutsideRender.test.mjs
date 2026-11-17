@@ -39,6 +39,13 @@ const root = path.resolve(
 );
 const LIST = 'src/render/cesiumAllowList.json';
 const allowList = JSON.parse(readFileSync(path.join(root, LIST), 'utf8'));
+// Byrd-IT: the fork's own Cesium-direct files (features that predate the
+// renderer seam, #1760). Upstream's list only shrinks against origin/main
+// (upstream), so the fork keeps its list beside it; it is checked the same
+// way here, except against upstream's history. Porting a fork file removes
+// it from this list.
+const FORK_LIST = 'src/byrdit/cesiumAllowList.json';
+const forkList = JSON.parse(readFileSync(path.join(root, FORK_LIST), 'utf8'));
 
 const SCOPES = ['src', 'server', 'dev'];
 /** Not runtime code, though not named `.test`: imported by tests only. */
@@ -48,6 +55,8 @@ const TEST_ONLY = new Set([
   'src/voice/voiceWorkflowHarness.mjs',
   'src/layers/weather/shellFixture.mjs',
   'src/overlays/worldOverlayAllocation.worker.mjs',
+  // Byrd-IT: the drone-plan tools' Cesium-direct test fakes.
+  'src/byrdit/dronePlan/testDoubles.mjs',
 ]);
 const isTestSupport = (file) =>
   /\.test\.[cm]?js$/.test(file) ||
@@ -251,7 +260,7 @@ function reachesCesiumFile(file) {
 }
 
 test('only allow-listed files outside the Cesium adapter reach Cesium', () => {
-  const allowed = new Set(allowList);
+  const allowed = new Set([...allowList, ...forkList]);
   const offenders = runtimeFiles.filter(
     (file) => !allowed.has(file) && reachesCesiumFile(file),
   );
@@ -302,6 +311,10 @@ test('every allow-listed file still reaches Cesium', () => {
     (file) => !present.has(file) || !reachesCesiumFile(file),
   );
   assert.deepEqual(stale, [], `Remove these from ${LIST}.`);
+  const forkStale = forkList.filter(
+    (file) => !present.has(file) || !reachesCesiumFile(file),
+  );
+  assert.deepEqual(forkStale, [], `Remove these from ${FORK_LIST}.`);
 });
 
 test('the files that name the adapter by design import exactly what they are allowed', () => {
@@ -309,6 +322,7 @@ test('the files that name the adapter by design import exactly what they are all
   for (const [file, modules] of Object.entries(ADAPTER_ENTRIES)) {
     assert.ok(present.has(file), `${file} is gone: drop it from the list`);
     assert.ok(!allowList.includes(file), `${file} is on ${LIST} too`);
+    assert.ok(!forkList.includes(file), `${file} is on ${FORK_LIST} too`);
     const { imports } = scan(readFileSync(path.join(root, file), 'utf8'));
     const named = new Set(imports.map((s) => targetOf(file, s)));
     for (const module of modules)
@@ -443,6 +457,9 @@ test('the allow-list only shrinks', (t) => {
 
 test('the allow-list is sorted and has no duplicates', () => {
   assert.deepEqual(allowList, [...new Set(allowList)].sort());
+  assert.deepEqual(forkList, [...new Set(forkList)].sort());
+  for (const file of forkList)
+    assert.ok(!allowList.includes(file), `${file} is on both lists`);
 });
 
 test('no runtime file is in a language the ratchet cannot read', () => {

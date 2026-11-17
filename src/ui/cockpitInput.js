@@ -4,7 +4,7 @@ import { fromDegrees } from '../geo/ellipsoid.js';
 import { lookKeyStep } from '../cockpitLook.js';
 import { isPointerFree } from '../data/inputOwnership.js';
 import { inputFor } from '../input/dispatcher.js';
-import { findInput, findQuery } from '../render/rendererOf.js';
+import { canvasOf, findInput, findQuery } from '../render/rendererOf.js';
 import { trackedPositionNow } from './cockpitCamera.js';
 
 /** How far from the followed track a double-click may land, CSS pixels. */
@@ -287,7 +287,7 @@ export function isTouchDoubleTap(previous, tap) {
  * @returns {() => void} Removes the listeners.
  */
 export function routeTouchDoubleTap(now = () => performance.now()) {
-  const canvas = this.viewer?.canvas ?? this.viewer?.scene?.canvas;
+  const canvas = canvasOf(this.viewer);
   if (typeof canvas?.addEventListener !== 'function') return () => {};
   const pressed = new Map();
   let lastTap = null;

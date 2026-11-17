@@ -17,12 +17,16 @@ import {
   countedFiles,
   currentHits,
   readBaseline,
+  readForkBaseline,
+  FORK_BASELINE,
   ROOT,
   UPDATE_COMMAND,
   viewerAccessHits,
 } from '../testSupport/viewerAccess.mjs';
 
 const baseline = readBaseline();
+// Byrd-IT: the fork's record, beside upstream's.
+const forkBaseline = readForkBaseline();
 const hits = currentHits();
 
 const describe = (file) =>
@@ -99,7 +103,7 @@ test('the matcher catches Cesium-shaped access through a viewer', () => {
 test('off-list files reach through the viewer no more than recorded', () => {
   const over = [];
   for (const [file, found] of hits) {
-    const allowed = baseline[file] ?? 0;
+    const allowed = (baseline[file] ?? 0) + (forkBaseline[file] ?? 0);
     if (found.length > allowed)
       over.push(
         `  ${file}: ${found.length} accesses, ${allowed} recorded\n${describe(file)}`,
@@ -136,6 +140,10 @@ test('the record is sorted, with positive counts', () => {
   const files = Object.keys(baseline);
   assert.deepEqual(files, [...files].sort());
   for (const [file, count] of Object.entries(baseline))
+    assert.ok(Number.isInteger(count) && count > 0, `${file}: ${count}`);
+  const forkFiles = Object.keys(forkBaseline);
+  assert.deepEqual(forkFiles, [...forkFiles].sort(), FORK_BASELINE);
+  for (const [file, count] of Object.entries(forkBaseline))
     assert.ok(Number.isInteger(count) && count > 0, `${file}: ${count}`);
 });
 
