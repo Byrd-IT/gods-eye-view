@@ -6235,6 +6235,21 @@ test('red marks: every slider has one, with a text label, and they only inform',
   w.handle.destroy();
 });
 
+test('red marks: a mark is placed by a grid-item margin (a share of the slider column), never by an absolute left (a share of the whole row)', async () => {
+  const w = await timedWorld({ frontOverlap: 80 });
+  for (const name of ['overlap', 'speed', 'interval', 'height']) {
+    const tick = roleList(w, `redmark-${name}`)[0];
+    const f = Number(tick.getAttribute('data-fraction'));
+    assert.equal(
+      tick.style.marginLeft,
+      `calc(5px + (100% - 10px) * ${f} - 1px)`,
+      `${name} mark margin follows its fraction, thumb centre travels 5 px in from each end`,
+    );
+    assert.equal(tick.style.left, undefined, `${name} mark has no absolute left`);
+  }
+  w.handle.destroy();
+});
+
 test('red marks: the overlap mark is what speed x interval gives, and the speed mark round-trips', async () => {
   const w = await timedWorld({ frontOverlap: 80, timedIntervalS: 10 });
   const o = w.handle.getState().options;
