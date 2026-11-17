@@ -88,6 +88,11 @@ import {
   MIN_AGL_M,
   MIN_WAYPOINTS_PER_MISSION,
   OBSTACLE_MARGIN_M,
+  TERRAIN_STEP_CHOICES_M,
+  cleanHeightMode,
+  cleanTerrainStepM,
+  isFlatHeight,
+  terrainPointsApply,
   footprint,
   INTERVAL_TRIGGER_PROVEN,
   isContinuousCapture,
@@ -163,6 +168,7 @@ import {
   planErrorText,
   speedText,
   speedWithMphText,
+  takeoffUnsetText,
   warningText,
   warningTone,
 } from './format.js';
@@ -617,6 +623,10 @@ export function initDronePlan({
       obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
       orbitTargets: [],
       obstacles: [],
+      // Above ground ('terrain', every older plan) or Flat above takeoff.
+      heightMode: 'terrain',
+      // Metres between extra terrain points on distance / timed lines.
+      terrainStepM: null,
     },
     // True once the person adds, removes or switches a target: from then on
     // the list is theirs and is no longer rebuilt from the areas.
@@ -2394,6 +2404,21 @@ export function initDronePlan({
       attrs: { 'data-role': 'suite' },
     });
     into('shots');
+    ui.heightMode = select(
+      [
+        ['terrain', t('Above ground (follows the terrain)')],
+        ['flat', t('Flat (same height above takeoff)')],
+      ],
+      t('Height mode'),
+    );
+    ({ row: ui.heightModeRow } = field(t('Height mode'), ui.heightMode, {
+      value: false,
+    }));
+    ui.heightModeRow.setAttribute('data-role', 'height-mode');
+    ui.heightModeNote = el(doc, 'p', host, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'height-mode-note' },
+    });
     ui.agl = lslider(t('Height above ground'), {
       minM: MIN_AGL_M,
       maxM: AGL_CAP_M,
@@ -2402,11 +2427,30 @@ export function initDronePlan({
       stepM: 0.2,
       stepFt: 10,
     });
-    ({ row: ui.aglRow, out: ui.aglOut } = field(
-      t('Height above ground'),
-      ui.agl,
-    ));
+    ({
+      row: ui.aglRow,
+      out: ui.aglOut,
+      labelEl: ui.aglLabel,
+    } = field(t('Height above ground'), ui.agl));
     addMark('height', ui.aglOut);
+    // Extra terrain points: only for Above ground with distance / timed lines.
+    ui.terrainStep = select(
+      [
+        ['', t('Off (line ends only)')],
+        ...TERRAIN_STEP_CHOICES_M.map((m) => [String(m), String(m)]),
+      ],
+      t('Terrain points on lines'),
+    );
+    ({ row: ui.terrainStepRow } = field(
+      t('Terrain points on lines'),
+      ui.terrainStep,
+      { value: false },
+    ));
+    ui.terrainStepRow.setAttribute('data-role', 'terrain-step');
+    ui.terrainStepNote = el(doc, 'p', host, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'terrain-step-note' },
+    });
     ui.side = slider(t('Side overlap'), 40, 95, 1);
     ({ out: ui.sideOut } = field(t('Side overlap'), ui.side));
 
@@ -3186,6 +3230,16 @@ export function initDronePlan({
       useRecommended();
     });
     onInput(ui.agl, () => (o.aglM = lengthToM(ui.agl.value)));
+    ui.heightMode.addEventListener('change', () => {
+      o.heightMode = cleanHeightMode(ui.heightMode.value);
+      syncControls();
+      schedule();
+    });
+    ui.terrainStep.addEventListener('change', () => {
+      o.terrainStepM = cleanTerrainStepM(ui.terrainStep.value);
+      syncControls();
+      schedule();
+    });
     onInput(ui.front, () => (o.frontOverlap = Number(ui.front.value)));
     onInput(ui.side, () => (o.sideOverlap = Number(ui.side.value)));
     ui.pattern.addEventListener('change', () => {
@@ -4094,6 +4148,63 @@ export function initDronePlan({
     ui.aglRow.title = t('Hard cap {cap} above ground', {
       cap: lengthText(AGL_CAP_M),
     });
+    {
+      o.heightMode = cleanHeightMode(o.heightMode);
+      o.terrainStepM = cleanTerrainStepM(o.terrainStepM);
+      const orbitOnly = o.pattern === 'orbit';
+      const flat = isFlatHeight(o);
+      ui.heightMode.value = o.heightMode;
+      // Orbits fly their rings above the ground around each target.
+      ui.heightModeRow.hidden = orbitOnly;
+      ui.heightModeNote.hidden = orbitOnly;
+      ui.heightModeNote.textContent = flat
+        ? t(
+            'Flat: every waypoint is at this height above the takeoff point, the number DJI Fly shows. Over lower ground the aircraft is higher above the ground, over higher ground closer to it (and to the trees). Overlap and detail are worked out at this height.',
+          )
+        : t(
+            'Above ground: this height is kept above the ground under each waypoint, so the heights DJI Fly shows (above the takeoff point) change with the ground.',
+          );
+      const label = flat ? t('Height above takeoff') : t('Height above ground');
+      ui.aglLabel.textContent = label;
+      ui.agl.setAttribute?.('aria-label', label);
+      const stepOptions = () => [
+        ...(ui.terrainStep.options ?? ui.terrainStep.children ?? []),
+      ];
+      for (const option of stepOptions()) {
+        if (option.value)
+          option.textContent = t('Every {spacing}', {
+            spacing: lengthText(Number(option.value)),
+          });
+      }
+      // A saved spacing that is not one of the choices gets its own entry,
+      // so the select never shows Off for a plan that has points on.
+      const wanted = o.terrainStepM == null ? '' : String(o.terrainStepM);
+      if (wanted && !stepOptions().some((x) => x.value === wanted)) {
+        el(doc, 'option', ui.terrainStep, {
+          text: t('Every {spacing}', {
+            spacing: lengthText(o.terrainStepM),
+          }),
+          attrs: { value: wanted },
+        });
+      }
+      ui.terrainStep.value = wanted;
+      const lines = !orbitOnly && isContinuousCapture(o.captureMode);
+      ui.terrainStepRow.hidden = !lines || flat;
+      ui.terrainStepNote.hidden = !lines || flat;
+      const added = state.result?.plan?.terrainPoints?.added;
+      ui.terrainStepNote.textContent = terrainPointsApply(o)
+        ? Number.isFinite(added) && !state.dirty
+          ? t(
+              '{count} terrain points added along the lines, so the height follows the ground between the line ends. They count toward the waypoint limit per file.',
+              { count: num(added) },
+            )
+          : t(
+              'Terrain points are added along the lines so the height follows the ground between the line ends. They count toward the waypoint limit per file.',
+            )
+        : t(
+            'Off: a distance or timed line is only its two end points, so the height follows the ground only at the line ends.',
+          );
+    }
     ui.ringsLabel.textContent = t('Fixed heights ({unit}, optional)', {
       unit: lengthUnit(),
     });
@@ -5671,6 +5782,46 @@ export function initDronePlan({
       t('Terrain range'),
       result.ground.known ? lengthText(totals.terrainRangeM) : t('unknown'),
     );
+    const h = result.heights;
+    if (h) {
+      stat(
+        t('Height mode'),
+        h.mode === 'flat'
+          ? t('Flat (same height above takeoff)')
+          : t('Above ground (follows the terrain)'),
+      );
+      // From the finished files: what DJI Fly will show (above takeoff) and
+      // what that is above the ground under each waypoint.
+      stat(
+        t('Above ground'),
+        h.aglMinM != null
+          ? t('{min} to {max} at the waypoints', {
+              min: lengthText(h.aglMinM),
+              max: lengthText(h.aglMaxM),
+            })
+          : t('unknown (terrain not read)'),
+      );
+      if (h.relMinM != null) {
+        stat(
+          t('DJI Fly shows'),
+          t('{min} to {max} above takeoff', {
+            min: lengthText(h.relMinM),
+            max: lengthText(h.relMaxM),
+          }),
+        );
+      }
+    }
+    if (plan.terrainPoints) {
+      stat(t('Terrain points added'), num(plan.terrainPoints.added));
+    }
+    if (h && !h.takeoffSet) {
+      const node = el(doc, 'li', ui.warnings, {
+        text: takeoffUnsetText(),
+        attrs: { 'data-code': 'takeoff-unset', 'data-tone': 'warn' },
+      });
+      node.style.color = WARNING_TONE_COLOR.warn;
+      node.style.fontWeight = '600';
+    }
     for (const w of warnings) {
       const text = warningText(w);
       if (!text) continue;
@@ -6553,6 +6704,10 @@ export function initDronePlan({
       plan.options.minPhotoIntervalS,
     );
     state.intervalReject = false;
+    // A plan saved before the height setting flies Above ground, as it did;
+    // never keep the last plan's mode or terrain points.
+    state.options.heightMode = cleanHeightMode(plan.options.heightMode);
+    state.options.terrainStepM = cleanTerrainStepM(plan.options.terrainStepM);
     state.options.orbitTargets = plan.orbitTargets;
     state.options.lookAtPaths = plan.lookAtPaths ?? [];
     state.orbitTargetsTouched = plan.orbitTargetsTouched;

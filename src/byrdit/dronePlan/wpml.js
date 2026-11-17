@@ -66,6 +66,7 @@ import {
   TRANSIT_SPEED_MS,
   writtenSpacingM,
   INTERVAL_TRIGGER_PROVEN,
+  isFlatHeight,
 } from './planner.js';
 import { minShutterDenominator, SHUTTER_DENOMINATORS } from './speed.js';
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
@@ -1114,6 +1115,22 @@ function gimbalReadmeLine(mission) {
   return `Gimbal: ${pitchText(pitches[0])} deg at every waypoint. ${check}`;
 }
 
+/**
+ * The README height line. Above ground keeps the line every earlier export
+ * had; Flat says the height is above the takeoff point. Extra terrain points
+ * are named when the plan added any.
+ */
+function heightLine(plan) {
+  const set = fmt1(plan.options?.aglM);
+  if (isFlatHeight(plan.options)) {
+    return `Height: ${set} m above the takeoff point at every waypoint (Flat). Height above the ground changes with the ground.`;
+  }
+  const extra = plan.terrainPoints;
+  return extra?.added > 0
+    ? `Height: ${set} m above ground (requested); ${extra.added} terrain points added, every ${fmt1(extra.stepM)} m along the lines`
+    : `Height: ${set} m above ground (requested)`;
+}
+
 /** One block per mission file: the settings the pilot has to see before flying. */
 function fileReadmeLines(result, system) {
   const { plan, missions } = result;
@@ -1129,9 +1146,7 @@ function fileReadmeLines(result, system) {
     lines.push(`File ${index + 1}:`);
     lines.push(`  ${requestedModeText(capture, marked)}`);
     lines.push(`  Waypoint cap: ${plan.options?.maxWaypoints ?? 200}`);
-    lines.push(
-      `  Height: ${fmt1(plan.options?.aglM)} m above ground (requested)`,
-    );
+    lines.push(`  ${heightLine(plan)}`);
     lines.push(`  ${speedLine(plan, capture, system)}`);
     lines.push(`  ${gimbalReadmeLine(mission)}`);
     lines.push(

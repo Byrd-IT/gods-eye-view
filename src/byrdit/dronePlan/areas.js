@@ -14,6 +14,7 @@
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
 import { validateDroneBox } from './limits.js';
 import {
+  addTerrainPoints,
   assembleMissions,
   estimateMission,
   footprint,
@@ -587,6 +588,12 @@ function decideTakeoff(list, rawOptions) {
  * @param {object} rawOptions planFlight options plus jobGrouping 'per-area' | 'whole'
  */
 export function planAreas(areas, rawOptions = {}) {
+  // Extra terrain points go on after the lines are clipped and ordered, so
+  // they never change the route itself (see addTerrainPoints).
+  return addTerrainPoints(planAreasLines(areas, rawOptions));
+}
+
+function planAreasLines(areas, rawOptions = {}) {
   const list = (areas ?? []).map((area) => ({
     ...area,
     box: area.kind === 'polygon' ? bboxOfPoints(area.ring) : { ...area.box },
@@ -875,6 +882,7 @@ export function assembleAreaPlan(plan, ground) {
     terrainComplete: built.terrainComplete,
     truncated,
     ground: built.ground,
+    heights: built.heights,
     jobs: plan.jobs,
     areaStats: areaStatRows(plan, missions),
   };

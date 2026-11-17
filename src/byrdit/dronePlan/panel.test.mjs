@@ -6561,3 +6561,102 @@ test('gimbal: the DJI Fly check note shows for the grid patterns, not for an orb
   assert.equal(note.hidden, true);
   w.handle.destroy();
 });
+
+// ------------------------------------------------- height mode (t_503a72e0) --
+const sloped = (cartos) =>
+  cartos.map((c) => ({
+    ...c,
+    // 0.05 m up per metre east of -97.77.
+    height: 100 + (c.longitude + 97.77) * metersPerDegree(30.27).lon * 0.05,
+  }));
+const role = (w, name) =>
+  w.find((n) => n.getAttribute?.('data-role') === name)[0];
+
+test('height mode: Above ground by default; Flat relabels the height and writes one KMZ height', async () => {
+  const w = setup({ sample: async (c) => sloped(c) });
+  const o = () => w.handle.getState().options;
+  const mode = w.control('Height mode');
+  assert.equal(mode.value, 'terrain');
+  assert.equal(o().heightMode, 'terrain');
+  assert.equal(role(w, 'height-mode').hidden, false);
+  w.handle.setBox(boxM(600, 300));
+  await w.handle.replan();
+  let stats = w.stats();
+  assert.equal(stats['Height mode'], 'Above ground (follows the terrain)');
+  const h0 = w.handle.getResult().heights;
+  assert.match(stats['DJI Fly shows'], / to .* above takeoff$/);
+  assert.ok(h0.relMaxM - h0.relMinM > 10, 'terrain mode heights vary');
+  // No takeoff set: the prominent warning is first and amber.
+  const items = w.find((n) => n.tagName === 'LI' && n.getAttribute('data-code'));
+  assert.equal(items[0].getAttribute('data-code'), 'takeoff-unset');
+  assert.match(items[0].textContent, /heights are measured from the box centre/);
+  assert.equal(items[0].style.color, WARNING_TONE_COLOR.warn);
+
+  mode.value = 'flat';
+  mode.dispatch('change');
+  assert.equal(o().heightMode, 'flat');
+  assert.ok(w.control('Height above takeoff'), 'slider is now above takeoff');
+  assert.equal(w.control('Height above ground'), undefined);
+  await w.handle.replan();
+  const r = w.handle.getResult();
+  stats = w.stats();
+  assert.equal(stats['Height mode'], 'Flat (same height above takeoff)');
+  assert.equal(r.heights.relMinM, r.heights.relMaxM);
+  assert.equal(r.heights.relMinM, Math.round(o().aglM * 10) / 10);
+  assert.equal(stats['DJI Fly shows'], '80 m to 80 m above takeoff');
+  assert.match(stats['Above ground'], / to .* at the waypoints$/);
+  for (const m of r.missions)
+    for (const wp of m.waypoints) assert.equal(wp.relHeightM, r.heights.relMinM);
+  // Saved and reopened in another panel: Flat comes back.
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  assert.equal(doc.options.heightMode, 'flat');
+  const w2 = setup({ sample: async (c) => sloped(c) });
+  await w2.handle.loadPlan(doc);
+  assert.equal(w2.handle.getState().options.heightMode, 'flat');
+  // An older plan without the setting opens as Above ground, even in a panel
+  // that was on Flat.
+  delete doc.options.heightMode;
+  await w2.handle.loadPlan(doc);
+  assert.equal(w2.handle.getState().options.heightMode, 'terrain');
+  assert.equal(w2.control('Height mode').value, 'terrain');
+  w.handle.destroy();
+  w2.handle.destroy();
+});
+
+test('height mode: hidden for orbit; terrain points only for Above ground with distance/timed lines', async () => {
+  const w = setup({ sample: async (c) => sloped(c) });
+  const o = () => w.handle.getState().options;
+  const stepRow = role(w, 'terrain-step');
+  assert.equal(stepRow.hidden, true, 'stop capture: no terrain points');
+  w.control('Pattern').value = 'orbit';
+  w.control('Pattern').dispatch('change');
+  assert.equal(role(w, 'height-mode').hidden, true);
+  w.control('Pattern').value = 'grid';
+  w.control('Pattern').dispatch('change');
+  const capture = w.control('Capture mode');
+  capture.value = 'timed';
+  capture.dispatch('change');
+  assert.equal(stepRow.hidden, false);
+  const step = w.control('Terrain points on lines');
+  assert.match(role(w, 'terrain-step-note').textContent, /only at the line ends/);
+  w.handle.setBox(boxM(600, 300));
+  await w.handle.replan();
+  const before = w.handle.getResult().totals.waypointCount;
+  step.value = '25';
+  step.dispatch('change');
+  assert.equal(o().terrainStepM, 25);
+  await w.handle.replan();
+  const r = w.handle.getResult();
+  assert.ok(r.plan.terrainPoints.added > 0);
+  assert.equal(w.stats()['Terrain points added'], String(r.plan.terrainPoints.added));
+  assert.ok(r.totals.waypointCount >= before + r.plan.terrainPoints.added);
+  assert.match(
+    role(w, 'terrain-step-note').textContent,
+    new RegExp(`^${r.plan.terrainPoints.added} terrain points added`),
+  );
+  // Flat hides it: it would do nothing.
+  w.control('Height mode').value = 'flat';
+  w.control('Height mode').dispatch('change');
+  assert.equal(stepRow.hidden, true);
+  w.handle.destroy();
+});
