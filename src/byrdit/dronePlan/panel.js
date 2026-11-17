@@ -4119,10 +4119,9 @@ export function initDronePlan({
       ui.gridPitch.max = String(shallowestGridPitchDeg(gridPreset));
       o.gridPitchDeg = cleanGridPitchDeg(o.gridPitchDeg, gridPreset);
       ui.gridPitch.value = String(o.gridPitchDeg);
-      ui.gridPitchOut.textContent =
-        o.gridPitchDeg === -90
-          ? t('{deg} straight down', { deg: `${num(o.gridPitchDeg)}°` })
-          : `${num(o.gridPitchDeg)}°`;
+      // Same short text at every value: a longer text at -90 would resize
+      // the slider under the finger as the angle leaves -90.
+      ui.gridPitchOut.textContent = `${num(o.gridPitchDeg)}°`;
       ui.gridPitchRow.title = t(
         '-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.',
         { deg: `${num(shallowestGridPitchDeg(gridPreset))}°` },
