@@ -6424,8 +6424,13 @@ test('gimbal: a plain grid has a Gimbal angle, -90 by default, shown only for th
   pick(w, 'Pattern', 'double');
   assert.equal(rowOf(gimbal).hidden, true);
   assert.equal(rowOf(w.control('Camera tilt')).hidden, false);
+  assert.equal(
+    w.stats().Gimbal,
+    '-60° on both crossing passes (no straight-down pass)',
+  );
   pick(w, 'Pattern', 'orbit');
   assert.equal(rowOf(gimbal).hidden, true);
+  assert.equal(w.stats().Gimbal, 'on the centre', 'an orbit aims at the target');
   w.handle.destroy();
 });
 
