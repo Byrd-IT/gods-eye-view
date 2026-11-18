@@ -7592,6 +7592,10 @@ test('new panels, clean view and opacity reach their owners', async () => {
   delete model.get;
   const noReadback = await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 });
   assert.equal(noReadback.unavailable, true);
+  model.get = () => { throw new Error('secret-fixture-must-not-be-echoed'); };
+  const failedReadback = await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 });
+  assert.equal(failedReadback.ok, false);
+  assert.equal(JSON.stringify(failedReadback).includes('secret-fixture-must-not-be-echoed'), false);
 });
 
 test('set_panel_open accepts the Authoring name for the scene panel', async () => {

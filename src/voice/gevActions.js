@@ -4032,10 +4032,14 @@ function setPanelOpen(styleManager, panelId, open) {
     forkPanel && doc?.getElementById ? doc.getElementById(panelId) : null;
   if (forkPanel && doc?.getElementById && (!panel || (open && panel.hidden)))
     return false;
-  styleManager.setPanelCollapsed(panelId, !open, { explicit: true });
-  if (panel?.classList?.contains)
-    return panel.classList.contains('collapsed') !== open;
-  return true;
+  try {
+    styleManager.setPanelCollapsed(panelId, !open, { explicit: true });
+    if (panel?.classList?.contains)
+      return panel.classList.contains('collapsed') !== open;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -4074,8 +4078,20 @@ function setCleanView(styleManager, args = {}) {
       say: error,
     };
   }
-  styleManager.toggleCleanView(enabled);
-  const cleanView = readCleanViewState(styleManager);
+  let cleanView;
+  try {
+    styleManager.toggleCleanView(enabled);
+    cleanView = readCleanViewState(styleManager);
+  } catch {
+    const error = 'Clean view could not be changed or read.';
+    return {
+      ok: false,
+      action: 'set_clean_view',
+      applied: null,
+      error,
+      say: error,
+    };
+  }
   if (cleanView === null) {
     const error = 'Clean view changed, but its state could not be read.';
     return {
@@ -4174,34 +4190,45 @@ function setLayerOpacity(model, args = {}) {
       say: error,
     };
   }
-  if (!model.has(entry.id)) {
-    const error = 'That layer has no opacity control.';
+  try {
+    if (!model.has(entry.id)) {
+      const error = 'That layer has no opacity control.';
+      return {
+        ok: false,
+        action: 'set_layer_opacity',
+        applied: false,
+        layerId: entry.id,
+        error,
+        say: error,
+      };
+    }
+    const changed = model.set(entry.id, opacityPct / 100) === true;
+    // Read the model back: the tool reports what the app holds, not what it
+    // asked for.
+    const stored = model.get(entry.id);
+    const currentPct = Math.round(Number(stored) * 100);
+    const applied = currentPct === opacityPct;
+    const say = `Opacity for ${entry.id} is ${currentPct} percent.`;
+    return {
+      ok: applied,
+      action: 'set_layer_opacity',
+      applied,
+      changed,
+      layerId: entry.id,
+      opacityPct: currentPct,
+      say,
+      ...(applied ? {} : { error: say }),
+    };
+  } catch {
+    const error = 'Layer opacity could not be changed or read.';
     return {
       ok: false,
       action: 'set_layer_opacity',
-      applied: false,
-      layerId: entry.id,
+      applied: null,
       error,
       say: error,
     };
   }
-  const changed = model.set(entry.id, opacityPct / 100) === true;
-  // Read the model back: the tool reports what the app holds, not what it
-  // asked for.
-  const stored = model.get(entry.id);
-  const currentPct = Math.round(Number(stored) * 100);
-  const applied = currentPct === opacityPct;
-  const say = `Opacity for ${entry.id} is ${currentPct} percent.`;
-  return {
-    ok: applied,
-    action: 'set_layer_opacity',
-    applied,
-    changed,
-    layerId: entry.id,
-    opacityPct: currentPct,
-    say,
-    ...(applied ? {} : { error: say }),
-  };
 }
 
 function normalizeContextMode(value) {
