@@ -60,6 +60,10 @@ export function initGevVoiceCommands(options) {
       createGevActionRunner({
         ...options,
         deixis,
+        // The app's per-layer opacity model (src/byrdit/layerOpacity): the
+        // same host adapter the other voice hosts pass, so the runner can
+        // fade a layer and read the opacity back.
+        layerOpacity: options.layerOpacity,
         readVoicePanelOperation: () => commands?.captureVoicePanelOperation?.(),
       }),
       options.toolCatalog,

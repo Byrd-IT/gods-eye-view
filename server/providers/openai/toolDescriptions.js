@@ -207,7 +207,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   get_current_view_state: {
     description:
-      'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, and layer state before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.',
+      'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, layer state and layer opacity before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.',
     $position: 1,
   },
   set_hud: {
@@ -839,6 +839,38 @@ export const ACTION_DESCRIPTIONS = {
         },
         takeoff: {
           description: 'For takeoff: pick, clear, or point.',
+          $position: 1,
+        },
+      },
+    },
+  },
+  set_clean_view: {
+    description:
+      'Turn clean view on or off: clean view hides every panel and control and leaves only the globe. enabled true turns it on, false turns it off. It changes nothing on the map: the camera, the layers and the position stay as they are. Say the resulting state ("Clean view is on"), not the request. If the host has no clean view control, say that it is unavailable rather than claiming the panels went away.',
+    $position: 1,
+    parameters: {
+      properties: {
+        enabled: {
+          description:
+            'True for clean view (panels hidden), false to bring them back.',
+          $position: 1,
+        },
+      },
+    },
+  },
+  set_layer_opacity: {
+    description:
+      'Set a data layer\'s transparency: opacityPct is a whole percent, 0 (invisible) to 100 (solid). Use it for "make the flights layer half transparent" or "fade the weather radar". It never turns a layer on or off — that is set_layer_visibility — and it never moves the camera. A layer the app gives no opacity control (recent imagery has its own) is refused; say so instead of claiming it changed. Say the resulting percent.',
+    $position: 1,
+    parameters: {
+      properties: {
+        layerId: {
+          description: `The layer to fade. Spoken names: ${voiceLayerAliasHint()}.`,
+          $position: 1,
+        },
+        opacityPct: {
+          description:
+            'Opacity as a whole percent: 0 is invisible, 100 is solid. The app stores it as a fraction.',
           $position: 1,
         },
       },

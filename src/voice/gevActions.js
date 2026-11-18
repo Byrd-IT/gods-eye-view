@@ -154,6 +154,23 @@ const PANEL_ALIASES = new Map([
   ['weather panel', 'weather-panel'],
   ['recent imagery', 'recent-imagery-panel'],
   ['imagery panel', 'recent-imagery-panel'],
+  // The right-rail panels (Byrd-IT fork). Every alias here names a panel the
+  // rail actually ships; an alias for a panel that does not exist would
+  // resolve cleanly and then fail with "no panel to open here".
+  ['time travel', 'time-travel-panel'],
+  ['time-travel', 'time-travel-panel'],
+  ['history', 'time-travel-panel'],
+  ['map layers', 'map-layers-panel'],
+  ['map-layers', 'map-layers-panel'],
+  ['overlays', 'map-layers-panel'],
+  ['solunar', 'solunar-panel'],
+  ['sun and moon', 'solunar-panel'],
+  ['moon', 'solunar-panel'],
+  ['sun times', 'solunar-panel'],
+  ['drone plan', 'drone-plan-panel'],
+  ['drone flight plan', 'drone-plan-panel'],
+  ['flight plan', 'drone-plan-panel'],
+  ['drone', 'drone-plan-panel'],
 ]);
 
 const PANEL_IDS = new Set([
@@ -169,6 +186,10 @@ const PANEL_IDS = new Set([
   'weather-panel',
   'recent-imagery-panel',
   'provider-settings',
+  'time-travel-panel',
+  'map-layers-panel',
+  'solunar-panel',
+  'drone-plan-panel',
 ]);
 const CONTEXT_MODE_ALIASES = new Map([
   ['off', 'off'],
@@ -322,6 +343,9 @@ export function createGevActionRunner({
   sky = null,
   imagery = null,
   dronePlan = null,
+  // The app's per-layer opacity model (src/byrdit/layerOpacity). A function
+  // returning the model, or the model itself; null when the host has none.
+  layerOpacity = null,
   osmSearch = null,
   areaOptions = null,
 }) {
@@ -366,6 +390,11 @@ export function createGevActionRunner({
     ...(areaOptions || {}),
   });
   const searchOsmFeatures = osmSearch || createOsmFeatureSource();
+  // The opacity model is a host service; read it per call so a host that
+  // mounts it late still answers.
+  const opacityModel = () =>
+    (typeof layerOpacity === 'function' ? layerOpacity() : layerOpacity) ||
+    null;
   const resolveRegionRing = (name, options) =>
     voiceAreas.resolveRegion(name, options);
   const ensureAnalystEngine = () =>
@@ -1595,6 +1624,7 @@ export function createGevActionRunner({
         styleManager,
         dataManager,
         sceneDirector,
+        opacityModel(),
       );
     }
 
@@ -1700,6 +1730,14 @@ export function createGevActionRunner({
 
     if (name === 'control_droneplan') {
       return controlDronePlan(dronePlan?.(), args);
+    }
+
+    if (name === 'set_clean_view') {
+      return setCleanView(styleManager, args);
+    }
+
+    if (name === 'set_layer_opacity') {
+      return setLayerOpacity(opacityModel(), args);
     }
 
     if (name === 'control_cctv') {
@@ -3981,8 +4019,189 @@ function normalizeAircraftClassFilter(value) {
  */
 function setPanelOpen(styleManager, panelId, open) {
   if (typeof styleManager?.setPanelCollapsed !== 'function') return false;
+  // Feature owners hide unavailable cards; do not report a successful open
+  // for a hidden card or reveal content whose owner deliberately hid it.
+  const forkPanel = [
+    'time-travel-panel',
+    'map-layers-panel',
+    'solunar-panel',
+    'drone-plan-panel',
+  ].includes(panelId);
+  const doc = globalThis.document;
+  const panel =
+    forkPanel && doc?.getElementById ? doc.getElementById(panelId) : null;
+  if (forkPanel && doc?.getElementById && (!panel || (open && panel.hidden)))
+    return false;
   styleManager.setPanelCollapsed(panelId, !open, { explicit: true });
+  if (panel?.classList?.contains)
+    return panel.classList.contains('collapsed') !== open;
   return true;
+}
+
+/**
+ * Clean view (the shell's chrome-free view) over the shell's own control.
+ *
+ * The shell owns the state: `toggleCleanView` sets the body class and the
+ * button, and the control snapshot reports it back as `cleanView`. The tool
+ * therefore toggles and then READS the state, so the answer is what the app
+ * actually shows rather than what was asked for.
+ * @param {object} styleManager The application shell (its control facade).
+ * @param {object} args Tool arguments: enabled (boolean).
+ * @returns {object} The tool result.
+ */
+function setCleanView(styleManager, args = {}) {
+  // The enabled flag is a decision, not a hint: anything but a boolean is a
+  // malformed call and must not silently become "off".
+  if (typeof args.enabled !== 'boolean') {
+    const error = 'Clean view needs enabled to be true or false.';
+    return {
+      ok: false,
+      action: 'set_clean_view',
+      applied: false,
+      error,
+      say: error,
+    };
+  }
+  const enabled = args.enabled;
+  if (typeof styleManager?.toggleCleanView !== 'function') {
+    const error = 'Clean view is unavailable in this host.';
+    return {
+      ok: false,
+      action: 'set_clean_view',
+      applied: false,
+      unavailable: true,
+      error,
+      say: error,
+    };
+  }
+  styleManager.toggleCleanView(enabled);
+  const cleanView = readCleanViewState(styleManager);
+  if (cleanView === null) {
+    const error = 'Clean view changed, but its state could not be read.';
+    return {
+      ok: false,
+      action: 'set_clean_view',
+      applied: null,
+      enabled,
+      error,
+      say: error,
+    };
+  }
+  const applied = cleanView === enabled;
+  const say = cleanView
+    ? 'Clean view is on; the panels are hidden.'
+    : 'Clean view is off; the panels are back.';
+  return {
+    ok: applied,
+    action: 'set_clean_view',
+    applied,
+    enabled,
+    cleanView,
+    say,
+    ...(applied ? {} : { error: say }),
+  };
+}
+
+/**
+ * The clean-view state the shell reports, or null when it cannot be read.
+ * @param {object} styleManager The application shell.
+ * @returns {boolean|null} The current state.
+ */
+function readCleanViewState(styleManager) {
+  const controls = styleManager?.getControlState?.();
+  if (controls && typeof controls.cleanView === 'boolean')
+    return controls.cleanView;
+  const body = globalThis.document?.body;
+  if (body?.classList?.contains)
+    return body.classList.contains('ui-clean-view');
+  return null;
+}
+
+/**
+ * Voice adapter over the app's per-layer opacity model
+ * (src/byrdit/layerOpacity/opacityModel.js).
+ *
+ * The model stores fractions from 0 to 1 and knows one id set: a layer the
+ * app does not give a slider to (recent imagery has its own control) is not
+ * in it, and the tool says so rather than pretending it changed.
+ * @param {object} model The opacity model, or null when the host has none.
+ * @param {object} args Tool arguments: layerId, opacityPct.
+ * @returns {object} The tool result.
+ */
+function setLayerOpacity(model, args = {}) {
+  const layerId = normalizeLayerId(args.layerId || args.layer);
+  const entry = layerId ? voiceLayer(layerId) : null;
+  if (!entry) {
+    // The layer id came from the caller, so it is never echoed back: the
+    // message says what happened, not what was asked for.
+    const error = 'That layer is not one I can fade.';
+    return {
+      ok: false,
+      action: 'set_layer_opacity',
+      applied: false,
+      error,
+      say: error,
+    };
+  }
+  const opacityPct = args.opacityPct;
+  if (!Number.isInteger(opacityPct) || opacityPct < 0 || opacityPct > 100) {
+    // The percent came from the caller too: the message states the rule
+    // without repeating the value that broke it.
+    const error = 'Opacity must be a whole percent between 0 and 100.';
+    return {
+      ok: false,
+      action: 'set_layer_opacity',
+      applied: false,
+      layerId: entry.id,
+      error,
+      say: error,
+    };
+  }
+  if (
+    !model ||
+    typeof model.set !== 'function' ||
+    typeof model.get !== 'function' ||
+    typeof model.has !== 'function'
+  ) {
+    const error = 'Layer opacity is unavailable in this host.';
+    return {
+      ok: false,
+      action: 'set_layer_opacity',
+      applied: false,
+      unavailable: true,
+      layerId: entry.id,
+      error,
+      say: error,
+    };
+  }
+  if (!model.has(entry.id)) {
+    const error = 'That layer has no opacity control.';
+    return {
+      ok: false,
+      action: 'set_layer_opacity',
+      applied: false,
+      layerId: entry.id,
+      error,
+      say: error,
+    };
+  }
+  const changed = model.set(entry.id, opacityPct / 100) === true;
+  // Read the model back: the tool reports what the app holds, not what it
+  // asked for.
+  const stored = model.get(entry.id);
+  const currentPct = Math.round(Number(stored) * 100);
+  const applied = currentPct === opacityPct;
+  const say = `Opacity for ${entry.id} is ${currentPct} percent.`;
+  return {
+    ok: applied,
+    action: 'set_layer_opacity',
+    applied,
+    changed,
+    layerId: entry.id,
+    opacityPct: currentPct,
+    say,
+    ...(applied ? {} : { error: say }),
+  };
 }
 
 function normalizeContextMode(value) {
@@ -4693,12 +4912,14 @@ function getCurrentViewState(
   styleManager,
   dataManager,
   sceneDirector = null,
+  layerOpacity = null,
 ) {
   return getWorldPacket({
     viewer,
     styleManager,
     dataManager,
     sceneDirector,
+    layerOpacity,
   });
 }
 

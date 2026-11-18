@@ -994,8 +994,34 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
         'osm_query',
         'show_street_level',
         'open_stories',
+        // Clean view and layer opacity voice: two later, separate tools.
+        'set_clean_view',
+        'set_layer_opacity',
       ].includes(tool.name),
   );
+  // The right-rail panel targets are additive; take them out again so the
+  // first-run missions still ride the payload they were pinned against.
+  const panelTargets = legacyTools.find(
+    (tool) => tool.name === 'set_panel_open',
+  ).parameters.properties.panelId.enum;
+  legacyTools.find(
+    (tool) => tool.name === 'set_panel_open',
+  ).parameters.properties.panelId.enum = panelTargets.filter(
+    (id) =>
+      ![
+        'time-travel-panel',
+        'map-layers-panel',
+        'solunar-panel',
+        'drone-plan-panel',
+      ].includes(id),
+  );
+  // The view-state description now names layer opacity; the first-run
+  // missions do not read it.
+  const legacyViewState = legacyTools.find(
+    (tool) => tool.name === 'get_current_view_state',
+  );
+  legacyViewState.description =
+    'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, and layer state before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.';
   const hudLayout = legacyTools.find((tool) => tool.name === 'set_hud')
     .parameters.properties.layout;
   assert.deepEqual(hudLayout.enum, ['tactical', 'minimal', 'cyber']);

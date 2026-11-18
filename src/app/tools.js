@@ -354,6 +354,9 @@ export function createApplicationTools({
     sky: () => window.__gevSky?.voice ?? null,
     imagery: () => window.__gevImagery?.voice ?? null,
     dronePlan: () => window.__gevDronePlan?.voice ?? null,
+    // The per-layer opacity model (src/byrdit/layerOpacity), so voice can
+    // set a layer's opacity and read it back in the view state.
+    layerOpacity: () => data.layerOpacity?.model ?? null,
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });

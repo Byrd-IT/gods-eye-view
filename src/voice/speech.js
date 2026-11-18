@@ -1076,6 +1076,8 @@ const STEP_TITLES = Object.freeze({
   control_sky: msg('Control sky'),
   control_imagery: msg('Control imagery'),
   control_droneplan: msg('Control drone plan'),
+  set_clean_view: msg('Control clean view'),
+  set_layer_opacity: msg('Set layer opacity'),
   control_cctv: msg('Control CCTV'),
   control_radio: msg('Control radio'),
   track_entity: msg('Track contact'),

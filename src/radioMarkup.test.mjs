@@ -25,11 +25,11 @@ const css = readStylesheet(new URL('../style.css', import.meta.url));
 
 function realtimeTools() { return GEV_REALTIME_TOOLS; }
 
-test('Realtime schema exposes the authoritative 40-tool inventory', () => {
+test('Realtime schema exposes the authoritative 42-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 40);
+  assert.equal(tools.length, 42);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 40, 'tool names are unique');
+  assert.equal(new Set(names).size, 42, 'tool names are unique');
   assert.ok(names.includes('resolve_area'));
   assert.ok(names.includes('find_imagery'));
   assert.ok(names.includes('osm_query'));
@@ -45,6 +45,8 @@ test('Realtime schema exposes the authoritative 40-tool inventory', () => {
   assert.ok(names.includes('control_sky'));
   assert.ok(names.includes('control_imagery'));
   assert.ok(names.includes('control_droneplan'));
+  assert.ok(names.includes('set_clean_view'));
+  assert.ok(names.includes('set_layer_opacity'));
   // Every tool closes its parameter object: an open schema lets the model
   // invent arguments the runner silently drops.
   for (const tool of tools) {
@@ -160,7 +162,7 @@ test('the edited existing tools changed exactly as intended', () => {
   const panel = byName.get('set_panel_open');
   assert.deepEqual(
     panel.parameters.properties.panelId.enum,
-    ['data-panel', 'location-bar', 'control-panel', 'cctv-panel', 'radio-panel', 'scene-panel', 'utilities-panel', 'pp-toggles', 'global-context-panel', 'weather-panel', 'recent-imagery-panel', 'voice-settings', 'voice-preview', 'provider-settings'],
+    ['data-panel', 'location-bar', 'control-panel', 'cctv-panel', 'radio-panel', 'scene-panel', 'utilities-panel', 'pp-toggles', 'global-context-panel', 'weather-panel', 'recent-imagery-panel', 'voice-settings', 'voice-preview', 'provider-settings', 'time-travel-panel', 'map-layers-panel', 'solunar-panel', 'drone-plan-panel'],
   );
   assert.deepEqual(panel.parameters.required, ['panelId', 'open']);
 
@@ -215,6 +217,9 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     'control_imagery',
     // Drone Flight Plan voice: a new tool, appended last.
     'control_droneplan',
+    // Clean view and layer opacity voice: two new tools, appended last.
+    'set_clean_view',
+    'set_layer_opacity',
     // Voice geometry: new tools.
     'resolve_area',
     'find_imagery',

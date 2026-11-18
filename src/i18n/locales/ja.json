@@ -2623,6 +2623,8 @@
   "Control scene": "シーンを操作",
   "Control CCTV": "CCTVを操作",
   "Control radio": "ラジオを操作",
+  "Control clean view": "クリーン表示を操作",
+  "Set layer opacity": "レイヤーの不透明度を設定",
   "Track contact": "コンタクトを追跡",
   "Stop tracking": "追跡を停止",
   "Clear marks": "マークを消去",

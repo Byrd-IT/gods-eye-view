@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { GEV_ACTION_SCHEMAS, createActionTools } from './actionSchemas.js';
+import { VOICE_TOGGLE_LAYER_IDS } from './layerManifest.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
 import { createAreaStore } from '../data/areaStore.js';
 import { createAreaResolver } from '../data/areaResolver.js';
@@ -23,15 +24,42 @@ const stable = (value) =>
         )
       : value;
 
+// The tools this release adds, and the panel targets it adds to
+// set_panel_open. Both are deliberate additions: the digest below keeps
+// covering every tool before them, and the additions are pinned by their own
+// assertions.
+const NEW_TOOLS = ['set_clean_view', 'set_layer_opacity'];
+const NEW_PANEL_TARGETS = [
+  'time-travel-panel',
+  'map-layers-panel',
+  'solunar-panel',
+  'drone-plan-panel',
+];
+// The view-state description before it started naming layer opacity.
+const LEGACY_VIEW_STATE_DESCRIPTION =
+  'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, and layer state before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.';
+
 test('the complete Realtime tool payload pins the manifest-generated layer release', () => {
+  // The deliberate edits are put back exactly as they were before the
+  // digest, the way the radio-markup pin does, so the shipped payload still
+  // reproduces the pin it has always carried.
+  const tools = structuredClone(
+    GEV_REALTIME_TOOLS.filter(
+      (tool) =>
+        tool.name !== 'set_cyber_sonar' && !NEW_TOOLS.includes(tool.name),
+    ),
+  );
+  const panel = tools.find((tool) => tool.name === 'set_panel_open');
+  panel.parameters.properties.panelId.enum =
+    panel.parameters.properties.panelId.enum.filter(
+      (id) => !NEW_PANEL_TARGETS.includes(id),
+    );
+  const viewState = tools.find(
+    (tool) => tool.name === 'get_current_view_state',
+  );
+  viewState.description = LEGACY_VIEW_STATE_DESCRIPTION;
   const digest = createHash('sha256')
-    .update(
-      JSON.stringify(
-        stable(
-          GEV_REALTIME_TOOLS.filter((tool) => tool.name !== 'set_cyber_sonar'),
-        ),
-      ),
-    )
+    .update(JSON.stringify(stable(tools)))
     .digest('hex');
   assert.equal(
     digest,
@@ -86,6 +114,11 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Upstream merge fa6d9547 (2026-11-17): upstream's open_stories joins the
     // fork's 39 tools (40); upstream's own pin moved 0c27f620... -> 5a2deb65...
     // over its renderer-seam work. The fork pin before the merge was bec0ddca....
+    // This release adds set_clean_view and set_layer_opacity (last) and four
+    // set_panel_open targets, and the view-state description now names layer
+    // opacity. The digest above is taken over the payload without those
+    // additions, so the pin still reproduces; the additions are pinned by
+    // their own assertions.
     '5f94528fbbb5297f1b9b00fdaa770eee0f8915fc87a67adbfc0f798b8a1a862a',
   );
 });
@@ -184,6 +217,8 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'control_sky',
         'control_imagery',
         'control_droneplan',
+        'set_clean_view',
+        'set_layer_opacity',
         'resolve_area',
         'find_imagery',
         'osm_query',
@@ -227,6 +262,10 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'voice-preview',
         'provider-settings',
         'utilities-panel',
+        'time-travel-panel',
+        'map-layers-panel',
+        'solunar-panel',
+        'drone-plan-panel',
       ].includes(id),
   );
   for (const tool of legacy) {
@@ -395,4 +434,61 @@ test('control_droneplan timedIntervalS has the same rule as the panel field and 
   // Any positive number is usable (0.05 is accepted by the handler and the panel),
   // so the schema must not add a higher floor of its own.
   assert.equal(prop.minimum, undefined);
+});
+
+test('the complete current Realtime tool inventory is pinned', () => {
+  assert.equal(
+    createHash('sha256')
+      .update(JSON.stringify(stable(GEV_REALTIME_TOOLS)))
+      .digest('hex'),
+    'c1308321b0e30cf8ebb7deeef56f2f0433b58d0149e9fe8c95099b047f824974',
+  );
+});
+
+test('the clean view and layer opacity tools are appended after control_droneplan', () => {
+  const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);
+  assert.equal(names.at(-1), 'set_layer_opacity');
+  assert.equal(names.at(-2), 'set_clean_view');
+  assert.equal(names.at(-3), 'control_droneplan');
+
+  const clean = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'set_clean_view',
+  );
+  assert.equal(clean.parameters.properties.enabled.type, 'boolean');
+  assert.deepEqual(clean.parameters.required, ['enabled']);
+  assert.equal(clean.parameters.additionalProperties, false);
+
+  const opacity = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'set_layer_opacity',
+  );
+  assert.deepEqual(opacity.parameters.properties.layerId.enum, [
+    ...VOICE_TOGGLE_LAYER_IDS,
+  ]);
+  assert.equal(opacity.parameters.properties.opacityPct.type, 'integer');
+  assert.equal(opacity.parameters.properties.opacityPct.minimum, 0);
+  assert.equal(opacity.parameters.properties.opacityPct.maximum, 100);
+  assert.deepEqual(opacity.parameters.required, ['layerId', 'opacityPct']);
+  assert.equal(opacity.parameters.additionalProperties, false);
+
+  const panels = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'set_panel_open',
+  ).parameters.properties.panelId.enum;
+  assert.deepEqual(panels.slice(-4), NEW_PANEL_TARGETS);
+});
+
+test("the opacity tool takes only whole percents inside the app's range", () => {
+  const schema = GEV_ACTION_SCHEMAS.find(
+    (tool) => tool.name === 'set_layer_opacity',
+  ).parameters;
+  for (const pct of [0, 1, 40, 100])
+    assert.deepEqual(
+      validateArgs(schema, { layerId: 'flights', opacityPct: pct }),
+      [],
+    );
+  for (const pct of [-1, 101, 12.5, '40'])
+    assert.ok(
+      validateArgs(schema, { layerId: 'flights', opacityPct: pct }).length > 0,
+      `opacityPct ${pct}`,
+    );
+  assert.ok(validateArgs(schema, { layerId: 'flights' }).length > 0);
 });

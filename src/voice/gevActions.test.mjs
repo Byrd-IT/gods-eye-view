@@ -7543,6 +7543,57 @@ test('analyst_query keeps transit route IDs raw so a follow-up filter still matc
   }
 });
 
+test('new panels, clean view and opacity reach their owners', async () => {
+  const calls = [];
+  let cleanView = false;
+  const opacity = new Map();
+  const model = {
+    has: (id) => id === 'flights',
+    get: (id) => opacity.get(id) ?? 1,
+    set: (id, value) => { opacity.set(id, value); return true; },
+    entries: () => [...opacity.entries()],
+  };
+  const runner = createGevActionRunner({
+    viewer: {
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+      camera: { moveEnd: { addEventListener() {} }, positionWC: Cesium.Cartesian3.fromDegrees(-97.7, 30.2, 1000) },
+    },
+    styleManager: {
+      setPanelCollapsed: (...args) => calls.push(args),
+      toggleCleanView: (value) => { cleanView = value; },
+      getControlState: () => ({ cleanView }),
+    },
+    dataManager: { layers: new Map(), isEnabled: () => false, getAll: () => [] },
+    layerOpacity: () => model,
+  });
+  for (const [phrase, id] of [['history', 'time-travel-panel'], ['map layers', 'map-layers-panel'], ['moon', 'solunar-panel'], ['drone plan', 'drone-plan-panel']]) {
+    assert.equal((await runner('set_panel_open', { panelId: phrase, open: true })).panelId, id);
+    assert.equal(calls.at(-1)[0], id);
+  }
+  const savedDocument = globalThis.document;
+  try {
+    globalThis.document = { getElementById: () => ({ hidden: true }) };
+    const count = calls.length;
+    const hidden = await runner('set_panel_open', { panelId: 'map-layers-panel', open: true });
+    assert.equal(hidden.ok, false);
+    assert.equal(calls.length, count);
+  } finally {
+    if (savedDocument === undefined) delete globalThis.document;
+    else globalThis.document = savedDocument;
+  }
+  assert.equal((await runner('set_clean_view', { enabled: true })).cleanView, true);
+  assert.equal((await runner('set_clean_view', { enabled: 'false' })).ok, false);
+  const faded = await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 });
+  assert.equal(faded.ok, true);
+  assert.equal(model.get('flights'), 0.4);
+  assert.equal((await runner('get_current_view_state')).layerOpacity.flights, 40);
+  assert.equal((await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 101 })).ok, false);
+  delete model.get;
+  const noReadback = await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 });
+  assert.equal(noReadback.unavailable, true);
+});
+
 test('set_panel_open accepts the Authoring name for the scene panel', async () => {
   const calls = [];
   const runner = createGevActionRunner({

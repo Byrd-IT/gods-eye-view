@@ -88,6 +88,28 @@ export function activeContactsWindow(dataManager) {
 }
 
 /**
+ * The per-layer opacity the app holds, as whole percents, for the layers
+ * that are not at their default (100 %). A host without an opacity model
+ * reports nothing rather than an empty map.
+ * @param {object|null} model The app's opacity model, when it has one.
+ * @returns {object|null} Layer id → percent, or null when there is no model.
+ */
+export function readLayerOpacity(model) {
+  if (!model || typeof model.get !== 'function') return null;
+  const out = {};
+  const ids =
+    typeof model.entries === 'function'
+      ? model.entries().map(([id]) => id)
+      : [];
+  for (const id of ids) {
+    const value = Number(model.get(id));
+    if (!Number.isFinite(value)) continue;
+    out[id] = Math.round(value * 100);
+  }
+  return out;
+}
+
+/**
  * Build the model-free fast World Packet from existing application owners.
  *
  * This performs no network requests and intentionally mirrors the historical
@@ -99,6 +121,7 @@ export function getWorldPacket(options = {}) {
     styleManager,
     dataManager,
     sceneDirector = null,
+    layerOpacity = null,
     now: requestedNow,
   } = options ?? {};
   // A default parameter only covers undefined; null or NaN would age every
@@ -119,6 +142,7 @@ export function getWorldPacket(options = {}) {
     typeof styleManager?.getContextModeState === 'function'
       ? withContextModeVocabulary(styleManager.getContextModeState())
       : null;
+  const opacity = readLayerOpacity(layerOpacity);
 
   return {
     ok: true,
@@ -164,5 +188,8 @@ export function getWorldPacket(options = {}) {
       layerSnapshots(rows, { now }).filter((layer) => layer.enabled),
       { now },
     ),
+    // Only a host that owns an opacity model reports layer opacity, and only
+    // for the layers that are off their default: the packet stays compact.
+    ...(opacity ? { layerOpacity: opacity } : {}),
   };
 }

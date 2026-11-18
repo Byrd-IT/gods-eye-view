@@ -719,7 +719,9 @@ test('the Realtime prompt stays within its size budget', () => {
   // control_droneplan timedIntervalS option (about 130 chars). Upstream raised
   // its own ceiling 55,500 -> 56,500 for show_street_level (aa95c2c2); the fork
   // allowance stays 11,500 on top (measured 67,157 default, under 68,000).
-  const BYRDIT_FORK_PROMPT_CHARS = 11_500;
+  // The opacity tool repeats the layer-ID enum; measured with Overpass at
+  // 71,437 characters after adding the two tools and four panel targets.
+  const BYRDIT_FORK_PROMPT_CHARS = 15_000;
   // Instructions plus tool schemas, in characters, under the same 56,500
   // ceiling as the deixis prompt lint. Voice geometry adds resolve_area,
   // find_imagery and the analyst area scopes (osm_query only with an

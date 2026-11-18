@@ -216,6 +216,12 @@ const schemas = [
             'voice-settings',
             'voice-preview',
             'provider-settings',
+            // The right-rail panels (Byrd-IT fork): Time Travel, Map Layers,
+            // Solunar and Drone Flight Plan.
+            'time-travel-panel',
+            'map-layers-panel',
+            'solunar-panel',
+            'drone-plan-panel',
           ],
         },
         open: {
@@ -1225,6 +1231,39 @@ const schemas = [
         index: { type: 'integer', minimum: 0, maximum: 59 },
       },
       required: ['action'],
+    },
+  },
+  {
+    name: 'set_clean_view',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        enabled: {
+          type: 'boolean',
+        },
+      },
+      required: ['enabled'],
+    },
+  },
+  {
+    name: 'set_layer_opacity',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        layerId: {
+          type: 'string',
+          enum: toggleLayerIds(),
+        },
+        // The app stores opacity as a 0..1 fraction; the tool speaks percent.
+        opacityPct: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 100,
+        },
+      },
+      required: ['layerId', 'opacityPct'],
     },
   },
 ];
