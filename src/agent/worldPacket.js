@@ -96,17 +96,22 @@ export function activeContactsWindow(dataManager) {
  */
 export function readLayerOpacity(model) {
   if (!model || typeof model.get !== 'function') return null;
-  const out = {};
-  const ids =
-    typeof model.entries === 'function'
-      ? model.entries().map(([id]) => id)
-      : [];
-  for (const id of ids) {
-    const value = Number(model.get(id));
-    if (!Number.isFinite(value)) continue;
-    out[id] = Math.round(value * 100);
+  try {
+    const out = {};
+    const ids =
+      typeof model.entries === 'function'
+        ? model.entries().map(([id]) => id)
+        : [];
+    for (const id of ids) {
+      const value = Number(model.get(id));
+      if (!Number.isFinite(value)) continue;
+      out[id] = Math.round(value * 100);
+    }
+    return out;
+  } catch {
+    // Read-back is optional; never expose an adapter's error to the model.
+    return null;
   }
-  return out;
 }
 
 /**

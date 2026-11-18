@@ -7546,6 +7546,7 @@ test('analyst_query keeps transit route IDs raw so a follow-up filter still matc
 test('new panels, clean view and opacity reach their owners', async () => {
   const calls = [];
   let cleanView = false;
+  let failProvider = false;
   const opacity = new Map();
   const model = {
     has: (id) => id === 'flights',
@@ -7565,7 +7566,10 @@ test('new panels, clean view and opacity reach their owners', async () => {
       getControlState: () => ({ cleanView }),
     },
     dataManager: { layers: new Map(), isEnabled: () => false, getAll: () => [] },
-    layerOpacity: () => model,
+    layerOpacity: () => {
+      if (failProvider) throw new Error('secret-fixture');
+      return model;
+    },
   });
   for (const [phrase, id] of [['history', 'time-travel-panel'], ['map layers', 'map-layers-panel'], ['moon', 'solunar-panel'], ['drone plan', 'drone-plan-panel']]) {
     assert.equal((await runner('set_panel_open', { panelId: phrase, open: true })).panelId, id);
@@ -7596,6 +7600,8 @@ test('new panels, clean view and opacity reach their owners', async () => {
   const failedReadback = await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 });
   assert.equal(failedReadback.ok, false);
   assert.equal(JSON.stringify(failedReadback).includes('secret-fixture-must-not-be-echoed'), false);
+  failProvider = true;
+  assert.equal((await runner('set_layer_opacity', {layerId:'flights',opacityPct:40})).unavailable, true);
 });
 
 test('set_panel_open accepts the Authoring name for the scene panel', async () => {

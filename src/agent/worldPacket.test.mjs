@@ -2,10 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
-import { getWorldPacket } from './worldPacket.js';
+import { getWorldPacket, readLayerOpacity } from './worldPacket.js';
 import { bindRenderer } from '../render/rendererOf.js';
 import { createStubRenderer } from '../render/stub/index.js';
 import { createGevActionRunner } from '../voice/gevActions.js';
+
+test('opacity readback fails closed without exposing adapter errors', () => {
+  const model = {
+    entries: () => [['flights', 0.4]],
+    get: () => {
+      throw new Error('secret-fixture');
+    },
+  };
+  assert.equal(readLayerOpacity(model), null);
+});
 
 function withoutVoicePresentation(result) {
   const packet = { ...result };

@@ -392,9 +392,16 @@ export function createGevActionRunner({
   const searchOsmFeatures = osmSearch || createOsmFeatureSource();
   // The opacity model is a host service; read it per call so a host that
   // mounts it late still answers.
-  const opacityModel = () =>
-    (typeof layerOpacity === 'function' ? layerOpacity() : layerOpacity) ||
-    null;
+  const opacityModel = () => {
+    try {
+      return (
+        (typeof layerOpacity === 'function' ? layerOpacity() : layerOpacity) ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  };
   const resolveRegionRing = (name, options) =>
     voiceAreas.resolveRegion(name, options);
   const ensureAnalystEngine = () =>
