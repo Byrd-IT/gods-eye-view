@@ -66,6 +66,7 @@ import {
   TRANSIT_SPEED_MS,
   writtenSpacingM,
   INTERVAL_TRIGGER_PROVEN,
+  isFlatHeight,
 } from './planner.js';
 import { minShutterDenominator, SHUTTER_DENOMINATORS } from './speed.js';
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
@@ -1091,6 +1092,60 @@ function readmeChecklist(plan) {
   return out;
 }
 
+/**
+ * The gimbal pitch(es) a mission file writes, for the README, with the check
+ * the pilot must make: DJI Fly may not hold the angle the file gives.
+ */
+function gimbalReadmeLine(mission) {
+  const pitches = [];
+  for (const leg of mission.legs ?? []) {
+    for (const wp of leg.waypoints ?? []) {
+      const p = Number(wp.pitchDeg);
+      if (Number.isFinite(p) && !pitches.includes(p)) pitches.push(p);
+    }
+  }
+  const check =
+    'Check the gimbal angle in DJI Fly before you start: it may not hold the angle in the file.';
+  if (!pitches.length) return `Gimbal: unknown. ${check}`;
+  if (pitches.length > 1) {
+    const lo = Math.min(...pitches);
+    const hi = Math.max(...pitches);
+    return `Gimbal: ${pitchText(lo)} to ${pitchText(hi)} deg (changes along the route). ${check}`;
+  }
+  return `Gimbal: ${pitchText(pitches[0])} deg at every waypoint. ${check}`;
+}
+
+/**
+ * The README height line. Above ground keeps the line every earlier export
+ * had; Flat gives the requested height above the takeoff point and the range
+ * this file really writes (obstacle and transit lifts can raise some
+ * waypoints). Extra terrain points are named when the plan added any.
+ */
+function heightLine(plan, mission) {
+  const set = fmt1(plan.options?.aglM);
+  if (isFlatHeight(plan.options)) {
+    const rel = (mission?.waypoints ?? [])
+      .map((w) => Number(w.relHeightM))
+      .filter(Number.isFinite);
+    const lo = rel.length ? Math.min(...rel) : null;
+    const hi = rel.length ? Math.max(...rel) : null;
+    const range =
+      lo == null
+        ? ''
+        : lo === hi
+          ? ` This file: ${fmt1(lo)} m above the takeoff point at every waypoint.`
+          : ` This file: ${fmt1(lo)} to ${fmt1(hi)} m above the takeoff point (obstacle or transit lifts).`;
+    return `Height: ${set} m above the takeoff point (Flat, requested).${range} Height above the ground changes with the ground.`;
+  }
+  const extra = plan.terrainPoints;
+  if (!(extra?.added > 0)) return `Height: ${set} m above ground (requested)`;
+  const widened =
+    extra.widenedLines > 0
+      ? `; on ${extra.widenedLines} line${extra.widenedLines === 1 ? '' : 's'} they were spread wider to fit the waypoint cap (up to ${fmt1(extra.maxGapM)} m apart), so height follows the ground less closely there`
+      : '';
+  return `Height: ${set} m above ground (requested); ${extra.added} terrain points added, every ${fmt1(extra.stepM)} m along the lines${widened}`;
+}
+
 /** One block per mission file: the settings the pilot has to see before flying. */
 function fileReadmeLines(result, system) {
   const { plan, missions } = result;
@@ -1106,10 +1161,9 @@ function fileReadmeLines(result, system) {
     lines.push(`File ${index + 1}:`);
     lines.push(`  ${requestedModeText(capture, marked)}`);
     lines.push(`  Waypoint cap: ${plan.options?.maxWaypoints ?? 200}`);
-    lines.push(
-      `  Height: ${fmt1(plan.options?.aglM)} m above ground (requested)`,
-    );
+    lines.push(`  ${heightLine(plan, mission)}`);
     lines.push(`  ${speedLine(plan, capture, system)}`);
+    lines.push(`  ${gimbalReadmeLine(mission)}`);
     lines.push(
       '  Every waypoint states the plan speed and its own gimbal pitch, so a resumed file does not depend on an earlier waypoint. Not verified in DJI Fly.',
     );
@@ -1219,9 +1273,12 @@ export function readmeText(result, when = new Date(), opts = {}) {
     lines.push('', 'Warnings:');
     for (const w of warnings) {
       const speedWarning =
-        typeof w.code === 'string' && w.code.startsWith('speed-')
+        (typeof w.code === 'string' && w.code.startsWith('speed-')) ||
+        w.code === 'flat-low-clearance'
           ? pilotWarningText(w, unitSystem)
-          : '';
+          : w.code === 'takeoff-unset'
+            ? 'No takeoff point was set: every height in these files is measured from the box centre. Take off there, or set the launch spot in GEV and export again.'
+            : '';
       lines.push(
         speedWarning
           ? `  - ${speedWarning}`

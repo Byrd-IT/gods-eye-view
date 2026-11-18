@@ -2101,6 +2101,7 @@ test('Steps: nine numbered collapsible steps hold every control in the planned o
   assert.equal(stepOf(w.control('Height above ground')), 3);
   assert.equal(stepOf(w.control('Front overlap')), 3);
   assert.equal(stepOf(w.control('Camera tilt')), 3);
+  assert.equal(stepOf(w.control('Gimbal angle')), 3);
   assert.equal(stepOf(w.control('Flight direction')), 3);
   assert.equal(stepOf(w.control('Photos')), 3);
   assert.equal(stepOf(w.control('Orbit radius')), 4);
@@ -6432,4 +6433,318 @@ test('a compact export that cannot compress says so and downloads nothing', asyn
     globalThis.CompressionStream = real;
     w.handle.destroy();
   }
+});
+
+// ------------------------------------------------------- gimbal angle --
+// Brandon 2026-11-17: the plan showed "Gimbal -90°" with no way to change it.
+// A plain grid now has its own Gimbal angle; the Gimbal line of the
+// Recommended list shows the angle the plan flies; every waypoint of the
+// exported file carries that angle.
+
+/** Every waypoint's pitch in a downloaded KMZ (param and its own rotate). */
+function kmzPitches(bytes) {
+  const xml = new TextDecoder().decode(readZip(bytes).get('wpmz/waylines.wpml'));
+  const marks = xml.split('<Placemark>').slice(1);
+  return marks.map((m) => ({
+    param: m.match(
+      /<wpml:waypointGimbalPitchAngle>([^<]+)<\/wpml:waypointGimbalPitchAngle>/,
+    )?.[1],
+    rotates: [
+      ...m.matchAll(
+        /<wpml:gimbalPitchRotateAngle>([^<]+)<\/wpml:gimbalPitchRotateAngle>/g,
+      ),
+    ].map((x) => x[1]),
+  }));
+}
+
+const slide = (w, label, value) => {
+  const c = w.control(label);
+  c.value = String(value);
+  c.dispatch('input');
+};
+
+test('gimbal: a plain grid has a Gimbal angle, -90 by default, shown only for the grid', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  const gimbal = w.control('Gimbal angle');
+  assert.ok(gimbal, 'the control exists');
+  assert.equal(rowOf(gimbal).hidden, false);
+  assert.equal(String(gimbal.min), '-90');
+  assert.equal(String(gimbal.max), '-35', 'Mini 5 Pro: shallower reaches the horizon');
+  assert.equal(String(gimbal.value), '-90');
+  assert.match(w.stats().Gimbal, /^-90° straight down$/);
+  for (const wp of w.handle.getResult().missions.flatMap((m) =>
+    m.legs.flatMap((l) => l.waypoints),
+  ))
+    assert.equal(wp.pitchDeg, -90);
+  pick(w, 'Pattern', 'double');
+  assert.equal(rowOf(gimbal).hidden, true);
+  assert.equal(rowOf(w.control('Camera tilt')).hidden, false);
+  assert.equal(
+    w.stats().Gimbal,
+    '-60° on both crossing passes (no straight-down pass)',
+  );
+  pick(w, 'Pattern', 'orbit');
+  assert.equal(rowOf(gimbal).hidden, true);
+  assert.equal(w.stats().Gimbal, 'on the centre', 'an orbit aims at the target');
+  w.handle.destroy();
+});
+
+test('gimbal: a set grid angle sticks through redraws and other sliders, and the plan and KMZ fly it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'mapping-grid-timed');
+  await w.handle.replan();
+  slide(w, 'Gimbal angle', -60);
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.gridPitchDeg, -60);
+  slide(w, 'Front overlap', 75);
+  await w.handle.replan();
+  assert.equal(w.control('Gimbal angle').value, '-60', 'after another slider');
+  assert.equal(w.handle.getState().options.gridPitchDeg, -60);
+  const r = w.handle.getResult();
+  assert.equal(r.plan.options.gridPitchDeg, -60);
+  assert.equal(r.plan.options.captureMode, 'timed');
+  assert.equal(
+    w.stats().Gimbal,
+    '-60° tilted forward on every line · recommended -90°',
+  );
+  for (const wp of r.missions.flatMap((m) => m.legs.flatMap((l) => l.waypoints)))
+    assert.equal(wp.pitchDeg, -60);
+  r.missions.forEach((_, i) => w.handle.downloadMission(i));
+  assert.equal(w.downloads.length, r.missions.length);
+  for (const dl of w.downloads) {
+    const marks = kmzPitches(dl.bytes);
+    assert.ok(marks.length >= 2);
+    for (const m of marks) {
+      assert.equal(m.param, '-60', 'waypointGimbalPitchAngle');
+      assert.ok(m.rotates.length >= 1, 'its own gimbalRotate');
+      for (const p of m.rotates) assert.equal(p, '-60');
+    }
+  }
+  // A shallower value than the aircraft allows is held at its limit.
+  slide(w, 'Gimbal angle', -20);
+  assert.equal(w.handle.getState().options.gridPitchDeg, -35);
+  w.handle.destroy();
+});
+
+test('gimbal: the Gimbal line follows the double grid Camera tilt, and its KMZ uses it', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'mapping-grid-timed');
+  pick(w, 'Pattern', 'double');
+  slide(w, 'Camera tilt', -75);
+  await w.handle.replan();
+  assert.equal(
+    w.stats().Gimbal,
+    '-75° on both crossing passes (no straight-down pass) · recommended -60°',
+  );
+  slide(w, 'Camera tilt', -60);
+  assert.equal(
+    w.stats().Gimbal,
+    '-60° on both crossing passes (no straight-down pass)',
+  );
+  slide(w, 'Camera tilt', -50);
+  await w.handle.replan();
+  const r = w.handle.getResult();
+  w.handle.downloadMission(0);
+  for (const m of kmzPitches(w.downloads[0].bytes)) {
+    assert.equal(m.param, '-50');
+    for (const p of m.rotates) assert.equal(p, '-50');
+  }
+  assert.ok(r.missions.length >= 1);
+  w.handle.destroy();
+});
+
+test('gimbal: USE RECOMMENDED puts the grid back straight down and the tilt at -60, only when pressed', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  slide(w, 'Gimbal angle', -45);
+  w.handle.getState().options.tiltPitchDeg = -75;
+  await w.handle.replan();
+  slide(w, 'Height above ground', 70);
+  await w.handle.replan();
+  assert.equal(w.handle.getState().options.gridPitchDeg, -45, 'not reset by other changes');
+  w.buttons('data-action')
+    .find((b) => b.getAttribute('data-action') === 'use-recommended')
+    .click();
+  await w.handle.replan();
+  const o = w.handle.getState().options;
+  assert.equal(o.gridPitchDeg, -90);
+  assert.equal(o.tiltPitchDeg, -60);
+  assert.equal(w.control('Gimbal angle').value, '-90');
+  w.handle.destroy();
+});
+
+test('gimbal: a saved plan reopens with its grid angle; an older plan without one flies straight down', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  slide(w, 'Gimbal angle', -50);
+  await w.handle.replan();
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  assert.equal(doc.options.gridPitchDeg, -50);
+  const w2 = setup();
+  await w2.handle.loadPlan(doc);
+  assert.equal(w2.handle.getState().options.gridPitchDeg, -50);
+  assert.equal(w2.control('Gimbal angle').value, '-50');
+  assert.equal(
+    w2.handle.getResult().plan.options.gridPitchDeg,
+    -50,
+    're-planned with it',
+  );
+  // The same panel then opens a plan saved before the setting existed.
+  const old = JSON.parse(JSON.stringify(doc));
+  delete old.options.gridPitchDeg;
+  await w2.handle.loadPlan(old);
+  assert.equal(w2.handle.getState().options.gridPitchDeg, -90);
+  for (const wp of w2.handle
+    .getResult()
+    .missions.flatMap((m) => m.legs.flatMap((l) => l.waypoints)))
+    assert.equal(wp.pitchDeg, -90);
+  w.handle.destroy();
+  w2.handle.destroy();
+});
+
+test('gimbal: the DJI Fly check note shows for the grid patterns, not for an orbit', () => {
+  const w = setup();
+  const note = w.find((n) => n.getAttribute('data-role') === 'gimbal-note')[0];
+  assert.ok(note);
+  assert.match(note.textContent, /check the gimbal angle on the controller/);
+  assert.equal(note.hidden, false);
+  pick(w, 'Pattern', 'double');
+  assert.equal(note.hidden, false);
+  pick(w, 'Pattern', 'orbit');
+  assert.equal(note.hidden, true);
+  w.handle.destroy();
+});
+
+// ------------------------------------------------- height mode (t_503a72e0) --
+const sloped = (cartos) =>
+  cartos.map((c) => ({
+    ...c,
+    // 0.05 m up per metre east of -97.77.
+    height: 100 + (c.longitude + 97.77) * metersPerDegree(30.27).lon * 0.05,
+  }));
+const role = (w, name) =>
+  w.find((n) => n.getAttribute?.('data-role') === name)[0];
+
+test('height mode: Above ground by default; Flat relabels the height and writes one KMZ height', async () => {
+  const w = setup({ sample: async (c) => sloped(c) });
+  const o = () => w.handle.getState().options;
+  const mode = w.control('Height mode');
+  assert.equal(mode.value, 'terrain');
+  assert.equal(o().heightMode, 'terrain');
+  assert.equal(role(w, 'height-mode').hidden, false);
+  w.handle.setBox(boxM(600, 300));
+  await w.handle.replan();
+  let stats = w.stats();
+  assert.equal(stats['Height mode'], 'Above ground (follows the terrain)');
+  const h0 = w.handle.getResult().heights;
+  assert.match(stats['DJI Fly shows'], / to .* above takeoff$/);
+  assert.ok(h0.relMaxM - h0.relMinM > 10, 'terrain mode heights vary');
+  // No takeoff set: the prominent warning is first and amber.
+  const items = w.find((n) => n.tagName === 'LI' && n.getAttribute('data-code'));
+  assert.equal(items[0].getAttribute('data-code'), 'takeoff-unset');
+  assert.match(items[0].textContent, /heights are measured from the box centre/);
+  assert.equal(items[0].style.color, WARNING_TONE_COLOR.warn);
+  assert.equal(items[0].style.fontWeight, '600');
+  assert.equal(
+    items.filter((n) => n.getAttribute('data-code') === 'takeoff-unset').length,
+    1,
+  );
+
+  mode.value = 'flat';
+  mode.dispatch('change');
+  assert.equal(o().heightMode, 'flat');
+  assert.ok(w.control('Height above takeoff'), 'slider is now above takeoff');
+  assert.equal(w.control('Height above ground'), undefined);
+  await w.handle.replan();
+  const r = w.handle.getResult();
+  stats = w.stats();
+  assert.equal(stats['Height mode'], 'Flat (same height above takeoff)');
+  assert.equal(r.heights.relMinM, r.heights.relMaxM);
+  assert.equal(r.heights.relMinM, Math.round(o().aglM * 10) / 10);
+  assert.equal(stats['DJI Fly shows'], '80 m to 80 m above takeoff');
+  assert.match(stats['Above ground'], / to .* at the waypoints$/);
+  for (const m of r.missions)
+    for (const wp of m.waypoints) assert.equal(wp.relHeightM, r.heights.relMinM);
+  // Saved and reopened in another panel: Flat comes back.
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  assert.equal(doc.options.heightMode, 'flat');
+  const w2 = setup({ sample: async (c) => sloped(c) });
+  await w2.handle.loadPlan(doc);
+  assert.equal(w2.handle.getState().options.heightMode, 'flat');
+  // An older plan without the setting opens as Above ground, even in a panel
+  // that was on Flat.
+  delete doc.options.heightMode;
+  await w2.handle.loadPlan(doc);
+  assert.equal(w2.handle.getState().options.heightMode, 'terrain');
+  assert.equal(w2.control('Height mode').value, 'terrain');
+  w.handle.destroy();
+  w2.handle.destroy();
+});
+
+test('height mode: hidden for orbit; terrain points only for Above ground with distance/timed lines', async () => {
+  const w = setup({ sample: async (c) => sloped(c) });
+  const o = () => w.handle.getState().options;
+  const stepRow = role(w, 'terrain-step');
+  assert.equal(stepRow.hidden, true, 'stop capture: no terrain points');
+  w.control('Pattern').value = 'orbit';
+  w.control('Pattern').dispatch('change');
+  assert.equal(role(w, 'height-mode').hidden, true);
+  w.control('Pattern').value = 'grid';
+  w.control('Pattern').dispatch('change');
+  const capture = w.control('Capture mode');
+  capture.value = 'timed';
+  capture.dispatch('change');
+  assert.equal(stepRow.hidden, false);
+  const step = w.control('Terrain points on lines');
+  assert.match(role(w, 'terrain-step-note').textContent, /only at the line ends/);
+  w.handle.setBox(boxM(600, 300));
+  await w.handle.replan();
+  const before = w.handle.getResult().totals.waypointCount;
+  step.value = '25';
+  step.dispatch('change');
+  assert.equal(o().terrainStepM, 25);
+  await w.handle.replan();
+  const r = w.handle.getResult();
+  assert.ok(r.plan.terrainPoints.added > 0);
+  assert.equal(w.stats()['Terrain points added'], String(r.plan.terrainPoints.added));
+  assert.ok(r.totals.waypointCount >= before + r.plan.terrainPoints.added);
+  assert.match(
+    role(w, 'terrain-step-note').textContent,
+    new RegExp(`^${r.plan.terrainPoints.added} terrain points added`),
+  );
+  // Flat hides it: it would do nothing.
+  w.control('Height mode').value = 'flat';
+  w.control('Height mode').dispatch('change');
+  assert.equal(stepRow.hidden, true);
+  w.handle.destroy();
+});
+
+test('height mode: a saved spacing outside the choices gets one entry, dropped with the next plan', async () => {
+  const w = setup({ sample: async (c) => sloped(c) });
+  w.handle.setBox(boxM(600, 300));
+  w.handle.applyOptions({ captureMode: 'timed' }, { planNow: true });
+  await w.handle.replan();
+  const doc = JSON.parse(JSON.stringify(await snapshotOf(w)));
+  const step = () => w.control('Terrain points on lines');
+  const values = () => step().children.map((n) => n.getAttribute('value'));
+  const labels = () => step().children.map((n) => n.textContent);
+  const base = values();
+  doc.options.terrainStepM = 30;
+  await w.handle.loadPlan(doc);
+  assert.equal(w.control('Terrain points on lines').value, '30');
+  assert.deepEqual(values(), [...base, '30']);
+  assert.equal(labels().at(-1), 'Every 30 m');
+  doc.options.terrainStepM = 40;
+  await w.handle.loadPlan(doc);
+  assert.equal(w.control('Terrain points on lines').value, '40');
+  assert.deepEqual(values(), [...base, '40']);
+  delete doc.options.terrainStepM;
+  await w.handle.loadPlan(doc);
+  assert.equal(w.control('Terrain points on lines').value, '');
+  assert.deepEqual(values(), base);
+  w.handle.destroy();
 });

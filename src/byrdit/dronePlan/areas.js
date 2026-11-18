@@ -14,6 +14,7 @@
 import { deltaLon, groundDistanceM, makeFrame, wrapLon } from './geo.js';
 import { validateDroneBox } from './limits.js';
 import {
+  addTerrainPoints,
   assembleMissions,
   estimateMission,
   footprint,
@@ -25,6 +26,7 @@ import {
   linePhotoCount,
   normalizeOptions,
   planFlight,
+  surveyTiltDeg,
   takeoffDistanceFromBoxM,
   VLOS_WARN_M,
 } from './planner.js';
@@ -190,15 +192,15 @@ function withJob(plan, areas, grouping) {
 
 function marginM(preset, options, hasPolygon) {
   if (!hasPolygon || options.pattern === 'orbit') return 0;
-  const tilt = options.pattern === 'double' ? 90 + options.tiltPitchDeg : 0;
+  const tilt = surveyTiltDeg(options);
   const fp = footprint(preset, options.aglM, tilt);
   return Math.max(fp.acrossM, fp.alongM) / 2;
 }
 
 /** Metres the camera looks ahead of the drone. Zero for a nadir grid. */
 function lookAheadM(options) {
-  if (options.pattern !== 'double') return 0;
-  const tilt = ((90 + options.tiltPitchDeg) * Math.PI) / 180;
+  if (options.pattern === 'orbit') return 0;
+  const tilt = (surveyTiltDeg(options) * Math.PI) / 180;
   const ahead = options.aglM * Math.tan(tilt);
   return Number.isFinite(ahead) && ahead > 0 ? ahead : 0;
 }
@@ -586,6 +588,12 @@ function decideTakeoff(list, rawOptions) {
  * @param {object} rawOptions planFlight options plus jobGrouping 'per-area' | 'whole'
  */
 export function planAreas(areas, rawOptions = {}) {
+  // Extra terrain points go on after the lines are clipped and ordered, so
+  // they never change the route itself (see addTerrainPoints).
+  return addTerrainPoints(planAreasLines(areas, rawOptions));
+}
+
+function planAreasLines(areas, rawOptions = {}) {
   const list = (areas ?? []).map((area) => ({
     ...area,
     box: area.kind === 'polygon' ? bboxOfPoints(area.ring) : { ...area.box },
@@ -874,6 +882,7 @@ export function assembleAreaPlan(plan, ground) {
     terrainComplete: built.terrainComplete,
     truncated,
     ground: built.ground,
+    heights: built.heights,
     jobs: plan.jobs,
     areaStats: areaStatRows(plan, missions),
   };

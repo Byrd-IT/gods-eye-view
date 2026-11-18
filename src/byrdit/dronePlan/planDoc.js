@@ -13,7 +13,9 @@
  * a `.gevplan` file is untrusted input.
  */
 import {
+  HEIGHT_MODES,
   cleanMinPhotoIntervalS,
+  cleanTerrainStepM,
   cleanTimedIntervalS,
   normalizeLookAtPaths,
   normalizeOrbitTargets,
@@ -45,6 +47,8 @@ const OPTION_TYPES = Object.freeze({
   pattern: (v) => ['grid', 'double', 'orbit'].includes(v),
   direction: (v) => v === 'auto' || finite(v) || typeof v === 'string',
   tiltPitchDeg: finite,
+  // Plain grid gimbal, degrees (-90 straight down). Absent in older plans.
+  gridPitchDeg: finite,
   speedMs: finite,
   photoMode: (v) => ['waypoint', 'interval'].includes(v),
   captureMode: (v) => CAPTURE_MODES.includes(v),
@@ -74,6 +78,11 @@ const OPTION_TYPES = Object.freeze({
   orbitOutwardPitchDeg: finite,
   orbitTargetHeightM: finite,
   obstacleHeightM: finite,
+  // Absent on plans saved before the setting: they load as Above ground.
+  heightMode: (v) => HEIGHT_MODES.includes(v),
+  // Metres between extra terrain points; absent or null means off.
+  terrainStepM: (v) =>
+    v === null || (typeof v === 'number' && cleanTerrainStepM(v) === v),
 });
 
 const lonLat = (p) =>

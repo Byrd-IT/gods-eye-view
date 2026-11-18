@@ -185,6 +185,196 @@ export function isContinuousCapture(captureMode) {
 }
 
 /**
+ * How waypoint heights are flown on the survey patterns (grid, double).
+ * terrain — Above ground: the set height is kept above the ground under each
+ *   waypoint, so the height written to the KMZ (above the takeoff point)
+ *   changes with the ground. The behaviour of every plan saved before this
+ *   setting existed.
+ * flat — every waypoint is written at the set height above the takeoff
+ *   point. The height above the ground then changes with the ground.
+ * Orbits always fly Above ground: their rings are set around each target.
+ */
+export const HEIGHT_MODES = Object.freeze(['terrain', 'flat']);
+export const DEFAULT_HEIGHT_MODE = 'terrain';
+
+/** A stored or typed height mode; anything else is Above ground. */
+export function cleanHeightMode(value) {
+  return HEIGHT_MODES.includes(value) ? value : DEFAULT_HEIGHT_MODE;
+}
+
+/** True when this plan's survey lines fly flat above the takeoff point. */
+export function isFlatHeight(options) {
+  return (
+    cleanHeightMode(options?.heightMode) === 'flat' &&
+    options?.pattern !== 'orbit'
+  );
+}
+
+/**
+ * Spacing of the extra terrain points on a distance / timed line, metres.
+ * Such a line is only its two end points, so Above ground follows the ground
+ * only there; extra points along it let the height follow the ground in
+ * between. Null means off (the line stays two points).
+ */
+export const TERRAIN_STEP_CHOICES_M = Object.freeze([25, 50, 100, 200]);
+export const MIN_TERRAIN_STEP_M = 10;
+export const MAX_TERRAIN_STEP_M = 500;
+
+/** A usable spacing in metres, or null (off). Out-of-range is dropped. */
+export function cleanTerrainStepM(value) {
+  if (value == null || value === '' || typeof value === 'boolean') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < MIN_TERRAIN_STEP_M || n > MAX_TERRAIN_STEP_M)
+    return null;
+  return n;
+}
+
+/** Whether extra terrain points apply to this plan at all. */
+export function terrainPointsApply(options) {
+  return (
+    cleanTerrainStepM(options?.terrainStepM) != null &&
+    !isFlatHeight(options) &&
+    options?.pattern !== 'orbit' &&
+    isContinuousCapture(options?.captureMode)
+  );
+}
+
+/**
+ * Add terrain points along every distance / timed survey line of a plan, so
+ * no stretch between two waypoints is longer than `terrainStepM`. The new
+ * points sit on the straight line (the route and the photos do not move),
+ * copy the line's height, camera pitch and "no photo" flag, and get their own
+ * ground height when the terrain is read, so the KMZ height follows the
+ * ground there. They count against the waypoint cap and the mission split
+ * like any other waypoint. Ids are renumbered in route order.
+ * A plan the setting does not apply to is returned unchanged (same object).
+ */
+export function addTerrainPoints(plan) {
+  if (!plan || plan.error || !Array.isArray(plan.legs)) return plan;
+  const options = plan.options ?? {};
+  if (!terrainPointsApply(options)) return plan;
+  const stepM = cleanTerrainStepM(options.terrainStepM);
+  // A line with terrain points is never cut into two files (see the mission
+  // split), so it must fit one file: a line that would pass the cap gets
+  // its points spread wider.
+  const capWaypoints = Math.max(
+    2,
+    Math.floor(Number(options.maxWaypoints) || MAX_WAYPOINTS_PER_MISSION),
+  );
+  let added = 0;
+  let widened = 0;
+  let maxGapM = 0;
+  const legs = plan.legs.map((leg) => {
+    if (
+      leg.kind !== 'grid' ||
+      !isContinuousCapture(leg.captureMode) ||
+      (leg.waypoints?.length ?? 0) < 2
+    ) {
+      return leg;
+    }
+    const wps = leg.waypoints;
+    const want = [];
+    for (let i = 1; i < wps.length; i += 1) {
+      const d = groundDistanceM(wps[i - 1], wps[i]);
+      want.push(Math.max(1, Math.ceil(d / stepM - 1e-9)));
+    }
+    const extra = want.reduce((s, p) => s + p - 1, 0);
+    const room = Math.max(0, capWaypoints - wps.length);
+    let pieces = want;
+    if (extra > room) {
+      widened += 1;
+      const scale = room / extra;
+      pieces = want.map((p) => 1 + Math.floor((p - 1) * scale));
+      for (let i = 1; i < wps.length; i += 1) {
+        maxGapM = Math.max(
+          maxGapM,
+          groundDistanceM(wps[i - 1], wps[i]) / pieces[i - 1],
+        );
+      }
+    }
+    const out = [wps[0]];
+    for (let i = 1; i < wps.length; i += 1) {
+      const a = wps[i - 1];
+      const b = wps[i];
+      const n = pieces[i - 1];
+      for (let k = 1; k < n; k += 1) {
+        const f = k / n;
+        out.push({
+          ...a,
+          lon: wrapLon(a.lon + lonDelta(a.lon, b.lon) * f),
+          lat: a.lat + (b.lat - a.lat) * f,
+          photo: false,
+          terrainPoint: true,
+        });
+        added += 1;
+      }
+      out.push(b);
+    }
+    return out.length === wps.length
+      ? leg
+      : { ...leg, waypoints: out, terrainPointLine: true };
+  });
+  let nextId = 0;
+  const numbered = legs.map((leg) => ({
+    ...leg,
+    waypoints: leg.waypoints.map((w) => ({ ...w, id: nextId++ })),
+  }));
+  if (nextId > MAX_WAYPOINTS_TOTAL) {
+    return {
+      error: 'too-large',
+      message: 'Plan needs too many waypoints; use wider terrain point spacing',
+    };
+  }
+  return {
+    ...plan,
+    legs: numbered,
+    waypointCount: nextId,
+    terrainPoints: { added, stepM, widenedLines: widened, maxGapM },
+  };
+}
+
+/** Signed shortest longitude step from a to b, degrees. */
+function lonDelta(a, b) {
+  let d = b - a;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
+}
+
+/**
+ * Flat height: survey waypoints keep their set height above the takeoff
+ * point, so their height above their own ground (aglM) becomes
+ * takeoffM + set - groundM. The ground guess for an unread waypoint is the
+ * one assembleMissions uses (the nearest read point before it in the route,
+ * or the first read point for a gap at the start). `wpM` null means the
+ * terrain is unknown: everything is on flat ground at 0, nothing changes.
+ */
+function flatLegs(legs, wpM, takeoffM) {
+  if (!wpM) return legs;
+  const readOf = (w) => {
+    const g = wpM[w.id];
+    return typeof g === 'number' && Number.isFinite(g) ? g : null;
+  };
+  let last = legs
+    .flatMap((leg) => leg.waypoints)
+    .map(readOf)
+    .find((g) => g != null);
+  last ??= takeoffM;
+  return legs.map((leg) => {
+    const grid = leg.kind === 'grid';
+    return {
+      ...leg,
+      waypoints: leg.waypoints.map((w) => {
+        const g = readOf(w);
+        if (g != null) last = g;
+        if (!grid) return w;
+        return { ...w, setHeightM: w.aglM, aglM: takeoffM + w.aglM - last };
+      }),
+    };
+  });
+}
+
+/**
  * Trusted static setting. Default false until an owner-authorized change
  * to this constant. A plan, voice patch, or imported file cannot flip it.
  * False keeps the Mini 5 Pro distance-trigger notice.
@@ -333,6 +523,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
   pattern: 'grid',
   direction: 'auto',
   tiltPitchDeg: -60,
+  gridPitchDeg: -90,
   speedMs: 5,
   photoMode: 'waypoint',
   captureMode: 'stop',
@@ -371,6 +562,10 @@ export const DEFAULT_OPTIONS = Object.freeze({
   // person has one for the area. Never saved: it is a live object.
   surfaceProbe: null,
   takeoff: null,
+  // 'terrain' (Above ground, every plan saved before this setting) or 'flat'.
+  heightMode: DEFAULT_HEIGHT_MODE,
+  // Metres between extra terrain points on distance / timed lines; null off.
+  terrainStepM: null,
 });
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -416,6 +611,63 @@ export function footprint(preset, aglM, tiltDeg = 0) {
     alongM: aglM * (Math.tan(far) - Math.tan(near)),
     gsdCm: (centreRange * pitchMm * 100) / f,
   };
+}
+
+/** Gimbal pitch of a plain grid: -90 is straight down (the default). */
+export const GRID_PITCH_DEFAULT_DEG = -90;
+/** The steepest a grid gimbal can point: straight down. */
+export const GRID_PITCH_MIN_DEG = -90;
+/** Shallowest grid gimbal before the aircraft's own limit is applied. */
+export const GRID_PITCH_MAX_DEG = -30;
+/** Grid gimbal steps, degrees (the slider and the planner agree on it). */
+export const GRID_PITCH_STEP_DEG = 5;
+
+/**
+ * The shallowest grid gimbal pitch for `preset`, on the 5 degree grid. The
+ * top edge of the photo must stay under 85 degrees from straight down, or the
+ * footprint reaches the horizon and the overlap cannot be worked out
+ * (footprint() throws). Mini 5 Pro: half the vertical view is 26.6 degrees,
+ * so the shallowest is -35 degrees. Never shallower than GRID_PITCH_MAX_DEG.
+ */
+export function shallowestGridPitchDeg(preset) {
+  const h = Number(preset?.sensorHeightMm);
+  const f = Number(preset?.focalMm);
+  if (!(h > 0) || !(f > 0)) return GRID_PITCH_MAX_DEG;
+  const halfVDeg = (Math.atan(h / (2 * f)) * 180) / Math.PI;
+  // Largest tilt from straight down with the far edge strictly under 85.
+  const maxTilt = 85 - halfVDeg - 1e-6;
+  // Round toward straight down, so 90 + pitch never passes maxTilt.
+  const pitch =
+    Math.floor((maxTilt - 90) / GRID_PITCH_STEP_DEG) * GRID_PITCH_STEP_DEG;
+  return Math.max(GRID_PITCH_MIN_DEG, Math.min(GRID_PITCH_MAX_DEG, pitch));
+}
+
+/** A grid gimbal pitch for `preset`: on the step, -90 .. the shallowest. */
+export function cleanGridPitchDeg(value, preset) {
+  const n = num(value, GRID_PITCH_DEFAULT_DEG);
+  const stepped = Math.round(n / GRID_PITCH_STEP_DEG) * GRID_PITCH_STEP_DEG;
+  return clamp(stepped, GRID_PITCH_MIN_DEG, shallowestGridPitchDeg(preset));
+}
+
+/**
+ * The gimbal pitch every photo of a survey pattern is taken at: the Camera
+ * tilt for a double grid, the grid gimbal for a plain grid. Null for an orbit
+ * (the camera follows the ring). Reads normalized options.
+ */
+export function surveyPitchDeg(options) {
+  if (options?.pattern === 'orbit') return null;
+  if (options?.pattern === 'double') {
+    const p = Number(options.tiltPitchDeg);
+    return Number.isFinite(p) ? p : -60;
+  }
+  const p = Number(options?.gridPitchDeg);
+  return Number.isFinite(p) ? p : GRID_PITCH_DEFAULT_DEG;
+}
+
+/** Degrees from straight down for a survey pattern's photos (0 = nadir). */
+export function surveyTiltDeg(options) {
+  const pitch = surveyPitchDeg(options);
+  return pitch == null ? 0 : 90 + pitch;
 }
 
 /** Spacing between flight lines and between photos along a line, metres. */
@@ -556,7 +808,12 @@ export function normalizeOptions(raw = {}, box = null) {
   const continuousEligible =
     o.pattern !== 'orbit' && isContinuousCapture(o.captureMode);
   o.continuousRoute = continuousEligible && raw?.continuousRoute === true;
+  o.heightMode = cleanHeightMode(o.heightMode);
+  o.terrainStepM = cleanTerrainStepM(o.terrainStepM);
   o.tiltPitchDeg = clamp(num(o.tiltPitchDeg, -60), -80, -45);
+  // Plain grid gimbal. Absent (every plan saved before it existed) stays
+  // straight down, so old plans and their files do not change.
+  o.gridPitchDeg = cleanGridPitchDeg(o.gridPitchDeg, preset);
   o.speedMs = clamp(
     num(o.speedMs, preset.defaultSpeedMs),
     MIN_PLAN_SPEED_MS,
@@ -1376,7 +1633,15 @@ export function planFlight(box, rawOptions = {}) {
               turn: 90,
             },
           ]
-        : [{ tiltDeg: 0, pitch: -90, turn: 0 }];
+        : [
+            {
+              // Straight down by default; a tilted grid looks ahead along
+              // each line, like one pass of the double grid.
+              tiltDeg: 90 + options.gridPitchDeg,
+              pitch: options.gridPitchDeg,
+              turn: 0,
+            },
+          ];
     let baseAngle;
     if (options.direction === 'auto') baseAngle = hw >= hh ? 0 : 90;
     else baseAngle = options.direction;
@@ -1591,10 +1856,26 @@ export function assembleMissions(plan, ground) {
   const warnings = [...plan.notes];
   const known = ground?.known === true;
   if (!known) warnings.push({ code: 'terrain-unknown', params: {} });
+  // Every height in the files is measured from the takeoff point; with none
+  // set it is the box / area centre, which is rarely where the pilot stands.
+  if (takeoff?.custom !== true)
+    warnings.push({ code: 'takeoff-unset', params: {} });
+  const takeoffM = known ? ground.takeoffM : 0;
+  const flat = isFlatHeight(options);
+  // Flat: every survey waypoint flies at the set height above the TAKEOFF
+  // point. Its height above its own ground is then takeoff + set - ground,
+  // and that real height is what the obstacle columns, the 400 ft check and
+  // the low-clearance warning must see. Turning aglM into that real value
+  // here keeps everything below unchanged (relHeightM = ground + aglM -
+  // takeoff = the set height). A waypoint with no ground read uses the same
+  // guess as below, so its KMZ height is still the set height.
+  const sourceLegs = flat
+    ? flatLegs(plan.legs, known ? ground.wpM : null, takeoffM)
+    : plan.legs;
   // Per-obstacle heights: lift every stretch that passes a column, and flag
   // the ones the height cap cannot lift (drawn red on the globe).
   const readM = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-  const cleared = applyObstacleClearance(plan.legs, options.obstacles, {
+  const cleared = applyObstacleClearance(sourceLegs, options.obstacles, {
     capM: AGL_CAP_M,
     // Ground under each waypoint and under each column, from the terrain
     // read (never from the 3D tiles): a column on higher ground needs the
@@ -1625,7 +1906,6 @@ export function assembleMissions(plan, ground) {
       params: { count: options.obstaclesDropped },
     });
   }
-  const takeoffM = known ? ground.takeoffM : 0;
 
   // A waypoint the terrain gave no height for takes the nearest read height
   // before it in the route (never the takeoff height, which can be far from
@@ -1698,7 +1978,10 @@ export function assembleMissions(plan, ground) {
       }
     }
   }
-  if (steep) warnings.push({ code: 'steep-segment', params: { count: steep } });
+  // Flat lines are straight at one height above the takeoff point: nothing
+  // bends between their waypoints, so the steep-ground note does not apply.
+  if (steep && !flat)
+    warnings.push({ code: 'steep-segment', params: { count: steep } });
 
   const budgetS = options.batteryMin * 60;
   const missions = [];
@@ -1764,7 +2047,18 @@ export function assembleMissions(plan, ground) {
       pending.unshift(leg);
       continue;
     }
-    // The leg alone exceeds a mission: cut it at the largest feasible piece.
+    // The leg alone exceeds a mission. A line with terrain points stays
+    // whole and unchanged, as it did when it was only its two ends: a cut
+    // would restart the distance trigger mid-line and move the photos.
+    // addTerrainPoints keeps such a line within the waypoint cap, so only
+    // the battery time can be short, and that is warned like any long line.
+    if (leg.terrainPointLine === true) {
+      current.push(leg);
+      if (!feasible(current)) overBudget = true;
+      close();
+      continue;
+    }
+    // Otherwise cut it at the largest feasible piece.
     let take = 2;
     while (
       take < leg.waypoints.length &&
@@ -1959,6 +2253,33 @@ export function assembleMissions(plan, ground) {
       params: { maxAglM: highestAglM, capM: AGL_CAP_M },
     });
   }
+  const heights = heightSummary(built, {
+    flat,
+    known,
+    takeoffM,
+    takeoffSet: takeoff?.custom === true,
+  });
+  // Flat over rising ground comes closer to the ground (and the trees): warn
+  // with the real lowest height when it is under the tree / obstacle height
+  // plus the margin.
+  if (flat && known && heights.aglMinM != null) {
+    const needM = Math.max(
+      MIN_AGL_M,
+      (options.obstacleHeightM ?? DEFAULT_OBSTACLE_HEIGHT_M) +
+        OBSTACLE_MARGIN_M,
+    );
+    if (heights.aglMinM < needM - 1e-9) {
+      warnings.push({
+        code: 'flat-low-clearance',
+        params: {
+          minAglM: heights.aglMinM,
+          needM,
+          count: heights.lowCount(needM),
+        },
+      });
+    }
+  }
+  delete heights.lowCount;
 
   const totals = {
     photoCount: built.reduce((s, m) => s + m.photoCount, 0),
@@ -1980,6 +2301,40 @@ export function assembleMissions(plan, ground) {
     terrainComplete,
     truncated: tooMany,
     ground: { takeoffM, known, missing },
+    heights,
+  };
+}
+
+/**
+ * What the panel shows about heights, read from the finished missions (after
+ * every obstacle and transit lift), so it matches the KMZ:
+ *  - relMinM / relMaxM: the heights written to the files, above the takeoff
+ *    point. This is what DJI Fly displays.
+ *  - aglMinM / aglMaxM: height above the ground under each waypoint
+ *    (relHeightM + takeoffM - groundM). Null when the terrain is unknown.
+ *  - mode, takeoffSet (false: the box / area centre is assumed).
+ * Heights between waypoints are not sampled: these are the waypoint values.
+ */
+export function heightSummary(missions, { flat, known, takeoffM, takeoffSet }) {
+  const wps = missions.flatMap((m) => m.waypoints);
+  const rel = wps.map((w) => w.relHeightM).filter(Number.isFinite);
+  const aglOf = (w) => round(w.relHeightM + takeoffM - w.groundM, 1);
+  const agl = known
+    ? wps
+        .filter(
+          (w) => Number.isFinite(w.relHeightM) && Number.isFinite(w.groundM),
+        )
+        .map(aglOf)
+    : [];
+  return {
+    mode: flat ? 'flat' : 'terrain',
+    takeoffSet: takeoffSet === true,
+    relMinM: rel.length ? Math.min(...rel) : null,
+    relMaxM: rel.length ? Math.max(...rel) : null,
+    aglMinM: agl.length ? Math.min(...agl) : null,
+    aglMaxM: agl.length ? Math.max(...agl) : null,
+    waypointCount: wps.length,
+    lowCount: (needM) => agl.filter((a) => a < needM - 1e-9).length,
   };
 }
 

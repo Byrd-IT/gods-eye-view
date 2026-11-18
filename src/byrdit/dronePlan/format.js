@@ -86,8 +86,19 @@ export function warningTone(code) {
   ) {
     return 'bad';
   }
-  if (code === 'line-end-split') return 'warn';
+  if (code === 'flat-low-clearance') return 'bad';
+  if (code === 'line-end-split' || code === 'takeoff-unset') return 'warn';
   return '';
+}
+
+/**
+ * The no-takeoff warning shown at the top of the results: every height in
+ * the files is measured from the takeoff point, and none was set.
+ */
+export function takeoffUnsetText() {
+  return t(
+    'No takeoff point is set: heights are measured from the box centre. Set your launch spot (Takeoff, SET) so the heights DJI Fly shows match where you fly from',
+  );
 }
 
 /** The sentence for one warning object `{ code, params }`. */
@@ -186,6 +197,17 @@ export function warningText(warning, system) {
       return t(
         '{count} stretches cross steep ground; DJI Fly curves between waypoints, so height above ground can drift there',
         { count: fixed(p.count) },
+      );
+    case 'takeoff-unset':
+      return takeoffUnsetText();
+    case 'flat-low-clearance':
+      return t(
+        'Flat height: over the highest ground this route is only {min} above the ground ({count} waypoints under {need}, the tree / obstacle height plus the margin). Raise the height, take off from higher ground or use Above ground',
+        {
+          min: lengthText(p.minAglM),
+          count: fixed(p.count),
+          need: lengthText(p.needM),
+        },
       );
     case 'mission-over-budget':
       return t(

@@ -88,14 +88,25 @@ import {
   MIN_AGL_M,
   MIN_WAYPOINTS_PER_MISSION,
   OBSTACLE_MARGIN_M,
+  TERRAIN_STEP_CHOICES_M,
+  cleanHeightMode,
+  cleanTerrainStepM,
+  isFlatHeight,
+  terrainPointsApply,
   footprint,
   INTERVAL_TRIGGER_PROVEN,
   isContinuousCapture,
   captureSpacingM,
   cleanMinPhotoIntervalS,
   cleanTimedIntervalS,
+  cleanGridPitchDeg,
+  GRID_PITCH_MIN_DEG,
+  GRID_PITCH_STEP_DEG,
   presetWithPhotoInterval,
+  shallowestGridPitchDeg,
   spacing,
+  surveyPitchDeg,
+  surveyTiltDeg,
   takeoffDistanceFromBoxM,
   writtenSpacingM,
 } from './planner.js';
@@ -287,11 +298,38 @@ export function cleanPhotoSpacingM(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Degrees from nadir, matching planFlight's pass tilt. Grid and orbit are 0. */
+/**
+ * Degrees from nadir, matching planFlight's pass tilt: the Camera tilt for a
+ * double grid, the Gimbal angle for a plain grid, 0 for an orbit.
+ */
 export function captureTiltDeg(options) {
-  if (options?.pattern !== 'double') return 0;
-  const tilt = 90 + Number(options.tiltPitchDeg);
+  const tilt = surveyTiltDeg(options);
   return Number.isFinite(tilt) ? tilt : 0;
+}
+
+/**
+ * The Gimbal line of the Recommended list: the angle THIS plan will fly, not
+ * the mode's default, so it can never say -90 while the plan is tilted. When
+ * it differs from the recommendation, the recommended angle is named too.
+ * @param {object} options The panel options (pattern, tiltPitchDeg, gridPitchDeg).
+ * @param {number|null} recommendedDeg The mode's recommended pitch (null: orbit).
+ */
+export function gimbalSummaryText(options, recommendedDeg) {
+  const pitch = surveyPitchDeg(options);
+  if (pitch == null || recommendedDeg === null) return t('on the centre');
+  const deg = `${num(pitch)}°`;
+  let text;
+  if (options.pattern === 'double') {
+    text = t('{deg} on both crossing passes (no straight-down pass)', { deg });
+  } else if (pitch === -90) {
+    text = t('{deg} straight down', { deg });
+  } else {
+    text = t('{deg} tilted forward on every line', { deg });
+  }
+  if (Number.isFinite(recommendedDeg) && recommendedDeg !== pitch) {
+    text += ` · ${t('recommended {deg}', { deg: `${num(recommendedDeg)}°` })}`;
+  }
+  return text;
 }
 
 export function captureStepLabel(mode) {
@@ -559,6 +597,7 @@ export function initDronePlan({
       pattern: 'grid',
       direction: 'auto',
       tiltPitchDeg: -60,
+      gridPitchDeg: -90,
       speedMs: getPreset(DEFAULT_PRESET_ID).defaultSpeedMs,
       photoMode: 'waypoint',
       captureMode: 'stop',
@@ -585,6 +624,10 @@ export function initDronePlan({
       obstacleHeightM: DEFAULT_OBSTACLE_HEIGHT_M,
       orbitTargets: [],
       obstacles: [],
+      // Above ground ('terrain', every older plan) or Flat above takeoff.
+      heightMode: 'terrain',
+      // Metres between extra terrain points on distance / timed lines.
+      terrainStepM: null,
     },
     // True once the person adds, removes or switches a target: from then on
     // the list is theirs and is no longer rebuilt from the areas.
@@ -2364,6 +2407,21 @@ export function initDronePlan({
       attrs: { 'data-role': 'suite' },
     });
     into('shots');
+    ui.heightMode = select(
+      [
+        ['terrain', t('Above ground (follows the terrain)')],
+        ['flat', t('Flat (same height above takeoff)')],
+      ],
+      t('Height mode'),
+    );
+    ({ row: ui.heightModeRow } = field(t('Height mode'), ui.heightMode, {
+      value: false,
+    }));
+    ui.heightModeRow.setAttribute('data-role', 'height-mode');
+    ui.heightModeNote = el(doc, 'p', host, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'height-mode-note' },
+    });
     ui.agl = lslider(t('Height above ground'), {
       minM: MIN_AGL_M,
       maxM: AGL_CAP_M,
@@ -2372,17 +2430,36 @@ export function initDronePlan({
       stepM: 0.2,
       stepFt: 10,
     });
-    ({ row: ui.aglRow, out: ui.aglOut } = field(
-      t('Height above ground'),
-      ui.agl,
-    ));
+    ({
+      row: ui.aglRow,
+      out: ui.aglOut,
+      labelEl: ui.aglLabel,
+    } = field(t('Height above ground'), ui.agl));
     addMark('height', ui.aglOut);
+    // Extra terrain points: only for Above ground with distance / timed lines.
+    ui.terrainStep = select(
+      [
+        ['', t('Off (line ends only)')],
+        ...TERRAIN_STEP_CHOICES_M.map((m) => [String(m), String(m)]),
+      ],
+      t('Terrain points on lines'),
+    );
+    ({ row: ui.terrainStepRow } = field(
+      t('Terrain points on lines'),
+      ui.terrainStep,
+      { value: false },
+    ));
+    ui.terrainStepRow.setAttribute('data-role', 'terrain-step');
+    ui.terrainStepNote = el(doc, 'p', host, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'terrain-step-note' },
+    });
     ui.side = slider(t('Side overlap'), 40, 95, 1);
     ({ out: ui.sideOut } = field(t('Side overlap'), ui.side));
 
     ui.pattern = select(
       [
-        ['grid', t('Grid, straight down')],
+        ['grid', t('Grid')],
         ['double', t('Double grid, tilted')],
         ['orbit', t('Orbit the centre')],
       ],
@@ -2402,6 +2479,26 @@ export function initDronePlan({
     }));
     ui.tilt = slider(t('Camera tilt'), -80, -45, 5);
     ({ row: ui.tiltRow, out: ui.tiltOut } = field(t('Camera tilt'), ui.tilt));
+    // Plain grid gimbal: -90 (straight down) to the aircraft's shallowest
+    // angle (max set per aircraft in render, -35 on a Mini 5 Pro).
+    ui.gridPitch = slider(
+      t('Gimbal angle'),
+      GRID_PITCH_MIN_DEG,
+      shallowestGridPitchDeg(getPreset(DEFAULT_PRESET_ID)),
+      GRID_PITCH_STEP_DEG,
+    );
+    ui.gridPitch.setAttribute?.('data-role', 'grid-pitch');
+    ({ row: ui.gridPitchRow, out: ui.gridPitchOut } = field(
+      t('Gimbal angle'),
+      ui.gridPitch,
+    ));
+    ui.gimbalNote = el(doc, 'p', host, {
+      cls: 'gev-dp-note',
+      attrs: { 'data-role': 'gimbal-note' },
+      text: t(
+        'Every waypoint in the file sets this gimbal angle. DJI Fly may not hold it: check the gimbal angle on the controller before you start each mission.',
+      ),
+    });
     into('orbits');
     ui.radius = lslider(t('Orbit radius'), {
       minM: 10,
@@ -3136,6 +3233,16 @@ export function initDronePlan({
       useRecommended();
     });
     onInput(ui.agl, () => (o.aglM = lengthToM(ui.agl.value)));
+    ui.heightMode.addEventListener('change', () => {
+      o.heightMode = cleanHeightMode(ui.heightMode.value);
+      syncControls();
+      schedule();
+    });
+    ui.terrainStep.addEventListener('change', () => {
+      o.terrainStepM = cleanTerrainStepM(ui.terrainStep.value);
+      syncControls();
+      schedule();
+    });
     onInput(ui.front, () => (o.frontOverlap = Number(ui.front.value)));
     onInput(ui.side, () => (o.sideOverlap = Number(ui.side.value)));
     ui.pattern.addEventListener('change', () => {
@@ -3152,6 +3259,14 @@ export function initDronePlan({
       schedule();
     });
     onInput(ui.tilt, () => (o.tiltPitchDeg = Number(ui.tilt.value)));
+    onInput(
+      ui.gridPitch,
+      () =>
+        (o.gridPitchDeg = cleanGridPitchDeg(
+          Number(ui.gridPitch.value),
+          getPreset(o.presetId),
+        )),
+    );
     onInput(ui.radius, () => (o.orbitRadiusM = lengthToM(ui.radius.value)));
     onInput(
       ui.targetHeight,
@@ -3690,11 +3805,18 @@ export function initDronePlan({
         ? `${num(rec.frontOverlap)}%`
         : `${num(rec.frontOverlap)}% / ${num(rec.sideOverlap)}%`,
     );
+    // The angle THIS plan flies (Camera tilt for a double grid, Gimbal angle
+    // for a grid), with the mode's recommended angle when they differ.
     row(
       t('Gimbal'),
-      rec.gimbalPitchDeg === null
-        ? t('on the centre')
-        : `${num(rec.gimbalPitchDeg)}°`,
+      gimbalSummaryText(
+        state.options,
+        rec.gimbalPitchDeg === null
+          ? null
+          : state.options.pattern === 'double'
+            ? rec.tiltPitchDeg
+            : rec.gimbalPitchDeg,
+      ),
     );
     row(
       t('Camera'),
@@ -4029,6 +4151,73 @@ export function initDronePlan({
     ui.aglRow.title = t('Hard cap {cap} above ground', {
       cap: lengthText(AGL_CAP_M),
     });
+    {
+      o.heightMode = cleanHeightMode(o.heightMode);
+      o.terrainStepM = cleanTerrainStepM(o.terrainStepM);
+      const orbitOnly = o.pattern === 'orbit';
+      const flat = isFlatHeight(o);
+      ui.heightMode.value = o.heightMode;
+      // Orbits fly their rings above the ground around each target.
+      ui.heightModeRow.hidden = orbitOnly;
+      ui.heightModeNote.hidden = orbitOnly;
+      ui.heightModeNote.textContent = flat
+        ? t(
+            'Flat: every waypoint is at this height above the takeoff point, the number DJI Fly shows. Over lower ground the aircraft is higher above the ground, over higher ground closer to it (and to the trees). Overlap and detail are worked out at this height.',
+          )
+        : t(
+            'Above ground: this height is kept above the ground under each waypoint, so the heights DJI Fly shows (above the takeoff point) change with the ground.',
+          );
+      const label = flat ? t('Height above takeoff') : t('Height above ground');
+      ui.aglLabel.textContent = label;
+      ui.agl.setAttribute?.('aria-label', label);
+      const stepOptions = () => [
+        ...(ui.terrainStep.options ?? ui.terrainStep.children ?? []),
+      ];
+      // A saved spacing that is not one of the choices gets its own entry,
+      // so the select never shows Off for a plan that has points on. Only the
+      // current one is kept: the list is rebuilt (with new option nodes) when
+      // the entries it needs change, so one from an earlier plan goes.
+      const wanted = o.terrainStepM == null ? '' : String(o.terrainStepM);
+      const choices = ['', ...TERRAIN_STEP_CHOICES_M.map(String)];
+      const desired =
+        wanted && !choices.includes(wanted) ? [...choices, wanted] : choices;
+      // The value attribute is what the option was built with.
+      const valueOf = (x) => x.getAttribute?.('value') ?? x.value ?? '';
+      const have = stepOptions().map(valueOf);
+      if (have.join('|') !== desired.join('|')) {
+        ui.terrainStep.replaceChildren(
+          ...desired.map((value) =>
+            el(doc, 'option', null, {
+              text: value ? value : t('Off (line ends only)'),
+              attrs: { value },
+            }),
+          ),
+        );
+      }
+      for (const option of stepOptions()) {
+        if (valueOf(option))
+          option.textContent = t('Every {spacing}', {
+            spacing: lengthText(Number(valueOf(option))),
+          });
+      }
+      ui.terrainStep.value = wanted;
+      const lines = !orbitOnly && isContinuousCapture(o.captureMode);
+      ui.terrainStepRow.hidden = !lines || flat;
+      ui.terrainStepNote.hidden = !lines || flat;
+      const added = state.result?.plan?.terrainPoints?.added;
+      ui.terrainStepNote.textContent = terrainPointsApply(o)
+        ? Number.isFinite(added) && !state.dirty
+          ? t(
+              '{count} terrain points added along the lines, so the height follows the ground between the line ends. They count toward the waypoint limit per file.',
+              { count: num(added) },
+            )
+          : t(
+              'Terrain points are added along the lines so the height follows the ground between the line ends. They count toward the waypoint limit per file.',
+            )
+        : t(
+            'Off: a distance or timed line is only its two end points, so the height follows the ground only at the line ends.',
+          );
+    }
     ui.ringsLabel.textContent = t('Fixed heights ({unit}, optional)', {
       unit: lengthUnit(),
     });
@@ -4048,6 +4237,20 @@ export function initDronePlan({
     ui.direction.value = String(o.direction);
     ui.tilt.value = String(o.tiltPitchDeg);
     ui.tiltOut.textContent = `${num(o.tiltPitchDeg)}°`;
+    {
+      // The shallowest grid angle depends on the aircraft's view.
+      const gridPreset = getPreset(o.presetId) ?? preset;
+      ui.gridPitch.max = String(shallowestGridPitchDeg(gridPreset));
+      o.gridPitchDeg = cleanGridPitchDeg(o.gridPitchDeg, gridPreset);
+      ui.gridPitch.value = String(o.gridPitchDeg);
+      // Same short text at every value: a longer text at -90 would resize
+      // the slider under the finger as the angle leaves -90.
+      ui.gridPitchOut.textContent = `${num(o.gridPitchDeg)}°`;
+      ui.gridPitchRow.title = t(
+        '-90 is straight down. A tilted grid looks ahead along each line. The shallowest angle for this aircraft is {deg}: any flatter and the top of the photo reaches the horizon.',
+        { deg: `${num(shallowestGridPitchDeg(gridPreset))}°` },
+      );
+    }
     const radius =
       o.orbitRadiusM ?? state.result?.plan?.options?.orbitRadiusM ?? 40;
     ui.radius.value = lengthField(radius);
@@ -4152,6 +4355,8 @@ export function initDronePlan({
     // applies to the grid patterns.
     ui.photoRow.hidden = orbit || timedMode;
     ui.tiltRow.hidden = o.pattern !== 'double';
+    ui.gridPitchRow.hidden = o.pattern !== 'grid';
+    ui.gimbalNote.hidden = orbit;
     ui.radiusRow.hidden = !orbit;
     ui.ringsRow.hidden = !orbit;
     ui.anglesRow.hidden = !orbit;
@@ -5590,7 +5795,45 @@ export function initDronePlan({
       t('Terrain range'),
       result.ground.known ? lengthText(totals.terrainRangeM) : t('unknown'),
     );
-    for (const w of warnings) {
+    const h = result.heights;
+    if (h) {
+      stat(
+        t('Height mode'),
+        h.mode === 'flat'
+          ? t('Flat (same height above takeoff)')
+          : t('Above ground (follows the terrain)'),
+      );
+      // From the finished files: what DJI Fly will show (above takeoff) and
+      // what that is above the ground under each waypoint.
+      stat(
+        t('Above ground'),
+        h.aglMinM != null
+          ? t('{min} to {max} at the waypoints', {
+              min: lengthText(h.aglMinM),
+              max: lengthText(h.aglMaxM),
+            })
+          : t('unknown (terrain not read)'),
+      );
+      if (h.relMinM != null) {
+        stat(
+          t('DJI Fly shows'),
+          t('{min} to {max} above takeoff', {
+            min: lengthText(h.relMinM),
+            max: lengthText(h.relMaxM),
+          }),
+        );
+      }
+    }
+    if (plan.terrainPoints) {
+      stat(t('Terrain points added'), num(plan.terrainPoints.added));
+    }
+    // The no-takeoff warning goes first: every height DJI Fly shows hangs on
+    // the takeoff point.
+    const ordered = [
+      ...warnings.filter((w) => w.code === 'takeoff-unset'),
+      ...warnings.filter((w) => w.code !== 'takeoff-unset'),
+    ];
+    for (const w of ordered) {
       const text = warningText(w);
       if (!text) continue;
       const tone = warningTone(w.code);
@@ -5603,6 +5846,7 @@ export function initDronePlan({
       });
       if (tone && WARNING_TONE_COLOR[tone])
         node.style.color = WARNING_TONE_COLOR[tone];
+      if (w.code === 'takeoff-unset') node.style.fontWeight = '600';
     }
     const kmz = kmzOk();
     if (!kmz.ok) {
@@ -6444,6 +6688,9 @@ export function initDronePlan({
     state.takeoff = plan.takeoff;
     // A plan saved before the camera preset existed gets the default one.
     state.options.cameraPresetId = DEFAULT_CAMERA_PRESET_ID;
+    // A plan saved before the grid gimbal existed flies straight down, not
+    // the angle left over from the plan open before it.
+    state.options.gridPitchDeg = -90;
     Object.assign(state.options, plan.options);
     state.options.captureMode = cleanCaptureMode(state.options.captureMode);
     state.options.continuousRoute = state.options.continuousRoute === true;
@@ -6469,6 +6716,10 @@ export function initDronePlan({
       plan.options.minPhotoIntervalS,
     );
     state.intervalReject = false;
+    // A plan saved before the height setting flies Above ground, as it did;
+    // never keep the last plan's mode or terrain points.
+    state.options.heightMode = cleanHeightMode(plan.options.heightMode);
+    state.options.terrainStepM = cleanTerrainStepM(plan.options.terrainStepM);
     state.options.orbitTargets = plan.orbitTargets;
     state.options.lookAtPaths = plan.lookAtPaths ?? [];
     state.orbitTargetsTouched = plan.orbitTargetsTouched;

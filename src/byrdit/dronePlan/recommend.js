@@ -267,6 +267,8 @@ export function recommend(aircraft, mode, context = {}) {
     frontOverlap: base.frontOverlap,
     sideOverlap: base.sideOverlap,
     gimbalPitchDeg: base.gimbalPitchDeg,
+    // Use Recommended puts a plain grid's gimbal back straight down.
+    gridPitchDeg: base.gimbalPitchDeg ?? -90,
     tiltPitchDeg: base.tiltPitchDeg,
     orbitHeightsM: base.orbitHeightsM ? [...base.orbitHeightsM] : null,
     orbitRingMode: base.orbitRingMode ?? null,
@@ -294,6 +296,7 @@ export const RECOMMENDED_OPTION_KEYS = Object.freeze([
   'frontOverlap',
   'sideOverlap',
   'tiltPitchDeg',
+  'gridPitchDeg',
   'orbitHeightsM',
   'orbitRingMode',
   'speedMs',

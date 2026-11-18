@@ -65,6 +65,8 @@ const KEEP = [
   'minPhotoIntervalS',
   'timedIntervalS',
   'continuousRoute',
+  'heightMode',
+  'terrainStepM',
   'orbitRadiusM',
   'obstacleHeightM',
   'orbitTargetHeightM',
