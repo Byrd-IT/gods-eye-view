@@ -21,7 +21,6 @@
   "src/byrdit/dronePlan/preview.js",
   "src/byrdit/dronePlan/screenPoint.js",
   "src/byrdit/dronePlan/terrain.js",
-  "src/byrdit/historyUi/greyPainter.js",
   "src/byrdit/historyUi/tileOutlines.js",
   "src/byrdit/navControl/navControl.js",
   "src/byrdit/skyView/horizonProfile.js",

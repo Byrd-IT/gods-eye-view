@@ -30,6 +30,7 @@ import { bindRenderer } from '../rendererOf.js';
 import { FREE_LOOK_MAX_HEIGHT_METERS } from '../../globeInView.js';
 import { createCesiumInput } from './input.js';
 import { cesiumCapabilities, createCesiumPorts } from './ports.js';
+import { greyDrawPort } from '../../byrdit/historyUi/greyPainter.js';
 import { cesiumMapEngine } from './mapEngine.js';
 import { installFreeLookHeightLimit } from './freeLookLimit.js';
 import { trimStaleSceneCommands } from './sceneCommandRelease.js';
@@ -171,7 +172,8 @@ export function createCesiumRendererPlugin({
         canvas: viewer.canvas,
         frame: ports.frame,
         globe: ports.globe,
-        draw: ports.draw,
+        // Byrd-IT (history, B12f): grey drawing for layers in history.
+        draw: greyDrawPort(ports.draw),
         camera: ports.camera,
         query: ports.query,
         input: input.port,

@@ -20,7 +20,10 @@ const tests = (file) =>
   file === 'src/layers/recentImagery/testDoubles.mjs' ||
   file === 'src/voice/voiceWorkflowHarness.mjs' ||
   file === 'src/layers/wildlifeSightings/renderPerformanceFixtures.mjs' ||
-  file === 'src/overlays/worldOverlayAllocation.worker.mjs';
+  file === 'src/overlays/worldOverlayAllocation.worker.mjs' ||
+  // Byrd-IT fork test doubles (imported by fork tests only).
+  file === 'src/byrdit/dronePlan/testDoubles.mjs' ||
+  file === 'src/byrdit/historyUi/fakeDom.mjs';
 const source = (file) =>
   file.startsWith('src/sources/') ||
   /^src\/layers\/[^/]+\/(?:source|bundledSource|flowSource)\.js$/.test(file);

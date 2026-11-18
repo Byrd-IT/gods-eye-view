@@ -69,7 +69,9 @@
       "src/render/occlusion/depthProbe.js",
       "src/data/detectionOcclusion.js",
       "src/byrdit/usgsWater.js",
-      "src/byrdit/usgsWaterCopy.js"
+      "src/byrdit/usgsWaterCopy.js",
+      "src/byrdit/cesiumViewer.js",
+      "src/render/cesium/viewers.js"
     ],
     "external": ["cesium", "kdbush"]
   },
@@ -1109,7 +1111,9 @@
       "src/geo/ellipsoid.js",
       "src/geo/horizon.js",
       "src/render/rendererOf.js",
-      "src/byrdit/liveVisibility.js"
+      "src/byrdit/liveVisibility.js",
+      "src/byrdit/cesiumViewer.js",
+      "src/render/cesium/viewers.js"
     ],
     "external": ["vue", "pinia", "vue-i18n", "cesium"]
   },
@@ -1752,7 +1756,8 @@
       "src/byrdit/layerOpacity/opacityModel.js",
       "src/byrdit/layerOpacity/opacityRow.js",
       "src/data/placeNames.js",
-      "src/layers/satellites/classes.js"
+      "src/layers/satellites/classes.js",
+      "src/byrdit/cesiumViewer.js"
     ],
     "external": [
       "cesium",
@@ -1977,7 +1982,10 @@
       "src/sources/live/vessels.js",
       "src/data/planespottersPhoto.js",
       "src/data/openVesselPhoto.js",
-      "src/byrdit/history/flightView.js"
+      "src/byrdit/history/flightView.js",
+      "src/render/rendererOf.js",
+      "src/render/cesium/viewers.js",
+      "src/byrdit/cesiumViewer.js"
     ],
     "external": []
   },
@@ -2124,7 +2132,9 @@
       "src/data/detectionOcclusion.js",
       "src/layers/flights/placed.js",
       "src/data/courseFromFixes.js",
-      "src/byrdit/history/flightView.js"
+      "src/byrdit/history/flightView.js",
+      "src/render/cesium/viewers.js",
+      "src/byrdit/cesiumViewer.js"
     ],
     "external": ["cesium", "kdbush"]
   },
@@ -2546,7 +2556,10 @@
       "src/layers/wind/streamlines.js",
       "src/layers/wind/model.js",
       "src/sky/assets.js",
-      "src/render/cesium/cardPreviews.js"
+      "src/render/cesium/cardPreviews.js",
+      "src/byrdit/historyUi/greyPainter.js",
+      "src/byrdit/googleKeyCodec.js",
+      "src/byrdit/serverKeys.js"
     ],
     "external": ["cesium", "pbf", "@mapbox/vector-tile", "kdbush"]
   },
@@ -2643,7 +2656,9 @@
       "src/render/vectorBase/style.js",
       "src/render/vectorBase/paint.js",
       "src/render/vectorBase/expressions.js",
-      "src/time/frameWait.js"
+      "src/time/frameWait.js",
+      "src/byrdit/googleKeyCodec.js",
+      "src/byrdit/serverKeys.js"
     ],
     "external": ["cesium", "pbf", "@mapbox/vector-tile", "kdbush"]
   },
@@ -3513,7 +3528,9 @@
       "src/render/vectorBase/style.js",
       "src/render/vectorBase/paint.js",
       "src/render/vectorBase/expressions.js",
-      "src/byrdit/liveVisibility.js"
+      "src/byrdit/liveVisibility.js",
+      "src/render/cesium/viewers.js",
+      "src/byrdit/cesiumViewer.js"
     ],
     "external": ["hls.js", "cesium", "pbf", "@mapbox/vector-tile", "kdbush"]
   },
@@ -5730,7 +5747,8 @@
       "src/byrdit/dronePlan/shotWaypoints.js",
       "src/byrdit/dronePlan/missionLabel.js",
       "src/byrdit/dronePlan/cheatSheet.js",
-      "src/byrdit/dronePlan/missionThumb.js"
+      "src/byrdit/dronePlan/missionThumb.js",
+      "src/byrdit/cesiumViewer.js"
     ],
     "external": [
       "hls.js",
@@ -6566,7 +6584,8 @@
       "src/byrdit/usgsWaterCopy.js",
       "src/byrdit/history/flightView.js",
       "src/layers/satellites/history.js",
-      "src/byrdit/gpCsv.js"
+      "src/byrdit/gpCsv.js",
+      "src/byrdit/cesiumViewer.js"
     ],
     "external": [
       "hls.js",
@@ -8225,7 +8244,10 @@
       "src/data/imagingSensors.js",
       "src/data/planespottersPhoto.js",
       "src/data/openVesselPhoto.js",
-      "src/byrdit/history/flightView.js"
+      "src/byrdit/history/flightView.js",
+      "src/render/rendererOf.js",
+      "src/render/cesium/viewers.js",
+      "src/byrdit/cesiumViewer.js"
     ],
     "external": ["@mapbox/vector-tile", "pbf"]
   },
@@ -8531,7 +8553,10 @@
       "src/sources/transitHistoryStore.js",
       "src/sources/transitHistory.js",
       "src/sources/rateLimit.js",
-      "src/geoDistance.js"
+      "src/geoDistance.js",
+      "src/render/rendererOf.js",
+      "src/render/cesium/viewers.js",
+      "src/byrdit/cesiumViewer.js"
     ],
     "external": []
   },
