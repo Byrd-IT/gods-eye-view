@@ -7554,17 +7554,18 @@ test('new panels, clean view and opacity reach their owners', async () => {
     set: (id, value) => { opacity.set(id, value); return true; },
     entries: () => [...opacity.entries()],
   };
+  const styleManager = {
+    setPanelCollapsed: (...args) => calls.push(args),
+    toggleCleanView: (value) => { cleanView = value; },
+    getControlState: () => ({ cleanView }),
+  };
   const runner = createGevActionRunner({
     viewer: {
       clock: { onTick: { addEventListener: () => () => {} } },
       scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
       camera: { moveEnd: { addEventListener() {} }, positionWC: Cesium.Cartesian3.fromDegrees(-97.7, 30.2, 1000) },
     },
-    styleManager: {
-      setPanelCollapsed: (...args) => calls.push(args),
-      toggleCleanView: (value) => { cleanView = value; },
-      getControlState: () => ({ cleanView }),
-    },
+    styleManager,
     dataManager: { layers: new Map(), isEnabled: () => false, getAll: () => [] },
     layerOpacity: () => {
       if (failProvider) throw new Error('secret-fixture');
@@ -7588,11 +7589,20 @@ test('new panels, clean view and opacity reach their owners', async () => {
   }
   assert.equal((await runner('set_clean_view', { enabled: true })).cleanView, true);
   assert.equal((await runner('set_clean_view', { enabled: 'false' })).ok, false);
+  delete styleManager.toggleCleanView;
+  assert.equal((await runner('set_clean_view', { enabled: false })).ok, false);
+  styleManager.toggleCleanView = () => { throw new Error('secret-fixture'); };
+  assert.equal((await runner('set_clean_view', { enabled: false })).ok, false);
+  styleManager.toggleCleanView = () => {};
+  assert.equal((await runner('set_clean_view', { enabled: false })).ok, false);
   const faded = await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 });
   assert.equal(faded.ok, true);
   assert.equal(model.get('flights'), 0.4);
   assert.equal((await runner('get_current_view_state')).layerOpacity.flights, 40);
   assert.equal((await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 101 })).ok, false);
+  model.has = () => false;
+  assert.equal((await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 })).ok, false);
+  model.has = () => true;
   delete model.get;
   const noReadback = await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 });
   assert.equal(noReadback.unavailable, true);

@@ -7,6 +7,18 @@ import { bindRenderer } from '../render/rendererOf.js';
 import { createStubRenderer } from '../render/stub/index.js';
 import { createGevActionRunner } from '../voice/gevActions.js';
 
+test('opacity readback omits absent and empty models', () => {
+  assert.equal(readLayerOpacity({ get: () => 1 }), null);
+  assert.equal(
+    readLayerOpacity({ get: () => NaN, entries: () => [['flights', 0]] }),
+    null,
+  );
+  assert.deepEqual(
+    readLayerOpacity({ get: () => 0.4, entries: () => [['flights', 0.4]] }),
+    { flights: 40 },
+  );
+});
+
 test('opacity readback fails closed without exposing adapter errors', () => {
   const model = {
     entries: () => [['flights', 0.4]],

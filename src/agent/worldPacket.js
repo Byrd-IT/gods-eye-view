@@ -107,7 +107,7 @@ export function readLayerOpacity(model) {
       if (!Number.isFinite(value)) continue;
       out[id] = Math.round(value * 100);
     }
-    return out;
+    return Object.keys(out).length ? out : null;
   } catch {
     // Read-back is optional; never expose an adapter's error to the model.
     return null;
