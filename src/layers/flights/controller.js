@@ -1,5 +1,6 @@
 import { findCamera } from '../../render/rendererOf.js';
 import { flightViewQuery } from '../../byrdit/history/flightView.js';
+import { cesiumViewerFor } from '../../byrdit/cesiumViewer.js';
 
 export function createController({
   flightState,
@@ -22,7 +23,7 @@ export function createController({
       ? {
           latitude: pose.lat,
           longitude: pose.lon,
-          ...flightViewQuery(viewer), // Byrd-IT B20: OpenSky view lease
+          ...flightViewQuery(cesiumViewerFor(viewer)), // Byrd-IT B20: OpenSky view lease
         }
       : {};
   }
