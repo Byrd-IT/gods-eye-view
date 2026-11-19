@@ -7,7 +7,32 @@ import { bindRenderer } from '../render/rendererOf.js';
 import { createStubRenderer } from '../render/stub/index.js';
 import { CCTV_FOCUS_RESULT } from '../layers/cctv/policy.js';
 import { createSkyVoice } from '../byrdit/skyView/skyVoice.js';
+import { createHistoryVoice } from '../byrdit/historyUi/historyVoice.js';
 import { readHostViewState } from '../agent/worldPacket.js';
+
+test('History preset suppresses untrusted owner state', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const state = {
+    active: true,
+    preset: '1h',
+    timeMs: Date.now(),
+    rate: secret,
+  };
+  const voice = createHistoryVoice({
+    getHandle: () => ({ setPreset() {}, getState: () => state }),
+    getRouter: () => ({
+      adapters: [],
+      getState: () => ({ swapped: [secret] }),
+    }),
+  });
+  const { runner } = harness({ adapters: { history: () => voice } });
+  const result = await runner('control_history', {
+    action: 'preset',
+    preset: '1h',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
 
 test('Sky satellite magnitude suppresses an untrusted filter state', async () => {
   const secret = `SYNTHETIC_${crypto.randomUUID()}`;

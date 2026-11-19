@@ -105,6 +105,32 @@ export function createHistoryVoice({
   };
 
   const done = (extra = {}) => ({ ok: true, ...snapshot(), ...extra });
+  const doneControl = (extra = {}) => {
+    const state = snapshot();
+    const allowedFeeds = new Set([
+      'flights',
+      'military',
+      'ais-live-vessels',
+      'earthquakes',
+      'local-firms',
+      'fire-perimeters',
+      'weather-cyclones',
+      'rocket-launches',
+      'transit',
+      'bikeshare',
+      'wind',
+      'air-quality',
+      'gnss-integrity',
+      'local-usgs-water',
+    ]);
+    return {
+      ok: true,
+      ...state,
+      rate: Number.isFinite(state.rate) ? state.rate : null,
+      playingFeeds: state.playingFeeds.filter((id) => allowedFeeds.has(id)),
+      ...extra,
+    };
+  };
 
   return {
     feedLayerIds: () => (getRouter?.()?.adapters ?? []).map((a) => a.layerId),
@@ -175,7 +201,7 @@ export function createHistoryVoice({
       if (typeof h.setPreset !== 'function') return unavailable();
       h.setPreset(id);
       return h.getState().preset === id
-        ? done({ preset: id })
+        ? doneControl({ preset: id })
         : fail('History preset did not change');
     },
     expand(expanded) {
@@ -185,7 +211,7 @@ export function createHistoryVoice({
         return fail('expanded must be true or false');
       h.expand(expanded);
       return h.getState().expanded === expanded
-        ? done({ expanded })
+        ? doneControl({ expanded })
         : fail('History panel did not change');
     },
     lock(row, locked) {
@@ -209,7 +235,7 @@ export function createHistoryVoice({
         );
       clocks.setLocked(row, locked);
       return clocks.isLocked(row) === locked
-        ? done({ historyRow: row, locked })
+        ? doneControl({ historyRow: row, locked })
         : fail('History lock did not change');
     },
     live() {
