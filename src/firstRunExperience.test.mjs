@@ -1098,10 +1098,11 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // gains the timedIntervalS option (Timed-shot interval, seconds, no floor).
   // Re-pinned again for Mapping Grid (Timed) (40789 -> 40810, +21): the
   // control_droneplan mode enum gains mapping-grid-timed.
-  assert.equal(block.length, 38944, 'serialized tool schema length drifted');
+  // Imagery, Sky and History wiring plus prompt compaction changes this payload.
+  assert.equal(block.length, 40600, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '548b2013dc645559dc7012b77155283a0d97127a6c36a32a74a5c03df8bc5ba9',
+    '4922e9a51edaaa587209d6d30c3b707e659c2d4716a56447d737aebd3e0b1fbb',
     'serialized legacy-filtered tool schema drifted',
   );
   const instructions = fs.readFileSync(

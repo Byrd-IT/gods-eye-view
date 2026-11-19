@@ -129,7 +129,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // set_panel_open targets, and the view-state description now names layer
     // opacity. The digest removes those additions and navigation/solunar tools,
     // but changes for the shortened drone description; re-pinned accordingly.
-    '149a41bd259c85c63dd70c46aeec3bb747d41927cbbc1108221aa4f70ae2bf58',
+    // Imagery/Sky/History extensions and prompt compaction re-pin this payload.
+    'cccaae72d5ee198794c62719806f0586e7084fb4efb7c004557b98bcc524518f',
   );
 });
 
@@ -460,7 +461,8 @@ test('the complete current Realtime tool inventory is pinned', () => {
       .digest('hex'),
     // Re-pinned for navigation and solunar voice and the deliberately
     // shortened descriptions needed to keep the prompt within budget.
-    'ce7fd130da70825f6672dfd2c05b846c43ba74efba33ea8ffc9dd7be99b12b2e',
+    // Re-pinned again for Imagery/Sky/History and prompt compaction.
+    'e8ae4bc5258870495c31bd845333495731a3819922a55f402289d86e5b007a09',
   );
 });
 

@@ -206,7 +206,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   get_current_view_state: {
     description:
-      'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, layer state and layer opacity before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.',
+      'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, layer state, layer opacity, Sky, History playback and Drone plan state before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.',
     $position: 1,
   },
   set_hud: {
@@ -618,7 +618,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   analyst_query: {
     description:
-      'Counts, lists, superlatives and attribute filters over records loaded by ENABLED layers — "how many flights over Texas", "biggest fire near LA", "ships headed to Oakland", "next rocket launch". complete:false means the count is a floor ("at least") and rankings cover the records examined; partial names unanswered layers. Items carry lat/lon for a follow-up fly_to_location. ok:false codes: LAYER_OFF (offer to enable), NOT_READY (loading), NEEDS_CLARIFICATION (ask which), FOLLOW_UP_MISMATCH (ask again without followUp), UNKNOWN_FIELD/UNKNOWN_SCOPE/BAD_VALUE (retry with the allowed values). Aircraft emergency fields describe broadcasts, not confirmed incidents: narrate emergencyBroadcast with emergencySource. emergencyKind values are general, unlawful, nordo, downed, minfuel and lifeguard; GEV treats the last two as priorities (emergency:false). lastContactAtMs says when the transponder was last heard, not when the status arrived.',
+      'Query ENABLED layer records for counts, lists, rankings and filters. complete:false means at least count, ranking only examined records; partial names unanswered layers. Items have lat/lon. LAYER_OFF: offer enable; NOT_READY: loading; NEEDS_CLARIFICATION: ask; FOLLOW_UP_MISMATCH: retry without followUp; UNKNOWN_FIELD/UNKNOWN_SCOPE/BAD_VALUE: retry allowed values. Aircraft emergencies are broadcasts, not confirmed incidents: say emergencyBroadcast and emergencySource. emergencyKind: general, unlawful, nordo, downed, minfuel, lifeguard; last two are priorities (emergency:false). lastContactAtMs is last transponder contact, not status arrival.',
     $position: 1,
     parameters: {
       properties: {
@@ -629,7 +629,7 @@ export const ACTION_DESCRIPTIONS = {
         },
         scope: {
           description:
-            'Always set it (see WHERE). Explicit "in view" uses view; "nearby" uses view when Contacts is off. Around the active Contacts subject uses radius with the requested km and center omitted, never view. pointer = "around here/this" while pointing (radius at the cursor); region = "over Texas"; radius with center {lat, lon} = "near <place>" or explicit coordinates; anywhere = no place ("biggest anywhere", "today"); area + areaId from resolve_area; drawn = "the area I drew"; annotation = "the area you outlined".',
+            'Always set (see WHERE). "in view" = view; "nearby" = view when Contacts is off. Active Contacts subject: radius with requested km, omit center, never view. While pointing, "around here/this" = pointer; "over Texas" = region; "near <place>" or coordinates = radius with center {lat,lon}; no place = anywhere; area uses resolve_area areaId; "the area I drew" = drawn; "the area you outlined" = annotation.',
           $position: 2,
           properties: {
             name: {
@@ -697,13 +697,13 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_history: {
     description:
-      'History playback of the recorded globe (up to two years back): jump to a past time or date, play, pause, change speed, return to live, choose which feeds play, or read status. Jump opens History when the globe is live. Say the resulting state, not the request.',
+      'History: jump to the 1957-10-04 floor (coverage varies), play, pause, speed, live, feeds, preset, expand or lock rows. Say the resulting state.',
     $position: 1,
     parameters: {
       properties: {
         action: {
           description:
-            'jump needs time or minutesAgo; speed needs rate; feeds needs feeds. live leaves History. play and pause need History open (jump first).',
+            'jump needs time or minutesAgo; speed needs rate; feeds needs feeds. preset needs preset; expand needs expanded; lock needs historyRow and locked. live leaves History; play and pause need History open.',
           $position: 2,
         },
         time: {
@@ -711,10 +711,20 @@ export const ACTION_DESCRIPTIONS = {
             'For jump: ISO 8601 date-time WITH a zone, e.g. 2026-03-04T15:30:00Z or 2026-03-04T09:30:00-06:00. Convert the spoken local time first; a date alone means 00:00 UTC.',
           $position: 1,
         },
+        preset: { description: 'History window preset.', $position: 2 },
+        expanded: { description: 'Whether History is expanded.', $position: 1 },
+        locked: {
+          description: 'Whether the row follows History.',
+          $position: 1,
+        },
+        historyRow: {
+          description: 'History row id, not feed id.',
+          $position: 2,
+        },
         minutesAgo: {
           description:
             'For jump: relative time instead of time (\"an hour ago\" = 60, \"yesterday\" = 1440).',
-          $position: 3,
+          $position: 2,
         },
         rate: {
           description:
@@ -736,14 +746,36 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_sky: {
     description:
-      'Sky view: open or close it, look at a named planet, the ISS or a constellation, set the time of night, turn constellation lines on or off, or jump to a preset. Open uses the map centre. look at the ISS is look, not preset; preset iss is the next ISS pass. Say the resulting state, not the request.',
+      'Sky: open/close, look, time/live, lines, preset, playback, layers, magnitude, location, clear, status. Open uses map centre; ISS look differs from next-pass preset. Confirm state.',
     $position: 1,
     parameters: {
       properties: {
         action: {
           description:
-            'open, close, look (needs target), time (needs time or live), lines (needs enabled), preset (needs preset), or status.',
+            'open, close, look, time, lines, preset, status, play, pause, speed (rate), step (stepMs), reverse, layers (layer and enabled), magnitude, location (latitude and longitude), or clear (enabled).',
           $position: 2,
+        },
+        rate: { description: 'Sky playback seconds per second.', $position: 2 },
+        stepMs: {
+          description: 'Signed clock step in milliseconds.',
+          $position: 2,
+        },
+        layer: { description: 'Sky layer switch.', $position: 2 },
+        magnitude: {
+          description: 'Faintest limit: stars 3-6.5; satellites 3-7.',
+          $position: 3,
+        },
+        magnitudeTarget: {
+          description: 'Stars (default) or satellites.',
+          $position: 2,
+        },
+        latitude: {
+          description: 'Observer latitude in degrees.',
+          $position: 3,
+        },
+        longitude: {
+          description: 'Observer longitude in degrees.',
+          $position: 3,
         },
         target: {
           description:
@@ -761,8 +793,7 @@ export const ACTION_DESCRIPTIONS = {
           $position: 1,
         },
         enabled: {
-          description:
-            'For lines: true shows constellation lines, false hides them.',
+          description: 'For lines, layers or clear: true on, false off.',
           $position: 1,
         },
         preset: {
@@ -775,14 +806,35 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_imagery: {
     description:
-      'Aerial imagery by year: NAIP and historic or colour county sets. year uses the live catalog; county optionally frames a county. wayback is only for Esri Wayback, not NAIP.',
+      'Imagery: aerial year/compare/yearB, Wayback date and playback, latest/step, Recent Imagery mode/opacity/swap, off or status. Only claim imagery is visible when drawn or shown is true.',
     $position: 1,
     parameters: {
       properties: {
         action: {
           description:
-            'year (needs year; county optional), wayback (needs date), off (target aerial, wayback, or both; default aerial), or status.',
+            'year, wayback, off, status, compare (enabled, optional yearB), yearB, latest, step (delta), play, pause, speed (rate 1/2/4), mode (0 image, 1 basemap, 2 A/B), opacity (0-100), swap.',
           $position: 2,
+        },
+        yearB: { description: 'Aerial comparison year.', $position: 3 },
+        enabled: {
+          description: 'Turn aerial comparison on or off.',
+          $position: 1,
+        },
+        delta: {
+          description: 'Signed number of aerial or Wayback steps.',
+          $position: 1,
+        },
+        rate: {
+          description: 'Wayback playback speed 1, 2 or 4.',
+          $position: 2,
+        },
+        mode: {
+          description: 'Recent Imagery mode: 0 image, 1 basemap, 2 A/B.',
+          $position: 2,
+        },
+        opacityPct: {
+          description: 'Recent Imagery opacity percent.',
+          $position: 3,
         },
         year: {
           description:
@@ -801,7 +853,7 @@ export const ACTION_DESCRIPTIONS = {
         },
         target: {
           description:
-            'For off: aerial (the year overlay), wayback, or both. Default aerial.',
+            'For off: aerial, wayback or both; for latest/step: aerial or wayback. Default aerial.',
           $position: 1,
         },
       },

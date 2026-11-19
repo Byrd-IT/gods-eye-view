@@ -80,6 +80,9 @@ test('the tool schema names exactly the history feed layers, all voice-toggleabl
     'live',
     'status',
     'feeds',
+    'preset',
+    'expand',
+    'lock',
   ]);
   assert.deepEqual(tool.parameters.required, ['action']);
   assert.equal(tool.parameters.additionalProperties, false);
@@ -138,11 +141,11 @@ test('control_history actions are case-insensitive; an unknown action throws lik
   );
   await assert.rejects(
     () => h.runner('control_history', { action: 'rewind' }),
-    /Unknown history action: rewind/,
+    /Unknown history action/,
   );
   await assert.rejects(
     () => h.runner('control_history', {}),
-    /Unknown history action: missing/,
+    /Unknown history action/,
   );
 });
 
@@ -226,7 +229,7 @@ test('feeds refuse a layer that has no history, an empty list and a bad mode, ch
     feeds: ['flights', 'cctv'],
   });
   assert.equal(notFeed.ok, false);
-  assert.match(notFeed.error, /Not a History feed: cctv/);
+  assert.match(notFeed.error, /Not a History feed/);
   assert.deepEqual(notFeed.feedLayers, FEEDS);
   const empty = await h.runner('control_history', {
     action: 'feeds',

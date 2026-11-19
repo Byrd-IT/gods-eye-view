@@ -20,7 +20,7 @@
  * It adds no state of its own and never throws: an unusable request answers
  * {ok:false, error} so the model can say why.
  */
-import { RATES, HISTORY_FLOOR_MS } from './historyTimeline.js';
+import { RATES, HISTORY_FLOOR_MS, PRESETS } from './historyTimeline.js';
 
 export const HISTORY_VOICE_ACTIONS = Object.freeze([
   'jump',
@@ -30,6 +30,9 @@ export const HISTORY_VOICE_ACTIONS = Object.freeze([
   'live',
   'status',
   'feeds',
+  'preset',
+  'expand',
+  'lock',
 ]);
 
 const ZONE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
@@ -70,6 +73,7 @@ export function parseJumpTime(value, now) {
 export function createHistoryVoice({
   getHandle,
   getRouter = () => null,
+  getClocks = () => null,
   now = () => Date.now(),
 }) {
   const handle = () => {
@@ -120,16 +124,14 @@ export function createHistoryVoice({
         const minutes = Number(minutesAgo);
         if (!Number.isFinite(minutes) || minutes < 0)
           return fail('minutesAgo must be a number of minutes, zero or more');
-        ms =
-          t -
-          Math.min(minutes, Math.floor((t - HISTORY_FLOOR_MS) / 60_000)) *
-            60_000;
+        ms = t - minutes * 60_000;
       } else return fail('jump needs time (ISO 8601) or minutesAgo');
       const earliest = HISTORY_FLOOR_MS;
       const clamped = ms > t ? 'future' : ms < earliest ? 'past' : null;
-      h.seek(Math.min(t, Math.max(earliest, ms)), { snap: true });
+      const target = Math.min(t, Math.max(earliest, ms));
+      h.seek(target, { snap: true });
       return done({
-        requested: new Date(ms).toISOString(),
+        requested: new Date(target).toISOString(),
         ...(clamped ? { clamped } : {}),
       });
     },
@@ -164,6 +166,51 @@ export function createHistoryVoice({
         });
       h.setRate(n);
       return done();
+    },
+    preset(id) {
+      const h = handle();
+      if (!h) return unavailable();
+      if (!PRESETS.some((entry) => entry.id === id))
+        return fail('Unknown History window preset');
+      if (typeof h.setPreset !== 'function') return unavailable();
+      h.setPreset(id);
+      return h.getState().preset === id
+        ? done({ preset: id })
+        : fail('History preset did not change');
+    },
+    expand(expanded) {
+      const h = handle();
+      if (!h || typeof h.expand !== 'function') return unavailable();
+      if (typeof expanded !== 'boolean')
+        return fail('expanded must be true or false');
+      h.expand(expanded);
+      return h.getState().expanded === expanded
+        ? done({ expanded })
+        : fail('History panel did not change');
+    },
+    lock(row, locked) {
+      const h = handle();
+      if (!h) return unavailable();
+      const clocks = getClocks?.();
+      if (
+        !clocks ||
+        typeof clocks.row !== 'function' ||
+        typeof clocks.setLocked !== 'function' ||
+        typeof clocks.isLocked !== 'function'
+      )
+        return unavailable();
+      if (
+        typeof locked !== 'boolean' ||
+        typeof row !== 'string' ||
+        !clocks.row(row)
+      )
+        return fail(
+          'A valid History row and locked true or false are required',
+        );
+      clocks.setLocked(row, locked);
+      return clocks.isLocked(row) === locked
+        ? done({ historyRow: row, locked })
+        : fail('History lock did not change');
     },
     live() {
       const h = handle();

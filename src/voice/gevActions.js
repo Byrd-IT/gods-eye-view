@@ -83,6 +83,7 @@ import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
 import {
   getWorldPacket,
+  readHostViewState,
   withContextModeVocabulary,
   activeContactsWindow,
   TRACKABLE_FAMILIES,
@@ -349,6 +350,11 @@ export function createGevActionRunner({
   // app passes it as a function returning the adapter, or the adapter
   // itself; null when the host has no map overlays.
   overlays = null,
+  // The map stack controller (src/mapStackController.js). The app passes it
+  // as a function returning the controller, or the controller itself; null
+  // when the host has no map stack. Its own state answers whether the
+  // automatic basemap switch owns the stack.
+  mapStack = null,
   // The app's per-layer opacity model (src/byrdit/layerOpacity). A function
   // returning the model, or the model itself; null when the host has none.
   layerOpacity = null,
@@ -1632,12 +1638,24 @@ export function createGevActionRunner({
     }
 
     if (name === 'get_current_view_state') {
+      // The host's own handles read their state for the packet: Sky,
+      // History playback, the Drone Flight Plan, the imagery year and the
+      // map stack's automatic mode. A handle that is absent or that fails
+      // contributes nothing, and the read changes nothing.
+      const hostState = await readHostViewState({
+        sky,
+        history,
+        dronePlan,
+        imagery,
+        mapStack,
+      });
       return getCurrentViewState(
         viewer,
         styleManager,
         dataManager,
         sceneDirector,
         opacityModel(),
+        hostState,
       );
     }
 
@@ -1738,7 +1756,7 @@ export function createGevActionRunner({
     }
 
     if (name === 'control_imagery') {
-      return controlImagery(imagery?.(), args);
+      return controlImagery(imagery?.(), args, dataManager);
     }
 
     if (name === 'control_droneplan') {
@@ -2217,6 +2235,14 @@ async function controlHistory(voice, args = {}, setLayer) {
   if (action === 'play') return wrap(voice.play());
   if (action === 'pause') return wrap(voice.pause());
   if (action === 'speed') return wrap(voice.speed(args.rate));
+  if (action === 'preset')
+    return wrap(await safeAdapterCall(voice, 'preset', args.preset));
+  if (action === 'expand')
+    return wrap(await safeAdapterCall(voice, 'expand', args.expanded));
+  if (action === 'lock')
+    return wrap(
+      await safeAdapterCall(voice, 'lock', args.historyRow, args.locked),
+    );
   if (action === 'live') return wrap(voice.live());
   if (action === 'feeds') {
     const known = voice.feedLayerIds();
@@ -2230,7 +2256,7 @@ async function controlHistory(voice, args = {}, setLayer) {
       if (!id || !known.includes(id))
         return wrap({
           ok: false,
-          error: `Not a History feed: ${String(raw).slice(0, 40)}`,
+          error: 'Not a History feed',
           feedLayers: known,
         });
       if (!wanted.includes(id)) wanted.push(id);
@@ -2254,12 +2280,12 @@ async function controlHistory(voice, args = {}, setLayer) {
       try {
         r = await setLayer(layerId, enabled);
       } catch (error) {
-        r = { ok: false, error: error?.message };
+        r = { ok: false };
       }
       // switching off an unregistered / already-off layer is not an error
       if (r?.ok) changed.push({ layerId, enabled });
       else if (enabled || wanted.includes(layerId))
-        failed.push({ layerId, error: r?.error || 'failed' });
+        failed.push({ layerId, error: 'failed' });
     }
     // History's own state first: the feed outcome must win ok / mode
     const { ok: _ok, error: _error, ...state } = voice.status();
@@ -2271,7 +2297,20 @@ async function controlHistory(voice, args = {}, setLayer) {
       ...(failed.length ? { failed } : {}),
     });
   }
-  throw new Error(`Unknown history action: ${args.action || 'missing'}`);
+  throw new Error('Unknown history action');
+}
+
+async function safeAdapterCall(voice, method, ...args) {
+  try {
+    if (typeof voice?.[method] !== 'function')
+      return { ok: false, error: 'Control unavailable' };
+    const result = await voice[method](...args);
+    return result && typeof result === 'object'
+      ? result
+      : { ok: false, error: 'Control unavailable' };
+  } catch {
+    return { ok: false, error: 'Control failed' };
+  }
 }
 
 async function controlWidget(name, provider, args, actions) {
@@ -2468,33 +2507,121 @@ async function controlSky(voice, args = {}) {
   if (action === 'time')
     return wrap(await voice.time({ time: args.time, live: args.live }));
   if (action === 'lines') return wrap(await voice.lines(args.enabled));
+  if (['play', 'pause', 'speed', 'step', 'reverse'].includes(action))
+    return wrap(
+      await safeAdapterCall(
+        voice,
+        'playback',
+        action,
+        action === 'speed' ? args.rate : args.stepMs,
+      ),
+    );
+  if (action === 'layers')
+    return wrap(
+      await safeAdapterCall(voice, 'layers', args.layer, args.enabled),
+    );
+  if (action === 'magnitude')
+    return wrap(
+      await safeAdapterCall(
+        voice,
+        'magnitude',
+        args.magnitude,
+        args.magnitudeTarget,
+      ),
+    );
+  if (action === 'location')
+    return wrap(
+      await safeAdapterCall(voice, 'location', args.latitude, args.longitude),
+    );
+  if (action === 'clear')
+    return wrap(await safeAdapterCall(voice, 'clear', args.enabled));
   if (action === 'preset') return wrap(await voice.preset(args.preset));
-  // A token that is not a short word is not repeated: the model may have
-  // put a secret in the action field.
-  const token = /^[a-z]{1,20}$/.test(action) ? action : 'missing';
-  throw new Error(`Unknown sky action: ${token}`);
+  throw new Error('Unknown sky action');
 }
 
 /**
  * Voice aerial-year control (year / wayback / off / status) over the imagery
  * voice adapter (imageryVoice.js, handed in as `imagery`).
  */
-async function controlImagery(voice, args = {}) {
+async function controlImagery(voice, args = {}, dataManager = null) {
   const action = String(args.action || '').toLowerCase();
   const wrap = (result) => ({ action: 'control_imagery', ...result });
+  if (['mode', 'opacity', 'swap'].includes(action)) {
+    try {
+      const layer = dataManager?.layers?.get('recent-imagery')?.module;
+      if (!layer || typeof layer.getSnapshot !== 'function')
+        return wrap({ ok: false, error: 'Recent Imagery is unavailable' });
+      if (action === 'mode') {
+        if (
+          ![0, 1, 2].includes(args.mode) ||
+          typeof layer.setMode !== 'function'
+        )
+          return wrap({ ok: false, error: 'mode must be 0, 1 or 2' });
+        layer.setMode(args.mode);
+        const observed = layer.getSnapshot()?.mode;
+        const mode = ['image', 'basemap', 'ab'].includes(observed)
+          ? observed
+          : null;
+        return wrap({
+          ok: mode === ['image', 'basemap', 'ab'][args.mode],
+          mode,
+        });
+      }
+      if (action === 'opacity') {
+        if (
+          !Number.isInteger(args.opacityPct) ||
+          args.opacityPct < 0 ||
+          args.opacityPct > 100 ||
+          typeof layer.setAlpha !== 'function'
+        )
+          return wrap({ ok: false, error: 'opacityPct must be 0 to 100' });
+        layer.setAlpha(args.opacityPct / 100);
+        const alpha = layer.getSnapshot()?.alpha;
+        return wrap({
+          ok: alpha === args.opacityPct / 100,
+          opacityPct: Number.isFinite(alpha) ? alpha * 100 : null,
+        });
+      }
+      return layer.swapSides?.()
+        ? wrap({ ok: true, swapped: Boolean(layer.getSnapshot()?.swapped) })
+        : wrap({ ok: false, error: 'No live imagery swipe to swap' });
+    } catch {
+      return wrap({ ok: false, error: 'Recent Imagery control failed' });
+    }
+  }
   if (!voice)
     return wrap({
       ok: false,
       error: 'Aerial imagery is not available in this host',
     });
   if (action === 'status') return wrap(await voice.status());
+  if (action === 'compare')
+    return wrap(
+      await safeAdapterCall(voice, 'compare', {
+        enabled: args.enabled,
+        yearB: args.yearB,
+      }),
+    );
+  if (action === 'yearb')
+    return wrap(await safeAdapterCall(voice, 'yearB', { yearB: args.yearB }));
+  if (action === 'latest' || action === 'step')
+    return wrap(
+      await safeAdapterCall(voice, 'move', {
+        target: args.target,
+        latest: action === 'latest',
+        delta: args.delta,
+      }),
+    );
+  if (['play', 'pause', 'speed'].includes(action))
+    return wrap(
+      await safeAdapterCall(voice, 'transport', { action, rate: args.rate }),
+    );
   if (action === 'year')
     return wrap(await voice.year({ year: args.year, county: args.county }));
   if (action === 'wayback')
     return wrap(await voice.wayback({ date: args.date }));
   if (action === 'off') return wrap(await voice.off({ target: args.target }));
-  const token = /^[a-z]{1,20}$/.test(action) ? action : 'missing';
-  throw new Error(`Unknown imagery action: ${token}`);
+  throw new Error('Unknown imagery action');
 }
 
 /**
@@ -2574,9 +2701,10 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
 
   const summarize = () => {
     const ui = cctv.getUIState?.() || {};
+    const active = ui.activeCamera || null;
     return {
       activeCameraId: ui.activeCameraId || null,
-      activeCamera: ui.activeCamera?.name || ui.activeCamera?.id || null,
+      activeCamera: active?.name || active?.id || null,
       // `count`, not `cameras.length`: reading `cameras` builds every camera.
       cameraCount: Number.isFinite(ui.count) ? ui.count : 0,
       showCoverage: !!ui.showCoverage,
@@ -2584,6 +2712,17 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
       showProjection: !!ui.showProjection,
       calibrationMode: !!ui.calibrationMode,
       autoHop: !!ui.autoHop,
+      // What kind of feed the camera carries, and whether it has a public
+      // feed at all: a location-only camera (feed type 'none') shows no
+      // picture. The feed type is the camera's own configuration — it is
+      // never a claim that the feed is live.
+      feedType: ['none', 'image', 'mjpeg', 'mp4', 'hls', 'webm'].includes(
+        active?.feedType,
+      )
+        ? active.feedType
+        : null,
+      noFeed:
+        active && typeof active.noFeed === 'boolean' ? active.noFeed : null,
     };
   };
 
@@ -5150,6 +5289,7 @@ function getCurrentViewState(
   dataManager,
   sceneDirector = null,
   layerOpacity = null,
+  hostState = null,
 ) {
   return getWorldPacket({
     viewer,
@@ -5157,6 +5297,13 @@ function getCurrentViewState(
     dataManager,
     sceneDirector,
     layerOpacity,
+    // The compact sections the host's handles reported. Each is null when
+    // its owner could not answer, and then the packet says nothing about it.
+    sky: hostState?.sky ?? null,
+    historyPlayback: hostState?.historyPlayback ?? null,
+    dronePlan: hostState?.dronePlan ?? null,
+    imagery: hostState?.imagery ?? null,
+    mapStackAuto: hostState?.mapStackAuto ?? null,
   });
 }
 

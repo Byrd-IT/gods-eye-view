@@ -457,6 +457,9 @@ export async function attachWayback({
     enable: api.enable,
     disable: api.disable,
     setIndex: api.setIndex,
+    latest: api.latest,
+    step: api.step,
+    transport: () => panel?.controls?.slider ?? null,
     settleNow: api.settleNow,
     state: api.state,
     catalog: () =>

@@ -1537,8 +1537,46 @@ export class StyleManager extends ShellFacade {
    * agent confirms from the same state it acted on.
    * @returns {object} Current style/stack/HUD/detection/post-processing state.
    */
+  setLayerOpacityModel(model) {
+    this._layerOpacityModel = model;
+  }
+
   getControlState() {
+    let stackState = null;
+    let aerial = null;
+    const opacity = {};
+    try {
+      stackState = this.mapStackController?.getState?.();
+    } catch {
+      /* unavailable */
+    }
+    const autoMode = stackState?.autoMode;
+    const win = this.viewer?.container?.ownerDocument?.defaultView;
+    try {
+      aerial = win?.__gevNaip?.state?.();
+    } catch {
+      /* unavailable */
+    }
+    try {
+      for (const [id, value] of this._layerOpacityModel?.entries?.() ?? []) {
+        if (
+          typeof id === 'string' &&
+          /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) &&
+          Number.isFinite(value)
+        )
+          opacity[id] = Math.round(value * 100);
+      }
+    } catch {
+      /* unavailable */
+    }
     return {
+      ...(typeof autoMode === 'string'
+        ? { mapStackAuto: autoMode === 'auto' }
+        : {}),
+      ...(aerial && Array.isArray(aerial.ticks)
+        ? { imageryYear: aerial.year ?? null, imageryYears: [...aerial.ticks] }
+        : {}),
+      ...(Object.keys(opacity).length ? { layerOpacity: opacity } : {}),
       style: this.activeStyle || 'normal',
       mapStack: this.mapStackController?.getActiveId?.() || null,
       hud: {

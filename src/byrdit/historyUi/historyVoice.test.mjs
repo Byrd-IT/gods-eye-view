@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { mountHistoryControl } from './historyControl.js';
 import { createHistoryVoice, parseJumpTime } from './historyVoice.js';
 import { ALL_HISTORY_ADAPTERS } from './historyEventAdapters.js';
-import { DAY_MS, HOUR_MS } from './historyTimeline.js';
+import { DAY_MS, HOUR_MS, HISTORY_FLOOR_MS } from './historyTimeline.js';
+import { createLayerClocks } from './layerClocks.js';
 import { fixtureFetch, fixtureWorld } from './fixtures/b11Coverage.mjs';
 import { fakeClock, fakeDocument, fakeWindow } from './fakeDom.mjs';
 
 const NOW = Date.parse('2026-10-14T16:00:00Z');
-const HREF = 'https://gev.example/?sv=29.76,-95.37,180,45,60#lat=29.7&lon=-95.3&l=abc';
+const HREF =
+  'https://gev.example/?sv=29.76,-95.37,180,45,60#lat=29.7&lon=-95.3&l=abc';
 
 function setup({ swapped = [] } = {}) {
   const clock = fakeClock(NOW);
@@ -32,10 +34,44 @@ function setup({ swapped = [] } = {}) {
   return { clock, control, voice, router };
 }
 
+test('History voice preset, expansion, row lock and record-floor jump reach real owners', () => {
+  const { control, clock } = setup();
+  const clocks = createLayerClocks({
+    rows: [{ id: 'flights', label: 'Flights', adapterIds: ['flights'] }],
+    now: clock.now,
+  });
+  const voice = createHistoryVoice({
+    getHandle: () => control,
+    getClocks: () => clocks,
+    now: clock.now,
+  });
+  assert.equal(voice.preset('90d').preset, '90d');
+  assert.equal(control.getState().preset, '90d');
+  assert.equal(voice.expand(true).expanded, true);
+  assert.equal(control.getState().expanded, true);
+  assert.equal(voice.lock('flights', false).locked, false);
+  assert.equal(clocks.isLocked('flights'), false);
+  assert.equal(voice.lock('missing', true).ok, false);
+  const jump = voice.jump({
+    minutesAgo: (NOW - HISTORY_FLOOR_MS) / 60_000 + 10,
+  });
+  assert.equal(jump.requested, new Date(HISTORY_FLOOR_MS).toISOString());
+  control.destroy();
+});
+
 test('parseJumpTime: ISO with a zone, a bare date is UTC, a zoneless time is refused', () => {
-  assert.equal(parseJumpTime('2026-03-04T15:30:00Z').ms, Date.parse('2026-03-04T15:30:00Z'));
-  assert.equal(parseJumpTime('2026-03-04T09:30:00-06:00').ms, Date.parse('2026-03-04T15:30:00Z'));
-  assert.equal(parseJumpTime('2026-03-04').ms, Date.parse('2026-03-04T00:00:00Z'));
+  assert.equal(
+    parseJumpTime('2026-03-04T15:30:00Z').ms,
+    Date.parse('2026-03-04T15:30:00Z'),
+  );
+  assert.equal(
+    parseJumpTime('2026-03-04T09:30:00-06:00').ms,
+    Date.parse('2026-03-04T15:30:00Z'),
+  );
+  assert.equal(
+    parseJumpTime('2026-03-04').ms,
+    Date.parse('2026-03-04T00:00:00Z'),
+  );
   assert.match(parseJumpTime('2026-03-04T09:30:00').error, /zone/);
   assert.match(parseJumpTime('yesterday at 3').error, /ISO 8601/);
   assert.match(parseJumpTime('').error, /ISO 8601/);
@@ -75,7 +111,11 @@ test('jump: refuses bad input, clamps the future and the far past', () => {
   assert.equal(h.voice.jump({ time: '2026-10-10T12:00:00' }).ok, false);
   assert.equal(h.voice.jump({ minutesAgo: -5 }).ok, false);
   assert.equal(h.voice.jump({ minutesAgo: 'soon' }).ok, false);
-  assert.equal(h.control.getState().mode, 'live', 'a refused jump never opens History');
+  assert.equal(
+    h.control.getState().mode,
+    'live',
+    'a refused jump never opens History',
+  );
   const future = h.voice.jump({ time: '2027-01-01T00:00:00Z' });
   assert.equal(future.ok, true);
   assert.equal(future.clamped, 'future');
@@ -120,12 +160,20 @@ test('speed: only the control rates, 1 / 10 / 60 / 600', () => {
     assert.equal(r.ok, true);
     assert.equal(r.rate, rate);
   }
-  assert.equal(h.voice.speed('60').rate, 60, 'a numeric string is the same rate');
+  assert.equal(
+    h.voice.speed('60').rate,
+    60,
+    'a numeric string is the same rate',
+  );
   const bad = h.voice.speed(5);
   assert.equal(bad.ok, false);
   assert.deepEqual(bad.allowed, [1, 10, 60, 600]);
   assert.equal(h.voice.speed(undefined).ok, false);
-  assert.equal(h.control.getState().rate, 60, 'a refused speed changes nothing');
+  assert.equal(
+    h.control.getState().rate,
+    60,
+    'a refused speed changes nothing',
+  );
   h.control.destroy();
 });
 

@@ -107,7 +107,7 @@ test('a missing imagery host and an unknown action do not echo caller text', asy
   await assert.rejects(
     () => runner('control_imagery', { action: SECRET }),
     (error) => {
-      assert.match(error.message, /Unknown imagery action: missing/);
+      assert.match(error.message, /Unknown imagery action/);
       assert.equal(error.message.includes('sk-synth'), false);
       assert.equal(error.message.includes('Bearer'), false);
       return true;

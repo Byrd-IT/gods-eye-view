@@ -9,6 +9,8 @@ import {
 } from './skyView.js';
 import { worldDirectionToAzEl } from './skyCamera.js';
 import { createObserver } from './observer.js';
+import { createSkyVoice } from './skyVoice.js';
+import { LAYER_SWITCHES } from './skyContent.js';
 import { readFileSync } from 'node:fs';
 import { createSatWorkerHandler } from './satWorker.js';
 import { isNakedEyeCandidate } from './brightness.js';
@@ -267,6 +269,26 @@ function poseDelta(camera, before) {
     Cesium.Cartesian3.distance(camera.right, before.right),
   );
 }
+
+test('Sky voice switches and magnitude operate the mounted real owners', async () => {
+  const { handle } = setup();
+  try {
+    assert.equal(await handle.enterAt({ latDeg: 32, lonDeg: -95, heightKnown: true, heightM: 0 }), true);
+    const voice = createSkyVoice({ getHandle: () => handle });
+    for (const [layer] of LAYER_SWITCHES) {
+      assert.equal((await voice.layers(layer, true)).ok, true, layer);
+      assert.equal(handle.content.flags[layer], true);
+      assert.equal((await voice.layers(layer, false)).ok, true, layer);
+      assert.equal(handle.content.flags[layer], false);
+    }
+    assert.equal((await voice.magnitude(5, 'stars')).ok, true);
+    assert.equal(handle.content.userLimit, 5);
+    assert.equal((await voice.magnitude(6, 'satellites')).ok, true);
+    assert.equal(handle.nakedEye.limit, 6);
+    assert.equal((await voice.clear(true)).ok, true);
+    assert.equal(handle.clearView.on, true);
+  } finally { handle.destroy(); }
+});
 
 test('mount: Sky button, panel, toolbar, overlay canvas; once per viewer; null without a DOM', () => {
   const { doc, viewer, handle } = setup();

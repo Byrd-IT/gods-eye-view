@@ -68,6 +68,24 @@ test('control_sky stays just before control_imagery and does not reorder control
   assert.equal(tool.parameters.properties.enabled.type, 'boolean');
 });
 
+test('new Sky calls suppress owner exceptions and report absent adapters', async () => {
+  const secret = 'SYNTHETIC_TOKEN_SUFFIXABC123';
+  const h = harness({
+    voiceOverrides: {
+      playback: () => {
+        throw new Error(secret);
+      },
+    },
+  });
+  const result = await h.runner('control_sky', { action: 'play' });
+  assert.equal(result.ok, false);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+  assert.equal(
+    (await h.runner('control_sky', { action: 'layers', layer: 'grid' })).ok,
+    false,
+  );
+});
+
 test('control_sky open, close, look, time, lines, preset and status reach Sky', async () => {
   const h = harness();
   assert.equal(
@@ -120,15 +138,12 @@ test('control_sky actions are case-insensitive; an unknown action throws a short
   assert.equal((await h.runner('control_sky', { action: 'CLOSE' })).ok, true);
   await assert.rejects(
     () => h.runner('control_sky', { action: 'rewind' }),
-    /Unknown sky action: rewind/,
+    /Unknown sky action/,
   );
-  await assert.rejects(
-    () => h.runner('control_sky', {}),
-    /Unknown sky action: missing/,
-  );
+  await assert.rejects(() => h.runner('control_sky', {}), /Unknown sky action/);
   await assert.rejects(
     () => h.runner('control_sky', { action: 'Bearer SECRETKEY123' }),
-    /Unknown sky action: missing/,
+    /Unknown sky action/,
   );
 });
 

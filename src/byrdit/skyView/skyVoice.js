@@ -16,7 +16,7 @@
  * {ok:false, error} so the model can say why. Errors never repeat the text
  * the caller sent.
  */
-import { MAX_JUMP_SCORE } from './skyContent.js';
+import { MAX_JUMP_SCORE, LAYER_SWITCHES } from './skyContent.js';
 import { SKY_TIME_MAX_MS, SKY_TIME_MIN_MS } from './skyClock.js';
 import { PRESETS } from './skyPresets.js';
 
@@ -28,6 +28,15 @@ export const SKY_VOICE_ACTIONS = Object.freeze([
   'lines',
   'preset',
   'status',
+  'play',
+  'pause',
+  'speed',
+  'step',
+  'reverse',
+  'layers',
+  'magnitude',
+  'location',
+  'clear',
 ]);
 
 export const SKY_PRESET_IDS = Object.freeze(PRESETS.map((preset) => preset.id));
@@ -249,6 +258,119 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       if (!current || current !== sky) return unavailable();
       current.content.setFlags({ lines: enabled }, { notify: true });
       return done(current, { opened: opened.opened });
+    },
+    async playback(action, value) {
+      const sky = handle();
+      if (!sky) return unavailable();
+      if (sky.time?.provider === 'history')
+        return fail('History is setting the Sky time. Leave History first.');
+      const opened = await ensureOpen(sky);
+      if (!opened.ok) return opened;
+      if (handle() !== sky || sky.time?.provider === 'history' || !sky.clock)
+        return unavailable();
+      const clock = sky.clock;
+      let ok = false;
+      if (action === 'play') ok = clock.play?.();
+      else if (action === 'pause') ok = clock.playing ? clock.pause?.() : true;
+      else if (action === 'speed') ok = clock.setRate?.(value);
+      else if (action === 'reverse') ok = clock.setRate?.(-clock.rate);
+      else if (
+        action === 'step' &&
+        (value === 60_000 ||
+          value === -60_000 ||
+          value === 3_600_000 ||
+          value === -3_600_000)
+      )
+        ok = clock.step?.(value);
+      if (!ok) return fail('Sky playback action could not be applied');
+      return done(sky, { rate: clock.rate, playing: clock.playing });
+    },
+    async layers(layer, enabled) {
+      const sky = handle();
+      if (!sky) return unavailable();
+      if (
+        !LAYER_SWITCHES.some(([id]) => id === layer) ||
+        typeof enabled !== 'boolean'
+      )
+        return fail('A valid Sky layer and enabled true or false are required');
+      const opened = await ensureOpen(sky);
+      if (!opened.ok) return opened;
+      if (handle() !== sky || typeof sky.content?.setFlags !== 'function')
+        return unavailable();
+      sky.content.setFlags({ [layer]: enabled }, { notify: true });
+      if (sky.content.flags?.[layer] !== enabled)
+        return fail('Sky layer did not change');
+      return done(sky, { layer, enabled });
+    },
+    async magnitude(limit, target = 'stars') {
+      const sky = handle();
+      if (!sky) return unavailable();
+      if (
+        typeof limit !== 'number' ||
+        !Number.isFinite(limit) ||
+        !['stars', 'satellites'].includes(target) ||
+        limit < 3 ||
+        limit > (target === 'stars' ? 6.5 : 7)
+      )
+        return fail('Choose a valid magnitude and target');
+      const opened = await ensureOpen(sky);
+      if (!opened.ok) return opened;
+      if (handle() !== sky) return unavailable();
+      if (target === 'stars') {
+        if (typeof sky.content?.setUserLimit !== 'function')
+          return unavailable();
+        sky.content.setUserLimit(limit);
+        if (sky.content.userLimit !== limit)
+          return fail('Star magnitude did not change');
+        sky.redraw?.();
+        return done(sky, {
+          magnitudeTarget: target,
+          magnitude: sky.content.userLimit,
+        });
+      }
+      if (typeof sky.setNakedEye !== 'function') return unavailable();
+      sky.setNakedEye({ limit });
+      if (sky.nakedEye?.limit !== limit)
+        return fail('Satellite magnitude did not change');
+      return done(sky, {
+        magnitudeTarget: target,
+        magnitude: sky.nakedEye?.limit,
+        filterEnabled: sky.nakedEye?.on,
+      });
+    },
+    async location(latitude, longitude) {
+      const sky = handle();
+      if (!sky) return unavailable();
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        Math.abs(latitude) > 90 ||
+        Math.abs(longitude) > 180
+      )
+        return fail('location needs valid latitude and longitude');
+      if (typeof sky.enterAt !== 'function') return unavailable();
+      const result = await sky.enterAt({
+        latDeg: latitude,
+        lonDeg: longitude,
+        source: 'voice',
+      });
+      if (handle() !== sky) return unavailable();
+      if (!result) return fail('Sky location could not be set');
+      return done(sky);
+    },
+    async clear(enabled) {
+      const sky = handle();
+      if (!sky) return unavailable();
+      if (typeof enabled !== 'boolean')
+        return fail('clear needs enabled true or false');
+      const opened = await ensureOpen(sky);
+      if (!opened.ok) return opened;
+      if (handle() !== sky || typeof sky.clearView?.set !== 'function')
+        return unavailable();
+      sky.clearView.set(enabled);
+      if (sky.clearView.on !== enabled)
+        return fail('Sky clear view did not change');
+      return done(sky, { clear: enabled });
     },
     async preset(id) {
       const sky = handle();

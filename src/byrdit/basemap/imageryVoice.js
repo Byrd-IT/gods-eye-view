@@ -22,6 +22,16 @@ export const IMAGERY_VOICE_ACTIONS = Object.freeze([
   'wayback',
   'off',
   'status',
+  'compare',
+  'yearB',
+  'latest',
+  'step',
+  'play',
+  'pause',
+  'speed',
+  'mode',
+  'opacity',
+  'swap',
 ]);
 
 const OPEN_STACK_ID = 'byrdit-open';
@@ -387,6 +397,100 @@ export function createImageryVoice({
       };
     },
 
+    async compare({ enabled, yearB } = {}) {
+      const handle = naip();
+      const block = catalog();
+      if (!handle || !block || typeof handle.setCompare !== 'function')
+        return unavailable();
+      const state = handle.state?.();
+      if (
+        typeof enabled !== 'boolean' ||
+        (yearB !== undefined && !state?.ticks?.includes(yearB))
+      )
+        return fail('Choose compare on or off and an available second year');
+      handle.setCompare(enabled, yearB);
+      const observed = handle.state?.();
+      if (
+        !observed ||
+        observed.compare !== enabled ||
+        (yearB !== undefined && observed.yearB !== yearB)
+      )
+        return fail('Compare could not be set');
+      return { ok: true, ...snapshot(handle, block) };
+    },
+    async yearB({ yearB } = {}) {
+      const handle = naip();
+      const block = catalog();
+      if (!handle || !block || typeof handle.setYearB !== 'function')
+        return unavailable();
+      if (!handle.state?.().ticks?.includes(yearB))
+        return fail('Choose an available second year');
+      handle.setYearB(yearB);
+      if (handle.state?.()?.yearB !== yearB)
+        return fail('Second year could not be set');
+      return { ok: true, ...snapshot(handle, block) };
+    },
+    async move({ target = 'aerial', latest = false, delta } = {}) {
+      if (target === 'aerial') {
+        const handle = naip();
+        const block = catalog();
+        if (!handle || !block) return unavailable();
+        const state = handle.state?.();
+        if (!state?.ticks?.length) return fail('No aerial years are available');
+        if (latest) handle.setYear(state.ticks.at(-1));
+        else if (Number.isInteger(delta) && typeof handle.step === 'function')
+          handle.step(delta);
+        else
+          return fail('step needs an integer direction and available control');
+        if (latest && handle.state?.()?.year !== state.ticks.at(-1))
+          return fail('Latest year could not be set');
+        return { ok: true, ...snapshot(handle, block) };
+      }
+      if (target !== 'wayback') return fail('Choose aerial or wayback');
+      const handle = wayback();
+      if (
+        !handle ||
+        typeof handle.latest !== 'function' ||
+        typeof handle.step !== 'function'
+      )
+        return fail('Wayback is not available right now');
+      if (latest) handle.latest();
+      else if (Number.isInteger(delta)) handle.step(delta);
+      else return fail('step needs an integer direction');
+      const state = handle.state?.();
+      return {
+        ok: true,
+        target: 'wayback',
+        date: state?.date ?? null,
+        on: Boolean(state?.on && state?.ready),
+        shown: Boolean(
+          state?.on &&
+          state?.shownRelease &&
+          state.shownRelease === state.release,
+        ),
+      };
+    },
+    async transport({ action, rate } = {}) {
+      const handle = wayback();
+      const state = handle?.state?.();
+      const slider = handle?.transport?.();
+      if (!state?.on || !state?.ready || !slider || slider.destroyed)
+        return fail('Wayback playback is not available right now');
+      if (action === 'play') {
+        if (!slider.start?.()) return fail('Wayback cannot play');
+      } else if (action === 'pause') slider.stop?.();
+      else if (action === 'speed') {
+        if (!slider.setPlaybackRate?.(rate))
+          return fail('Wayback speed must be 1, 2 or 4');
+      } else return fail('Unknown Wayback playback action');
+      return {
+        ok: true,
+        target: 'wayback',
+        playing: slider.isPlaying(),
+        rate: slider.getPlaybackRate(),
+        date: handle.state?.().date ?? null,
+      };
+    },
     async off({ target } = {}) {
       const which =
         target === 'wayback' || target === 'both' || target === 'aerial'

@@ -202,6 +202,7 @@ export function mountHistoryForShell(
   const voice = createHistoryVoice({
     getHandle: () => handle,
     getRouter: () => router,
+    getClocks: () => clockMenu?.clocks ?? null,
   });
   // QA / console hook, and the voice tool's way in
   if (win)

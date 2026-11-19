@@ -8322,6 +8322,7 @@
       "src/geo/celestial.js",
       "src/geo/quaternion.js",
       "src/agent/worldPacket.js",
+      "src/byrdit/dronePlan/presets.js",
       "src/data/layerSnapshot.js",
       "src/data/feedState.js",
       "src/contextModePolicy.js",

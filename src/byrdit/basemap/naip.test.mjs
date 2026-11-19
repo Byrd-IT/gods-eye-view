@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { composeNaip } from './naipProxy.js';
+import { createImageryVoice } from './imageryVoice.js';
 import { normalizeBasemapConfig } from './config.js';
 import { SERVED } from './fixtures/config.mjs';
 import { NAIP_PUBLISH, TYLER, GILMER } from './fixtures/naip.mjs';
@@ -196,6 +197,32 @@ const keys = (viewer) =>
   viewer.imageryLayers.items.map((l) =>
     l.imageryProvider ? l.imageryProvider.entry.key : l.name,
   );
+
+test('imagery voice compare, second year, step and latest drive real NAIP owner', async () => {
+  const { detach } = setup();
+  const voice = createImageryVoice({
+    getNaip: () => detach,
+    getCatalog: () => NAIP,
+  });
+  try {
+    const ticks = detach.state().ticks;
+    assert.ok(ticks.length >= 2);
+    assert.equal(
+      (await voice.compare({ enabled: true, yearB: ticks[0] })).ok,
+      true,
+    );
+    assert.equal(detach.state().yearB, ticks[0]);
+    assert.equal((await voice.yearB({ yearB: ticks.at(-1) })).ok, true);
+    assert.equal(detach.state().yearB, ticks.at(-1));
+    assert.equal((await voice.move({ latest: true })).ok, true);
+    assert.equal(detach.state().year, ticks.at(-1));
+    assert.equal((await voice.move({ delta: -1 })).ok, true);
+    assert.equal(detach.state().year, ticks.at(-2));
+    assert.equal((await voice.yearB({ yearB: 1234 })).ok, false);
+  } finally {
+    detach();
+  }
+});
 
 // ---------------------------------------------------------------- discovery
 
@@ -653,7 +680,9 @@ test('naip slider: ticks only for years present, keyboard arrows move by tick', 
     .children.map((c) => c.textContent);
   assert.deepEqual(ticks, ['1939', '2018', '2024']);
   // the shared time slider (timeTravel/timeSlider.js): fraction = index / 2
-  const ranges = [...panel.walk()].filter((e) => e.attributes.role === 'slider');
+  const ranges = [...panel.walk()].filter(
+    (e) => e.attributes.role === 'slider',
+  );
   const range = ranges[0];
   assert.equal(range.attributes['aria-valuemax'], '1000');
   assert.equal(range.attributes['aria-valuenow'], '1000');
@@ -680,7 +709,11 @@ test('naip slider: ticks only for years present, keyboard arrows move by tick', 
   key('a'); // other keys are not taken
   assert.equal(prevented, 6);
   // Dragging the bar picks the tick at that position (the fake box is 1000 wide).
-  range.fire('pointerdown', { clientX: 1000, pointerId: 1, preventDefault() {} });
+  range.fire('pointerdown', {
+    clientX: 1000,
+    pointerId: 1,
+    preventDefault() {},
+  });
   range.fire('pointerup', {});
   assert.equal(detach.state().year, 2024);
   // Compare row hidden until the box is ticked.
@@ -725,7 +758,9 @@ test('naip slider: never wider than its container on a phone; rows wrap and the 
     assert.equal(row.style.flexWrap, 'wrap');
     assert.equal(row.style.minWidth, '0');
   }
-  const ranges = [...panel.walk()].filter((e) => e.attributes.role === 'slider');
+  const ranges = [...panel.walk()].filter(
+    (e) => e.attributes.role === 'slider',
+  );
   assert.equal(ranges.length, 2);
   for (const range of ranges) {
     // the slider follows its column; the column keeps the preferred width

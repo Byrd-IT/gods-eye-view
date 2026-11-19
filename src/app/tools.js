@@ -365,6 +365,10 @@ export function createApplicationTools({
     // while it is mounted; without it the voice reports the overlays as
     // unavailable instead of pretending they were changed.
     overlays: () => overlaysVoiceFor(window.__gevOverlays ?? null),
+    // The map stack controller, so the view state can say whether the
+    // automatic basemap switch owns the stack. Its own state answers that;
+    // a controller without the automatic switch says nothing.
+    mapStack: () => mapStackController ?? null,
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });

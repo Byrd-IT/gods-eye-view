@@ -735,6 +735,19 @@ export function createDiscreteSlider(options = {}) {
     getIndex: () => index,
     getItems: () => [...items],
     isPlaying: () => Boolean(timer),
+    getPlaybackRate: () => rate,
+    start() {
+      if (ui.destroyed || items.length < 2) return false;
+      start();
+      return Boolean(timer);
+    },
+    setPlaybackRate(next) {
+      if (ui.destroyed || !rates.includes(next)) return false;
+      rate = next;
+      ui.setRate(next);
+      if (timer) restartTimer();
+      return true;
+    },
     /** The caller moved (no onChange): follow it. */
     setIndex(i) {
       index = clampIndex(i);

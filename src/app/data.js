@@ -64,7 +64,11 @@ export function createApplicationData({
   }
   // Byrd-IT fork: per-layer opacity sliders (default 100 %, additive).
   const layerOpacity = createLayerOpacity({ viewer, dataManager });
-  defer(() => layerOpacity.destroy());
+  styleManager.setLayerOpacityModel?.(layerOpacity.model);
+  defer(() => {
+    styleManager.setLayerOpacityModel?.(null);
+    layerOpacity.destroy();
+  });
   presentation.panel.attachOpacity(layerOpacity.model);
   presentation.mount(document.getElementById('data-toggles'));
   styleManager.attachDataManager(dataManager);
