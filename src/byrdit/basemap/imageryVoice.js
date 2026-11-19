@@ -248,8 +248,22 @@ export function createImageryVoice({
       : null;
 
   const controlSnapshot = (handle, block) => {
-    const { label: _label, sets: _sets, ...state } = snapshot(handle, block);
-    return state;
+    const state = handle?.state?.() ?? {};
+    const validYear = (year) =>
+      Number.isInteger(year) && year >= 1800 && year <= 2999;
+    const compare = state.compare === true && state.yearB != null;
+    return {
+      year: validYear(state.year) ? state.year : null,
+      enabled: Boolean(state.enabled),
+      compare,
+      drawn:
+        Array.isArray(state.layers) &&
+        state.layers.some((layer) => layer?.show === true),
+      ...(compare
+        ? { yearB: validYear(state.yearB) ? state.yearB : null }
+        : {}),
+      years: sliderYears(block).filter(validYear),
+    };
   };
 
   async function openStack() {

@@ -7,6 +7,25 @@ import {
   flyToImageryBounds,
 } from './imageryVoice.js';
 
+test('imagery step suppresses untrusted year state', async () => {
+  const marker = `SYNTHETIC_${crypto.randomUUID()}`;
+  const handle = {
+    setYear() {},
+    step() {},
+    state: () => ({ year: marker, ticks: [2018, 2024], layers: [] }),
+  };
+  const voice = createImageryVoice({
+    getNaip: () => handle,
+    getCatalog: () => ({
+      years: [{ year: 2018 }, { year: 2024 }],
+      regional: [],
+    }),
+  });
+  const result = await voice.move({ delta: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.stringify(result).includes(marker), false);
+});
+
 test('Wayback playback never echoes an untrusted release date', async () => {
   const secret = 'SYNTHETIC_WAYBACK_DATE_SECRET_8012';
   const handle = {
