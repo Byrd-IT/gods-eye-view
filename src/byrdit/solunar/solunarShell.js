@@ -97,11 +97,12 @@ export function mountSolunarForShell(
   };
   let lastCartesian = null;
   const useSpot = (spot, source) => {
-    if (!spot) return;
+    if (!spot || panel.setSpot(spot.latDeg, spot.lonDeg, source) !== true)
+      return false;
     lastCartesian = spot.cartesian;
-    panel.setSpot(spot.latDeg, spot.lonDeg, source);
     if (isOpen()) showMarker(spot.cartesian);
     armMidnightTimer(); // the new spot may be in another zone
+    return true;
   };
   const useCenter = () => useSpot(mapCenterSpot(viewer), 'center');
   const panel = createSolunarPanel({
@@ -155,8 +156,7 @@ export function mountSolunarForShell(
   /** Put the card on a spot the caller named, marker and all. */
   const setSpotByDegrees = (latDeg, lonDeg) => {
     const cartesian = Cesium.Cartesian3.fromDegrees(lonDeg, latDeg);
-    useSpot({ latDeg, lonDeg, cartesian }, 'voice');
-    return panel.getSpot() != null;
+    return useSpot({ latDeg, lonDeg, cartesian }, 'voice');
   };
 
   // A card left open past the spot's local midnight re-draws itself then, so
@@ -240,10 +240,7 @@ export function mountSolunarForShell(
     isOpen,
     setSpot: setSpotByDegrees,
     getSpot: () => panel.getSpot(),
-    useCenter: () => {
-      useCenter();
-      return panel.getSpot() != null;
-    },
+    useCenter,
     setHour12: (value) => panel.setHour12(value),
     getHour12: () => panel.getHour12(),
     isDestroyed: () => destroyed,

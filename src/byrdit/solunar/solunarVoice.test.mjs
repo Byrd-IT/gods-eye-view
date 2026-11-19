@@ -417,6 +417,21 @@ test('voice centre goes back to the middle of the map', async () => {
   }
 });
 
+test('voice center refuses an unavailable map center even with an existing spot', async () => {
+  const viewer = fakeViewer({ hit: () => null });
+  const { mount, restore } = setup({ open: true, viewer });
+  try {
+    await mount.voice.spot({ latitude: 33.05, longitude: -95.1 });
+    viewer.camera.positionCartographic = null;
+    const result = await mount.voice.center();
+    assert.equal(result.ok, false);
+    assert.equal(mount.voice.status().spot.source, 'voice');
+  } finally {
+    mount.destroy();
+    restore();
+  }
+});
+
 test('voice clock switches the card to the 24 h clock', async () => {
   const { body, mount, restore } = setup({ open: true });
   try {
