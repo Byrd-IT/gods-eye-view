@@ -507,11 +507,13 @@ export function createImageryVoice({
         if (!slider.setPlaybackRate?.(rate))
           return fail('Wayback speed must be 1, 2 or 4');
       } else return fail('Unknown Wayback playback action');
+      const playing = slider.isPlaying();
+      const observedRate = slider.getPlaybackRate();
       return {
         ok: true,
         target: 'wayback',
-        playing: slider.isPlaying(),
-        rate: slider.getPlaybackRate(),
+        playing: typeof playing === 'boolean' ? playing : null,
+        rate: [1, 2, 4].includes(observedRate) ? observedRate : null,
         date: safeReleaseDate(handle.state?.().date),
       };
     },

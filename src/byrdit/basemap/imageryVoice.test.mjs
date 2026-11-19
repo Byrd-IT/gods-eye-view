@@ -7,6 +7,23 @@ import {
   flyToImageryBounds,
 } from './imageryVoice.js';
 
+test('Wayback playback suppresses untrusted transport state', async () => {
+  const marker = `SYNTHETIC_${crypto.randomUUID()}`;
+  const handle = {
+    catalog: () => [],
+    state: () => ({ on: true, ready: true, date: '2020-01-01' }),
+    transport: () => ({
+      start: () => true,
+      isPlaying: () => marker,
+      getPlaybackRate: () => marker,
+    }),
+  };
+  const voice = createImageryVoice({ getWayback: () => handle });
+  const result = await voice.transport({ action: 'play' });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.stringify(result).includes(marker), false);
+});
+
 test('imagery step suppresses untrusted year state', async () => {
   const marker = `SYNTHETIC_${crypto.randomUUID()}`;
   const handle = {
