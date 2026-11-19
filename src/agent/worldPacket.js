@@ -350,8 +350,7 @@ function compactImageryState(status) {
   if (Array.isArray(status.years)) {
     const years = status.years
       .map((year) => finiteNumber(year))
-      .filter((year) => year !== null)
-      .slice(0, MAX_COMPACT_LIST);
+      .filter((year) => year !== null);
     if (years.length) out.years = years;
   }
   const enabled = reportedBoolean(status, 'enabled');

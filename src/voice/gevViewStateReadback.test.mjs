@@ -6,6 +6,15 @@ import { createGevActionRunner, controlCctv } from './gevActions.js';
 import { bindRenderer } from '../render/rendererOf.js';
 import { createStubRenderer } from '../render/stub/index.js';
 import { CCTV_FOCUS_RESULT } from '../layers/cctv/policy.js';
+import { readHostViewState } from '../agent/worldPacket.js';
+
+test('imagery readback retains every available year', async () => {
+  const years = Array.from({ length: 40 }, (_, i) => 1980 + i);
+  const state = await readHostViewState({
+    imagery: { status: () => ({ years }) },
+  });
+  assert.deepEqual(state.imagery.years, years);
+});
 
 test('CCTV never echoes an untrusted feed type', async () => {
   const secret = 'SYNTHETIC_FEEDTYPE_SECRET_49d8a1';
