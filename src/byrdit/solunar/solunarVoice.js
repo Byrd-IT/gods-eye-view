@@ -135,7 +135,7 @@ export function createSolunarVoice(deps = {}) {
   }
 
   async function ensureOpen() {
-    if (isOpen() !== true) await open?.();
+    await open?.();
     return !gone() && isOpen() === true;
   }
 

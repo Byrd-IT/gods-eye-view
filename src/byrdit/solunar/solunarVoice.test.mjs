@@ -81,7 +81,12 @@ function setup({ open = false, viewer = fakeViewer(), shell = {} } = {}) {
   const previousWindow = globalThis.window;
   globalThis.window = window;
   const mount = mountSolunarForShell(
-    { viewer, setPanelCollapsed: (_id, collapsed) => root.classList.toggle('collapsed', collapsed), ...shell },
+    {
+      viewer,
+      setPanelCollapsed: (_id, collapsed) =>
+        root.classList.toggle('collapsed', collapsed),
+      ...shell,
+    },
     { document: doc, now: () => Date.UTC(2026, 10, 3, 18) },
   );
   return {
@@ -144,7 +149,11 @@ function fakeCard({ spot = null, hour12 = true, open = false } = {}) {
 }
 
 test('throwing lifecycle provider is contained for every action', async () => {
-  const voice = createSolunarVoice({ isDestroyed: () => { throw new Error('sensitive-fixture'); } });
+  const voice = createSolunarVoice({
+    isDestroyed: () => {
+      throw new Error('sensitive-fixture');
+    },
+  });
   for (const action of SOLUNAR_VOICE_ACTIONS) {
     const result = await voice[action]();
     assert.equal(result.ok, false);
@@ -248,7 +257,12 @@ test('clock refuses anything that is not a boolean and keeps the old choice', ()
 
 test('status reports the card and the day without changing anything', () => {
   const { state, voice } = fakeCard({
-    spot: { latDeg: 33.05, lonDeg: -95.1, zone: 'America/Chicago', source: 'click' },
+    spot: {
+      latDeg: 33.05,
+      lonDeg: -95.1,
+      zone: 'America/Chicago',
+      source: 'click',
+    },
   });
   const result = voice.status();
   assert.equal(result.ok, true);
@@ -332,7 +346,14 @@ test('destroy takes back only its own window handle', () => {
 
 test('voice reveals an already expanded card on a phone sheet', async () => {
   let reveals = 0;
-  const { mount, restore } = setup({ open: true, shell: { revealPanel: () => { reveals++; } } });
+  const { mount, restore } = setup({
+    open: true,
+    shell: {
+      revealPanel: () => {
+        reveals++;
+      },
+    },
+  });
   try {
     assert.equal((await mount.voice.open()).ok, true);
     assert.equal(reveals, 1);
@@ -342,9 +363,36 @@ test('voice reveals an already expanded card on a phone sheet', async () => {
   }
 });
 
+test('voice spot reveals an already expanded card on a phone sheet', async () => {
+  let reveals = 0;
+  const { mount, restore } = setup({
+    open: true,
+    shell: {
+      revealPanel: () => {
+        reveals++;
+      },
+    },
+  });
+  try {
+    assert.equal(
+      (await mount.voice.spot({ latitude: 33.05, longitude: -95.1 })).ok,
+      true,
+    );
+    assert.equal(reveals, 1);
+  } finally {
+    mount.destroy();
+    restore();
+  }
+});
+
 test('voice waits for asynchronous rail disclosure before reporting open', async () => {
   let root;
-  const setupResult = setup({ shell: { setPanelCollapsed: () => queueMicrotask(() => root.classList.remove('collapsed')) } });
+  const setupResult = setup({
+    shell: {
+      setPanelCollapsed: () =>
+        queueMicrotask(() => root.classList.remove('collapsed')),
+    },
+  });
   root = setupResult.root;
   try {
     const result = await setupResult.mount.voice.open();
@@ -357,7 +405,9 @@ test('voice waits for asynchronous rail disclosure before reporting open', async
 });
 
 test('voice refuses opening when the rail cannot disclose the card', async () => {
-  const { mount, root, restore } = setup({ shell: { setPanelCollapsed: null } });
+  const { mount, root, restore } = setup({
+    shell: { setPanelCollapsed: null },
+  });
   try {
     assert.equal((await mount.voice.open()).ok, false);
     assert.equal(root.classList.contains('collapsed'), true);
@@ -384,7 +434,10 @@ test('voice sets a spot, marks it and reads the day back', async () => {
   const { body, viewer, mount, restore } = setup({ open: true });
   try {
     await tick();
-    const result = await mount.voice.spot({ latitude: 33.05, longitude: -95.1 });
+    const result = await mount.voice.spot({
+      latitude: 33.05,
+      longitude: -95.1,
+    });
     assert.equal(result.ok, true);
     assert.equal(result.spot.latitude, 33.05);
     assert.equal(result.spot.longitude, -95.1);
@@ -411,7 +464,10 @@ test('voice centre goes back to the middle of the map', async () => {
     assert.equal(result.ok, true);
     assert.equal(result.spot.source, 'center');
     // the fake globe's middle is 33.0N 96.0W
-    assert.match(body.querySelector('.gev-sl-spot').textContent, /33\.000°N 96\.000°W/);
+    assert.match(
+      body.querySelector('.gev-sl-spot').textContent,
+      /33\.000°N 96\.000°W/,
+    );
   } finally {
     restore();
   }
