@@ -30,9 +30,8 @@ const stable = (value) =>
 // assertions.
 const NEW_TOOLS = ['set_clean_view', 'set_layer_opacity'];
 // The navigation and solunar voice tools this release appends after them.
-// They are additive like NEW_TOOLS: the legacy pins below stay reproducible
-// once these two are left out, and the additions are pinned by their own
-// assertions.
+// These are omitted where the existing inventory is checked separately;
+// prompt-budget description changes also require the legacy digest to change.
 const APPENDED_TOOLS = ['control_nav', 'control_solunar'];
 const NEW_PANEL_TARGETS = [
   'time-travel-panel',
@@ -45,9 +44,8 @@ const LEGACY_VIEW_STATE_DESCRIPTION =
   'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, and layer state before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.';
 
 test('the complete Realtime tool payload pins the manifest-generated layer release', () => {
-  // The deliberate edits are put back exactly as they were before the
-  // digest, the way the radio-markup pin does, so the shipped payload still
-  // reproduces the pin it has always carried.
+  // Remove separately pinned additions before checking the remaining payload.
+  // Description shortening changes its digest, which is deliberately re-pinned.
   const tools = structuredClone(
     GEV_REALTIME_TOOLS.filter(
       (tool) =>
@@ -123,9 +121,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // over its renderer-seam work. The fork pin before the merge was bec0ddca....
     // This release adds set_clean_view and set_layer_opacity (last) and four
     // set_panel_open targets, and the view-state description now names layer
-    // opacity. The digest above is taken over the payload without those
-    // additions, so the pin still reproduces; the additions are pinned by
-    // their own assertions.
+    // opacity. The digest removes those additions and navigation/solunar tools,
+    // but changes for the shortened drone description; re-pinned accordingly.
     '720e3dbf6ec3524853dfbe5604ec6993d0abe0967f29f4fc986e8abfc86dbdf3',
   );
 });
@@ -450,10 +447,8 @@ test('the complete current Realtime tool inventory is pinned', () => {
     createHash('sha256')
       .update(JSON.stringify(stable(GEV_REALTIME_TOOLS)))
       .digest('hex'),
-    // Re-pinned for the navigation and solunar voice tools this release
-    // appends (control_nav, control_solunar); the pin before them,
-    // c1308321b0e30cf8ebb7deeef56f2f0433b58d0149e9fe8c95099b047f824974,
-    // is reproduced from the payload without those two tools.
+    // Re-pinned for navigation and solunar voice and the deliberately
+    // shortened descriptions needed to keep the prompt within budget.
     '17a85be72dde6c6a2f894f1e2b60b35f5b3eeda3e541f23b1be8a5384abfcc77',
   );
 });

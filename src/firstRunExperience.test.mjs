@@ -1099,7 +1099,7 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
     '786878f6d43f47b69edf40d303220610d97cfc09485711649900150e0e9cb3c8',
-    'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
+    'serialized legacy-filtered tool schema drifted',
   );
   const instructions = fs.readFileSync(
     new URL('../server/providers/openai/instructions.js', import.meta.url),
