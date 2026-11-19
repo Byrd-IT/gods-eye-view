@@ -7,6 +7,29 @@ import {
   flyToImageryBounds,
 } from './imageryVoice.js';
 
+test('Wayback playback never echoes an untrusted release date', async () => {
+  const secret = 'SYNTHETIC_WAYBACK_DATE_SECRET_8012';
+  const handle = {
+    catalog: () => [],
+    latest() {},
+    step() {},
+    state: () => ({ on: true, ready: true, date: secret }),
+    transport: () => ({
+      start: () => true,
+      isPlaying: () => true,
+      getPlaybackRate: () => 1,
+    }),
+  };
+  const voice = createImageryVoice({ getWayback: () => handle });
+  for (const result of [
+    await voice.move({ target: 'wayback', latest: true }),
+    await voice.transport({ action: 'play' }),
+  ]) {
+    assert.equal(result.ok, true);
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  }
+});
+
 const SECRET = 'Bearer sk-synthTEST123suffix';
 
 function catalog() {

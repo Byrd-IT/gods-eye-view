@@ -242,6 +242,11 @@ export function createImageryVoice({
     };
   };
 
+  const safeReleaseDate = (value) =>
+    typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? value
+      : null;
+
   const controlSnapshot = (handle, block) => {
     const { label: _label, sets: _sets, ...state } = snapshot(handle, block);
     return state;
@@ -466,7 +471,7 @@ export function createImageryVoice({
       return {
         ok: true,
         target: 'wayback',
-        date: state?.date ?? null,
+        date: safeReleaseDate(state?.date),
         on: Boolean(state?.on && state?.ready),
         shown: Boolean(
           state?.on &&
@@ -493,7 +498,7 @@ export function createImageryVoice({
         target: 'wayback',
         playing: slider.isPlaying(),
         rate: slider.getPlaybackRate(),
-        date: handle.state?.().date ?? null,
+        date: safeReleaseDate(handle.state?.().date),
       };
     },
     async off({ target } = {}) {
