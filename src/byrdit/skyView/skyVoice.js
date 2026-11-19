@@ -125,6 +125,15 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
   // state, not arbitrary catalog text; existing look/status remain unchanged.
   const doneControl = (sky, extra = {}) => {
     const { lookingAt: _lookingAt, ...state } = snapshot(sky);
+    state.timeMode = ['history', 'live', 'fixed', 'play'].includes(
+      state.timeMode,
+    )
+      ? state.timeMode
+      : null;
+    if (!Number.isFinite(state.latitude) || Math.abs(state.latitude) > 90)
+      delete state.latitude;
+    if (!Number.isFinite(state.longitude) || Math.abs(state.longitude) > 180)
+      delete state.longitude;
     return { ok: true, ...state, ...extra };
   };
 
