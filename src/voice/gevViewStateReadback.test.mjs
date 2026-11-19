@@ -6,7 +6,21 @@ import { createGevActionRunner, controlCctv } from './gevActions.js';
 import { bindRenderer } from '../render/rendererOf.js';
 import { createStubRenderer } from '../render/stub/index.js';
 import { CCTV_FOCUS_RESULT } from '../layers/cctv/policy.js';
+import { createSkyVoice } from '../byrdit/skyView/skyVoice.js';
 import { readHostViewState } from '../agent/worldPacket.js';
+
+test('Sky playback never returns an untrusted opening error', async () => {
+  const secret = 'SYNTHETIC_SKY_OPEN_SECRET_7312';
+  const sky = {
+    active: false,
+    openHere: async () => ({ ok: false, error: secret }),
+  };
+  const voice = createSkyVoice({ getHandle: () => sky });
+  const { runner } = harness({ adapters: { sky: () => voice } });
+  const result = await runner('control_sky', { action: 'play' });
+  assert.equal(result.ok, false);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
 
 test('imagery readback retains every available year', async () => {
   const years = Array.from({ length: 40 }, (_, i) => 1980 + i);

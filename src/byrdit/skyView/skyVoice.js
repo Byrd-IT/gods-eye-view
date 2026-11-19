@@ -127,7 +127,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
     if (typeof sky.openHere !== 'function')
       return fail('Sky view cannot open from here');
     const opened = await sky.openHere();
-    if (!opened?.ok) return fail(opened?.error || 'Could not open Sky view');
+    if (!opened?.ok) return fail('Could not open Sky view');
     return { ok: true, opened: !opened.alreadyOpen };
   }
 
