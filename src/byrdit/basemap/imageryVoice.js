@@ -418,7 +418,7 @@ export function createImageryVoice({
       if (
         !observed ||
         observed.compare !== enabled ||
-        (yearB !== undefined && observed.yearB !== yearB)
+        (enabled && yearB !== undefined && observed.yearB !== yearB)
       )
         return fail('Compare could not be set');
       return { ok: true, ...controlSnapshot(handle, block) };

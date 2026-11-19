@@ -232,6 +232,11 @@ test('imagery voice compare, second year, step and latest drive real NAIP owner'
     assert.equal(detach.state().yearB, ticks[0]);
     assert.equal((await voice.yearB({ yearB: ticks.at(-1) })).ok, true);
     assert.equal(detach.state().yearB, ticks.at(-1));
+    assert.equal(
+      (await voice.compare({ enabled: false, yearB: ticks[0] })).ok,
+      true,
+    );
+    assert.equal(detach.state().compare, false);
     assert.equal((await voice.move({ latest: true })).ok, true);
     assert.equal(detach.state().year, ticks.at(-1));
     assert.equal((await voice.move({ delta: -1 })).ok, true);
