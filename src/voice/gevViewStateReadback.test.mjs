@@ -9,6 +9,21 @@ import { CCTV_FOCUS_RESULT } from '../layers/cctv/policy.js';
 import { createSkyVoice } from '../byrdit/skyView/skyVoice.js';
 import { readHostViewState } from '../agent/worldPacket.js';
 
+test('Sky playback never returns untrusted marker text', async () => {
+  const secret = 'SYNTHETIC_SKY_MARKER_SECRET_8731';
+  const sky = {
+    active: true,
+    content: { marker: { label: secret }, flags: {} },
+    clock: { rate: 1, playing: false, play: () => true },
+    time: { provider: 'builtin', getTime: () => Date.now() },
+  };
+  const voice = createSkyVoice({ getHandle: () => sky });
+  const { runner } = harness({ adapters: { sky: () => voice } });
+  const result = await runner('control_sky', { action: 'play' });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('Sky playback never returns an untrusted opening error', async () => {
   const secret = 'SYNTHETIC_SKY_OPEN_SECRET_7312';
   const sky = {

@@ -121,6 +121,12 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
   };
 
   const done = (sky, extra = {}) => ({ ok: true, ...snapshot(sky), ...extra });
+  // Marker labels come from catalog data. New control responses need only
+  // state, not arbitrary catalog text; existing look/status remain unchanged.
+  const doneControl = (sky, extra = {}) => {
+    const { lookingAt: _lookingAt, ...state } = snapshot(sky);
+    return { ok: true, ...state, ...extra };
+  };
 
   async function ensureOpen(sky) {
     if (sky.active) return { ok: true, opened: false };
@@ -293,7 +299,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       )
         ok = clock.step?.(value);
       if (!ok) return fail('Sky playback action could not be applied');
-      return done(sky, { rate: clock.rate, playing: clock.playing });
+      return doneControl(sky, { rate: clock.rate, playing: clock.playing });
     },
     async layers(layer, enabled) {
       const sky = handle();
@@ -310,7 +316,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       sky.content.setFlags({ [layer]: enabled }, { notify: true });
       if (sky.content.flags?.[layer] !== enabled)
         return fail('Sky layer did not change');
-      return done(sky, { layer, enabled });
+      return doneControl(sky, { layer, enabled });
     },
     async magnitude(limit, target = 'stars') {
       const sky = handle();
@@ -333,7 +339,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         if (sky.content.userLimit !== limit)
           return fail('Star magnitude did not change');
         sky.redraw?.();
-        return done(sky, {
+        return doneControl(sky, {
           magnitudeTarget: target,
           magnitude: sky.content.userLimit,
         });
@@ -342,7 +348,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       sky.setNakedEye({ limit });
       if (sky.nakedEye?.limit !== limit)
         return fail('Satellite magnitude did not change');
-      return done(sky, {
+      return doneControl(sky, {
         magnitudeTarget: target,
         magnitude: sky.nakedEye?.limit,
         filterEnabled: sky.nakedEye?.on,
@@ -366,7 +372,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       });
       if (handle() !== sky) return unavailable();
       if (!result) return fail('Sky location could not be set');
-      return done(sky);
+      return doneControl(sky);
     },
     async clear(enabled) {
       const sky = handle();
@@ -380,7 +386,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       sky.clearView.set(enabled);
       if (sky.clearView.on !== enabled)
         return fail('Sky clear view did not change');
-      return done(sky, { clear: enabled });
+      return doneControl(sky, { clear: enabled });
     },
     async preset(id) {
       const sky = handle();
