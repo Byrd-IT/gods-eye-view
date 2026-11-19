@@ -34,6 +34,23 @@ function setup({ swapped = [] } = {}) {
   return { clock, control, voice, router };
 }
 
+test('History control replies retain every real history feed', () => {
+  const state = { active: true, preset: '1h', rate: 1 };
+  const voice = createHistoryVoice({
+    getHandle: () => ({ getState: () => state, setPreset() {} }),
+    getRouter: () => ({
+      adapters: ALL_HISTORY_ADAPTERS,
+      getState: () => ({
+        swapped: ALL_HISTORY_ADAPTERS.map((adapter) => adapter.id),
+      }),
+    }),
+  });
+  assert.deepEqual(
+    voice.preset('1h').playingFeeds,
+    ALL_HISTORY_ADAPTERS.map((adapter) => adapter.layerId),
+  );
+});
+
 test('History voice preset, expansion, row lock and record-floor jump reach real owners', () => {
   const { control, clock } = setup();
   const clocks = createLayerClocks({
