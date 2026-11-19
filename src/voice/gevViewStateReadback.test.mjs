@@ -2,10 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
-import { createGevActionRunner } from './gevActions.js';
+import { createGevActionRunner, controlCctv } from './gevActions.js';
 import { bindRenderer } from '../render/rendererOf.js';
 import { createStubRenderer } from '../render/stub/index.js';
 import { CCTV_FOCUS_RESULT } from '../layers/cctv/policy.js';
+
+test('CCTV never echoes an untrusted feed type', async () => {
+  const secret = 'SYNTHETIC_FEEDTYPE_SECRET_49d8a1';
+  const module = {
+    getUIState: () => ({
+      activeCamera: { id: 'cam', feedType: secret, noFeed: false },
+      count: 1,
+    }),
+    cycleCamera: () => true,
+    focusCamera: () => true,
+  };
+  const manager = {
+    layers: new Map([['cctv', { module }]]),
+    isEnabled: () => true,
+  };
+  const result = await controlCctv(manager, { action: 'next' });
+  assert.equal(result.feedType, null);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
 
 globalThis.window = globalThis.window || {
   clearTimeout,
