@@ -308,7 +308,10 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       )
         ok = clock.step?.(value);
       if (!ok) return fail('Sky playback action could not be applied');
-      return doneControl(sky, { rate: clock.rate, playing: clock.playing });
+      return doneControl(sky, {
+        rate: Number.isFinite(clock.rate) ? clock.rate : null,
+        playing: typeof clock.playing === 'boolean' ? clock.playing : null,
+      });
     },
     async layers(layer, enabled) {
       const sky = handle();

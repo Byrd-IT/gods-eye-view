@@ -9,6 +9,21 @@ import { CCTV_FOCUS_RESULT } from '../layers/cctv/policy.js';
 import { createSkyVoice } from '../byrdit/skyView/skyVoice.js';
 import { readHostViewState } from '../agent/worldPacket.js';
 
+test('Sky playback never returns untrusted clock rate or playing state', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const sky = {
+    active: true,
+    content: { flags: {} },
+    clock: { rate: secret, playing: secret, play: () => true },
+    time: { provider: 'builtin', getTime: () => Date.now() },
+  };
+  const voice = createSkyVoice({ getHandle: () => sky });
+  const { runner } = harness({ adapters: { sky: () => voice } });
+  const result = await runner('control_sky', { action: 'play' });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('Sky controls never return untrusted clock or observer fields', async () => {
   const secret = `SYNTHETIC_${crypto.randomUUID()}`;
   const sky = {
