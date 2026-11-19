@@ -241,6 +241,22 @@ function makeViewer(doc = fakeDoc()) {
   return { viewer, display, base, added };
 }
 
+test('Wayback voice controls the mounted slider, rate and releases', async () => {
+  const doc = fakeDoc();
+  doc.defaultView = {};
+  const { detach } = await setup({ doc });
+  try {
+    assert.equal(await detach.enable(), true);
+    const voice = doc.defaultView.__gevImagery.voice;
+    assert.equal((await voice.transport({ action: 'speed', rate: 4 })).rate, 4);
+    assert.equal((await voice.transport({ action: 'speed', rate: 3 })).ok, false);
+    assert.equal((await voice.move({ target: 'wayback', delta: -1 })).ok, true);
+    assert.equal((await voice.transport({ action: 'play' })).playing, true);
+    assert.equal((await voice.transport({ action: 'pause' })).playing, false);
+    assert.equal((await voice.move({ target: 'wayback', latest: true })).ok, true);
+  } finally { detach(); }
+});
+
 async function setup({
   doc = fakeDoc(),
   docJson = DOC,
