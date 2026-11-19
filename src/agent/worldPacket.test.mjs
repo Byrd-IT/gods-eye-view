@@ -5,6 +5,8 @@ import * as Cesium from 'cesium';
 import { getWorldPacket, readLayerOpacity } from './worldPacket.js';
 import { bindRenderer } from '../render/rendererOf.js';
 import { createStubRenderer } from '../render/stub/index.js';
+import { createCesiumPorts } from '../render/cesium/ports.js';
+import { headlessCamera } from '../render/cesium/cameraGoldens.js';
 import { createGevActionRunner } from '../voice/gevActions.js';
 
 test('World Packet reports the renderer camera heading and pitch in degrees', () => {
@@ -15,6 +17,41 @@ test('World Packet reports the renderer camera heading and pitch in degrees', ()
     JSON.stringify(packet.camera),
   );
   assert.ok(Math.abs(packet.camera.pitchDeg - -45) < 1e-6);
+});
+
+test('World Packet reads heading and pitch through the real Cesium camera port', () => {
+  const { scene, camera } = headlessCamera();
+  for (const name of ['preUpdate', 'postUpdate', 'preRender', 'postRender'])
+    scene[name] = new Cesium.Event();
+  scene.primitives = { add() {}, remove() {} };
+  scene.requestRender = () => {};
+  const viewer = {
+    scene,
+    camera,
+    clock: { currentTime: Cesium.JulianDate.now() },
+  };
+  const renderer = createCesiumPorts(viewer, {
+    capabilities: new Set(['cameraChangeThreshold']),
+  });
+  bindRenderer(viewer, renderer);
+  try {
+    camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(-97.74, 30.26, 500),
+      orientation: {
+        heading: Cesium.Math.toRadians(123),
+        pitch: Cesium.Math.toRadians(-32),
+        roll: 0,
+      },
+    });
+    const packet = getWorldPacket({
+      viewer,
+      dataManager: { getAll: () => [] },
+    });
+    assert.ok(Math.abs(packet.camera.headingDeg - 123) < 1e-6);
+    assert.ok(Math.abs(packet.camera.pitchDeg + 32) < 1e-6);
+  } finally {
+    renderer.dispose();
+  }
 });
 
 test('opacity readback omits absent and empty models', () => {

@@ -139,6 +139,7 @@ function setup(options = {}) {
     parent: doc.body,
     document: doc,
     hookWindow,
+    now: options.now,
     runNavigation:
       options.runNavigation ||
       ((noun, navigate) => {
@@ -175,7 +176,11 @@ function fakeHandle(overrides = {}) {
 }
 
 test('a throwing handle provider is contained', async () => {
-  const voice = createNavVoice({ getHandle: () => { throw new Error('sensitive-fixture'); } });
+  const voice = createNavVoice({
+    getHandle: () => {
+      throw new Error('sensitive-fixture');
+    },
+  });
   const result = await voice.status();
   assert.equal(result.ok, false);
   assert.doesNotMatch(JSON.stringify(result), /sensitive-fixture/);
@@ -347,6 +352,30 @@ test('voice zoom chains the steps it was given', async () => {
   const result = await handle.voice.zoom({ direction: 'in', steps: 2 });
   assert.equal(result.ok, true);
   assert.ok(Math.abs(frame().range - 490) < 2, `range ${frame().range}`);
+});
+
+test('voice zoom uses the current frame after an animation settles or is cancelled', async () => {
+  for (const cancel of [false, true]) {
+    let now = 0;
+    const { handle, viewer, frame } = setup({
+      view: { range: 2000 },
+      now: () => now,
+    });
+    assert.equal(handle.perform('zoom-in'), true);
+    if (cancel) {
+      assert.equal((await handle.voice.heading({ heading: 90 })).ok, true);
+    } else {
+      now = 1000;
+      viewer.scene.preUpdate.raiseEvent();
+    }
+    orbit(viewer, { heading: 30, pitch: -45, range: 1000 });
+    assert.equal((await handle.voice.zoom({ direction: 'in' })).ok, true);
+    assert.ok(
+      Math.abs(frame().range - 700) < 2,
+      `cancel=${cancel}: ${frame().range}`,
+    );
+    handle.destroy();
+  }
 });
 
 test('voice top_down and north use the widget behaviour', async () => {

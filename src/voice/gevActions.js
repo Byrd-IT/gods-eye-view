@@ -2267,10 +2267,6 @@ async function controlHistory(voice, args = {}, setLayer) {
   throw new Error(`Unknown history action: ${args.action || 'missing'}`);
 }
 
-/**
- * Voice Sky view control (open / close / look / time / lines / preset /
- * status) over the Sky voice adapter (skyVoice.js, handed in as `sky`).
- */
 async function controlWidget(name, provider, args, actions) {
   try {
     const voice = typeof provider === 'function' ? provider() : provider;
@@ -2294,6 +2290,10 @@ async function controlWidget(name, provider, args, actions) {
   }
 }
 
+/**
+ * Voice Sky view control (open / close / look / time / lines / preset /
+ * status) over the Sky voice adapter (skyVoice.js, handed in as `sky`).
+ */
 async function controlSky(voice, args = {}) {
   const action = String(args.action || '').toLowerCase();
   const wrap = (result) => ({ action: 'control_sky', ...result });
