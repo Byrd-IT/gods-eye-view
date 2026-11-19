@@ -29,6 +29,11 @@ const stable = (value) =>
 // covering every tool before them, and the additions are pinned by their own
 // assertions.
 const NEW_TOOLS = ['set_clean_view', 'set_layer_opacity'];
+// The navigation and solunar voice tools this release appends after them.
+// They are additive like NEW_TOOLS: the legacy pins below stay reproducible
+// once these two are left out, and the additions are pinned by their own
+// assertions.
+const APPENDED_TOOLS = ['control_nav', 'control_solunar'];
 const NEW_PANEL_TARGETS = [
   'time-travel-panel',
   'map-layers-panel',
@@ -46,7 +51,9 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
   const tools = structuredClone(
     GEV_REALTIME_TOOLS.filter(
       (tool) =>
-        tool.name !== 'set_cyber_sonar' && !NEW_TOOLS.includes(tool.name),
+        tool.name !== 'set_cyber_sonar' &&
+        !NEW_TOOLS.includes(tool.name) &&
+        !APPENDED_TOOLS.includes(tool.name),
     ),
   );
   const panel = tools.find((tool) => tool.name === 'set_panel_open');
@@ -119,7 +126,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // opacity. The digest above is taken over the payload without those
     // additions, so the pin still reproduces; the additions are pinned by
     // their own assertions.
-    '5f94528fbbb5297f1b9b00fdaa770eee0f8915fc87a67adbfc0f798b8a1a862a',
+    '720e3dbf6ec3524853dfbe5604ec6993d0abe0967f29f4fc986e8abfc86dbdf3',
   );
 });
 
@@ -224,6 +231,8 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'osm_query',
         'show_street_level',
         'open_stories',
+        'control_nav',
+        'control_solunar',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by
@@ -441,15 +450,23 @@ test('the complete current Realtime tool inventory is pinned', () => {
     createHash('sha256')
       .update(JSON.stringify(stable(GEV_REALTIME_TOOLS)))
       .digest('hex'),
-    'c1308321b0e30cf8ebb7deeef56f2f0433b58d0149e9fe8c95099b047f824974',
+    // Re-pinned for the navigation and solunar voice tools this release
+    // appends (control_nav, control_solunar); the pin before them,
+    // c1308321b0e30cf8ebb7deeef56f2f0433b58d0149e9fe8c95099b047f824974,
+    // is reproduced from the payload without those two tools.
+    '17a85be72dde6c6a2f894f1e2b60b35f5b3eeda3e541f23b1be8a5384abfcc77',
   );
 });
 
 test('the clean view and layer opacity tools are appended after control_droneplan', () => {
   const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);
-  assert.equal(names.at(-1), 'set_layer_opacity');
-  assert.equal(names.at(-2), 'set_clean_view');
-  assert.equal(names.at(-3), 'control_droneplan');
+  // The navigation and solunar voice tools this release appends land after
+  // the clean-view and opacity pair, so the pair is no longer the tail.
+  assert.equal(names.at(-1), 'control_solunar');
+  assert.equal(names.at(-2), 'control_nav');
+  assert.equal(names.at(-3), 'set_layer_opacity');
+  assert.equal(names.at(-4), 'set_clean_view');
+  assert.equal(names.at(-5), 'control_droneplan');
 
   const clean = GEV_REALTIME_TOOLS.find(
     (tool) => tool.name === 'set_clean_view',
@@ -474,6 +491,60 @@ test('the clean view and layer opacity tools are appended after control_dronepla
     (tool) => tool.name === 'set_panel_open',
   ).parameters.properties.panelId.enum;
   assert.deepEqual(panels.slice(-4), NEW_PANEL_TARGETS);
+});
+
+test('the appended navigation and solunar voice tools are pinned', () => {
+  const nav = GEV_REALTIME_TOOLS.find((tool) => tool.name === 'control_nav');
+  assert.deepEqual(nav.parameters.properties.action.enum, [
+    'tilt',
+    'heading',
+    'zoom',
+    'top_down',
+    'north',
+    'look',
+    'status',
+  ]);
+  assert.equal(nav.parameters.properties.tilt.type, 'integer');
+  assert.equal(nav.parameters.properties.tilt.minimum, 0);
+  assert.equal(nav.parameters.properties.tilt.maximum, 79);
+  assert.equal(nav.parameters.properties.heading.type, 'integer');
+  assert.equal(nav.parameters.properties.heading.minimum, 0);
+  assert.equal(nav.parameters.properties.heading.maximum, 359);
+  assert.deepEqual(nav.parameters.properties.direction.enum, [
+    'in',
+    'out',
+    'up',
+    'down',
+    'left',
+    'right',
+  ]);
+  assert.equal(nav.parameters.properties.steps.type, 'integer');
+  assert.equal(nav.parameters.properties.steps.minimum, 1);
+  assert.equal(nav.parameters.properties.steps.maximum, 10);
+  assert.deepEqual(nav.parameters.required, ['action']);
+  assert.equal(nav.parameters.additionalProperties, false);
+  assert.ok(nav.description);
+
+  const solunar = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'control_solunar',
+  );
+  assert.deepEqual(solunar.parameters.properties.action.enum, [
+    'open',
+    'spot',
+    'center',
+    'clock',
+    'status',
+  ]);
+  assert.equal(solunar.parameters.properties.latitude.type, 'number');
+  assert.equal(solunar.parameters.properties.latitude.minimum, -90);
+  assert.equal(solunar.parameters.properties.latitude.maximum, 90);
+  assert.equal(solunar.parameters.properties.longitude.type, 'number');
+  assert.equal(solunar.parameters.properties.longitude.minimum, -180);
+  assert.equal(solunar.parameters.properties.longitude.maximum, 180);
+  assert.equal(solunar.parameters.properties.hour12.type, 'boolean');
+  assert.deepEqual(solunar.parameters.required, ['action']);
+  assert.equal(solunar.parameters.additionalProperties, false);
+  assert.ok(solunar.description);
 });
 
 test("the opacity tool takes only whole percents inside the app's range", () => {

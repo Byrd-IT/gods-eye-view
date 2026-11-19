@@ -177,6 +177,88 @@ test('a stored 24 h choice is used on the next start', () => {
   );
 });
 
+test('setHour12 changes the clock, is remembered and repaints', () => {
+  const { container, panel, store } = setup();
+  panel.setSpot(...LAKE);
+  const sunset = () =>
+    text(
+      container.querySelector(
+        '.gev-sl-day[data-date="2026-11-03"] .gev-sl-sunset .gev-sl-value',
+      ),
+    );
+  assert.equal(panel.getHour12(), true);
+  assert.equal(panel.setHour12(false), true);
+  assert.equal(panel.getHour12(), false);
+  assert.equal(sunset(), '17:27');
+  assert.equal(store.get(HOUR12_STORAGE_KEY), '24');
+  // the chip shows the new choice as pressed
+  const active = container.querySelector('.gev-sl-clock.active');
+  assert.equal(active.dataset.hour12, 'false');
+  assert.equal(active.getAttribute('aria-pressed'), 'true');
+  assert.equal(panel.setHour12(true), true);
+  assert.equal(sunset(), '5:27 PM');
+  assert.equal(store.get(HOUR12_STORAGE_KEY), '12');
+});
+
+test('setHour12 and the 12 h / 24 h chips share one state', () => {
+  const { container, panel, store } = setup();
+  panel.setSpot(...LAKE);
+  panel.setHour12(false);
+  // clicking the chip the panel already shows keeps it there
+  [...container.querySelectorAll('.gev-sl-clock')]
+    .find((c) => text(c) === '24 h')
+    .click();
+  assert.equal(panel.getHour12(), false);
+  assert.equal(store.get(HOUR12_STORAGE_KEY), '24');
+  // clicking the other chip moves the shared state
+  [...container.querySelectorAll('.gev-sl-clock')]
+    .find((c) => text(c) === '12 h')
+    .click();
+  assert.equal(panel.getHour12(), true);
+  assert.equal(store.get(HOUR12_STORAGE_KEY), '12');
+});
+
+test('setHour12 refuses anything that is not a boolean', () => {
+  const { container, panel, store } = setup();
+  panel.setSpot(...LAKE);
+  const sunset = () =>
+    text(
+      container.querySelector(
+        '.gev-sl-day[data-date="2026-11-03"] .gev-sl-sunset .gev-sl-value',
+      ),
+    );
+  for (const bad of ['true', 0, 1, null, undefined, {}, [], NaN]) {
+    assert.equal(panel.setHour12(bad), false, String(bad));
+  }
+  assert.equal(panel.getHour12(), true, 'the state did not change');
+  assert.equal(sunset(), '5:27 PM');
+  assert.equal(store.has(HOUR12_STORAGE_KEY), false, 'nothing was written');
+});
+
+test('setHour12 keeps working when storage refuses to write', () => {
+  const { panel } = setup({
+    storage: {
+      getItem: () => null,
+      setItem() {
+        throw new Error('quota');
+      },
+    },
+  });
+  panel.setSpot(...LAKE);
+  assert.equal(panel.setHour12(false), true);
+  assert.equal(panel.getHour12(), false);
+});
+
+test('a destroyed panel refuses the clock and keeps the stored choice', () => {
+  const { container, panel, store } = setup();
+  panel.setSpot(...LAKE);
+  panel.destroy();
+  assert.equal(panel.setHour12(false), false);
+  assert.equal(panel.getHour12(), true, 'the state did not change');
+  assert.equal(store.has(HOUR12_STORAGE_KEY), false, 'nothing was written');
+  assert.equal(container.children.length, 0);
+});
+
 test('Use map centre calls back; invalid points are refused', () => {
   const { container, panel, centered } = setup();
   panel.setSpot(...LAKE);

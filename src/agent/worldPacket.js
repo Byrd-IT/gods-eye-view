@@ -88,9 +88,16 @@ export function activeContactsWindow(dataManager) {
 }
 
 /**
- * The per-layer opacity the app holds, as whole percents, for the layers
- * that are not at their default (100 %). A host without an opacity model
- * reports nothing rather than an empty map.
+ * The per-layer opacity the model exposes, as whole percents.
+ *
+ * The read-back is faithful: every entry the model reports becomes a whole
+ * percent, including 100 for a layer sitting at its default. The app's own
+ * opacity model (src/byrdit/layerOpacity/opacityModel.js) only stores layers
+ * off their 100 % default, so a 100 does not normally reach this function;
+ * a host that reports one gets it reported back as 100 rather than dropped.
+ *
+ * A host without an opacity model, or one whose entries are all non-finite,
+ * reports nothing (null) rather than an empty map.
  * @param {object|null} model The app's opacity model, when it has one.
  * @returns {object|null} Layer id → percent, or null when there is no model.
  */
@@ -156,6 +163,12 @@ export function getWorldPacket(options = {}) {
       latitude: eye.lat,
       longitude: eye.lon,
       heightM: eye.height,
+      ...(Number.isFinite(pose.heading)
+        ? { headingDeg: ((((pose.heading * 180) / Math.PI) % 360) + 360) % 360 }
+        : {}),
+      ...(Number.isFinite(pose.pitch)
+        ? { pitchDeg: (pose.pitch * 180) / Math.PI }
+        : {}),
     },
     style: styleManager?.activeStyle || 'normal',
     context: contextState
@@ -194,7 +207,7 @@ export function getWorldPacket(options = {}) {
       { now },
     ),
     // Only a host that owns an opacity model reports layer opacity, and only
-    // for the layers that are off their default: the packet stays compact.
+    // the layers it actually exposes: the packet stays compact.
     ...(opacity ? { layerOpacity: opacity } : {}),
   };
 }

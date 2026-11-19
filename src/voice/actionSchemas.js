@@ -1266,6 +1266,52 @@ const schemas = [
       required: ['layerId', 'opacityPct'],
     },
   },
+  {
+    name: 'control_nav',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: [
+            'tilt',
+            'heading',
+            'zoom',
+            'top_down',
+            'north',
+            'look',
+            'status',
+          ],
+        },
+        tilt: { type: 'integer', minimum: 0, maximum: 79 },
+        heading: { type: 'integer', minimum: 0, maximum: 359 },
+        direction: {
+          type: 'string',
+          enum: ['in', 'out', 'up', 'down', 'left', 'right'],
+        },
+        steps: { type: 'integer', minimum: 1, maximum: 10 },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'control_solunar',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['open', 'spot', 'center', 'clock', 'status'],
+        },
+        latitude: { type: 'number', minimum: -90, maximum: 90 },
+        longitude: { type: 'number', minimum: -180, maximum: 180 },
+        hour12: { type: 'boolean' },
+      },
+      required: ['action'],
+    },
+  },
 ];
 
 function freeze(value) {

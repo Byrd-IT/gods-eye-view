@@ -159,18 +159,18 @@ const PANEL_ALIASES = new Map([
   // resolve cleanly and then fail with "no panel to open here".
   ['time travel', 'time-travel-panel'],
   ['time-travel', 'time-travel-panel'],
-  ['history', 'time-travel-panel'],
+  ['history panel', 'time-travel-panel'],
   ['map layers', 'map-layers-panel'],
   ['map-layers', 'map-layers-panel'],
   ['overlays', 'map-layers-panel'],
   ['solunar', 'solunar-panel'],
   ['sun and moon', 'solunar-panel'],
-  ['moon', 'solunar-panel'],
+  ['moon panel', 'solunar-panel'],
   ['sun times', 'solunar-panel'],
   ['drone plan', 'drone-plan-panel'],
   ['drone flight plan', 'drone-plan-panel'],
   ['flight plan', 'drone-plan-panel'],
-  ['drone', 'drone-plan-panel'],
+  ['drone panel', 'drone-plan-panel'],
 ]);
 
 const PANEL_IDS = new Set([
@@ -343,6 +343,8 @@ export function createGevActionRunner({
   sky = null,
   imagery = null,
   dronePlan = null,
+  nav = null,
+  solunar = null,
   // The app's per-layer opacity model (src/byrdit/layerOpacity). A function
   // returning the model, or the model itself; null when the host has none.
   layerOpacity = null,
@@ -1747,6 +1749,25 @@ export function createGevActionRunner({
       return setLayerOpacity(opacityModel(), args);
     }
 
+    if (name === 'control_nav')
+      return controlWidget('control_nav', nav, args, [
+        'tilt',
+        'heading',
+        'zoom',
+        'top_down',
+        'north',
+        'look',
+        'status',
+      ]);
+    if (name === 'control_solunar')
+      return controlWidget('control_solunar', solunar, args, [
+        'open',
+        'spot',
+        'center',
+        'clock',
+        'status',
+      ]);
+
     if (name === 'control_cctv') {
       const action = String(args.action || '').toLowerCase();
       if (
@@ -2250,6 +2271,29 @@ async function controlHistory(voice, args = {}, setLayer) {
  * Voice Sky view control (open / close / look / time / lines / preset /
  * status) over the Sky voice adapter (skyVoice.js, handed in as `sky`).
  */
+async function controlWidget(name, provider, args, actions) {
+  try {
+    const voice = typeof provider === 'function' ? provider() : provider;
+    if (!voice)
+      return {
+        action: name,
+        ok: false,
+        error: 'Control unavailable in this host',
+      };
+    const action =
+      typeof args.action === 'string' ? args.action.toLowerCase() : '';
+    if (!actions.includes(action) || typeof voice[action] !== 'function')
+      return {
+        action: name,
+        ok: false,
+        error: 'Unknown or unavailable control action',
+      };
+    return { action: name, ...(await voice[action](args)) };
+  } catch {
+    return { action: name, ok: false, error: 'Control failed' };
+  }
+}
+
 async function controlSky(voice, args = {}) {
   const action = String(args.action || '').toLowerCase();
   const wrap = (result) => ({ action: 'control_sky', ...result });

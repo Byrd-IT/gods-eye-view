@@ -7543,6 +7543,29 @@ test('analyst_query keeps transit route IDs raw so a follow-up filter still matc
   }
 });
 
+test('widget controls dispatch arguments and return the adapter state', async () => {
+  const calls = [];
+  const viewer = { clock: { onTick: { addEventListener: () => () => {} } }, scene: { canvas: { addEventListener() {}, removeEventListener() {} } }, camera: { moveEnd: { addEventListener() {} } } };
+  const runner = createGevActionRunner({ viewer, styleManager: {}, dataManager: {}, nav: () => ({ tilt: async (args) => { calls.push(args); return { ok: true, tilt: 17 }; } }), solunar: () => ({ clock: (args) => { calls.push(args); return { ok: true, hour12: false }; } }) });
+  const nav = await runner('control_nav', { action: 'tilt', tilt: 17 });
+  const solunar = await runner('control_solunar', { action: 'clock', hour12: false });
+  assert.equal(nav.tilt, 17);
+  assert.equal(solunar.hour12, false);
+  assert.deepEqual(calls, [{ action: 'tilt', tilt: 17 }, { action: 'clock', hour12: false }]);
+});
+
+test('widget controls contain provider and adapter exceptions without leaking', async () => {
+  const secret = 'synthetic-provider-secret';
+  for (const [name, option] of [['control_nav', 'nav'], ['control_solunar', 'solunar']]) {
+    for (const provider of [() => { throw new Error(secret); }, () => ({ status: () => { throw new Error(secret); } })]) {
+      const runner = createGevActionRunner({ viewer: { clock: { onTick: { addEventListener: () => () => {} } }, scene: { canvas: { addEventListener() {}, removeEventListener() {} } }, camera: { moveEnd: { addEventListener() {} } } }, styleManager: {}, dataManager: {}, [option]: provider });
+      const result = await runner(name, { action: 'status' });
+      assert.equal(result.ok, false);
+      assert.equal(JSON.stringify(result).includes(secret), false);
+    }
+  }
+});
+
 test('new panels, clean view and opacity reach their owners', async () => {
   const calls = [];
   let cleanView = false;
@@ -7572,9 +7595,12 @@ test('new panels, clean view and opacity reach their owners', async () => {
       return model;
     },
   });
-  for (const [phrase, id] of [['history', 'time-travel-panel'], ['map layers', 'map-layers-panel'], ['moon', 'solunar-panel'], ['drone plan', 'drone-plan-panel']]) {
+  for (const [phrase, id] of [['history panel', 'time-travel-panel'], ['map layers', 'map-layers-panel'], ['moon panel', 'solunar-panel'], ['drone plan', 'drone-plan-panel']]) {
     assert.equal((await runner('set_panel_open', { panelId: phrase, open: true })).panelId, id);
     assert.equal(calls.at(-1)[0], id);
+  }
+  for (const ambiguous of ['history', 'moon', 'drone']) {
+    await assert.rejects(runner('set_panel_open', { panelId: ambiguous, open: true }), /Unknown panel/);
   }
   const savedDocument = globalThis.document;
   try {
@@ -7590,9 +7616,14 @@ test('new panels, clean view and opacity reach their owners', async () => {
   assert.equal((await runner('set_clean_view', { enabled: true })).cleanView, true);
   assert.equal((await runner('set_clean_view', { enabled: 'false' })).ok, false);
   delete styleManager.toggleCleanView;
-  assert.equal((await runner('set_clean_view', { enabled: false })).ok, false);
+  const noToggle = await runner('set_clean_view', { enabled: false });
+  assert.equal(noToggle.ok, false);
+  assert.equal(noToggle.unavailable, true);
   styleManager.toggleCleanView = () => { throw new Error('secret-fixture'); };
-  assert.equal((await runner('set_clean_view', { enabled: false })).ok, false);
+  const throwingToggle = await runner('set_clean_view', { enabled: false });
+  assert.equal(throwingToggle.ok, false);
+  // The adapter's exception text must never reach the model.
+  assert.equal(JSON.stringify(throwingToggle).includes('secret-fixture'), false);
   styleManager.toggleCleanView = () => {};
   assert.equal((await runner('set_clean_view', { enabled: false })).ok, false);
   const faded = await runner('set_layer_opacity', { layerId: 'flights', opacityPct: 40 });

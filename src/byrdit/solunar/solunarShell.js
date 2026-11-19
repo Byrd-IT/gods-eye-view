@@ -6,7 +6,9 @@
  */
 import * as Cesium from 'cesium';
 import { pickGroundPosition } from '../../input/dispatcher.js';
-import { createSolunarPanel } from './panel.js';
+import { createSolunarPanel, formatClock } from './panel.js';
+import { createSolunarVoice } from './solunarVoice.js';
+import { solunarWeek } from './solunarDay.js';
 import { addDays, localDateOf, localDayStartMs } from './zone.js';
 import { cesiumViewerFor } from '../cesiumViewer.js';
 
@@ -63,6 +65,9 @@ export function mountSolunarForShell(
   const root = doc?.getElementById?.(SOLUNAR_ID);
   const body = doc?.getElementById?.(SOLUNAR_BODY_ID);
   const viewer = cesiumViewerFor(shell?.viewer);
+  // Where the voice handle is published: the page's window in a browser, the
+  // document's own view in a test.
+  const win = globalThis.window ?? doc?.defaultView ?? null;
   if (!root || !body || !viewer) return null;
   if (root.dataset?.solunarMounted === '1') return null;
   root.dataset.solunarMounted = '1';
@@ -105,6 +110,54 @@ export function mountSolunarForShell(
     ...(now ? { now } : {}),
     onUseCenter: useCenter,
   });
+
+  /** The day the card shows first, read back for the voice. */
+  const readToday = () => {
+    const spot = panel.getSpot();
+    if (!spot) return null;
+    const zone = spot.zone;
+    const clock = now ?? Date.now;
+    const day = solunarWeek({ ...spot, zone }, clock(), 1)[0];
+    if (!day) return null;
+    const h12 = panel.getHour12();
+    const times = (list) =>
+      list.map((ms) => formatClock(ms, zone, h12)).join(' · ');
+    return {
+      date: day.date,
+      zone,
+      phase: day.phase,
+      illuminationPct: Math.round(day.illumination * 100),
+      huntingStars: day.huntingStars,
+      fishingStars: day.fishingStars,
+      sunrise: times(day.sunrise),
+      sunset: times(day.sunset),
+      moonrise: times(day.moonrise),
+      moonset: times(day.moonset),
+      moonOverhead: times(day.moonUpper),
+      moonUnderfoot: times(day.moonLower),
+    };
+  };
+
+  /** Open the card the way the rail does, through the shell's disclosure. */
+  const openCard = async () => {
+    if (!root.classList.contains('collapsed')) {
+      shell.revealPanel?.(SOLUNAR_ID);
+      return true;
+    }
+    if (typeof shell?.setPanelCollapsed !== 'function') return false;
+    shell.setPanelCollapsed(SOLUNAR_ID, false, { explicit: true });
+    await Promise.resolve();
+    if (!isOpen()) return false;
+    shell.revealPanel?.(SOLUNAR_ID);
+    return true;
+  };
+
+  /** Put the card on a spot the caller named, marker and all. */
+  const setSpotByDegrees = (latDeg, lonDeg) => {
+    const cartesian = Cesium.Cartesian3.fromDegrees(lonDeg, latDeg);
+    useSpot({ latDeg, lonDeg, cartesian }, 'voice');
+    return panel.getSpot() != null;
+  };
 
   // A card left open past the spot's local midnight re-draws itself then, so
   // the week never shows yesterday as today.
@@ -181,9 +234,28 @@ export function mountSolunarForShell(
 
   if (isOpen()) useCenter();
 
-  return {
+  let destroyed = false;
+  const voice = createSolunarVoice({
+    open: openCard,
+    isOpen,
+    setSpot: setSpotByDegrees,
+    getSpot: () => panel.getSpot(),
+    useCenter: () => {
+      useCenter();
+      return panel.getSpot() != null;
+    },
+    setHour12: (value) => panel.setHour12(value),
+    getHour12: () => panel.getHour12(),
+    isDestroyed: () => destroyed,
+    readToday,
+  });
+
+  const handle = {
     panel,
+    voice,
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
       observer?.disconnect();
       canvas?.removeEventListener('pointerdown', onDown);
       canvas?.removeEventListener('pointerup', onUp);
@@ -191,6 +263,14 @@ export function mountSolunarForShell(
       stopMidnightTimer();
       panel.destroy();
       delete root.dataset.solunarMounted;
+      // Only this card's own handle is removed: a later mount may have put
+      // its own voice there, and that one stays.
+      if (win?.__gevSolunar?.voice === voice) delete win.__gevSolunar;
     },
   };
+
+  // The voice tool reaches the card through this handle, the way the other
+  // fork cards publish theirs.
+  if (win) win.__gevSolunar = handle;
+  return handle;
 }

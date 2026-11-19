@@ -109,6 +109,24 @@ export function createSolunarPanel({
   let hour12 = readHour12(storage);
   let destroyed = false;
 
+  /**
+   * The one place the 12/24 h choice changes: state, then the same storage
+   * key, then a repaint. Both the clock chips and setHour12() come through
+   * here, so they cannot drift apart. A destroyed panel changes nothing.
+   */
+  const applyHour12 = (value) => {
+    if (typeof value !== 'boolean') return false;
+    if (destroyed) return false;
+    hour12 = value;
+    try {
+      storage?.setItem(HOUR12_STORAGE_KEY, value ? '12' : '24');
+    } catch {
+      /* not persisted */
+    }
+    render();
+    return true;
+  };
+
   const render = () => {
     if (destroyed) return;
     container.replaceChildren();
@@ -151,13 +169,7 @@ export function createSolunarPanel({
         },
       });
       chip.addEventListener('click', () => {
-        hour12 = value;
-        try {
-          storage?.setItem(HOUR12_STORAGE_KEY, value ? '12' : '24');
-        } catch {
-          /* not persisted */
-        }
-        render();
+        applyHour12(value);
       });
     }
     el(doc, 'div', head, {
@@ -315,6 +327,10 @@ export function createSolunarPanel({
       return true;
     },
     getSpot: () => (spot ? { ...spot } : null),
+    /** Switch between 12 h and 24 h clocks. Only booleans are accepted. */
+    setHour12(value) {
+      return applyHour12(value);
+    },
     getHour12: () => hour12,
     refresh: render,
     destroy() {

@@ -64,6 +64,8 @@ export function initGevVoiceCommands(options) {
         // same host adapter the other voice hosts pass, so the runner can
         // fade a layer and read the opacity back.
         layerOpacity: options.layerOpacity,
+        nav: options.nav,
+        solunar: options.solunar,
         readVoicePanelOperation: () => commands?.captureVoicePanelOperation?.(),
       }),
       options.toolCatalog,

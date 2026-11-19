@@ -810,7 +810,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_droneplan: {
     description:
-      'Drone Flight Plan rail: draw an area, set aircraft and capture options, plan DJI Fly KMZ missions, or plan every recommended pass. open shows the panel and does not start a draw. draw starts the box or polygon tool; the person still has to drag or click. box and polygon set an area from coordinates. recommend applies the recommended speed, height, overlap and shutter for the current aircraft and mode. options sets one or more panel controls. takeoff is pick (the person clicks the ground), clear (box centre), or point (lat and lon). suite plans every recommended pass. download saves a mission, all missions, or the suite zip only when downloads is true. close clears the plan from the globe. Say the resulting aircraft, mode and counts, not the request. If downloaded is false, do not claim a file was saved. If drawing is false, the draw did not start. If terrainComplete is false, heights are incomplete. These files are NOT FLIGHT-TESTED: never say a mission is safe to fly.',
+      'Drone Flight Plan: open shows the rail; draw starts box or polygon (person must draw); box/polygon set coordinates. recommend applies current-aircraft settings; options changes controls. takeoff: pick, clear (box centre), or point (lat/lon). suite plans recommended passes; download requires downloads=true. close clears globe plan. Report actual aircraft, mode and counts: downloaded:false means no file; drawing:false means not started; terrainComplete:false means incomplete heights. NOT FLIGHT-TESTED: never claim a mission is safe.',
     $position: 1,
     parameters: {
       properties: {
@@ -846,7 +846,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   set_clean_view: {
     description:
-      'Turn clean view on or off: clean view hides every panel and control and leaves only the globe. enabled true turns it on, false turns it off. It changes nothing on the map: the camera, the layers and the position stay as they are. Say the resulting state ("Clean view is on"), not the request. If the host has no clean view control, say that it is unavailable rather than claiming the panels went away.',
+      'Clean view hides panels and controls without changing camera or layers. enabled true hides, false restores. Report the resulting state or unavailability.',
     $position: 1,
     parameters: {
       properties: {
@@ -860,17 +860,59 @@ export const ACTION_DESCRIPTIONS = {
   },
   set_layer_opacity: {
     description:
-      'Set a data layer\'s transparency: opacityPct is a whole percent, 0 (invisible) to 100 (solid). Use it for "make the flights layer half transparent" or "fade the weather radar". It never turns a layer on or off — that is set_layer_visibility — and it never moves the camera. A layer the app gives no opacity control (recent imagery has its own) is refused; say so instead of claiming it changed. Say the resulting percent.',
+      'Set layer opacityPct, 0 invisible to 100 solid; this does not toggle the layer or move the camera. Use set_layer_visibility to toggle. Recent imagery has its own opacity control. Report the resulting percent or refusal.',
     $position: 1,
     parameters: {
       properties: {
         layerId: {
-          description: `The layer to fade. Spoken names: ${voiceLayerAliasHint()}.`,
+          description:
+            'Layer to fade; use the same IDs as set_layer_visibility.',
           $position: 1,
         },
         opacityPct: {
-          description:
-            'Opacity as a whole percent: 0 is invisible, 100 is solid. The app stores it as a fraction.',
+          description: 'Opacity percent: 0 invisible, 100 solid.',
+          $position: 1,
+        },
+      },
+    },
+  },
+  control_nav: {
+    description:
+      'Control map navigation: tilt, compass heading, zoom, top down, north up, look, or read status. Tilt is the slider angle 0 to 79 degrees from top-down. Report actual state or refusal.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: { description: 'Navigation operation.', $position: 1 },
+        tilt: {
+          description: 'Tilt slider degrees from top-down, 0 to 79.',
+          $position: 1,
+        },
+        heading: {
+          description: 'Compass bearing in degrees, 0 to 359.',
+          $position: 1,
+        },
+        direction: {
+          description: 'Zoom in or out; look up, down, left or right.',
+          $position: 1,
+        },
+        steps: {
+          description: 'Number of zoom or look steps, 1 to 10.',
+          $position: 1,
+        },
+      },
+    },
+  },
+  control_solunar: {
+    description:
+      'Open Solunar, select a spot or map center, set 12/24 hour clock, or report sun and moon times and ratings for the selected spot. Report actual state or refusal.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: { description: 'Solunar operation.', $position: 1 },
+        latitude: { description: 'Spot latitude in degrees.', $position: 1 },
+        longitude: { description: 'Spot longitude in degrees.', $position: 1 },
+        hour12: {
+          description: 'True for 12-hour, false for 24-hour clock.',
           $position: 1,
         },
       },

@@ -357,6 +357,8 @@ export function createApplicationTools({
     // The per-layer opacity model (src/byrdit/layerOpacity), so voice can
     // set a layer's opacity and read it back in the view state.
     layerOpacity: () => data.layerOpacity?.model ?? null,
+    nav: () => window.__gevNav?.voice ?? null,
+    solunar: () => window.__gevSolunar?.voice ?? null,
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });

@@ -7,6 +7,16 @@ import { bindRenderer } from '../render/rendererOf.js';
 import { createStubRenderer } from '../render/stub/index.js';
 import { createGevActionRunner } from '../voice/gevActions.js';
 
+test('World Packet reports the renderer camera heading and pitch in degrees', () => {
+  const { viewer, dataManager, styleManager } = harness();
+  const packet = getWorldPacket({ viewer, dataManager, styleManager });
+  assert.ok(
+    Math.abs(packet.camera.headingDeg - 0) < 1e-6,
+    JSON.stringify(packet.camera),
+  );
+  assert.ok(Math.abs(packet.camera.pitchDeg - -45) < 1e-6);
+});
+
 test('opacity readback omits absent and empty models', () => {
   assert.equal(readLayerOpacity({ get: () => 1 }), null);
   assert.equal(
@@ -17,6 +27,61 @@ test('opacity readback omits absent and empty models', () => {
     readLayerOpacity({ get: () => 0.4, entries: () => [['flights', 0.4]] }),
     { flights: 40 },
   );
+});
+
+// The packet stays compact: with no opacity model, or with a model whose
+// entries are all unreadable, the packet carries no layerOpacity key at all
+// rather than an empty or null one.
+test('World Packet omits layer opacity when the model is absent or unreadable', () => {
+  const { viewer, dataManager, styleManager } = harness();
+
+  const withoutModel = getWorldPacket({ viewer, dataManager, styleManager });
+  assert.equal('layerOpacity' in withoutModel, false);
+
+  const unreadable = getWorldPacket({
+    viewer,
+    dataManager,
+    styleManager,
+    layerOpacity: {
+      entries: () => [['flights', Number.NaN]],
+      get: () => Number.NaN,
+    },
+  });
+  assert.equal('layerOpacity' in unreadable, false);
+
+  const throwing = getWorldPacket({
+    viewer,
+    dataManager,
+    styleManager,
+    layerOpacity: {
+      entries: () => [['flights', 0.4]],
+      get: () => {
+        throw new Error('secret-fixture');
+      },
+    },
+  });
+  assert.equal('layerOpacity' in throwing, false);
+  assert.equal(JSON.stringify(throwing).includes('secret-fixture'), false);
+});
+
+// The 100 % entries contract: a layer the model exposes at its default is
+// reported as 100, so the packet states the opacity it read rather than
+// silently dropping the layer.
+test('World Packet reports a 100 percent entry the model exposes', () => {
+  const { viewer, dataManager, styleManager } = harness();
+  const packet = getWorldPacket({
+    viewer,
+    dataManager,
+    styleManager,
+    layerOpacity: {
+      entries: () => [
+        ['flights', 1],
+        ['traffic', 0.4],
+      ],
+      get: (id) => (id === 'flights' ? 1 : 0.4),
+    },
+  });
+  assert.deepEqual(packet.layerOpacity, { flights: 100, traffic: 40 });
 });
 
 test('opacity readback fails closed without exposing adapter errors', () => {
@@ -257,6 +322,8 @@ const PRE_EXTRACTION_PAYLOAD = {
     latitude: 30.259999999999994,
     longitude: -97.74,
     heightM: 499.99999999901877,
+    headingDeg: 0,
+    pitchDeg: -45,
   },
   style: 'night-vision',
   context: {
