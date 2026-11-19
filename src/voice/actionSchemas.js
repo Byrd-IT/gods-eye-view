@@ -1361,7 +1361,7 @@ const schemas = [
           ],
         },
         enabled: { type: 'boolean' },
-        ageDays: { enum: [1, 3, 7, 14, 30, 'all'] },
+        ageDays: { type: 'string', enum: ['1', '3', '7', '14', '30', 'all'] },
       },
       required: [],
     },

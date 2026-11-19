@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGevActionRunner } from './gevActions.js';
+import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
+import { GHOSTMAPS_AGE_OPTIONS } from '../layers/ghostMaps/records.js';
 import {
   GHOSTMAPS_PRODUCTS,
   GHOSTMAPS_LATEST_DROP,
@@ -16,6 +18,17 @@ const viewer = {
 };
 globalThis.window ||= { clearTimeout, setTimeout };
 const ids = [...GHOSTMAPS_PRODUCTS, GHOSTMAPS_LATEST_DROP].map((p) => p.id);
+test('GhostMaps tool schema tracks actual catalog and typed age options', () => {
+  const schema = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'control_ghostmaps',
+  ).parameters.properties;
+  assert.deepEqual(schema.product.enum, ids);
+  assert.equal(schema.ageDays.type, 'string');
+  assert.deepEqual(
+    schema.ageDays.enum,
+    GHOSTMAPS_AGE_OPTIONS.map((age) => (age === null ? 'all' : String(age))),
+  );
+});
 function harness() {
   const state = new Map(ids.map((id) => [id, false]));
   let age = '7';
@@ -63,18 +76,44 @@ test('all products toggle without changing other products and return current sta
 });
 test('all age settings apply, invalid requests refuse and no layer reports unavailable', async () => {
   const { run, dataManager } = harness();
-  for (const ageDays of [1, 3, 7, 14, 30, 'all']) {
+  for (const ageDays of ['1', '3', '7', '14', '30', 'all']) {
     const result = await run('control_ghostmaps', { ageDays });
     assert.equal(result.ok, true);
     assert.equal(result.ageDays, String(ageDays));
   }
-  assert.equal((await run('control_ghostmaps', { ageDays: 2 })).ok, false);
+  assert.equal((await run('control_ghostmaps', { ageDays: '2' })).ok, false);
+  assert.equal((await run('control_ghostmaps', { ageDays: 7 })).ok, false);
   assert.equal(
     (await run('control_ghostmaps', { product: 'bad', enabled: true })).ok,
     false,
   );
   dataManager.layers.clear();
   assert.equal((await run('control_ghostmaps', {})).ok, false);
+});
+
+test('read-back reports product error and loading states without raw errors', async () => {
+  const { run, dataManager } = harness();
+  dataManager.layers.get('s2-ghostmaps').module.getRowControls = () => ({
+    chips: [
+      {
+        id: 'cip',
+        active: true,
+        state: 'error',
+        title: 'private failure detail',
+      },
+      { id: 'iran-cip', active: true, busy: true },
+    ],
+    segmented: { options: [{ id: 'age-7', active: true }] },
+  });
+  const result = await run('control_ghostmaps', {});
+  assert.equal(result.ok, true);
+  assert.equal(result.products[0].state, 'error');
+  assert.equal(result.products[1].busy, true);
+  assert.match(result.say, /failed/);
+  assert.equal(
+    JSON.stringify(result).includes('private failure detail'),
+    false,
+  );
 });
 
 test('no-op callbacks and exceptions do not report success or expose details', async () => {

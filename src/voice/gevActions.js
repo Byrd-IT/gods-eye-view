@@ -2309,7 +2309,7 @@ async function controlGhostMaps(dataManager, args = {}) {
     'yemen-flot',
     'latest-drop',
   ];
-  const ages = [1, 3, 7, 14, 30, 'all'];
+  const ages = ['1', '3', '7', '14', '30', 'all'];
   if (
     args.product !== undefined &&
     (!products.includes(args.product) || typeof args.enabled !== 'boolean')
@@ -2365,13 +2365,29 @@ async function controlGhostMaps(dataManager, args = {}) {
       (age && actualAge !== String(args.ageDays))
     )
       return fail('GhostMaps did not apply the requested change.');
-    return reply({
-      ok: true,
-      products: (controls.chips || []).map(({ id, active }) => ({
+    const productsReadBack = (controls.chips || []).map(
+      ({ id, active, busy, state }) => ({
         id,
         enabled: Boolean(active),
-      })),
+        busy: Boolean(busy),
+        state: state === 'error' ? 'error' : null,
+      }),
+    );
+    const problem = productsReadBack.some(
+      (product) => product.enabled && product.state === 'error',
+    );
+    const loading = productsReadBack.some(
+      (product) => product.enabled && product.busy,
+    );
+    return reply({
+      ok: true,
+      products: productsReadBack,
       ageDays: actualAge,
+      say: problem
+        ? 'GhostMaps selection read; a product failed.'
+        : loading
+          ? 'GhostMaps selection read; products are loading.'
+          : 'GhostMaps selection read.',
     });
   } catch {
     return fail('GhostMaps control failed.');

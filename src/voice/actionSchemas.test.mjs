@@ -460,7 +460,7 @@ test('the complete current Realtime tool inventory is pinned', () => {
       .digest('hex'),
     // Re-pinned for navigation and solunar voice and the deliberately
     // shortened descriptions needed to keep the prompt within budget.
-    '251250679be1525bdbda56de6047b2b587eca4ba26f67819cba9d05708f1c0cd',
+    'ce7fd130da70825f6672dfd2c05b846c43ba74efba33ea8ffc9dd7be99b12b2e',
   );
 });
 

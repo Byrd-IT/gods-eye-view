@@ -31,6 +31,10 @@ test('every tool has a plan label, never its raw name', () => {
     assert.notEqual(label, name.replace(/_/g, ' '), name);
     assert.doesNotMatch(label, /_/, name);
   }
+  assert.equal(planStepLabel('control_nav', {}), 'Action: Camera');
+  assert.equal(planStepLabel('control_solunar', {}), 'Action: Solunar');
+  assert.equal(planStepLabel('control_ghostmaps', {}), 'Action: GhostMaps');
+  assert.equal(planStepLabel('control_overlays', {}), 'Map layers');
   assert.equal(planStepLabel('analyst_query', {}), 'Analyst query');
   assert.equal(
     planStepLabel('adjust_camera_zoom', { direction: 'in' }),

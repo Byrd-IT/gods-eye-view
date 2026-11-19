@@ -932,7 +932,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_overlays: {
     description:
-      'Control Byrd-IT map overlays, not data layers. Use status to find IDs. Report actual state and refusals. Drawn means mounted, not necessarily visible.',
+      'Control map overlays, not data layers. Report state and refusals. Drawn means mounted, not necessarily visible.',
     $position: 1,
     parameters: {
       properties: {

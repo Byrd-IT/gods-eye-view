@@ -1076,7 +1076,6 @@ const STEP_TITLES = Object.freeze({
   control_sky: msg('Control sky'),
   control_imagery: msg('Control imagery'),
   control_droneplan: msg('Control drone plan'),
-  control_nav: msg('Control scene'),
   control_overlays: msg('Map layers'),
   set_clean_view: msg('Control clean view'),
   set_layer_opacity: msg('Set layer opacity'),
@@ -1094,9 +1093,17 @@ const STEP_TITLES = Object.freeze({
 
 /** A short on-screen label for one tool call in the voice card's plan. */
 export function planStepLabel(name, args = {}) {
-  if (name === 'control_solunar' || name === 'control_ghostmaps') {
+  if (
+    name === 'control_nav' ||
+    name === 'control_solunar' ||
+    name === 'control_ghostmaps'
+  ) {
     const feature =
-      name === 'control_solunar' ? msg('Solunar') : msg('GhostMaps');
+      name === 'control_nav'
+        ? msg('Camera')
+        : name === 'control_solunar'
+          ? msg('Solunar')
+          : msg('GhostMaps');
     return `${t(msg('Action'))}: ${t(feature)}`;
   }
   if (Object.hasOwn(STEP_TITLES, name)) return t(STEP_TITLES[name]);
