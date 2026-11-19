@@ -53,6 +53,7 @@ import {
   isContextRecordActive,
 } from '../data/contextStore.js';
 import { CCTV_FOCUS_RESULT } from '../layers/cctv/policy.js';
+import { MODES as RECENT_IMAGERY_MODES } from '../layers/recentImagery/index.js';
 import {
   NEAREST_RADIUS_MAX_M as STREET_LEVEL_WIDE_RADIUS_M,
   STREET_LEVEL_LAYER_ID,
@@ -2559,11 +2560,9 @@ async function controlImagery(voice, args = {}, dataManager = null) {
           return wrap({ ok: false, error: 'mode must be 0, 1 or 2' });
         layer.setMode(args.mode);
         const observed = layer.getSnapshot()?.mode;
-        const mode = ['image', 'basemap', 'ab'].includes(observed)
-          ? observed
-          : null;
+        const mode = RECENT_IMAGERY_MODES.includes(observed) ? observed : null;
         return wrap({
-          ok: mode === ['image', 'basemap', 'ab'][args.mode],
+          ok: mode === RECENT_IMAGERY_MODES[args.mode],
           mode,
         });
       }

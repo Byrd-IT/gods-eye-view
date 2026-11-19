@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGevActionRunner } from './gevActions.js';
@@ -17,6 +18,19 @@ import { ALL_HISTORY_ADAPTERS } from '../byrdit/historyUi/historyEventAdapters.j
 
 const NOW = Date.parse('2026-10-14T16:00:00Z');
 globalThis.window ??= { clearTimeout, setTimeout };
+
+test('imagery mode uses the owner MODES mapping', () => {
+  const source = readFileSync(
+    new URL('./gevActions.js', import.meta.url),
+    'utf8',
+  );
+  assert.ok(
+    /import\s*\{\s*MODES\s+as\s+RECENT_IMAGERY_MODES\s*\}\s*from\s*['"]\.\.\/layers\/recentImagery\/index\.js['"]/.test(
+      source,
+    ),
+  );
+  assert.ok(/RECENT_IMAGERY_MODES\[args\.mode\]/.test(source));
+});
 
 test('readback admits real feed ids and discards untrusted free text', async () => {
   const secret = 'SYNTHETIC_TOKEN_54e3e7';
