@@ -127,7 +127,17 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
     if (typeof sky.openHere !== 'function')
       return fail('Sky view cannot open from here');
     const opened = await sky.openHere();
-    if (!opened?.ok) return fail('Could not open Sky view');
+    if (!opened?.ok) {
+      const knownErrors = [
+        'No ground at the screen centre. Move the map onto land first.',
+        'Sky view is not available in this mode.',
+      ];
+      return fail(
+        knownErrors.includes(opened?.error)
+          ? opened.error
+          : 'Could not open Sky view',
+      );
+    }
     return { ok: true, opened: !opened.alreadyOpen };
   }
 
