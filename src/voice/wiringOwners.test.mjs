@@ -139,11 +139,16 @@ test('executors reach real History, Sky clock and Recent Imagery owners', async 
     true,
   );
   assert.equal(clock.rate, 3600);
-  assert.equal(
-    (await run('control_imagery', { action: 'mode', mode: 2 })).ok,
-    true,
-  );
-  assert.equal(recent.getSnapshot().mode, 'ab');
+  for (const [mode, expected] of [
+    [0, 'image'],
+    [1, 'basemap'],
+    [2, 'ab'],
+  ]) {
+    const result = await run('control_imagery', { action: 'mode', mode });
+    assert.equal(result.ok, true);
+    assert.equal(recent.getSnapshot().mode, expected);
+    assert.equal(result.mode, expected);
+  }
   assert.equal(
     (await run('control_imagery', { action: 'opacity', opacityPct: 65 })).ok,
     true,
