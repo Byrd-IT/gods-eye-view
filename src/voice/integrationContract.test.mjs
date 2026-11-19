@@ -713,6 +713,25 @@ test('without an operator Overpass the prompt never offers place search', () => 
   );
 });
 
+test('budget trimming retains imagery, drone and analyst safety rules in both prompts', () => {
+  for (const overpass of [false, true]) {
+    const prompt = realtimeInstructions(undefined, { overpass });
+    for (const rule of [
+      'If drawn is false, do not claim the imagery is visible.',
+      'If compare is true, only the left side changed.',
+      'If waybackOff is true, say Wayback turned off.',
+      'If waybackStillOn is true, Wayback is still covering the aerial layer.',
+      'If starting is true, Wayback is not on yet.',
+      'If downloaded is false, do not claim a file was saved.',
+      'If drawing is false, the draw did not start.',
+      'If terrainComplete is false, say heights are incomplete.',
+      'NOT FLIGHT-TESTED: never say a mission is safe to fly.',
+      'A count does NOT fulfill a requested list, ranking or filter',
+    ])
+      assert.ok(prompt.includes(rule), `missing rule: ${rule}`);
+  }
+});
+
 test('the Realtime prompt stays within its size budget', () => {
   // The actual request contains both the complete instructions and the JSON
   // tool definitions. Exercise both configurations, including optional OSM.

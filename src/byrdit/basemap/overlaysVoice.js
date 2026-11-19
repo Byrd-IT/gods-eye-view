@@ -5,9 +5,9 @@
  * those into the six voice actions the GEV tool exposes: enable, opacity,
  * raise, lower, phone_mode and status.
  *
- * Every action reads the controller state back, so the answer states what the
- * map actually shows. An overlay that is switched on while another basemap is
- * drawn reports enabled but not drawn, because that is the truth on screen.
+ * Every action reads controller state back; mounting does not prove that an
+ * overlay is visible at the current camera or that 3D loading succeeded.
+ * An enabled overlay can be absent when another basemap is selected.
  *
  * Failures are reported, never thrown: a raw controller error must not reach
  * the model. The controller also refuses (returns false) for an unknown id, a
@@ -74,8 +74,8 @@ export function createOverlaysVoice(controller) {
       kind: String(layer?.kind || ''),
       enabled: layer?.enabled === true,
       opacityPct: Math.round(Number(layer?.opacity ?? 0) * 100),
-      // The overlay that is created and drawn right now. An overlay switched
-      // on under another basemap is enabled but not drawn.
+      // Active means mounted in the scene, not necessarily visible at the
+      // current camera. A mounted 3D model may still be loading or failed.
       drawn:
         layer?.kind === '3d' && active.includes(layer?.id)
           ? null
