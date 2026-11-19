@@ -198,6 +198,24 @@ const keys = (viewer) =>
     l.imageryProvider ? l.imageryProvider.entry.key : l.name,
   );
 
+test('imagery step never returns untrusted catalog names', async () => {
+  const secret = 'SYNTHETIC_IMAGERY_NAME_SECRET_9451';
+  const { detach } = setup();
+  const block = structuredClone(NAIP);
+  for (const row of block.regional) row.name = secret;
+  const voice = createImageryVoice({
+    getNaip: () => detach,
+    getCatalog: () => block,
+  });
+  try {
+    const result = await voice.move({ latest: true });
+    assert.equal(result.ok, true);
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  } finally {
+    detach();
+  }
+});
+
 test('imagery voice compare, second year, step and latest drive real NAIP owner', async () => {
   const { detach } = setup();
   const voice = createImageryVoice({
