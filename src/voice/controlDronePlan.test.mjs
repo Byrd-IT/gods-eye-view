@@ -52,9 +52,10 @@ function harness(dronePlan) {
 
 test('control_droneplan stays before the appended view tools without reordering imagery', () => {
   const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);
-  // The navigation and solunar voice tools this release appends land after
-  // the clean-view and opacity pair, so the tail is now eight tools long.
-  assert.deepEqual(names.slice(-8), [
+  // The navigation, solunar and map overlay voice tools this release appends
+  // land after the clean-view and opacity pair, so the tail is now nine
+  // tools long.
+  assert.deepEqual(names.slice(-10), [
     'control_history',
     'control_sky',
     'control_imagery',
@@ -63,6 +64,8 @@ test('control_droneplan stays before the appended view tools without reordering 
     'set_layer_opacity',
     'control_nav',
     'control_solunar',
+    'control_overlays',
+    'control_ghostmaps',
   ]);
   const tool = GEV_REALTIME_TOOLS.find(
     (item) => item.name === 'control_droneplan',

@@ -25,11 +25,11 @@ const css = readStylesheet(new URL('../style.css', import.meta.url));
 
 function realtimeTools() { return GEV_REALTIME_TOOLS; }
 
-test('Realtime schema exposes the authoritative 44-tool inventory', () => {
+test('Realtime schema exposes the authoritative 46-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 44);
+  assert.equal(tools.length, 46);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 44, 'tool names are unique');
+  assert.equal(new Set(names).size, 46, 'tool names are unique');
   assert.ok(names.includes('resolve_area'));
   assert.ok(names.includes('find_imagery'));
   assert.ok(names.includes('osm_query'));
@@ -49,6 +49,8 @@ test('Realtime schema exposes the authoritative 44-tool inventory', () => {
   assert.ok(names.includes('set_layer_opacity'));
   assert.ok(names.includes('control_nav'));
   assert.ok(names.includes('control_solunar'));
+  assert.ok(names.includes('control_overlays'));
+  assert.ok(names.includes('control_ghostmaps'));
   // Every tool closes its parameter object: an open schema lets the model
   // invent arguments the runner silently drops.
   for (const tool of tools) {
@@ -226,6 +228,8 @@ test('no unchanged Realtime tool definition drifts silently', () => {
     // clean-view and opacity pair (pinned in actionSchemas.test.mjs).
     'control_nav',
     'control_solunar',
+    'control_overlays',
+    'control_ghostmaps',
     // Voice geometry: new tools.
     'resolve_area',
     'find_imagery',

@@ -345,6 +345,10 @@ export function createGevActionRunner({
   dronePlan = null,
   nav = null,
   solunar = null,
+  // The map overlay voice adapter (src/byrdit/basemap/overlaysVoice.js). The
+  // app passes it as a function returning the adapter, or the adapter
+  // itself; null when the host has no map overlays.
+  overlays = null,
   // The app's per-layer opacity model (src/byrdit/layerOpacity). A function
   // returning the model, or the model itself; null when the host has none.
   layerOpacity = null,
@@ -1767,6 +1771,9 @@ export function createGevActionRunner({
         'clock',
         'status',
       ]);
+    if (name === 'control_ghostmaps')
+      return controlGhostMaps(dataManager, args);
+    if (name === 'control_overlays') return controlOverlays(overlays, args);
 
     if (name === 'control_cctv') {
       const action = String(args.action || '').toLowerCase();
@@ -2287,6 +2294,142 @@ async function controlWidget(name, provider, args, actions) {
     return { action: name, ...(await voice[action](args)) };
   } catch {
     return { action: name, ok: false, error: 'Control failed' };
+  }
+}
+
+async function controlGhostMaps(dataManager, args = {}) {
+  const reply = (value) => ({ action: 'control_ghostmaps', ...value });
+  const fail = (error) => reply({ ok: false, error, say: error });
+  const products = [
+    'cip',
+    'kinetic-30d',
+    'border-crisis',
+    'iran-cip',
+    'iran-kinetic',
+    'yemen-flot',
+    'latest-drop',
+  ];
+  const ages = [1, 3, 7, 14, 30, 'all'];
+  if (
+    args.product !== undefined &&
+    (!products.includes(args.product) || typeof args.enabled !== 'boolean')
+  )
+    return fail('A valid product and enabled true or false are required.');
+  if (args.product === undefined && args.enabled !== undefined)
+    return fail('Choose a product to enable or disable.');
+  if (args.ageDays !== undefined && !ages.includes(args.ageDays))
+    return fail('Choose a valid event age.');
+  try {
+    const entry = dataManager?.layers?.get('s2-ghostmaps');
+    const layer = entry?.module;
+    if (!entry?.enabled || typeof layer?.getRowControls !== 'function')
+      return fail(
+        'GhostMaps is unavailable. Enable the GhostMaps layer first.',
+      );
+    let controls = layer.getRowControls();
+    const chip =
+      args.product === undefined
+        ? null
+        : controls?.chips?.find((item) => item.id === args.product);
+    const age =
+      args.ageDays === undefined
+        ? null
+        : controls?.segmented?.options?.find(
+            (item) => item.id === `age-${args.ageDays}`,
+          );
+    if (
+      args.product !== undefined &&
+      (!chip || typeof chip.onClick !== 'function')
+    )
+      return fail(
+        'That GhostMaps product is not available in the current catalog.',
+      );
+    if (
+      args.ageDays !== undefined &&
+      (!age || typeof age.onClick !== 'function')
+    )
+      return fail('The GhostMaps age control is unavailable.');
+    if (chip && chip.active !== args.enabled) await chip.onClick();
+    if (age && !age.active) await age.onClick();
+    controls = layer.getRowControls();
+    const actualChip =
+      args.product === undefined
+        ? null
+        : controls?.chips?.find((item) => item.id === args.product);
+    const actualAge =
+      (controls.segmented?.options || [])
+        .find((item) => item.active)
+        ?.id?.slice(4) ?? null;
+    if (
+      (chip && actualChip?.active !== args.enabled) ||
+      (age && actualAge !== String(args.ageDays))
+    )
+      return fail('GhostMaps did not apply the requested change.');
+    return reply({
+      ok: true,
+      products: (controls.chips || []).map(({ id, active }) => ({
+        id,
+        enabled: Boolean(active),
+      })),
+      ageDays: actualAge,
+    });
+  } catch {
+    return fail('GhostMaps control failed.');
+  }
+}
+
+/** The map overlay actions the GEV tool exposes. */
+const OVERLAY_ACTIONS = [
+  'enable',
+  'opacity',
+  'raise',
+  'lower',
+  'phone_mode',
+  'status',
+];
+
+/**
+ * Voice Map Layers control over the overlay adapter
+ * (src/byrdit/basemap/overlaysVoice.js). The adapter owns the overlay ids,
+ * the values it accepts and the state read-back; this only routes the action
+ * and keeps a failing adapter from leaking an error to the model.
+ */
+async function controlOverlays(voice, args = {}) {
+  const action = String(args.action || '').toLowerCase();
+  const wrap = (result) => ({ action: 'control_overlays', ...result });
+  let adapter = voice;
+  try {
+    adapter = typeof voice === 'function' ? voice() : voice;
+  } catch {
+    adapter = null;
+  }
+  if (!adapter) {
+    const error = 'Map overlays are not available in this host.';
+    return wrap({ ok: false, unavailable: true, error, say: error });
+  }
+  if (!OVERLAY_ACTIONS.includes(action)) {
+    const error = 'Unknown map overlay action.';
+    return wrap({ ok: false, error, say: error });
+  }
+  try {
+    const run = adapter[action];
+    if (typeof run !== 'function') {
+      const error = 'Map overlay controls are unavailable in this host.';
+      return wrap({ ok: false, unavailable: true, error, say: error });
+    }
+    const result = await run(args);
+    if (!result || typeof result !== 'object')
+      return wrap({
+        ok: false,
+        error: 'The map overlay control did not answer.',
+        say: 'The map overlay control did not answer.',
+      });
+    return wrap(result);
+  } catch {
+    // The adapter's own failures are already reported; anything reaching
+    // here is a controller fault, and the reason must not leak.
+    const error = 'The map overlay control failed.';
+    return wrap({ ok: false, error, say: error });
   }
 }
 

@@ -6,7 +6,7 @@ import {
 export const ACTION_DESCRIPTIONS = {
   fly_to_location: {
     description:
-      "Fly the God's Eye View camera to a known city, geocoded country/region/city/landmark, or explicit WGS84 coordinate. Countries/cities frame the whole place; landmarks/buildings use close framing.",
+      "Fly the God's Eye View camera to a known city, geocoded country/region/city/landmark, or explicit WGS84 coordinate.",
     $position: 1,
     parameters: {
       properties: {
@@ -25,13 +25,12 @@ export const ACTION_DESCRIPTIONS = {
           $position: 1,
         },
         viewMode: {
-          description:
-            'Optional framing intent. Usually omit this; GEV infers whole-place framing for countries/cities and close framing for landmarks.',
+          description: 'Usually omit: GEV infers whole-place or close framing.',
           $position: 2,
         },
         rangeM: {
           description:
-            'Optional camera range from the target in meters. Omit it for automatic whole-country/whole-city or close-landmark framing; provide it only when the user explicitly requests a numeric height or distance.',
+            'Optional camera range in meters; only when the user explicitly requests a numeric height or distance.',
           $position: 3,
         },
         waitForArrival: {
@@ -619,7 +618,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   analyst_query: {
     description:
-      'Counts, lists, superlatives and attribute filters over records loaded by ENABLED layers — "how many flights over Texas", "biggest fire near LA", "ships headed to Oakland", "next rocket launch". A requested list or ranking requires this tool even after set_context_mode returned a Contacts count; that count alone has no requested items. complete:false means the count is a floor ("at least") and rankings cover the records examined; partial names unanswered layers. Items carry lat/lon for a follow-up fly_to_location. ok:false codes: LAYER_OFF (offer to enable), NOT_READY (loading), NEEDS_CLARIFICATION (ask which), FOLLOW_UP_MISMATCH (ask again without followUp), UNKNOWN_FIELD/UNKNOWN_SCOPE/BAD_VALUE (retry with the allowed values). Aircraft emergency fields describe broadcasts, not confirmed incidents: narrate emergencyBroadcast with emergencySource. emergencyKind values are general, unlawful, nordo, downed, minfuel and lifeguard; GEV treats the last two as priorities (emergency:false). lastContactAtMs says when the transponder was last heard, not when the status arrived.',
+      'Counts, lists, superlatives and attribute filters over records loaded by ENABLED layers — "how many flights over Texas", "biggest fire near LA", "ships headed to Oakland", "next rocket launch". complete:false means the count is a floor ("at least") and rankings cover the records examined; partial names unanswered layers. Items carry lat/lon for a follow-up fly_to_location. ok:false codes: LAYER_OFF (offer to enable), NOT_READY (loading), NEEDS_CLARIFICATION (ask which), FOLLOW_UP_MISMATCH (ask again without followUp), UNKNOWN_FIELD/UNKNOWN_SCOPE/BAD_VALUE (retry with the allowed values). Aircraft emergency fields describe broadcasts, not confirmed incidents: narrate emergencyBroadcast with emergencySource. emergencyKind values are general, unlawful, nordo, downed, minfuel and lifeguard; GEV treats the last two as priorities (emergency:false). lastContactAtMs says when the transponder was last heard, not when the status arrived.',
     $position: 1,
     parameters: {
       properties: {
@@ -630,7 +629,7 @@ export const ACTION_DESCRIPTIONS = {
         },
         scope: {
           description:
-            'Always set it (see WHERE). Explicit "in view" uses view; "nearby" uses view when Contacts is off. Around the active Contacts subject uses radius with the requested km and center omitted, never view: the five closest within 250 km use scope:{kind:"radius",km:250}, sortBy:"distance", limit:5. For another requested radius use its actual km, not 250. pointer = "around here/this" while pointing (radius at the cursor); region = "over Texas"; radius with center {lat, lon} = "near <place>" or explicit coordinates; anywhere = no place ("biggest anywhere", "today"); area + areaId from resolve_area; drawn = "the area I drew"; annotation = "the area you outlined". Preserve explicit view, named place, pointer and explicit center even while Contacts is active; never invent coordinates.',
+            'Always set it (see WHERE). Explicit "in view" uses view; "nearby" uses view when Contacts is off. Around the active Contacts subject uses radius with the requested km and center omitted, never view. pointer = "around here/this" while pointing (radius at the cursor); region = "over Texas"; radius with center {lat, lon} = "near <place>" or explicit coordinates; anywhere = no place ("biggest anywhere", "today"); area + areaId from resolve_area; drawn = "the area I drew"; annotation = "the area you outlined".',
           $position: 2,
           properties: {
             name: {
@@ -640,7 +639,7 @@ export const ACTION_DESCRIPTIONS = {
             },
             km: {
               description:
-                'For kind=radius or pointer: the actual requested kilometers. An active-subject 250 km request uses 250; another requested radius keeps that number.',
+                'For kind=radius or pointer: the actual requested kilometers.',
               $position: 1,
             },
             center: {
@@ -776,7 +775,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_imagery: {
     description:
-      'Aerial imagery by year: NAIP and the historic or colour county sets (show 2018 aerial, NAIP 2024, Titus 1940). year uses the live catalog; an unknown year returns the valid years. county is optional and frames that county. wayback is only for Esri Wayback (wayback 2014), not for NAIP. latest or recent satellite imagery stays the recent-imagery layer. Switching the basemap stack stays set_map_stack. Say the resulting year and sets, not the request. If drawn is false, do not claim the imagery is visible. If compare is true, only the left side changed. If waybackOff is true, say Wayback turned off. If waybackStillOn is true, Wayback is still covering the aerial layer. If starting is true, Wayback is not on yet.',
+      'Aerial imagery by year: NAIP and historic or colour county sets. year uses the live catalog; county optionally frames a county. wayback is only for Esri Wayback, not NAIP.',
     $position: 1,
     parameters: {
       properties: {
@@ -810,7 +809,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_droneplan: {
     description:
-      'Drone Flight Plan: open shows the rail; draw starts box or polygon (person must draw); box/polygon set coordinates. recommend applies current-aircraft settings; options changes controls. takeoff: pick, clear (box centre), or point (lat/lon). suite plans recommended passes; download requires downloads=true. close clears globe plan. Report actual aircraft, mode and counts: downloaded:false means no file; drawing:false means not started; terrainComplete:false means incomplete heights. NOT FLIGHT-TESTED: never claim a mission is safe.',
+      'Drone Flight Plan: open shows the rail; draw starts box or polygon (person must draw); box/polygon set coordinates. recommend applies current-aircraft settings; options changes controls. takeoff: pick, clear (box centre), or point (lat/lon). suite plans recommended passes; download requires downloads=true. close clears globe plan. Report actual aircraft, mode and counts. NOT FLIGHT-TESTED: never claim a mission is safe.',
     $position: 1,
     parameters: {
       properties: {
@@ -913,6 +912,45 @@ export const ACTION_DESCRIPTIONS = {
         longitude: { description: 'Spot longitude in degrees.', $position: 1 },
         hour12: {
           description: 'True for 12-hour, false for 24-hour clock.',
+          $position: 1,
+        },
+      },
+    },
+  },
+  control_ghostmaps: {
+    description:
+      'Control GhostMaps products and event age. Enable the layer first.',
+    parameters: {
+      properties: {
+        product: { description: 'GhostMaps product ID. Pair with enabled.' },
+        enabled: { description: 'Whether the selected product is enabled.' },
+        ageDays: {
+          description: 'Maximum event age in days, or all for every age.',
+        },
+      },
+    },
+  },
+  control_overlays: {
+    description:
+      'Control Byrd-IT map overlays, not data layers. Use status to find IDs. Report actual state and refusals. Drawn means mounted, not necessarily visible.',
+    $position: 1,
+    parameters: {
+      properties: {
+        action: {
+          description:
+            'enable (overlayId, enabled), opacity (overlayId, opacityPct), raise/lower (overlayId), phone_mode (enabled), or status.',
+          $position: 1,
+        },
+        overlayId: {
+          description: 'Overlay ID from status, not a data-layer ID.',
+          $position: 1,
+        },
+        enabled: {
+          description: 'For enable or phone_mode: true on, false off.',
+          $position: 1,
+        },
+        opacityPct: {
+          description: 'Opacity percent, 0 to 100.',
           $position: 1,
         },
       },

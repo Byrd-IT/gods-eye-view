@@ -1000,6 +1000,9 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
         // Navigation and solunar voice: two later, separate tools.
         'control_nav',
         'control_solunar',
+        // Map overlay voice: a later, separate tool.
+        'control_overlays',
+        'control_ghostmaps',
       ].includes(tool.name),
   );
   // The right-rail panel targets are additive; take them out again so the
@@ -1095,10 +1098,10 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // gains the timedIntervalS option (Timed-shot interval, seconds, no floor).
   // Re-pinned again for Mapping Grid (Timed) (40789 -> 40810, +21): the
   // control_droneplan mode enum gains mapping-grid-timed.
-  assert.equal(block.length, 40363, 'serialized tool schema length drifted');
+  assert.equal(block.length, 38944, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '786878f6d43f47b69edf40d303220610d97cfc09485711649900150e0e9cb3c8',
+    '548b2013dc645559dc7012b77155283a0d97127a6c36a32a74a5c03df8bc5ba9',
     'serialized legacy-filtered tool schema drifted',
   );
   const instructions = fs.readFileSync(

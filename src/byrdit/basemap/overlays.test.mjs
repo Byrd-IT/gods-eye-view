@@ -4,6 +4,7 @@ import { composeOverlays } from './overlaysProxy.js';
 import { normalizeOverlays } from './overlaysConfig.js';
 import { OVERLAYS_PUBLISH } from './fixtures/overlays.mjs';
 import { attachOverlays, stackOrder } from './overlays.js';
+import { overlaysVoiceFor } from './overlaysVoice.js';
 import {
   createVectorOverlayProvider,
   drawVectorTile,
@@ -159,6 +160,25 @@ function setup({
 
 const ids = (viewer) =>
   viewer.imageryLayers.items.map((l) => l.imageryProvider?.entry?.id ?? l.name);
+
+test('voice drives the real callable overlay controller and reads its changed stack', () => {
+  const { detach } = setup();
+  const voice = overlaysVoiceFor(detach);
+  assert.ok(voice);
+  assert.equal(
+    voice.enable({ overlayId: 'hillshade', enabled: true }).enabled,
+    true,
+  );
+  const moved = voice.raise({ overlayId: 'hillshade' });
+  assert.equal(moved.ok, true);
+  assert.equal(detach.state().stack.indexOf('hillshade'), 2);
+  assert.equal(moved.position.index, 3);
+  assert.equal(
+    voice.opacity({ overlayId: 'hillshade', opacityPct: 25 }).opacityPct,
+    25,
+  );
+  detach();
+});
 
 test('overlays: all offered, all OFF until toggled; fixed raster -> vector order', () => {
   const { viewer, detach } = setup();

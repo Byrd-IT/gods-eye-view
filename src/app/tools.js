@@ -43,6 +43,7 @@ import {
 } from '../renderGovernor.js';
 import { entityRecord, readEntityRecord } from '../data/entityRecords.js';
 import { overlayHost } from './layers/overlayHost.js';
+import { overlaysVoiceFor } from '../byrdit/basemap/overlaysVoice.js';
 
 /**
  * Attach scene tools, rendering listeners and the application debug handle.
@@ -359,6 +360,11 @@ export function createApplicationTools({
     layerOpacity: () => data.layerOpacity?.model ?? null,
     nav: () => window.__gevNav?.voice ?? null,
     solunar: () => window.__gevSolunar?.voice ?? null,
+    // The map overlay layers of the Byrd-IT Open stack. The controller is
+    // published by the basemap plugin (src/byrdit/basemap/index.js) and only
+    // while it is mounted; without it the voice reports the overlays as
+    // unavailable instead of pretending they were changed.
+    overlays: () => overlaysVoiceFor(window.__gevOverlays ?? null),
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });

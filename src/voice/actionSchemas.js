@@ -1312,6 +1312,60 @@ const schemas = [
       required: ['action'],
     },
   },
+  {
+    name: 'control_overlays',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['enable', 'opacity', 'raise', 'lower', 'phone_mode', 'status'],
+        },
+        // Overlay ids come from the live overlay manifest, so this is a free
+        // string rather than an enum: the model reads the id from the status
+        // result and echoes it back. The bound is the manifest's own name
+        // length, so an id or a name always fits.
+        overlayId: {
+          type: 'string',
+          maxLength: 80,
+        },
+        enabled: {
+          type: 'boolean',
+        },
+        opacityPct: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 100,
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'control_ghostmaps',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        product: {
+          type: 'string',
+          enum: [
+            'cip',
+            'kinetic-30d',
+            'border-crisis',
+            'iran-cip',
+            'iran-kinetic',
+            'yemen-flot',
+            'latest-drop',
+          ],
+        },
+        enabled: { type: 'boolean' },
+        ageDays: { enum: [1, 3, 7, 14, 30, 'all'] },
+      },
+      required: [],
+    },
+  },
 ];
 
 function freeze(value) {

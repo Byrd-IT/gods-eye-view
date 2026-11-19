@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createGhostMapsLayer } from './index.js';
+import { createGevActionRunner } from '../../voice/gevActions.js';
 import { bindFakeDraw } from '../../testSupport/fakeDrawPort.mjs';
 import { GHOSTMAPS_PRODUCTS, GHOSTMAPS_LATEST_DROP } from './catalog.js';
 
@@ -195,6 +196,38 @@ function fixture(
     click,
   };
 }
+
+test('voice operates actual GhostMaps row callbacks and reads their state', async (t) => {
+  const { layer, viewer } = fixture(t);
+  await layer.update(viewer);
+  const canvas = { addEventListener() {}, removeEventListener() {} };
+  const voiceViewer = {
+    canvas,
+    scene: { canvas },
+    clock: { onTick: { addEventListener: () => () => {} } },
+    camera: { moveEnd: { addEventListener() {} } },
+  };
+  const runner = createGevActionRunner({
+    viewer: voiceViewer,
+    styleManager: {},
+    dataManager: {
+      layers: new Map([['s2-ghostmaps', { enabled: true, module: layer }]]),
+      getAll: () => [],
+    },
+  });
+  const result = await runner('control_ghostmaps', {
+    product: 'cip',
+    enabled: false,
+    ageDays: 'all',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(
+    result.products.find((product) => product.id === 'cip').enabled,
+    false,
+  );
+  assert.equal(result.ageDays, 'all');
+  assert.equal(layer.getStats().ageDays, null);
+});
 
 test('cancelling a file read does not allocate packed-image URLs', async (t) => {
   const { layer, viewer, mounted, created, revoked } = fixture(t, {

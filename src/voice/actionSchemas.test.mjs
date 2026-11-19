@@ -29,10 +29,16 @@ const stable = (value) =>
 // covering every tool before them, and the additions are pinned by their own
 // assertions.
 const NEW_TOOLS = ['set_clean_view', 'set_layer_opacity'];
-// The navigation and solunar voice tools this release appends after them.
-// These are omitted where the existing inventory is checked separately;
-// prompt-budget description changes also require the legacy digest to change.
-const APPENDED_TOOLS = ['control_nav', 'control_solunar'];
+// The navigation and solunar voice tools this release appends after them,
+// and the map overlay tool after those. These are omitted where the existing
+// inventory is checked separately; prompt-budget description changes also
+// require the legacy digest to change.
+const APPENDED_TOOLS = [
+  'control_nav',
+  'control_solunar',
+  'control_overlays',
+  'control_ghostmaps',
+];
 const NEW_PANEL_TARGETS = [
   'time-travel-panel',
   'map-layers-panel',
@@ -123,7 +129,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // set_panel_open targets, and the view-state description now names layer
     // opacity. The digest removes those additions and navigation/solunar tools,
     // but changes for the shortened drone description; re-pinned accordingly.
-    '720e3dbf6ec3524853dfbe5604ec6993d0abe0967f29f4fc986e8abfc86dbdf3',
+    '149a41bd259c85c63dd70c46aeec3bb747d41927cbbc1108221aa4f70ae2bf58',
   );
 });
 
@@ -230,6 +236,8 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'open_stories',
         'control_nav',
         'control_solunar',
+        'control_overlays',
+        'control_ghostmaps',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by
@@ -443,25 +451,31 @@ test('control_droneplan timedIntervalS has the same rule as the panel field and 
 });
 
 test('the complete current Realtime tool inventory is pinned', () => {
+  // The map overlay tool this release appends is pinned by its own
+  // assertions; the digest keeps covering every tool before it.
+  const tools = GEV_REALTIME_TOOLS;
   assert.equal(
     createHash('sha256')
-      .update(JSON.stringify(stable(GEV_REALTIME_TOOLS)))
+      .update(JSON.stringify(stable(tools)))
       .digest('hex'),
     // Re-pinned for navigation and solunar voice and the deliberately
     // shortened descriptions needed to keep the prompt within budget.
-    '17a85be72dde6c6a2f894f1e2b60b35f5b3eeda3e541f23b1be8a5384abfcc77',
+    '251250679be1525bdbda56de6047b2b587eca4ba26f67819cba9d05708f1c0cd',
   );
 });
 
 test('the clean view and layer opacity tools are appended after control_droneplan', () => {
   const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);
-  // The navigation and solunar voice tools this release appends land after
-  // the clean-view and opacity pair, so the pair is no longer the tail.
-  assert.equal(names.at(-1), 'control_solunar');
-  assert.equal(names.at(-2), 'control_nav');
-  assert.equal(names.at(-3), 'set_layer_opacity');
-  assert.equal(names.at(-4), 'set_clean_view');
-  assert.equal(names.at(-5), 'control_droneplan');
+  // The navigation, solunar and map overlay voice tools this release appends
+  // land after the clean-view and opacity pair, so the pair is no longer the
+  // tail.
+  assert.equal(names.at(-1), 'control_ghostmaps');
+  assert.equal(names.at(-2), 'control_overlays');
+  assert.equal(names.at(-3), 'control_solunar');
+  assert.equal(names.at(-4), 'control_nav');
+  assert.equal(names.at(-5), 'set_layer_opacity');
+  assert.equal(names.at(-6), 'set_clean_view');
+  assert.equal(names.at(-7), 'control_droneplan');
 
   const clean = GEV_REALTIME_TOOLS.find(
     (tool) => tool.name === 'set_clean_view',
@@ -540,6 +554,33 @@ test('the appended navigation and solunar voice tools are pinned', () => {
   assert.deepEqual(solunar.parameters.required, ['action']);
   assert.equal(solunar.parameters.additionalProperties, false);
   assert.ok(solunar.description);
+});
+
+test('the appended map overlay voice tool is pinned', () => {
+  const overlays = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'control_overlays',
+  );
+  assert.deepEqual(overlays.parameters.properties.action.enum, [
+    'enable',
+    'opacity',
+    'raise',
+    'lower',
+    'phone_mode',
+    'status',
+  ]);
+  // The overlay ids come from the live overlay manifest, so the argument is
+  // a bounded string rather than an enum: the model reads the id from the
+  // status result and echoes it back.
+  assert.equal(overlays.parameters.properties.overlayId.type, 'string');
+  assert.equal(overlays.parameters.properties.overlayId.maxLength, 80);
+  assert.equal(overlays.parameters.properties.overlayId.enum, undefined);
+  assert.equal(overlays.parameters.properties.enabled.type, 'boolean');
+  assert.equal(overlays.parameters.properties.opacityPct.type, 'integer');
+  assert.equal(overlays.parameters.properties.opacityPct.minimum, 0);
+  assert.equal(overlays.parameters.properties.opacityPct.maximum, 100);
+  assert.deepEqual(overlays.parameters.required, ['action']);
+  assert.equal(overlays.parameters.additionalProperties, false);
+  assert.ok(overlays.description);
 });
 
 test("the opacity tool takes only whole percents inside the app's range", () => {
