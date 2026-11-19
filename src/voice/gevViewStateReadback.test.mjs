@@ -10,6 +10,26 @@ import { createSkyVoice } from '../byrdit/skyView/skyVoice.js';
 import { createHistoryVoice } from '../byrdit/historyUi/historyVoice.js';
 import { readHostViewState } from '../agent/worldPacket.js';
 
+test('History lock refuses an untrusted row even if owner accepts it', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const voice = createHistoryVoice({
+    getHandle: () => ({ getState: () => ({ active: false, rate: 1 }) }),
+    getClocks: () => ({
+      row: () => ({}),
+      setLocked() {},
+      isLocked: () => true,
+    }),
+  });
+  const { runner } = harness({ adapters: { history: () => voice } });
+  const result = await runner('control_history', {
+    action: 'lock',
+    historyRow: secret,
+    locked: true,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('History preset suppresses untrusted owner state', async () => {
   const secret = `SYNTHETIC_${crypto.randomUUID()}`;
   const state = {

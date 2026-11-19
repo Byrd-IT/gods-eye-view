@@ -21,6 +21,7 @@
  * {ok:false, error} so the model can say why.
  */
 import { RATES, HISTORY_FLOOR_MS, PRESETS } from './historyTimeline.js';
+import { ALL_ROW_DEFS } from './clockRows.js';
 
 export const HISTORY_VOICE_ACTIONS = Object.freeze([
   'jump',
@@ -228,6 +229,7 @@ export function createHistoryVoice({
       if (
         typeof locked !== 'boolean' ||
         typeof row !== 'string' ||
+        !ALL_ROW_DEFS.some((definition) => definition.id === row) ||
         !clocks.row(row)
       )
         return fail(
