@@ -1569,12 +1569,17 @@ export class StyleManager extends ShellFacade {
     } catch {
       /* unavailable */
     }
+    const validImageryYear = (year) =>
+      Number.isInteger(year) && year >= 1800 && year <= 2999;
     return {
       ...(typeof autoMode === 'string'
         ? { mapStackAuto: autoMode === 'auto' }
         : {}),
       ...(aerial && Array.isArray(aerial.ticks)
-        ? { imageryYear: aerial.year ?? null, imageryYears: [...aerial.ticks] }
+        ? {
+            imageryYear: validImageryYear(aerial.year) ? aerial.year : null,
+            imageryYears: aerial.ticks.filter(validImageryYear),
+          }
         : {}),
       ...(Object.keys(opacity).length ? { layerOpacity: opacity } : {}),
       style: this.activeStyle || 'normal',
