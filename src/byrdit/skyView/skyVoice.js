@@ -363,7 +363,8 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       return doneControl(sky, {
         magnitudeTarget: target,
         magnitude: sky.nakedEye?.limit,
-        filterEnabled: sky.nakedEye?.on,
+        filterEnabled:
+          typeof sky.nakedEye?.on === 'boolean' ? sky.nakedEye.on : null,
       });
     },
     async location(latitude, longitude) {

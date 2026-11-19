@@ -9,6 +9,26 @@ import { CCTV_FOCUS_RESULT } from '../layers/cctv/policy.js';
 import { createSkyVoice } from '../byrdit/skyView/skyVoice.js';
 import { readHostViewState } from '../agent/worldPacket.js';
 
+test('Sky satellite magnitude suppresses an untrusted filter state', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const sky = {
+    active: true,
+    content: { flags: {} },
+    nakedEye: { limit: 6, on: secret },
+    setNakedEye() {},
+    time: { provider: 'builtin', getTime: () => Date.now() },
+  };
+  const voice = createSkyVoice({ getHandle: () => sky });
+  const { runner } = harness({ adapters: { sky: () => voice } });
+  const result = await runner('control_sky', {
+    action: 'magnitude',
+    magnitude: 6,
+    magnitudeTarget: 'satellites',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('Sky playback never returns untrusted clock rate or playing state', async () => {
   const secret = `SYNTHETIC_${crypto.randomUUID()}`;
   const sky = {
