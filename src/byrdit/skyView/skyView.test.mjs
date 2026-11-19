@@ -275,6 +275,9 @@ test('Sky voice switches and magnitude operate the mounted real owners', async (
   try {
     assert.equal(await handle.enterAt({ latDeg: 32, lonDeg: -95, heightKnown: true, heightM: 0 }), true);
     const voice = createSkyVoice({ getHandle: () => handle });
+    assert.equal((await voice.location(33, -94)).ok, true);
+    assert.equal(handle.observer.latDeg, 33);
+    assert.equal(handle.observer.lonDeg, -94);
     for (const [layer] of LAYER_SWITCHES) {
       assert.equal((await voice.layers(layer, true)).ok, true, layer);
       assert.equal(handle.content.flags[layer], true);
