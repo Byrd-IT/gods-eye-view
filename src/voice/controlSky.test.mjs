@@ -82,6 +82,97 @@ test('Sky status suppresses owner exceptions', async () => {
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test('Sky status copies only allowlisted typed state from an owner', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = harness({
+    voiceOverrides: {
+      status: async () => ({
+        ok: true,
+        open: true,
+        lines: false,
+        timeMode: 'live',
+        time: '2026-10-26T04:00:00.000Z',
+        lookingAt: secret,
+        latitude: 32.7,
+        longitude: -94.9,
+        error: secret,
+        say: secret,
+        extra: secret,
+        get hostile() {
+          throw new Error(secret);
+        },
+      }),
+    },
+  });
+  const result = await h.runner('control_sky', { action: 'status' });
+  assert.equal(result.ok, true);
+  assert.equal(result.open, true);
+  assert.equal(result.lines, false);
+  assert.equal(result.timeMode, 'live');
+  assert.equal(result.time, '2026-10-26T04:00:00.000Z');
+  assert.equal(result.latitude, 32.7);
+  assert.equal(result.longitude, -94.9);
+  assert.equal(result.lookingAt, null);
+  assert.equal('error' in result, false);
+  assert.equal('say' in result, false);
+  assert.equal('extra' in result, false);
+  assert.equal('hostile' in result, false);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test('Sky status omits arbitrary catalog labels and replaces a bad owner error', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = harness({
+    voiceOverrides: {
+      status: async () => ({
+        ok: true,
+        open: true,
+        lookingAt: 'Jupiter',
+        timeMode: secret,
+        time: secret,
+        latitude: secret,
+        longitude: secret,
+      }),
+    },
+  });
+  const safe = await h.runner('control_sky', { action: 'status' });
+  assert.equal(safe.lookingAt, null);
+  assert.equal('timeMode' in safe, false);
+  assert.equal('time' in safe, false);
+  assert.equal('latitude' in safe, false);
+  assert.equal('longitude' in safe, false);
+  assert.equal(JSON.stringify(safe).includes(secret), false);
+
+  const failed = harness({
+    voiceOverrides: {
+      status: async () => ({ ok: false, error: secret }),
+    },
+  });
+  const refused = await failed.runner('control_sky', { action: 'status' });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, 'Sky status is unavailable');
+  assert.equal(JSON.stringify(refused).includes(secret), false);
+});
+
+test('Sky status reads hostile accessors once', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  let reads = 0;
+  const h = harness({
+    voiceOverrides: {
+      status: async () => ({
+        ok: true,
+        get timeMode() {
+          return ++reads === 1 ? 'live' : secret;
+        },
+      }),
+    },
+  });
+  const result = await h.runner('control_sky', { action: 'status' });
+  assert.equal(reads, 1);
+  assert.equal(result.timeMode, 'live');
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('new Sky calls suppress owner exceptions and report absent adapters', async () => {
   const secret = 'SYNTHETIC_TOKEN_SUFFIXABC123';
   const h = harness({

@@ -2522,7 +2522,33 @@ async function controlSky(voice, args = {}) {
       ok: false,
       error: 'Sky view is not available in this host',
     });
-  if (action === 'status') return wrap(await safeAdapterCall(voice, 'status'));
+  if (action === 'status') {
+    const status = await safeAdapterCall(voice, 'status');
+    try {
+      if (status.ok !== true)
+        return wrap({ ok: false, error: 'Sky status is unavailable' });
+      const result = { ok: true, lookingAt: null };
+      for (const key of ['open', 'lines']) {
+        const value = status[key];
+        if (typeof value === 'boolean') result[key] = value;
+      }
+      const { timeMode, time, latitude, longitude } = status;
+      if (['history', 'live', 'fixed', 'play'].includes(timeMode))
+        result.timeMode = timeMode;
+      if (
+        typeof time === 'string' &&
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(time)
+      )
+        result.time = time;
+      if (Number.isFinite(latitude) && Math.abs(latitude) <= 90)
+        result.latitude = latitude;
+      if (Number.isFinite(longitude) && Math.abs(longitude) <= 180)
+        result.longitude = longitude;
+      return wrap(result);
+    } catch {
+      return wrap({ ok: false, error: 'Sky status is unavailable' });
+    }
+  }
   if (action === 'open') return wrap(await voice.open());
   if (action === 'close') return wrap(await voice.close());
   if (action === 'look') return wrap(await voice.look(args.target));
