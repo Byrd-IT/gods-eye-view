@@ -24,7 +24,7 @@ function losTables(cov) {
 }
 
 // DDA the straight segment from camera plan position to (tx,ty); test each crossed column
-// against the ray height where the ray crosses that column's height plane. Camera's own column
+// against the solid terrain column. Camera's own column
 // and the target column are excluded. In-grid missing columns use model ground.
 function losBlocked(T, p, tx, ty, tz) {
   const dx = tx - p.x,
@@ -82,9 +82,8 @@ function losBlocked(T, p, tx, ty, tz) {
         const present = T.present[k],
           h = present ? T.zh[k] : T.ground;
         if (Number.isFinite(h)) {
-          const sHit = (h - p.z) / dzPer; // arclength where ray reaches column height
-          if (sHit > s + LOS_MARGIN_M && sHit < sNext - LOS_MARGIN_M)
-            return true;
+          const exitHeight = p.z + dzPer * (sNext - LOS_MARGIN_M);
+          if (exitHeight <= h) return true;
         }
       }
     }

@@ -47,3 +47,28 @@ test('upward and malformed cameras do not claim ground', () => {
     [],
   );
 });
+
+test('solid tall wall occludes ground even when camera begins outside the grid', () => {
+  const nx = 8,
+    ny = 5;
+  const k = Array.from({ length: nx * ny }, (_, i) => i);
+  const grid = {
+    nx,
+    ny,
+    x0: 0,
+    y0: 0,
+    cell_m: 1,
+    k,
+    z: k.map((i) => (i % nx === 3 ? 20 : 0)),
+  };
+  const state = {
+    cells: grid,
+    meta: { ground_z: 0 },
+    photos: [{ ...photo, x: -1.5, y: 2.5, hfov: 120, vfov: 120 }],
+  };
+  const visible = footprintMask(state, 0);
+  assert(visible.length > 0);
+  assert(visible.every((i) => i % nx < 3));
+  const noWall = { ...state, cells: { ...grid, z: k.map(() => 0) } };
+  assert(footprintMask(noWall, 0).some((i) => i % nx > 3));
+});
