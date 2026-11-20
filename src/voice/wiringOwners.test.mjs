@@ -154,5 +154,26 @@ test('executors reach real History, Sky clock and Recent Imagery owners', async 
     true,
   );
   assert.equal(recent.getSnapshot().alpha, 0.65);
+  assert.equal((await run('control_imagery', { action: 'swap' })).ok, false);
+  let swapped = false;
+  dataManager.layers.set('recent-imagery', {
+    module: {
+      swapSides: () => {
+        swapped = !swapped;
+        return true;
+      },
+      getSnapshot: () => ({ swapped }),
+    },
+  });
+  assert.deepEqual(await run('control_imagery', { action: 'swap' }), {
+    action: 'control_imagery',
+    ok: true,
+    swapped: true,
+  });
+  assert.deepEqual(await run('control_imagery', { action: 'swap' }), {
+    action: 'control_imagery',
+    ok: true,
+    swapped: false,
+  });
   control.destroy();
 });
