@@ -62,6 +62,28 @@ test('fallback readback excludes untrusted years and retains all valid years', a
   assert.equal(JSON.stringify(result).includes(marker), false);
   assert.deepEqual(result.controls.layerOpacity, { flights: 50 });
   assert.equal(JSON.stringify(result).includes(opacityMarker), false);
+  let imageryGetterHits = 0;
+  let stackGetterHits = 0;
+  viewer.container.ownerDocument.defaultView.__gevNaip.state = () => ({
+    get ticks() {
+      imageryGetterHits++;
+      throw new Error(marker);
+    },
+  });
+  style.mapStackController = {
+    getState: () => ({
+      get autoMode() {
+        stackGetterHits++;
+        throw new Error(marker);
+      },
+    }),
+  };
+  const brokenOwner = await run('get_current_view_state', {});
+  assert.equal(imageryGetterHits, 1);
+  assert.equal(stackGetterHits, 1);
+  assert.equal('imageryYear' in brokenOwner.controls, false);
+  assert.equal('mapStackAuto' in brokenOwner.controls, false);
+  assert.equal(JSON.stringify(brokenOwner).includes(marker), false);
   const direct = createGevActionRunner({
     viewer,
     styleManager: { getControlState: () => ({}) },

@@ -1542,18 +1542,25 @@ export class StyleManager extends ShellFacade {
   }
 
   getControlState() {
-    let stackState = null;
+    let autoMode = null;
     let aerial = null;
     const opacity = {};
+    const validImageryYear = (year) =>
+      Number.isInteger(year) && year >= 1800 && year <= 2999;
     try {
-      stackState = this.mapStackController?.getState?.();
+      autoMode = this.mapStackController?.getState?.()?.autoMode;
     } catch {
       /* unavailable */
     }
-    const autoMode = stackState?.autoMode;
     const win = this.viewer?.container?.ownerDocument?.defaultView;
     try {
-      aerial = win?.__gevNaip?.state?.();
+      const state = win?.__gevNaip?.state?.();
+      if (state && Array.isArray(state.ticks)) {
+        aerial = {
+          year: validImageryYear(state.year) ? state.year : null,
+          ticks: state.ticks.filter(validImageryYear),
+        };
+      }
     } catch {
       /* unavailable */
     }
@@ -1570,16 +1577,14 @@ export class StyleManager extends ShellFacade {
     } catch {
       /* unavailable */
     }
-    const validImageryYear = (year) =>
-      Number.isInteger(year) && year >= 1800 && year <= 2999;
     return {
       ...(typeof autoMode === 'string'
         ? { mapStackAuto: autoMode === 'auto' }
         : {}),
-      ...(aerial && Array.isArray(aerial.ticks)
+      ...(aerial
         ? {
-            imageryYear: validImageryYear(aerial.year) ? aerial.year : null,
-            imageryYears: aerial.ticks.filter(validImageryYear),
+            imageryYear: aerial.year,
+            imageryYears: aerial.ticks,
           }
         : {}),
       ...(Object.keys(opacity).length ? { layerOpacity: opacity } : {}),
