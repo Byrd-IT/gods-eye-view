@@ -12,6 +12,7 @@
  */
 export const MAP_LAYERS_ID = 'map-layers-panel';
 export const MAP_LAYERS_BODY_ID = 'gev-map-layers-body';
+const claims = new WeakMap();
 
 /**
  * @param {Document} doc
@@ -22,14 +23,23 @@ export function ensureMapLayersCard(doc = globalThis.document) {
   const root = doc?.getElementById?.(MAP_LAYERS_ID) ?? null;
   const body = doc?.getElementById?.(MAP_LAYERS_BODY_ID) ?? null;
   if (!root || !body) return null;
+  let claimed = false;
   return {
     root,
     body,
     show() {
+      if (!claimed) {
+        claimed = true;
+        claims.set(root, (claims.get(root) ?? 0) + 1);
+      }
       root.hidden = false;
     },
     hide() {
-      root.hidden = true;
+      if (!claimed) return;
+      claimed = false;
+      const remaining = Math.max(0, (claims.get(root) ?? 1) - 1);
+      claims.set(root, remaining);
+      root.hidden = remaining === 0;
     },
     isOpen: () => !(root.classList?.contains('collapsed') ?? true),
   };

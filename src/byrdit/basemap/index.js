@@ -221,10 +221,18 @@ export async function openBasemap({
             })
           : null;
       const hookWindow = viewer?.container?.ownerDocument?.defaultView ?? null;
-      const coverageCard = ensureMapLayersCard(viewer?.container?.ownerDocument ?? doc);
+      const coverageCard = ensureMapLayersCard(
+        viewer?.container?.ownerDocument ?? doc,
+      );
       const detachCoverage = coverageCard
-        ? attachCoveragePanel({ Cesium, viewer, container: coverageCard.body, fetchImpl })
+        ? attachCoveragePanel({
+            Cesium,
+            viewer,
+            container: coverageCard.body,
+            fetchImpl,
+          })
         : null;
+      if (detachCoverage) coverageCard.show();
       const imageryVoice = createImageryVoice({
         getNaip: () => naip,
         getCatalog: () => config.naip,
@@ -254,6 +262,7 @@ export async function openBasemap({
           delete hookWindow.__gevOverlays;
         overlays?.();
         detachCoverage?.();
+        coverageCard?.hide();
         naip?.();
         buildings?.();
         detachSwitch();
