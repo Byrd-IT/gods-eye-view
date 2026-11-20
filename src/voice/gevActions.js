@@ -2293,8 +2293,21 @@ async function controlHistory(voice, args = {}, setLayer) {
       else if (enabled || wanted.includes(layerId))
         failed.push({ layerId, error: 'failed' });
     }
-    // History's own state first: the feed outcome must win ok / mode
-    const { ok: _ok, error: _error, ...state } = voice.status();
+    // History's own state first: the feed outcome must win ok / mode.
+    // Report already-applied feed changes even if state readback throws.
+    let state;
+    try {
+      const { ok: _ok, error: _error, ...snapshot } = await voice.status();
+      state = snapshot;
+    } catch {
+      return wrap({
+        ok: false,
+        error: 'Control failed',
+        feedMode: mode,
+        changed,
+        ...(failed.length ? { failed } : {}),
+      });
+    }
     return wrap({
       ...state,
       ok: failed.length === 0,
@@ -2506,7 +2519,7 @@ async function controlSky(voice, args = {}) {
       ok: false,
       error: 'Sky view is not available in this host',
     });
-  if (action === 'status') return wrap(await voice.status());
+  if (action === 'status') return wrap(await safeAdapterCall(voice, 'status'));
   if (action === 'open') return wrap(await voice.open());
   if (action === 'close') return wrap(await voice.close());
   if (action === 'look') return wrap(await voice.look(args.target));
@@ -2598,7 +2611,7 @@ async function controlImagery(voice, args = {}, dataManager = null) {
       ok: false,
       error: 'Aerial imagery is not available in this host',
     });
-  if (action === 'status') return wrap(await voice.status());
+  if (action === 'status') return wrap(await safeAdapterCall(voice, 'status'));
   if (action === 'compare')
     return wrap(
       await safeAdapterCall(voice, 'compare', {

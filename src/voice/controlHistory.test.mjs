@@ -248,6 +248,25 @@ test('feeds refuse a layer that has no history, an empty list and a bad mode, ch
   assert.deepEqual(h.order, [], 'a refused request toggles no layer');
 });
 
+test('History feed outcome reports applied changes if status throws', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = harness({
+    voiceOverrides: {
+      status: () => {
+        throw new Error(secret);
+      },
+    },
+  });
+  const result = await h.runner('control_history', {
+    action: 'feeds',
+    feeds: [FEEDS[0]],
+    feedMode: 'add',
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.changed, [{ layerId: FEEDS[0], enabled: true }]);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('changed History status and jump suppress owner exceptions', async () => {
   const secret = `SYNTHETIC_${crypto.randomUUID()}`;
   const h = harness({

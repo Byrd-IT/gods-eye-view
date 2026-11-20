@@ -49,6 +49,18 @@ function harness(imagery) {
   return { runner, voice };
 }
 
+test('imagery status suppresses owner exceptions', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = harness({
+    status: () => {
+      throw new Error(secret);
+    },
+  });
+  const result = await h.runner('control_imagery', { action: 'status' });
+  assert.equal(result.ok, false);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('control_imagery stays just before control_droneplan and does not reorder control_sky', () => {
   const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);
   const imagery = names.indexOf('control_imagery');

@@ -68,6 +68,20 @@ test('control_sky stays just before control_imagery and does not reorder control
   assert.equal(tool.parameters.properties.enabled.type, 'boolean');
 });
 
+test('Sky status suppresses owner exceptions', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = harness({
+    voiceOverrides: {
+      status: () => {
+        throw new Error(secret);
+      },
+    },
+  });
+  const result = await h.runner('control_sky', { action: 'status' });
+  assert.equal(result.ok, false);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('new Sky calls suppress owner exceptions and report absent adapters', async () => {
   const secret = 'SYNTHETIC_TOKEN_SUFFIXABC123';
   const h = harness({
