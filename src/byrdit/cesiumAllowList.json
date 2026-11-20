@@ -1,6 +1,5 @@
 [
   "src/byrdit/basemap/buildings.js",
-  "src/byrdit/basemap/imagery.js",
   "src/byrdit/basemap/imageryVoice.js",
   "src/byrdit/basemap/index.js",
   "src/byrdit/basemap/naip.js",
@@ -8,8 +7,6 @@
   "src/byrdit/basemap/odmRequestGate.js",
   "src/byrdit/basemap/overlays.js",
   "src/byrdit/basemap/overlaysVector.js",
-  "src/byrdit/basemap/stack.js",
-  "src/byrdit/basemap/terrain.js",
   "src/byrdit/cesiumViewer.js",
   "src/byrdit/dronePlan/areaEditTool.js",
   "src/byrdit/dronePlan/checkLayer.js",
