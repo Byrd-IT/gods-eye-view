@@ -34,6 +34,14 @@ function setup({ swapped = [] } = {}) {
   return { clock, control, voice, router };
 }
 
+test('History status fails closed if handle disappears before snapshot', () => {
+  let calls = 0;
+  const voice = createHistoryVoice({
+    getHandle: () => (++calls === 1 ? { getState: () => ({ rate: 1 }) } : null),
+  });
+  assert.equal(voice.status().ok, false);
+});
+
 test('History feed registry filters untrusted layer IDs', () => {
   const voice = createHistoryVoice({
     getHandle: () => ({ getState: () => ({ active: false, rate: 1 }) }),

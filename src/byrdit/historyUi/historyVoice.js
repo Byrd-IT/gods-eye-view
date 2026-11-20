@@ -124,6 +124,7 @@ export function createHistoryVoice({
   ]);
   const doneControl = (extra = {}) => {
     const state = snapshot();
+    if (!state) return unavailable();
     return {
       ok: true,
       ...state,
