@@ -65,6 +65,7 @@ test('no fetch before opt-in; photo selection, discard, and teardown', async () 
     createLayer,
   });
   assert.equal(requests.length, 0);
+  assert(root.textContent.includes('Ground: red 0'));
   const toggle = root.find((n) => n.textContent === 'Show photo coverage');
   toggle.onclick();
   await tick();

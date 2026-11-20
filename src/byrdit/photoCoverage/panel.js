@@ -69,6 +69,11 @@ export function attachCoveragePanel({
   flagged.type = 'checkbox';
   const status = el('p', '', controls);
   status.setAttribute('role', 'status');
+  el(
+    'p',
+    'Ground: red 0, orange 1-2, yellow 3-4, green 5+ kept views. Cameras: cyan kept, gray discarded, magenta flagged.',
+    controls,
+  );
   const undo = el('button', 'Undo', controls);
   undo.type = 'button';
   const selectBox = el('button', 'Box select', controls);
