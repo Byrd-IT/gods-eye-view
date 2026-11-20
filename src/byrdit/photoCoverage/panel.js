@@ -2,6 +2,7 @@ import { createCoverageStore } from './store.js';
 import { createCoverageLayer } from './layer.js';
 import { photosForCell, coverageCounts } from './coverageCore.js';
 import { rankGaps } from './gaps.js';
+import { modelLatLon } from './coordinates.js';
 
 /** Small Map Layers card section. No request is made until explicitly enabled. */
 export function attachCoveragePanel({Cesium,viewer,container,doc=container?.ownerDocument,fetchImpl=globalThis.fetch,createLayer=createCoverageLayer}) {
@@ -47,7 +48,22 @@ export function attachCoveragePanel({Cesium,viewer,container,doc=container?.owne
       for(const p of list){const b=el('button',p.name,detail);b.type='button';b.onclick=()=>{selected={type:'photo',name:p.name};showDetail(store.snapshot());};}
     }
   }
-  function showGaps(s){gaps.replaceChildren();el('strong','Needs better coverage',gaps);for(const gap of s.gaps.slice(0,8))el('div',`${Math.round(gap.areaM2*10.7639)} sq ft; ${gap.zero} zero-coverage cells`,gaps);}
+  function showGaps(s){
+    gaps.replaceChildren();el('strong','Needs better coverage',gaps);
+    for(const gap of s.gaps.slice(0,8)) {
+      const row=el('div',`${Math.round(gap.areaM2*10.7639)} sq ft; ${gap.zero} zero-coverage cells `,gaps);
+      const send=el('button','Send bounding box to Drone Flight Plan',row);send.type='button';
+      send.onclick=()=>{
+        const plan=doc.defaultView?.__gevDronePlan;
+        if(!plan?.setPolygon){report('Drone Flight Plan is unavailable');return;}
+        const d=s.cells.cell_m;let mini=Infinity,maxi=-Infinity,minj=Infinity,maxj=-Infinity;
+        for(const k of gap.cells){const i=k%s.cells.nx,j=Math.floor(k/s.cells.nx);mini=Math.min(mini,i);maxi=Math.max(maxi,i);minj=Math.min(minj,j);maxj=Math.max(maxj,j);}
+        const x0=s.cells.x0+mini*d,x1=s.cells.x0+(maxi+1)*d,y0=s.cells.y0+minj*d,y1=s.cells.y0+(maxj+1)*d;
+        const ring=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(([x,y])=>modelLatLon(s.meta.origin,x,y));
+        if(plan.setPolygon(ring)){plan.open?.({draw:false});report('Gap bounding box added to Drone Flight Plan');}else report('Drone Flight Plan did not accept the gap');
+      };
+    }
+  }
   function visibleNames(s){
     const minH=minHeight.value===''?-Infinity:Number(minHeight.value), maxH=maxHeight.value===''?Infinity:Number(maxHeight.value), minP=minPitch.value===''?-Infinity:Number(minPitch.value), maxP=maxPitch.value===''?Infinity:Number(maxPitch.value), date=filterDate.value.replaceAll('-','');
     return new Set(s.photos.filter(p=>(!date||p.flight_date===date)&&(!flagged.checked||p.flags?.length)&&(!Number.isFinite(minH)||p.height_ft>=minH)&&(!Number.isFinite(maxH)||p.height_ft<=maxH)&&(!Number.isFinite(minP)||p.pitch_deg>=minP)&&(!Number.isFinite(maxP)||p.pitch_deg<=maxP)).map(p=>p.name));
