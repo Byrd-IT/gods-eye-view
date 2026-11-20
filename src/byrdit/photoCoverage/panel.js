@@ -3,11 +3,12 @@ import { createCoverageLayer } from './layer.js';
 import { photosForCell, coverageCounts } from './coverageCore.js';
 import { rankGaps } from './gaps.js';
 import { modelLatLon } from './coordinates.js';
+import { beginScreenSelection } from './screenSelection.js';
 
 /** Small Map Layers card section. No request is made until explicitly enabled. */
 export function attachCoveragePanel({Cesium,viewer,container,doc=container?.ownerDocument,fetchImpl=globalThis.fetch,createLayer=createCoverageLayer}) {
   if (!container || !doc) return () => {};
-  const store=createCoverageStore({fetchImpl}); let layer=null, epoch=0, selected=null, current=null;
+  const store=createCoverageStore({fetchImpl}); let layer=null, epoch=0, selected=null, current=null, cancelSelection=null, multi=[];
   const section=doc.createElement('section'); section.className='gev-photo-coverage';
   const heading=doc.createElement('h3'); heading.textContent='Photo coverage'; section.append(heading);
   function el(tag,label,parent=section) {const n=doc.createElement(tag);if(label)n.textContent=label;parent.append(n);return n;}
@@ -24,6 +25,11 @@ export function attachCoveragePanel({Cesium,viewer,container,doc=container?.owne
   const flaggedLabel=el('label','Flagged only ',controls);const flagged=el('input','',flaggedLabel);flagged.type='checkbox';
   const status=el('p','',controls); status.setAttribute('role','status');
   const undo=el('button','Undo',controls); undo.type='button';
+  const selectBox=el('button','Box select',controls);selectBox.type='button';
+  const selectCircle=el('button','Circle select',controls);selectCircle.type='button';
+  const multiStatus=el('span','0 selected',controls);
+  const keepSelected=el('button','Keep selected',controls);keepSelected.type='button';
+  const discardSelected=el('button','Discard selected',controls);discardSelected.type='button';
   const detail=el('div','',controls);
   const saveName=el('input','',controls); saveName.placeholder='Keep set name'; saveName.setAttribute('aria-label','Keep set name');
   const save=el('button','Save keep set',controls); save.type='button';
@@ -68,13 +74,16 @@ export function attachCoveragePanel({Cesium,viewer,container,doc=container?.owne
     const minH=minHeight.value===''?-Infinity:Number(minHeight.value), maxH=maxHeight.value===''?Infinity:Number(maxHeight.value), minP=minPitch.value===''?-Infinity:Number(minPitch.value), maxP=maxPitch.value===''?Infinity:Number(maxPitch.value), date=filterDate.value.replaceAll('-','');
     return new Set(s.photos.filter(p=>(!date||p.flight_date===date)&&(!flagged.checked||p.flags?.length)&&(!Number.isFinite(minH)||p.height_ft>=minH)&&(!Number.isFinite(maxH)||p.height_ft<=maxH)&&(!Number.isFinite(minP)||p.pitch_deg>=minP)&&(!Number.isFinite(maxP)||p.pitch_deg<=maxP)).map(p=>p.name));
   }
-  async function update(s){if(!s)return;const shown=visibleNames(s);const counts=coverageCounts(s.cells,s.photos,s.discarded,shown);s={...s,visibleNames:shown,counts,gaps:rankGaps(s.cells,s.mask,counts)};current=s;const g=++epoch; layer?.destroy();layer=null;report('Drawing coverage...');showDetail(s);showGaps(s);
+  async function update(s){if(!s)return;const shown=visibleNames(s);const counts=coverageCounts(s.cells,s.photos,s.discarded,shown);s={...s,visibleNames:shown,counts,gaps:rankGaps(s.cells,s.mask,counts)};current=s;const g=++epoch; cancelSelection?.();cancelSelection=null;layer?.destroy();layer=null;report('Drawing coverage...');showDetail(s);showGaps(s);
     try{const next=await createLayer({Cesium,viewer,state:s,onPick:p=>{selected=p;showDetail(store.snapshot());}});if(g!==epoch){next.destroy();return;}layer=next;report(`${s.photos.length} photos; ${s.discarded.size} discarded`);}catch{if(g===epoch)report('Coverage or terrain is unavailable');}}
-  async function load(){selected=null;const g=++epoch;layer?.destroy();layer=null;report('Loading photo coverage...');try{const s=await store.load(model.value);if(g!==epoch||!s)return;await update(s);await refreshSets();}catch{if(g===epoch)report('Coverage data is unavailable');}}
-  toggle.onclick=()=>{if(controls.hidden){controls.hidden=false;toggle.textContent='Hide photo coverage';load();}else{controls.hidden=true;toggle.textContent='Show photo coverage';epoch++;store.clear();layer?.destroy();layer=null;selected=null;current=null;}};
+  async function load(){selected=null;multi=[];multiStatus.textContent='0 selected';cancelSelection?.();cancelSelection=null;const g=++epoch;layer?.destroy();layer=null;report('Loading photo coverage...');try{const s=await store.load(model.value);if(g!==epoch||!s)return;await update(s);await refreshSets();}catch{if(g===epoch)report('Coverage data is unavailable');}}
+  toggle.onclick=()=>{if(controls.hidden){controls.hidden=false;toggle.textContent='Hide photo coverage';load();}else{controls.hidden=true;toggle.textContent='Show photo coverage';epoch++;store.clear();cancelSelection?.();cancelSelection=null;layer?.destroy();layer=null;selected=null;multi=[];current=null;}};
   model.onchange=load; undo.onclick=()=>update(store.undo());
   for(const input of [filterDate,minHeight,maxHeight,minPitch,maxPitch,flagged]) input.onchange=()=>update(store.snapshot());
+  function startSelect(mode){if(!layer?.screenPoints){report('Coverage map is not ready');return;}cancelSelection?.();report(`Drag a ${mode} around camera markers; Escape cancels`);cancelSelection=beginScreenSelection({viewer,mode,getPoints:()=>layer.screenPoints(),doc,onSelect:names=>{multi=names;multiStatus.textContent=`${multi.length} selected`;cancelSelection=null;report('Selection ready');}});}
+  selectBox.onclick=()=>startSelect('box');selectCircle.onclick=()=>startSelect('circle');
+  keepSelected.onclick=()=>{if(multi.length)update(store.setKept(multi,true));};discardSelected.onclick=()=>{if(multi.length)update(store.setKept(multi,false));};
   save.onclick=async()=>{try{await store.save(saveName.value);await refreshSets();report('Keep set saved');}catch{report('Keep set could not be saved');}};
   restore.onclick=async()=>{try{await update(await store.loadSet(sets.value));}catch{report('Keep set could not be loaded');}};
-  return ()=>{epoch++;store.clear();layer?.destroy();section.remove();};
+  return ()=>{epoch++;store.clear();cancelSelection?.();layer?.destroy();section.remove();};
 }

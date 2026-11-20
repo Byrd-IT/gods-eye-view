@@ -21,9 +21,12 @@ export async function createCoverageLayer({Cesium,viewer,state,onPick=()=>{}}) {
       return new Cesium.GeometryInstance({id:{type:'coverage-cell',key},geometry:new Cesium.RectangleGeometry({rectangle:Cesium.Rectangle.fromDegrees(a.lon,a.lat,b.lon,b.lat),vertexFormat:Cesium.PerInstanceColorAppearance.VERTEX_FORMAT}),attributes:{color:Cesium.ColorGeometryInstanceAttribute.fromColor(color)}});
     });
     if (instances.length) collection.add(new Cesium.GroundPrimitive({geometryInstances:instances,appearance:new Cesium.PerInstanceColorAppearance({flat:true,translucent:true}),asynchronous:true}));
+    const projected=[];
     positions.forEach((p,i)=>{
       const status=state.discarded.has(p.name)?Cesium.Color.GRAY:(p.flags?.length?Cesium.Color.MAGENTA:Cesium.Color.CYAN);
-      cameras.entities.add({id:`photo:${p.name}`,position:Cesium.Cartesian3.fromDegrees(p.lon,p.lat,modelHeight(p.z,state.meta.ground_z,terrain[i].height)),point:{pixelSize:7,color:status,outlineColor:Cesium.Color.BLACK,outlineWidth:1},properties:{photoName:p.name}});
+      const position=Cesium.Cartesian3.fromDegrees(p.lon,p.lat,modelHeight(p.z,state.meta.ground_z,terrain[i].height));
+      projected.push({name:p.name,position});
+      cameras.entities.add({id:`photo:${p.name}`,position,point:{pixelSize:7,color:status,outlineColor:Cesium.Color.BLACK,outlineWidth:1},properties:{photoName:p.name}});
     });
     handler=new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     handler.setInputAction(event=>{
@@ -31,7 +34,10 @@ export async function createCoverageLayer({Cesium,viewer,state,onPick=()=>{}}) {
       if (id?.type==='coverage-cell') onPick({type:'cell',key:id.key});
       else if (typeof id?.id==='string' && id.id.startsWith('photo:')) onPick({type:'photo',name:id.id.slice(6)});
     },Cesium.ScreenSpaceEventType.LEFT_CLICK);
-    return {destroy(){if(destroyed)return;destroyed=true;handler?.destroy();viewer.dataSources.remove(cameras,true);viewer.scene.primitives.remove(collection);}};
+    return {
+      screenPoints(){return projected.map(p=>{const xy=Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene,p.position);return xy?{name:p.name,x:xy.x,y:xy.y}:null;}).filter(Boolean);},
+      destroy(){if(destroyed)return;destroyed=true;handler?.destroy();viewer.dataSources.remove(cameras,true);viewer.scene.primitives.remove(collection);}
+    };
   } catch(error) {
     handler?.destroy(); viewer.dataSources.remove(cameras,true); viewer.scene.primitives.remove(collection); throw error;
   }
