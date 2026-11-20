@@ -484,6 +484,7 @@ export function createImageryVoice({
       else if (Number.isInteger(delta)) handle.step(delta);
       else return fail('step needs an integer direction');
       const state = handle.state?.();
+      if (!state) return unavailable();
       return {
         ok: true,
         target: 'wayback',

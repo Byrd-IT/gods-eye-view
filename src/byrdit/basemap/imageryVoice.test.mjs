@@ -7,6 +7,20 @@ import {
   flyToImageryBounds,
 } from './imageryVoice.js';
 
+test('Wayback step and latest refuse an owner that loses state', async () => {
+  for (const latest of [false, true]) {
+    const handle = {
+      catalog: () => [],
+      latest() {},
+      step() {},
+      state: () => null,
+    };
+    const voice = createImageryVoice({ getWayback: () => handle });
+    const result = await voice.move({ target: 'wayback', latest, delta: 1 });
+    assert.equal(result.ok, false);
+  }
+});
+
 test('Wayback playback suppresses untrusted transport state', async () => {
   const marker = `SYNTHETIC_${crypto.randomUUID()}`;
   const handle = {
