@@ -495,6 +495,42 @@ test('control_cctv reports a camera that carries a feed, and never claims it is 
   assert.equal('live' in result, false);
 });
 
+test('control_cctv select and next summarize only allowed feed types', async () => {
+  let active = { id: 'cam', name: 'Camera', feedType: 'none', noFeed: true };
+  const module = {
+    getUIState: () => ({ activeCamera: active, cameras: [active], count: 1 }),
+    selectCamera: () => true,
+    cycleCamera: () => 'cam',
+    focusCamera: () => CCTV_FOCUS_RESULT.FOCUSED,
+  };
+  const { runner } = harness({
+    dataManager: {
+      layers: new Map([['cctv', { module }]]),
+      getAll: () => [],
+      isEnabled: (id) => id === 'cctv',
+    },
+  });
+  for (const feedType of [
+    'none',
+    'image',
+    'mjpeg',
+    'mp4',
+    'hls',
+    'webm',
+    'untrusted',
+  ]) {
+    active = { ...active, feedType, noFeed: feedType === 'none' };
+    for (const args of [
+      { action: 'select', cameraQuery: 'cam' },
+      { action: 'next' },
+    ]) {
+      const result = await runner('control_cctv', args);
+      assert.equal(result.feedType, feedType === 'untrusted' ? null : feedType);
+      assert.equal(result.noFeed, feedType === 'none');
+    }
+  }
+});
+
 test('control_cctv without an active camera claims no feed type', async () => {
   const module = {
     getUIState: () => ({
