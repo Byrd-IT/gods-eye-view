@@ -420,8 +420,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       }
       const after = handle();
       if (!after || after !== current) return unavailable();
-      if (!result?.ok)
-        return fail(result?.reason || 'That preset was not found');
+      if (!result?.ok) return fail('That preset was not found');
       const historyOwned = after.time?.provider === 'history';
       const clockMs = after.time?.getTime?.();
       if (

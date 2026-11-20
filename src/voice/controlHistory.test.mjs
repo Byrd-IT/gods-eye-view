@@ -374,3 +374,18 @@ test('refusals never echo more than a short slice of what the model sent (secret
   assert.ok(!JSON.stringify(feed).includes('TAILMARK'));
   assert.ok(!JSON.stringify(feed).includes(secret));
 });
+
+test('control_history play, pause, speed and live contain owner throws', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const boom = () => {
+    throw new Error(secret);
+  };
+  const h = harness({
+    voiceOverrides: { play: boom, pause: boom, speed: boom, live: boom },
+  });
+  for (const action of ['play', 'pause', 'speed', 'live']) {
+    const result = await h.runner('control_history', { action, rate: 10 });
+    assert.equal(result.ok, false);
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  }
+});

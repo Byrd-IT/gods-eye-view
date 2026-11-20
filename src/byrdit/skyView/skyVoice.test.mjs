@@ -405,7 +405,7 @@ test('a preset that is not found does not claim the time moved', async () => {
   h.state.active = true;
   const r = await h.voice.preset('sunset');
   assert.equal(r.ok, false);
-  assert.match(r.error, /does not set/);
+  assert.equal(r.error, 'That preset was not found');
 });
 
 test('look, time, lines and preset do not run when open fails', async () => {
@@ -940,4 +940,14 @@ test('preset returns a fail reply if applyPreset rejects, and does not throw', a
   assert.equal(r.time, undefined);
   assert.equal(JSON.stringify(r).includes('SECRETKEY123'), false);
   assert.equal(JSON.stringify(r).includes('sunset'), false);
+});
+
+test('preset failure does not echo an owner reason', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = voiceFor({ presetResult: { ok: false, reason: secret } });
+  h.state.active = true;
+  const r = await h.voice.preset('sunset');
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'That preset was not found');
+  assert.equal(JSON.stringify(r).includes(secret), false);
 });

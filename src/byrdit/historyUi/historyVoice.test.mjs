@@ -284,3 +284,34 @@ test('a refused jump time never echoes the text it was given', () => {
   }
   h.control.destroy();
 });
+
+test('play, pause, speed and live drop untrusted rate and feed text', () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const state = { active: true, playing: true, rate: secret, preset: '1h' };
+  const handle = {
+    getState: () => state,
+    play() {},
+    pause() {},
+    setRate() {},
+    leave() {},
+  };
+  const voice = createHistoryVoice({
+    getHandle: () => handle,
+    getRouter: () => ({
+      adapters: [],
+      getState: () => ({ swapped: [secret] }),
+    }),
+  });
+  for (const result of [
+    voice.play(),
+    voice.pause(),
+    voice.speed(10),
+    voice.live(),
+  ])
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  state.active = false;
+  assert.equal(JSON.stringify(voice.play()).includes(secret), false);
+  state.active = true;
+  state.playing = false;
+  assert.equal(JSON.stringify(voice.play()).includes(secret), false);
+});

@@ -2238,9 +2238,10 @@ async function controlHistory(voice, args = {}, setLayer) {
         minutesAgo: args.minutesAgo,
       }),
     );
-  if (action === 'play') return wrap(voice.play());
-  if (action === 'pause') return wrap(voice.pause());
-  if (action === 'speed') return wrap(voice.speed(args.rate));
+  if (action === 'play') return wrap(await safeAdapterCall(voice, 'play'));
+  if (action === 'pause') return wrap(await safeAdapterCall(voice, 'pause'));
+  if (action === 'speed')
+    return wrap(await safeAdapterCall(voice, 'speed', args.rate));
   if (action === 'preset')
     return wrap(await safeAdapterCall(voice, 'preset', args.preset));
   if (action === 'expand')
@@ -2249,7 +2250,7 @@ async function controlHistory(voice, args = {}, setLayer) {
     return wrap(
       await safeAdapterCall(voice, 'lock', args.historyRow, args.locked),
     );
-  if (action === 'live') return wrap(voice.live());
+  if (action === 'live') return wrap(await safeAdapterCall(voice, 'live'));
   if (action === 'feeds') {
     const known = voice.feedLayerIds();
     const asked = Array.isArray(args.feeds) ? args.feeds : [];

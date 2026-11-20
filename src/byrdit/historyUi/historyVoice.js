@@ -134,6 +134,11 @@ export function createHistoryVoice({
     };
   };
 
+  const controlState = () => {
+    const { ok, error, ...rest } = doneControl();
+    return ok ? rest : {};
+  };
+
   return {
     feedLayerIds: () =>
       (getRouter?.()?.adapters ?? [])
@@ -171,21 +176,21 @@ export function createHistoryVoice({
       if (!h) return unavailable();
       if (!h.getState().active)
         return fail('History is not open: jump to a time first', {
-          ...snapshot(),
+          ...controlState(),
         });
       h.play();
       const s = h.getState();
       if (!s.playing)
         return fail('Already at the present: nothing to play forward to', {
-          ...snapshot(),
+          ...controlState(),
         });
-      return done();
+      return doneControl();
     },
     pause() {
       const h = handle();
       if (!h) return unavailable();
       h.pause();
-      return done();
+      return doneControl();
     },
     speed(rate) {
       const h = handle();
@@ -196,7 +201,7 @@ export function createHistoryVoice({
           allowed: [...RATES],
         });
       h.setRate(n);
-      return done();
+      return doneControl();
     },
     preset(id) {
       const h = handle();
@@ -248,7 +253,7 @@ export function createHistoryVoice({
       const h = handle();
       if (!h) return unavailable();
       h.leave();
-      return done();
+      return doneControl();
     },
   };
 }
