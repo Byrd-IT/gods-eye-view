@@ -5048,5 +5048,6 @@
   "Telemetry reads while the model is on screen": "模型显示在屏幕上时读取遥测",
   "Connecting to telemetry…": "正在连接遥测…",
   "{seconds} s": "{seconds} 秒",
-  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "太阳能板、散热器和一副天线依据 NASA 的实时遥测转动。另一副天线保持不动，机械臂仅作演示性摆动。"
+  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "太阳能板、散热器和一副天线依据 NASA 的实时遥测转动。另一副天线保持不动，机械臂仅作演示性摆动。",
+  "Latest": "最新"
 }

@@ -5163,5 +5163,6 @@
   "Telemetry reads while the model is on screen": "Telemetrie wird gelesen, solange das Modell zu sehen ist",
   "Connecting to telemetry…": "Verbindung zur Telemetrie…",
   "{seconds} s": "{seconds} s",
-  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "Solarflügel, Radiatoren und eine Antenne folgen der Live-Telemetrie der NASA. Die andere Antenne steht still und die Arme bewegen sich zur Veranschaulichung."
+  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "Solarflügel, Radiatoren und eine Antenne folgen der Live-Telemetrie der NASA. Die andere Antenne steht still und die Arme bewegen sich zur Veranschaulichung.",
+  "Latest": "Neueste"
 }

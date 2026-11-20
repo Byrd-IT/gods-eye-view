@@ -5163,5 +5163,6 @@
   "Telemetry reads while the model is on screen": "Telemetri läses medan modellen syns på skärmen",
   "Connecting to telemetry…": "Ansluter till telemetri…",
   "{seconds} s": "{seconds} s",
-  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "Paneler, radiatorer och en antenn följer NASA:s telemetri i realtid. Den andra antennen står stilla och armarna rör sig som illustration."
+  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "Paneler, radiatorer och en antenn följer NASA:s telemetri i realtid. Den andra antennen står stilla och armarna rör sig som illustration.",
+  "Latest": "Senaste"
 }

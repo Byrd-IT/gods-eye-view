@@ -5393,5 +5393,6 @@
   "Telemetry reads while the model is on screen": "Телеметрія читається, поки модель на екрані",
   "Connecting to telemetry…": "Підключення до телеметрії…",
   "{seconds} s": "{seconds} с",
-  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "Панелі, радіатори й одна антена слідують телеметрії NASA в реальному часі. Друга антена нерухома, а маніпулятори рухаються для ілюстрації."
+  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "Панелі, радіатори й одна антена слідують телеметрії NASA в реальному часі. Друга антена нерухома, а маніпулятори рухаються для ілюстрації.",
+  "Latest": "Останні"
 }

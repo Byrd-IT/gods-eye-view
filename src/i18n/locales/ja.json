@@ -5048,5 +5048,6 @@
   "Telemetry reads while the model is on screen": "テレメトリはモデルが画面にある間に読み取られます",
   "Connecting to telemetry…": "テレメトリに接続中…",
   "{seconds} s": "{seconds} 秒",
-  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "太陽電池パネル、ラジエーター、アンテナの1基はNASAのライブテレメトリに従います。もう1基のアンテナは動かず、アームは説明用にゆっくり動きます。"
+  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "太陽電池パネル、ラジエーター、アンテナの1基はNASAのライブテレメトリに従います。もう1基のアンテナは動かず、アームは説明用にゆっくり動きます。",
+  "Latest": "最新"
 }

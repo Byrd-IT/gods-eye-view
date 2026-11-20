@@ -5623,5 +5623,6 @@
   "Telemetry reads while the model is on screen": "تُقرأ القياسات أثناء ظهور النموذج على الشاشة",
   "Connecting to telemetry…": "جارٍ الاتصال بالقياسات…",
   "{seconds} s": "{seconds} ث",
-  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "الألواح والمشعّات وأحد الأطباق تتبع القياسات الحية من ناسا. الطبق الآخر ثابت، والأذرع تتحرك للتوضيح فقط."
+  "Arrays, radiators and one dish follow NASA's live telemetry. The other dish holds still and the arms sway for illustration.": "الألواح والمشعّات وأحد الأطباق تتبع القياسات الحية من ناسا. الطبق الآخر ثابت، والأذرع تتحرك للتوضيح فقط.",
+  "Latest": "الأحدث"
 }
