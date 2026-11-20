@@ -19,9 +19,16 @@ import path from 'node:path';
  *   - placement never nests the staging folder inside an existing folder and
  *     fails closed (no manifest entry) when the name was taken.
  *
+ * The second half covers the other side of that contract: an ssh link that
+ * drops mid-command answers nothing. A nonzero exit from `test -e` other than
+ * the explicit "false" (1), and any nonzero exit from `mv`, must not be read
+ * as "absent" or "moved". Those runs must leave both the manifest and any
+ * folder they cannot prove they own untouched. Staging names must also carry
+ * the host, so two machines cannot share (and delete) one staging folder.
+ *
  * No ssh and no network: every command runs locally through the same bash
- * seam the other publish tests use, and the race is injected deterministically
- * at the move command.
+ * seam the other publish tests use, and the faults are injected
+ * deterministically (exit 255, a fixed clock/pid, a fixed hostname).
  */
 
 const script = path.resolve(
@@ -212,6 +219,276 @@ print(json.dumps({
     );
     assert.equal(out.published_by_us, false);
     assert.deepEqual(out.staging, [], 'our staging is cleaned up');
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(phone, { recursive: true, force: true });
+  }
+});
+
+test('lost ssh right after the move: fail closed, add no entry, delete nothing', () => {
+  const main = tmp();
+  const phone = tmp();
+  try {
+    writeSplat(main);
+    const out = runProgram(
+      harness +
+        `
+state = {"moved": False, "blind": False}
+_base = local_run
+def flaky(cmd, check=True, input=None, **kw):
+    text = cmd[-1]
+    if text.startswith("mv "):
+        # The rename happens for real...
+        r = _base(cmd, check=check, input=input, **kw)
+        state["moved"] = True
+        return r
+    if state["moved"] and not state["blind"] and text.startswith("test -e "):
+        # ...and the link drops for exactly the next existence answer, then
+        # recovers so the manifest write is still reachable.
+        state["blind"] = True
+        return subprocess.CompletedProcess(cmd, 255, stdout="", stderr="ssh: connection closed")
+    return _base(cmd, check=check, input=input, **kw)
+p.run = flaky
+
+rc = p.main(["--splat", main, "--ground-m", "112",
+             "--id", "odm-3d-lost001", "--name", "Lost"])
+final = os.path.join(base, "odm-3d-lost001")
+snap = snapshot()
+print(json.dumps({
+    "rc": rc,
+    **snap,
+    "final_exists": os.path.isdir(final),
+    "final_tileset": os.path.exists(os.path.join(final, "tileset.json")),
+}))
+`,
+      main,
+      phone,
+    );
+    assert.equal(out.rc, 2, 'a lost link after the move is not a success');
+    assert.deepEqual(out.layers, [], 'no manifest entry is added on an unconfirmed move');
+    assert.equal(
+      out.final_exists,
+      true,
+      'the folder the move may have created is left for a human, never deleted',
+    );
+    assert.equal(out.final_tileset, true, 'the verified copy is still on S1 intact');
+    assert.deepEqual(out.staging, [], 'a completed move leaves no staging folder');
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(phone, { recursive: true, force: true });
+  }
+});
+
+test('a nonzero mv exit (link died during the move) never publishes', () => {
+  const main = tmp();
+  const phone = tmp();
+  try {
+    writeSplat(main);
+    const out = runProgram(
+      harness +
+        `
+state = {"failed": False}
+_base = local_run
+def flaky(cmd, check=True, input=None, **kw):
+    text = cmd[-1]
+    if not state["failed"] and cmd[0] != "curl" and text.startswith("mv "):
+        # The remote rename runs, but the link dies before ssh can report it:
+        # the caller sees a nonzero exit with the move already done.
+        _base(cmd, check=check, input=input, **kw)
+        state["failed"] = True
+        return subprocess.CompletedProcess(cmd, 255, stdout="", stderr="ssh: connection closed")
+    return _base(cmd, check=check, input=input, **kw)
+p.run = flaky
+
+rc = p.main(["--splat", main, "--ground-m", "112",
+             "--id", "odm-3d-mv25501", "--name", "Mv255"])
+final = os.path.join(base, "odm-3d-mv25501")
+snap = snapshot()
+print(json.dumps({
+    "rc": rc,
+    **snap,
+    "final_exists": os.path.isdir(final),
+    "final_tileset": os.path.exists(os.path.join(final, "tileset.json")),
+}))
+`,
+      main,
+      phone,
+    );
+    assert.equal(out.rc, 2);
+    assert.deepEqual(out.layers, [], 'a nonzero mv exit is never claimed as published');
+    assert.equal(
+      out.final_exists,
+      true,
+      'an unconfirmed move is left in place for a human, never deleted',
+    );
+    assert.equal(out.final_tileset, true);
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(phone, { recursive: true, force: true });
+  }
+});
+
+test('an unreadable existence check at the fast exit is not taken as absent', () => {
+  const main = tmp();
+  const phone = tmp();
+  try {
+    writeSplat(main);
+    const out = runProgram(
+      harness +
+        `
+final_path = os.path.join(base, "odm-3d-conn001")
+state = {"failed": False}
+_base = local_run
+def flaky(cmd, check=True, input=None, **kw):
+    if (
+        not state["failed"]
+        and cmd[0] != "curl"
+        and cmd[-1] == "test -e " + final_path
+    ):
+        state["failed"] = True
+        return subprocess.CompletedProcess(cmd, 255, stdout="", stderr="ssh: connection closed")
+    return _base(cmd, check=check, input=input, **kw)
+p.run = flaky
+
+rc = p.main(["--splat", main, "--ground-m", "112",
+             "--id", "odm-3d-conn001", "--name", "Conn"])
+final = os.path.join(base, "odm-3d-conn001")
+snap = snapshot()
+print(json.dumps({
+    "rc": rc,
+    **snap,
+    "final_exists": os.path.isdir(final),
+}))
+`,
+      main,
+      phone,
+    );
+    assert.equal(out.rc, 2, 'exit 255 from the existence check is not "no"');
+    assert.deepEqual(out.layers, [], 'the run stops before copying or publishing');
+    assert.equal(out.final_exists, false);
+    assert.deepEqual(out.staging, []);
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(phone, { recursive: true, force: true });
+  }
+});
+
+test('rollback keeps a placed folder when the manifest answer is unknown', () => {
+  const main = tmp();
+  const phone = tmp();
+  try {
+    writeSplat(main);
+    writeSplat(
+      phone,
+      splatTileset({ children: [{ content: { uri: 'tiles/phone.exe' } }] }),
+    );
+    mkdirSync(path.join(phone, 'tiles'));
+    writeFileSync(path.join(phone, 'tiles', 'phone.exe'), 'not served');
+    const out = runProgram(
+      harness +
+        `
+_base = local_run
+def flaky(cmd, check=True, input=None, **kw):
+    if cmd[0] != "curl" and "LACKS" in cmd[-1]:
+        return subprocess.CompletedProcess(cmd, 255, stdout="", stderr="ssh: connection closed")
+    return _base(cmd, check=check, input=input, **kw)
+p.run = flaky
+
+rc = p.main(["--splat", main, "--phone-splat", phone, "--ground-m", "112",
+             "--id", "odm-3d-unk001", "--name", "Unknown"])
+final = os.path.join(base, "odm-3d-unk001")
+snap = snapshot()
+print(json.dumps({
+    "rc": rc,
+    **snap,
+    "final_exists": os.path.isdir(final),
+    "final_tileset": os.path.exists(os.path.join(final, "tileset.json")),
+}))
+`,
+      main,
+      phone,
+    );
+    assert.equal(out.rc, 2);
+    assert.deepEqual(out.layers, [], 'the manifest was never touched');
+    assert.equal(
+      out.final_exists,
+      true,
+      'an unreadable manifest must not turn into a delete',
+    );
+    assert.equal(out.final_tileset, true);
+    assert.deepEqual(out.staging, []);
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(phone, { recursive: true, force: true });
+  }
+});
+
+test('staging names cannot collide across hosts with the same pid and clock', () => {
+  const main = tmp();
+  const phone = tmp();
+  try {
+    writeSplat(main);
+    const out = runProgram(
+      harness +
+        `
+import re
+import socket
+
+real_time_ns = p.time.time_ns
+real_pid = p.os.getpid
+real_urandom = p.os.urandom
+real_gethostname = socket.gethostname
+seen = []
+_base = local_run
+
+def capture(cmd, check=True, input=None, **kw):
+    match = re.search(r"\\.staging-[^/\\s]+", cmd[-1])
+    if match and match.group(0) not in seen:
+        seen.append(match.group(0))
+    return _base(cmd, check=check, input=input, **kw)
+
+p.run = capture
+p.time.time_ns = lambda: 111111111
+p.os.getpid = lambda: 4242
+p.os.urandom = lambda n: b"\\x07" * n
+
+def publish_once(hostname):
+    socket.gethostname = lambda: hostname
+    rc = p.main(["--splat", main, "--ground-m", "112",
+                 "--id", "odm-3d-cross001", "--name", "Cross"])
+    shutil.rmtree(os.path.join(base, "odm-3d-cross001"), ignore_errors=True)
+    json.dump({"layers": [], "note": ""}, open(p.MANIFEST, "w"))
+    return rc
+
+try:
+    rc_a = publish_once("host-alpha")
+    token_a = list(seen)
+    seen.clear()
+    rc_b = publish_once("host-beta")
+    token_b = list(seen)
+finally:
+    p.time.time_ns = real_time_ns
+    p.os.getpid = real_pid
+    p.os.urandom = real_urandom
+    socket.gethostname = real_gethostname
+
+print(json.dumps({
+    "rc_a": rc_a, "rc_b": rc_b,
+    "stage_a": token_a, "stage_b": token_b,
+}))
+`,
+      main,
+      phone,
+    );
+    assert.equal(out.rc_a, 0, 'the first simulated host publishes');
+    assert.equal(out.rc_b, 0, 'the second simulated host publishes');
+    assert.equal(out.stage_a.length, 1);
+    assert.equal(out.stage_b.length, 1);
+    assert.notEqual(
+      out.stage_a[0],
+      out.stage_b[0],
+      'identical pid, clock and random bytes must still differ by host',
+    );
   } finally {
     rmSync(main, { recursive: true, force: true });
     rmSync(phone, { recursive: true, force: true });

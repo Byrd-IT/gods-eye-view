@@ -49,6 +49,7 @@ import math
 import os
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -133,6 +134,38 @@ def sh(host: str | None, command: str, **kw):
     if host:
         return run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, command], **kw)
     return run(["bash", "-c", command], **kw)
+
+
+def remote_test(host: str | None, command: str) -> bool:
+    """The answer to a remote `test` command, or raise if there is no answer.
+
+    `test` has exactly two honest exit codes: 0 (true) and 1 (false). ssh
+    losing the connection (255), a remote shell/fork error (2) or a timeout say
+    nothing about the path. Treating those as "absent" is how a dropped link
+    turns into a published layer, so they raise instead.
+    """
+    result = sh(host, command, check=False)
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise Fail(
+        f"could not read {host or 'local'} state (exit {result.returncode}); "
+        "no manifest entry was added"
+    )
+
+
+def staging_token() -> str:
+    """A token unique to this run across every host that shares the S1 store.
+
+    pid + nanosecond clock is unique within one machine but not across machines:
+    two hosts can hand out the same pid at the same clock tick. The hostname
+    separates hosts, and the random suffix covers a reused hostname or a
+    simultaneous start. Staging folders must never be shared, because a run
+    removes its own staging path on failure.
+    """
+    host = re.sub(r"[^A-Za-z0-9_-]", "_", socket.gethostname())[:40] or "host"
+    return f"{host}-{os.getpid()}-{time.time_ns()}-{os.urandom(8).hex()}"
 
 
 # ---- geometry: georeferenced tileset -> lon/lat footprint ------------------
@@ -398,8 +431,13 @@ def ground_height(host, path) -> tuple[float, float, float]:
     return lo, mid, hi
 
 
-def manifest_lacks(layer_id: str) -> bool:
-    """True only when the manifest was read and does not list the id."""
+def manifest_lacks(layer_id: str) -> bool | None:
+    """Whether the S1 manifest was read and does not list the id.
+
+    True / False are real answers. None means the manifest could not be read
+    (ssh lost, remote error, unparseable output): the caller must treat that
+    as "unknown" and delete nothing.
+    """
     program = (
         "import json,sys; d=json.load(open(sys.argv[1])); "
         "print('LACKS' if not any(l.get('id')==sys.argv[2] for l in d['layers']) else 'LISTED')"
@@ -408,7 +446,14 @@ def manifest_lacks(layer_id: str) -> bool:
         ["ssh", "-o", "BatchMode=yes", S1, f"python3 -c {shlex.quote(program)} {shlex.quote(MANIFEST)} {shlex.quote(layer_id)}"],
         check=False,
     )
-    return result.returncode == 0 and result.stdout.strip() == "LACKS"
+    if result.returncode != 0:
+        return None
+    answer = result.stdout.strip()
+    if answer == "LACKS":
+        return True
+    if answer == "LISTED":
+        return False
+    return None
 
 
 def add_manifest_entry(entry: dict) -> None:
@@ -447,7 +492,11 @@ def publish_folder(host, model, final, stage, count, tileset, fixed_text=None):
     The caller's existence check is only a fast exit: the no-clobber move at
     the end is the race-safe decision, and it fails closed when final is taken.
     """
-    sh(S1, f"rm -rf {shlex.quote(stage)}")
+    # The staging name is unique to this run (see staging_token), so finding it
+    # already present means a collision or tampering, not a leftover of ours.
+    # Never rm it: that could destroy another host's verified copy.
+    if remote_test(S1, f"test -e {shlex.quote(stage)}"):
+        raise Fail("staging path already exists; refusing to reuse another run's folder")
     try:
         hashes = source_hashes(host, model)
         if len(hashes) != count:
@@ -483,14 +532,27 @@ def publish_folder(host, model, final, stage, count, tileset, fixed_text=None):
         # final at any time after it. -T renames the staging folder itself
         # (plain `mv` would move it *inside* an existing directory, nesting one
         # build in another) and -n refuses to replace whatever is already there.
-        # mv -n still exits 0 when it declines, so look for the staging folder:
-        # if it is still present, another writer owns final and this run fails
-        # closed, leaving that writer's folder untouched.
-        sh(S1, f"mv -T -n -- {shlex.quote(stage)} {shlex.quote(final)}", check=False)
-        if sh(S1, f"test -e {shlex.quote(stage)}", check=False).returncode == 0:
-            if sh(S1, f"test -e {shlex.quote(final)}", check=False).returncode == 0:
-                raise Fail(f"{final} appeared while publishing; another publisher owns it, so it was left untouched")
-            raise Fail(f"could not move the verified folder into {final}")
+        #
+        # A nonzero mv exit is NEVER success: `-n` declining (coreutils exits 1
+        # here), a rename error, and ssh dropping the link (255) can all leave
+        # the folder somewhere unknown. Fail closed and never remove final --
+        # another publisher may own it. If the move did happen but the link
+        # died, our folder is left in place for a human to inspect rather than
+        # being deleted or claimed in the manifest.
+        moved = sh(S1, f"mv -T -n -- {shlex.quote(stage)} {shlex.quote(final)}", check=False)
+        if moved.returncode != 0:
+            raise Fail(
+                f"could not confirm moving the verified folder into {final} "
+                f"(exit {moved.returncode}); another publisher may own it, "
+                "so it was left untouched and nothing was added to the manifest"
+            )
+        # mv reported success; require positive evidence that the rename
+        # carried the staging folder and put it at final. `remote_test` raises
+        # when the link lost the answer instead of reading that as "absent".
+        if remote_test(S1, f"test -e {shlex.quote(stage)}"):
+            raise Fail(f"the move reported success but {stage} is still present; not publishing")
+        if not remote_test(S1, f"test -e {shlex.quote(final)}"):
+            raise Fail(f"the move reported success but {final} is missing; not publishing")
     except BaseException:
         sh(S1, f"rm -rf {shlex.quote(stage)}", check=False)
         raise
@@ -599,15 +661,18 @@ def main(argv=None) -> int:
         final = f"{STORE}/odm3d/{args.id}"
         # One staging folder per run: two publishers of the same id must not
         # overwrite (or rm -rf) each other's copy, and the post-move check in
-        # publish_folder must see only this run's staging path.
-        run_token = f"{os.getpid()}-{time.time_ns()}"
+        # publish_folder must see only this run's staging path. The token names
+        # the host too, so publishers on different machines cannot collide.
+        run_token = staging_token()
         stage = f"{STORE}/odm3d/.staging-{args.id}.{run_token}"
         phone_final = f"{STORE}/odm3d/{args.id}-phone" if phone else None
         phone_stage = f"{STORE}/odm3d/.staging-{args.id}-phone.{run_token}" if phone else None
         # Fast, non-authoritative exit. Another publisher can create either name
         # after this check; publish_folder's no-clobber move is what decides.
+        # A check that cannot be answered (ssh dropped, remote error) is not a
+        # "no": remote_test raises and the run stops before touching anything.
         for target in [final, phone_final]:
-            if target and sh(S1, f"test -e {shlex.quote(target)}", check=False).returncode == 0:
+            if target and remote_test(S1, f"test -e {shlex.quote(target)}"):
                 raise Fail(f"{target} already exists on S1; use a new --id")
         fixed_text = None if is_splat else json.dumps(fixed, indent=1)
         # Only folders this run actually placed may be taken back. A failure
@@ -639,11 +704,23 @@ def main(argv=None) -> int:
             # list the id: a write that succeeded before the error (a dropped ssh)
             # means the build is live and its files must stay. If the manifest
             # cannot be read, nothing is deleted. Source data is never touched.
-            if placed and manifest_lacks(args.id):
-                for target in placed:
-                    sh(S1, f"rm -rf {shlex.quote(target)}", check=False)
-            elif placed:
-                log("error", "manifest state unknown or the layer is listed: the folder on S1 was left in place")
+            if placed:
+                lacks = manifest_lacks(args.id)
+                if lacks is True:
+                    for target in placed:
+                        removed = sh(S1, f"rm -rf {shlex.quote(target)}", check=False)
+                        if removed.returncode != 0:
+                            log(
+                                "error",
+                                f"could not remove {target} during rollback (exit {removed.returncode}); remove it by hand",
+                            )
+                elif lacks is False:
+                    log("error", "the manifest already lists the layer: the folder on S1 was left in place")
+                else:
+                    log(
+                        "error",
+                        "manifest state unknown: no folder was deleted; inspect S1 before retrying",
+                    )
             raise
 
         got = run(["curl", "-sf", "--max-time", "60", f"{ORIGIN}/odm3d/{args.id}/tileset.json"]).stdout

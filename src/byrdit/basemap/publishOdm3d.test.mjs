@@ -284,7 +284,9 @@ p.MANIFEST = os.path.join(d, "missing.json")
 res["unreadable"] = p.manifest_lacks("other")
 print(json.dumps(res))
 `);
-  assert.deepEqual(out, { absent: true, listed: false, unreadable: false });
+  // Unknown is its own answer (null), not "absent": the rollback deletes only
+  // on a real LACKS and says so when the manifest could not be read.
+  assert.deepEqual(out, { absent: true, listed: false, unreadable: null });
 });
 
 test('publish_odm_3d: a checksum mismatch, a missing file or an extra file in the S1 copy is refused', () => {
