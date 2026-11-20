@@ -2812,13 +2812,20 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
     } catch {
       /* unavailable */
     }
+    const cameraCount = ui.count;
+    const reportedMode = ui.coverageMode;
+    const coverageMode = ['on', 'off', 'viewshed'].includes(reportedMode)
+      ? reportedMode
+      : ui.showCoverage
+        ? 'on'
+        : 'off';
     return {
-      activeCameraId: ui.activeCameraId || null,
-      activeCamera: active?.name || active?.id || null,
+      activeCameraId: null,
+      activeCamera: null,
       // `count`, not `cameras.length`: reading `cameras` builds every camera.
-      cameraCount: Number.isFinite(ui.count) ? ui.count : 0,
+      cameraCount: Number.isFinite(cameraCount) ? cameraCount : 0,
       showCoverage: !!ui.showCoverage,
-      coverageMode: ui.coverageMode || (ui.showCoverage ? 'on' : 'off'),
+      coverageMode,
       showProjection: !!ui.showProjection,
       calibrationMode: !!ui.calibrationMode,
       autoHop: !!ui.autoHop,
@@ -2849,7 +2856,7 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
       return {
         ok: false,
         action: 'control_cctv',
-        error: `No camera matched "${args.cameraQuery}"`,
+        error: 'No camera matched that query',
         ...summarize(),
       };
     }
@@ -2860,7 +2867,7 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
       : CCTV_FOCUS_RESULT.NO_ACTIVE_CAMERA;
     return {
       action: 'control_cctv',
-      selected: match.name || match.id,
+      selected: !!selected,
       ...summarize(),
       ...cctvVoiceFocusOutcome(focusResult, { cameraSelected: !!selected }),
     };
@@ -2945,7 +2952,7 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
     dataManager.setLayerParams('cctv', { [key]: next }, { origin: 'voice' });
     return { ok: true, action: 'control_cctv', ...summarize() };
   }
-  throw new Error(`Unknown CCTV action: ${args.action || 'missing'}`);
+  throw new Error('Unknown CCTV action');
 }
 
 const RADIO_COUNTRY_CENTERS = new Map([

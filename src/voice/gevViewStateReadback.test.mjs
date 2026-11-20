@@ -284,6 +284,90 @@ test('CCTV never echoes an untrusted feed type', async () => {
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test('CCTV select does not echo a credential-bearing camera query', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const module = {
+    getUIState: () => ({
+      cameras: [{ id: 'cam', name: 'Camera' }],
+      activeCamera: null,
+      activeCameraId: null,
+      count: 1,
+    }),
+    selectCamera: () => true,
+    focusCamera: () => CCTV_FOCUS_RESULT.FOCUSED,
+  };
+  const manager = {
+    layers: new Map([['cctv', { module }]]),
+    isEnabled: () => true,
+  };
+  const result = await controlCctv(manager, {
+    action: 'select',
+    cameraQuery: secret,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'No camera matched that query');
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test('CCTV unknown actions never repeat caller text', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const module = {
+    getUIState: () => ({ cameras: [], count: 0 }),
+  };
+  const manager = {
+    layers: new Map([['cctv', { module }]]),
+    isEnabled: () => true,
+  };
+  await assert.rejects(
+    () => controlCctv(manager, { action: secret }),
+    (error) => {
+      assert.equal(error.message, 'Unknown CCTV action');
+      assert.equal(error.message.includes(secret), false);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => controlCctv(manager, { action: 'rewind' }),
+    /^Error: Unknown CCTV action$/,
+  );
+});
+
+test('CCTV select does not echo credential-bearing camera or coverage text', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const camera = {
+    id: 'cam',
+    name: secret,
+    feedType: 'none',
+    noFeed: true,
+  };
+  const module = {
+    getUIState: () => ({
+      cameras: [camera],
+      activeCamera: camera,
+      activeCameraId: secret,
+      coverageMode: secret,
+      showCoverage: false,
+      count: 1,
+    }),
+    selectCamera: () => true,
+    focusCamera: () => CCTV_FOCUS_RESULT.FOCUSED,
+  };
+  const manager = {
+    layers: new Map([['cctv', { module }]]),
+    isEnabled: () => true,
+  };
+  const result = await controlCctv(manager, {
+    action: 'select',
+    cameraQuery: 'cam',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.selected, true);
+  assert.equal(result.activeCamera, null);
+  assert.equal(result.activeCameraId, null);
+  assert.equal(result.coverageMode, 'off');
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 globalThis.window = globalThis.window || {
   clearTimeout,
   setTimeout,
@@ -590,7 +674,7 @@ test('control_cctv reports the camera feed type and whether it has a public feed
   const result = await runner('control_cctv', { action: 'focus' });
   assert.equal(result.feedType, 'none');
   assert.equal(result.noFeed, true);
-  assert.equal(result.activeCamera, 'Harbour Cam');
+  assert.equal(result.activeCamera, null);
 });
 
 test('control_cctv reports a camera that carries a feed, and never claims it is live', async () => {
