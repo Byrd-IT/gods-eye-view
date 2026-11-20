@@ -2984,6 +2984,14 @@ async function server() {
 }
 
 const settleUi = () => new Promise((r) => setTimeout(r, 250));
+// A fixed 250 ms is not enough for a save that goes over real HTTP when the
+// whole suite runs in parallel on a loaded host: wait for the outcome instead.
+const settleUntil = async (ready, limitMs = 8000) => {
+  const start = Date.now();
+  await settleUi();
+  while (!ready() && Date.now() - start < limitMs)
+    await new Promise((r) => setTimeout(r, 50));
+};
 const btn = (w, action) =>
   w.find(
     (n) => n.tagName === 'BUTTON' && n.getAttribute('data-action') === action,
@@ -4159,7 +4167,7 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
 
     field(w, 'name').value = 'Byrd Ranch ring A';
     btn(w, 'library-save')[0].click();
-    await settleUi();
+    await settleUntil(() => rows(w)[0]);
     assert.match(rows(w)[0].textContent, /^M1 · Byrd Ranch ring A/);
     assert.match(note(), /labelled M1/);
     await w.handle.replan();
