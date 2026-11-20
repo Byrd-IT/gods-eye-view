@@ -19,6 +19,25 @@ import { ALL_HISTORY_ADAPTERS } from '../byrdit/historyUi/historyEventAdapters.j
 const NOW = Date.parse('2026-10-14T16:00:00Z');
 globalThis.window ??= { clearTimeout, setTimeout };
 
+test('host threads Sky, History and Drone voice owners into the action runner', () => {
+  const source = readFileSync(
+    new URL('../app/tools.js', import.meta.url),
+    'utf8',
+  );
+  for (const [field, owner] of [
+    ['sky', 'Sky'],
+    ['history', 'HistorySwap'],
+    ['dronePlan', 'DronePlan'],
+  ]) {
+    assert.match(
+      source,
+      new RegExp(
+        `\\b${field}:\\s*\\(\\)\\s*=>\\s*window\\.__gev${owner}\\?\\.voice\\s*\\?\\?\\s*null`,
+      ),
+    );
+  }
+});
+
 test('imagery mode uses the owner MODES mapping', () => {
   const source = readFileSync(
     new URL('./gevActions.js', import.meta.url),
