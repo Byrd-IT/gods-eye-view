@@ -3211,7 +3211,7 @@
   "Too many waypoints: shrink the box or lower the overlap": "Demasiados puntos de ruta: reduce el recuadro o el solape",
   "The box is too small to plan a flight": "El recuadro es demasiado pequeño para planificar un vuelo",
   "Draw a box on the globe first": "Dibuja primero un recuadro en el globo",
-  "Drag a bigger box (at least 20 m a side)": "Arrastra un recuadro más grande (al menos 20 m por lado)",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "Arrastra un recuadro más grande (al menos 20 m, unos 65 ft por lado)",
   "Box is too big to fly (3 km a side at most)": "El recuadro es demasiado grande para volarlo (3 km por lado como máximo)",
   "Box drawing cancelled": "Dibujo del recuadro cancelado",
   "Press on the ground and drag a box": "Pulsa sobre el suelo y arrastra un recuadro",

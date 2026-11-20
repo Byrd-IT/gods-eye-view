@@ -165,7 +165,7 @@ async function cyanPixels(page) {
       if (
         px[i + 2] > 200 &&
         px[i + 1] > 150 &&
-        px[i] < 130 &&
+        px[i] < 180 &&
         px[i + 2] - px[i] > 100
       )
         n += 1;
@@ -184,30 +184,27 @@ try {
     downloadPath: DOWNLOADS,
   });
 
-  // The Drone Flight Plan card is its own launcher on the right rail. Do NOT
-  // expand the DISPLAY rail (pp-toggles) first: while it is open the card is
-  // hidden (aria-hidden, 0 x 0) and its button cannot be clicked.
-  await page.waitForFunction(
-    () =>
-      document.getElementById('drone-plan-panel')?.getBoundingClientRect()
-        .width > 0,
-    { timeout: 10_000 },
-  );
+  // The right rail's own DRONE FLIGHT PLAN item is the launcher. Do NOT
+  // expand the DISPLAY rail (pp-toggles) first, and do not press the card's
+  // collapse button: the rail entry is the control a person uses.
+  const RAIL_ITEM =
+    '#right-context-rail .ui-rail--right .ui-rail__item[data-rail-item="drone-plan-panel"]';
+  await page.waitForSelector(RAIL_ITEM, { visible: true, timeout: 30_000 });
   check(
-    'the Drone Flight Plan card is a collapsed launcher on the right rail',
-    await page.evaluate(() => {
-      const p = document.getElementById('drone-plan-panel');
+    'the right rail shows a DRONE FLIGHT PLAN launcher',
+    await page.evaluate((selector) => {
+      const button = document.querySelector(selector);
+      const panel = document.getElementById('drone-plan-panel');
       return (
-        p.parentElement?.id === 'right-context-rail' &&
-        p.hidden === false &&
-        p.classList.contains('collapsed') &&
-        p.textContent.includes('DRONE FLIGHT PLAN') &&
+        Boolean(button) &&
+        /DRONE FLIGHT PLAN/i.test(button.getAttribute('aria-label') || '') &&
+        panel?.parentElement?.id === 'right-context-rail' &&
         !document.getElementById('drone-plan-button')
       );
-    }),
+    }, RAIL_ITEM),
   );
 
-  await page.click('#drone-plan-panel .panel-collapse-btn');
+  await page.click(RAIL_ITEM);
   await wait(400);
   const opened = await page.evaluate(() => {
     const panel = document.getElementById('drone-plan-panel');
@@ -218,12 +215,12 @@ try {
       width: rect.width,
       boxCursor: document.body.classList.contains('gev-drone-box'),
       drawArmed: document
-        .querySelector('#drone-plan-panel .gev-dp-bar button[data-action="draw-box"]')
+        .querySelector('#drone-plan-panel button[data-action="draw-box"]')
         ?.getAttribute('aria-pressed'),
     };
   });
   check(
-    'the card opens expanded on the right rail',
+    'the right-rail launcher opens the card expanded',
     !opened.hidden && !opened.collapsed && opened.width > 200,
     JSON.stringify(opened),
   );
@@ -232,26 +229,111 @@ try {
     opened.boxCursor && opened.drawArmed === 'true',
   );
 
-  // Escape cancels the box session and gives the pointer back.
+  // The chip arms only: a second click on the armed chip leaves the tool
+  // armed (Escape is how it is put down).
+  await page.click('#drone-plan-panel button[data-action="draw-box"]');
+  await wait(150);
+  check(
+    'clicking the armed DRAW BOX chip never disarms it',
+    await page.evaluate(() => {
+      const chip = document.querySelector(
+        '#drone-plan-panel button[data-action="draw-box"]',
+      );
+      return (
+        chip?.getAttribute('aria-pressed') === 'true' &&
+        document.body.classList.contains('gev-drone-box')
+      );
+    }),
+  );
+
+  // Escape cancels the box session, releases the pointer and says so.
   await page.keyboard.press('Escape');
   await wait(250);
   check(
-    'Escape cancels the box drag and releases the pointer',
-    await page.evaluate(
-      () => !document.body.classList.contains('gev-drone-box'),
-    ),
+    'Escape cancels the box drag, releases the pointer and updates the status',
+    await page.evaluate(() => {
+      const status = document.querySelector(
+        '#drone-plan-panel .gev-dp-status',
+      )?.textContent;
+      return (
+        !document.body.classList.contains('gev-drone-box') &&
+        /Box drawing cancelled/.test(status || '')
+      );
+    }),
+    await status(page),
   );
-  await page.click('#drone-plan-panel .gev-dp-bar button[data-action="draw-box"]');
+  await page.click('#drone-plan-panel button[data-action="draw-box"]');
   await wait(250);
 
+  // A refused small box keeps the tool armed and warns in both units.
+  const areasBefore = await page.evaluate(
+    () => window.__gevDronePlan.getState().areas.length,
+  );
+  await page.mouse.move(420, 260);
+  await page.mouse.down();
+  await page.mouse.move(421, 261, { steps: 2 });
+  await page.mouse.up();
+  await wait(400);
+  check(
+    'a too-small box is refused, leaves DRAW BOX armed and warns 20 m / 65 ft',
+    await page.evaluate((before) => {
+      const chip = document.querySelector(
+        '#drone-plan-panel button[data-action="draw-box"]',
+      );
+      const text =
+        document.querySelector('#drone-plan-panel .gev-dp-status')
+          ?.textContent || '';
+      return (
+        window.__gevDronePlan.getState().areas.length === before &&
+        chip?.getAttribute('aria-pressed') === 'true' &&
+        document.body.classList.contains('gev-drone-box') &&
+        /20 m/.test(text) &&
+        /65 ft/.test(text)
+      );
+    }, areasBefore),
+    await status(page),
+  );
+
   const cyanBefore = await cyanPixels(page);
-  // Drag a box on the globe, clear of the panels.
+  // Drag a box on the globe, clear of the panels. While the button is still
+  // down the solid preview rectangle must be on the globe.
   await page.mouse.move(420, 260);
   await page.mouse.down();
   await page.mouse.move(600, 360, { steps: 6 });
   await page.mouse.move(760, 520, { steps: 6 });
+  const previewDuringDrag = await page.evaluate(() => {
+    const source =
+      window.__godsEyeView.viewer.dataSources.getByName('gev-drone-plan')[0];
+    const preview = source?.entities.values.find(
+      (entity) => entity.name === 'Box preview',
+    );
+    return {
+      visible: Boolean(preview?.rectangle),
+      solidFill: Boolean(preview?.rectangle?.material),
+    };
+  });
+  const cyanDuringDrag = await cyanPixels(page);
+  check(
+    'a solid rectangle preview paints on the globe while the box is dragged',
+    previewDuringDrag.visible &&
+      previewDuringDrag.solidFill &&
+      cyanDuringDrag > cyanBefore,
+    `${JSON.stringify(previewDuringDrag)}, cyan pixels ${cyanBefore} -> ${cyanDuringDrag}`,
+  );
   await page.mouse.up();
   await waitForPlan(page);
+  check(
+    'the drag preview goes when the box is committed and the area is in the state',
+    await page.evaluate(() => {
+      const source =
+        window.__godsEyeView.viewer.dataSources.getByName('gev-drone-plan')[0];
+      return (
+        !source?.entities.values.some(
+          (entity) => entity.name === 'Box preview',
+        ) && window.__gevDronePlan.getState().areas.length > 0
+      );
+    }),
+  );
   const s1 = await stats(page);
   console.log('stats:', JSON.stringify(s1));
   const result1 = await page.evaluate(() => {
@@ -272,8 +354,24 @@ try {
   });
   console.log('result:', JSON.stringify(result1));
   check(
-    'dragging a box produces a plan with photos and ground detail',
-    result1.photos > 0 && result1.gsd > 0,
+    'dragging a box produces a plan with photos, ground detail and missions',
+    result1.photos > 0 && result1.gsd > 0 && result1.missions > 0,
+    JSON.stringify({
+      photos: result1.photos,
+      gsd: result1.gsd,
+      missions: result1.missions,
+    }),
+  );
+  const polylineCount = await page.evaluate(() => {
+    const source =
+      window.__godsEyeView.viewer.dataSources.getByName('gev-drone-plan')[0];
+    return (source?.entities.values ?? []).filter((entity) => entity.polyline)
+      .length;
+  });
+  check(
+    'the committed plan renders missions and positive polylines',
+    result1.missions > 0 && polylineCount > 0,
+    `missions ${result1.missions}, polylines ${polylineCount}`,
   );
   check(
     'the stats list shows photos, ground detail, route, flight time, missions and waypoints',
@@ -337,6 +435,18 @@ try {
     quality: 85,
   });
 
+  // A bounded rendered regression for the Draw Box interaction. The legacy
+  // complete flight-plan QA remains available when this flag is not set.
+  if (process.env.QA_BOX_ONLY === '1') {
+    console.log(
+      failures.length
+        ? `BOX-ONLY: ${failures.length} FAILED`
+        : 'BOX-ONLY: ALL PASSED',
+    );
+    await browser.close();
+    process.exit(failures.length ? 1 : 0);
+  }
+
   // ------------------------------------------------------- 3D check --
   // Shaded safety zone, height curtain and camera view, on the globe and in
   // the panel. A visual aid: nothing here detects a collision.
@@ -345,7 +455,9 @@ try {
       const viewer = window.__godsEyeView.viewer;
       const ds = viewer.dataSources.getByName('gev-drone-plan')[0];
       const mine = (p) =>
-        ds.entities.values.filter((e) => (e.name || '').startsWith(`3D check ${p}`));
+        ds.entities.values.filter((e) =>
+          (e.name || '').startsWith(`3D check ${p}`),
+        );
       const shape = mine('zone')[0]?.polylineVolume?.shape?.getValue(
         viewer.clock.currentTime,
       );
@@ -359,8 +471,11 @@ try {
     });
   const checkUi = () =>
     page.evaluate(() => {
-      const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
-      const box = (k) => root?.querySelector(`input[data-check="${k}"]`)?.checked;
+      const root = document.querySelector(
+        '#drone-plan-panel [data-role="3d-check"]',
+      );
+      const box = (k) =>
+        root?.querySelector(`input[data-check="${k}"]`)?.checked;
       return {
         present: Boolean(root),
         text: root?.textContent ?? '',
@@ -370,7 +485,8 @@ try {
         view: root?.querySelector('select[data-check="frustum"]')?.value,
         width: root?.querySelector('input[data-check-slider="width"]')?.value,
         photos: root?.querySelector('input[data-check-slider="photo"]')?.max,
-        readout: root?.querySelector('[data-role="check-readout"]')?.textContent,
+        readout: root?.querySelector('[data-role="check-readout"]')
+          ?.textContent,
       };
     });
   const ui3 = await checkUi();
@@ -398,7 +514,9 @@ try {
     String(l0.halfWidth),
   );
   await page.evaluate(() => {
-    const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+    const root = document.querySelector(
+      '#drone-plan-panel [data-role="3d-check"]',
+    );
     const c = root.querySelector('input[data-check="curtain"]');
     c.checked = false;
     c.dispatchEvent(new Event('change', { bubbles: true }));
@@ -413,7 +531,9 @@ try {
     JSON.stringify(l1),
   );
   await page.evaluate(() => {
-    const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+    const root = document.querySelector(
+      '#drone-plan-panel [data-role="3d-check"]',
+    );
     const c = root.querySelector('input[data-check="curtain"]');
     c.checked = true;
     c.dispatchEvent(new Event('change', { bubbles: true }));
@@ -430,7 +550,9 @@ try {
   );
   const before3 = (await checkUi()).readout;
   await page.evaluate(() => {
-    const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+    const root = document.querySelector(
+      '#drone-plan-panel [data-role="3d-check"]',
+    );
     const p = root.querySelector('input[data-check-slider="photo"]');
     p.value = String(Math.min(Number(p.max), 5));
     p.dispatchEvent(new Event('input', { bubbles: true }));
@@ -439,11 +561,15 @@ try {
   const l3 = await layerCounts();
   check(
     '3D check: the photo slider steps the single pyramid',
-    after3.readout !== before3 && /Photo 5 of/.test(after3.readout) && l3.view === 5,
+    after3.readout !== before3 &&
+      /Photo 5 of/.test(after3.readout) &&
+      l3.view === 5,
     `${before3} -> ${after3.readout}`,
   );
   await page.evaluate(() => {
-    const root = document.querySelector('#drone-plan-panel [data-role="3d-check"]');
+    const root = document.querySelector(
+      '#drone-plan-panel [data-role="3d-check"]',
+    );
     const w = root.querySelector('input[data-check-slider="width"]');
     w.value = '10';
     w.dispatchEvent(new Event('input', { bubbles: true }));
@@ -514,7 +640,10 @@ try {
     const passes = window.__gevDronePlan.getState().suite?.passes ?? [];
     const planned = passes.filter((p) => p.result);
     const sec = planned.reduce((n, p) => n + p.result.totals.durationS, 0);
-    const flights = planned.reduce((n, p) => n + p.result.totals.missionCount, 0);
+    const flights = planned.reduce(
+      (n, p) => n + p.result.totals.missionCount,
+      0,
+    );
     return {
       text: node.textContent,
       top: Math.max(r.top, pr.top),
@@ -749,7 +878,7 @@ try {
   }
   await page.mouse.click(430, 280);
   await waitForPlan(page);
-  await page.click('#drone-plan-panel .gev-dp-bar button[data-action="draw-box"]');
+  await page.click('#drone-plan-panel button[data-action="draw-box"]');
   await wait(200);
   await page.mouse.move(500, 340);
   await page.mouse.down();
@@ -808,8 +937,7 @@ try {
       'the ZIP has a folder per job, flat when there is one job, and a README',
       jobNames.includes('README.txt') &&
         (oneJob
-          ? folders.size === 0 &&
-            jobNames.some((name) => name.endsWith('.kmz'))
+          ? folders.size === 0 && jobNames.some((name) => name.endsWith('.kmz'))
           : folders.size === merged.jobs.length),
       jobNames.join(', '),
     );

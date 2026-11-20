@@ -3377,7 +3377,7 @@
   "Move {name} to the trash? It is kept for 30 days.": "Перемістити {name} до кошика? Зберігається 30 днів.",
   "Compatibility check of {name}": "Перевірка сумісності {name}",
   "{name}: {count} waypoints drawn on the map": "{name}: {count} точок маршруту накреслено на карті",
-  "Drag a bigger box (at least 20 m a side)": "Перетягніть більшу рамку (щонайменше 20 m зі сторони)",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "Перетягніть більшу рамку (щонайменше 20 m, близько 65 футів, зі сторони)",
   "Box is too big to fly (3 km a side at most)": "Рамка завелика для польоту (щонайбільше 3 km зі сторони)",
   "tree": "дерево",
   "tower": "вежа",

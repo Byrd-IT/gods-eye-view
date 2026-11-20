@@ -3633,7 +3633,7 @@
   "Move {name} to the trash? It is kept for 30 days.": "Flytta {name} till papperskorgen? Den sparas i 30 dagar.",
   "Compatibility check of {name}": "Kompatibilitetskontroll av {name}",
   "{name}: {count} waypoints drawn on the map": "{name}: {count} vägpunkter ritade på kartan",
-  "Drag a bigger box (at least 20 m a side)": "Dra en större ruta (minst 20 m per sida)",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "Dra en större ruta (minst 20 m, cirka 65 ft per sida)",
   "Box is too big to fly (3 km a side at most)": "Rutan är för stor för att flyga (högst 3 km per sida)",
   "Distance trigger": "Avståndsutlösare",
   "Timed shot": "Tidsstyrd bild",

@@ -3292,7 +3292,7 @@
   "Too many waypoints: shrink the box or lower the overlap": "Слишком много путевых точек: уменьшите область или перекрытие",
   "The box is too small to plan a flight": "Область слишком мала для планирования полёта",
   "Draw a box on the globe first": "Сначала нарисуйте рамку на глобусе",
-  "Drag a bigger box (at least 20 m a side)": "Растяните рамку побольше (не менее 20 м с каждой стороны)",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "Растяните рамку побольше (не менее 20 м, примерно 65 футов, с каждой стороны)",
   "Box is too big to fly (3 km a side at most)": "Рамка слишком велика для полёта (не более 3 км с каждой стороны)",
   "Box drawing cancelled": "Рисование рамки отменено",
   "Press on the ground and drag a box": "Нажмите на землю и растяните рамку",

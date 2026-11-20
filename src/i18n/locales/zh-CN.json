@@ -3046,7 +3046,7 @@
   "Too many waypoints: shrink the box or lower the overlap": "航点太多：请缩小范围或降低重叠率",
   "The box is too small to plan a flight": "范围太小，无法规划飞行",
   "Draw a box on the globe first": "请先在地球上画一个框",
-  "Drag a bigger box (at least 20 m a side)": "请拖出更大的框（每边至少 20 米）",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "请拖出更大的框（每边至少 20 米，约 65 英尺）",
   "Box is too big to fly (3 km a side at most)": "框太大，无法飞行（每边最多 3 公里）",
   "Box drawing cancelled": "已取消画框",
   "Press on the ground and drag a box": "在地面上按下并拖出一个框",

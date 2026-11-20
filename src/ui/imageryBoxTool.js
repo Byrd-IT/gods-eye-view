@@ -32,6 +32,10 @@ export const IMAGERY_BOX_POINTER_OWNER = 'recent-imagery-box';
  *   degrees apart on the short arc, returned with west > east. Recent Imagery
  *   sets it. Other callers leave it off until their own box math accepts a
  *   west > east box.
+ *   `keepActiveOnInvalid` (default false) leaves the tool armed when its
+ *   validator refuses the box, so the person can drag again without arming it
+ *   a second time. Recent Imagery disarms, as before; the Drone Flight Plan
+ *   box sets it.
  * @returns {{ start: () => boolean, cancel: (reason?: string) => void, isActive: () => boolean, destroy: () => Promise<void> } | null}
  */
 export function initImageryBoxTool({
@@ -48,6 +52,7 @@ export function initImageryBoxTool({
   bodyClass = 'gev-imagery-box',
   validate = validateBox,
   shorterArc = false,
+  keepActiveOnInvalid = false,
 } = {}) {
   if (!viewer || typeof onBox !== 'function') return null;
 
@@ -128,7 +133,11 @@ export function initImageryBoxTool({
     if (result.reason === 'degenerate' && validate === validateBox)
       result.message = msg('Drag to size the box');
     endDrag();
-    setActive(false);
+    // A tool whose validator refuses a box may stay armed: the drag is over,
+    // the camera is given back, and the person can try again without pressing
+    // DRAW BOX a second time.
+    const keepArmed = !result.ok && keepActiveOnInvalid;
+    if (!keepArmed) setActive(false);
     if (result.ok) onBox(result.box);
     else onCancel?.(result.reason, result.message, box);
   };
