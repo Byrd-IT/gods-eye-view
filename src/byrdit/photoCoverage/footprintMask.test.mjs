@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {footprintMask} from './footprintMask.js';
+const cells={nx:3,ny:3,x0:0,y0:0,cell_m:1,k:[0,1,2,3,4,5,6,7,8],z:Array(9).fill(0)};
+const photo={name:'p',placed:true,x:1.5,y:1.5,z:10,fwd:[0,0,-1],right:[1,0,0],down:[0,1,0],hfov:90,vfov:90,flags:[]};
+test('downward camera footprint is the present-cell mask, not whole site shade',()=>{
+ const s={cells,photos:[photo],meta:{ground_z:0}};assert.deepEqual(new Set(footprintMask(s,0)),new Set(cells.k));
+ assert.deepEqual(footprintMask({...s,photos:[{...photo,placed:false}]},0),[]);
+ assert.deepEqual(footprintMask({...s,photos:[{...photo,flags:['far_off']}]},0),[]);
+});
+test('upward and malformed cameras do not claim ground',()=>{
+ const s={cells,photos:[{...photo,fwd:[0,0,1]}],meta:{ground_z:0}};assert.deepEqual(footprintMask(s,0),[]);
+ assert.deepEqual(footprintMask({...s,photos:[{...photo,down:null}]},0),[]);
+});

@@ -11,10 +11,10 @@ function harness(fail=false){
  const viewer={terrainProvider:{},scene:{canvas:{},primitives:{add(x){primitives.push(x);return x},remove(x){primitives.splice(primitives.indexOf(x),1)}},pick:()=>null},dataSources:{async add(x){dataSources.push(x)},remove(x){dataSources.splice(dataSources.indexOf(x),1)}}};
  return {C,viewer,primitives,dataSources,handlers};
 }
-const state={meta:{origin:{lat:0,lon:0},ground_z:-10},photos:[{name:'p.jpg',lat:0,lon:0,z:5,placed:true,flags:[],footprint:[[0,0],[1,0],[1,1],[0,1]]}],cells:{nx:1,ny:1,x0:0,y0:0,cell_m:3,k:[0]},counts:[1],mask:new Set([0]),discarded:new Set()};
+const state={meta:{origin:{lat:0,lon:0},ground_z:-10},photos:[{name:'p.jpg',lat:0,lon:0,x:0,y:0,z:5,fwd:[1,0,-1],placed:true,flags:[],footprint:[[0,0],[1,0],[1,1],[0,1]]}],cells:{nx:1,ny:1,x0:0,y0:0,cell_m:3,k:[0]},counts:[1],mask:new Set([0]),discarded:new Set()};
 test('layer renders ground and terrain-aligned camera then removes both exactly once',async()=>{
  const h=harness(), picks=[]; const layer=await createCoverageLayer({Cesium:h.C,viewer:h.viewer,state,onPick:p=>picks.push(p)});
- assert.equal(h.primitives.length,1);assert.equal(h.primitives[0].items.length,1);assert.deepEqual(h.dataSources[0].entities.items[0].position,[0,0,115]);assert.deepEqual(layer.screenPoints(),[{name:'p.jpg',x:3,y:4}]);
+ assert.equal(h.primitives.length,1);assert.equal(h.primitives[0].items.length,1);assert.deepEqual(h.dataSources[0].entities.items[0].position,[0,0,115]);assert.equal(h.dataSources[0].entities.items[1].id,'direction:p.jpg');assert.deepEqual(layer.screenPoints(),[{name:'p.jpg',x:3,y:4}]);
  h.viewer.scene.pick=()=>({id:{type:'coverage-cell',key:0}});h.handlers[0].fn({position:{}});assert.deepEqual(picks,[{type:'cell',key:0}]);
  layer.destroy();layer.destroy();assert.equal(h.primitives.length,0);assert.equal(h.dataSources.length,0);assert(h.handlers[0].dead);
 });
