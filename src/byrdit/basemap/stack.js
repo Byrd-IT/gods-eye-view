@@ -1,5 +1,5 @@
 import { basemapCreditHtml } from './credits.js';
-import { createBasemapImageryProvider } from './imagery.js';
+import { createBasemapImagerySpec } from './imagery.js';
 import { createBasemapTerrain } from './terrain.js';
 
 /**
@@ -51,10 +51,9 @@ export function byrditOpenDescriptor(health) {
 /**
  * Map source for the controller registry (same contract as the entries in
  * src/maps/defaultSources.js).
- * @param {{Cesium: object, config: ReturnType<import('./config.js').normalizeBasemapConfig>, fallbackTerrain: () => Promise<{provider: object}>, health?: {degradedReason: string|null}|null}} options
+ * @param {{config: ReturnType<import('./config.js').normalizeBasemapConfig>, fallbackTerrain: (request: {signal?: AbortSignal}) => Promise<{provider: object|null, spec?: object}>, health?: {degradedReason: string|null}|null}} options
  */
 export function createBasemapMapSource({
-  Cesium,
   config,
   fallbackTerrain,
   health = null,
@@ -65,11 +64,11 @@ export function createBasemapMapSource({
     descriptor: byrditOpenDescriptor(health),
     available: true,
     unavailableReason: null,
-    imagery: () => createBasemapImageryProvider(Cesium, config.imagery),
+    imagery: () => createBasemapImagerySpec(config.imagery),
     terrain: {
       id: BYRDIT_OPEN_STACK_ID,
       create: ({ signal } = {}) =>
-        createBasemapTerrain(Cesium, config.terrain, {
+        createBasemapTerrain(config.terrain, {
           fallback: fallbackTerrain,
           signal,
         }),

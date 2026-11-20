@@ -40,7 +40,13 @@ export type TerrainSpec = (
    * Quantized-mesh terrain (Cesium's tile format) in the folder `url`,
    * holding `layer.json` and its tiles; heights above the ellipsoid.
    */
-  | { kind: 'quantizedMesh'; url: string; requestVertexNormals?: boolean }
+  | {
+      kind: 'quantizedMesh';
+      url: string;
+      requestVertexNormals?: boolean;
+      /** Draw the tiles' water mask (default off). */
+      requestWaterMask?: boolean;
+    }
 ) & {
   /** Vertical exaggeration of the drawn terrain; default 1. */
   exaggeration?: number;

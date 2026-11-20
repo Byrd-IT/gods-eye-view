@@ -75,7 +75,7 @@ async function terrainProvider(spec, { worldDataToken }) {
     });
     return Cesium.CesiumTerrainProvider.fromUrl(resource, {
       requestVertexNormals: spec.requestVertexNormals ?? false,
-      requestWaterMask: false,
+      requestWaterMask: spec.requestWaterMask ?? false,
     });
   }
   throw new TypeError(`Unknown terrain kind: ${spec.kind}`);

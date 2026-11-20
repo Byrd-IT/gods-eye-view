@@ -230,20 +230,18 @@ function world({
   fakeFrames(viewer.scene, primitives);
   const config = normalizeBasemapConfig(served);
   const providers = new Map();
-  const Cesium = {
-    UrlTemplateImageryProvider: class {
-      constructor(options) {
-        this.options = options;
-        this.errorEvent = event();
-        providers.set('byrdit-open', this);
-      }
-    },
-  };
   const basemapSource = createBasemapMapSource({
-    Cesium,
     config,
     fallbackTerrain: async () => ({ provider: 'keyless' }),
   });
+  // The open imagery is the globe port's spec; this test's engine hears a
+  // layer's tile failures through the spec's errorEvent.
+  const openSpec = basemapSource.imagery;
+  basemapSource.imagery = (...args) => {
+    const spec = Object.assign(openSpec(...args), { errorEvent: event() });
+    providers.set('byrdit-open', spec);
+    return spec;
+  };
   basemapSource.terrain = {
     id: 'byrdit-open',
     create: async () => ({ provider: 'open-terrain' }),
