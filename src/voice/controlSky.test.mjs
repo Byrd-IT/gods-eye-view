@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGevActionRunner } from './gevActions.js';
+import { readHostViewState } from '../agent/worldPacket.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
 import {
   SKY_PRESET_IDS,
@@ -48,6 +49,36 @@ function harness({ voiceOverrides = {}, sky = undefined } = {}) {
   });
   return { runner, calls, voice };
 }
+
+test('view state reads untrusted enum and boolean accessors once', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  let skyReads = 0;
+  let historyReads = 0;
+  let boolReads = 0;
+  const state = await readHostViewState({
+    sky: {
+      status: () => ({
+        get timeMode() {
+          return ++skyReads === 1 ? 'live' : secret;
+        },
+        get open() {
+          return ++boolReads === 1 ? true : secret;
+        },
+      }),
+    },
+    history: {
+      status: () => ({
+        get mode() {
+          return ++historyReads === 1 ? 'history' : secret;
+        },
+      }),
+    },
+  });
+  assert.equal(JSON.stringify(state).includes(secret), false);
+  assert.equal(state.sky.timeMode, 'live');
+  assert.equal(state.sky.open, true);
+  assert.equal(state.historyPlayback.mode, 'history');
+});
 
 test('control_sky stays just before control_imagery and does not reorder control_history', () => {
   const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);

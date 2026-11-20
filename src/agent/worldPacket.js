@@ -213,8 +213,9 @@ function finiteNumber(value) {
  * @returns {boolean|null} The boolean, or null.
  */
 function reportedBoolean(status, key) {
-  if (!status || typeof status[key] !== 'boolean') return null;
-  return status[key];
+  if (!status) return null;
+  const value = status[key];
+  return typeof value === 'boolean' ? value : null;
 }
 
 /** The Sky state the packet carries: what is open, and what it looks at. */
@@ -225,17 +226,15 @@ function compactSkyState(status) {
   if (open !== null) out.open = open;
   const lines = reportedBoolean(status, 'lines');
   if (lines !== null) out.lines = lines;
+  const timeMode = status.timeMode;
+  if (['live', 'fixed', 'play', 'history', 'history-play'].includes(timeMode))
+    out.timeMode = timeMode;
+  const time = status.time;
   if (
-    ['live', 'fixed', 'play', 'history', 'history-play'].includes(
-      status.timeMode,
-    )
+    typeof time === 'string' &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(time)
   )
-    out.timeMode = status.timeMode;
-  if (
-    typeof status.time === 'string' &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(status.time)
-  )
-    out.time = status.time;
+    out.time = time;
   const latitude = finiteNumber(status.latitude);
   const longitude = finiteNumber(status.longitude);
   if (
@@ -254,16 +253,17 @@ function compactHistoryState(status) {
   const out = {};
   const playing = reportedBoolean(status, 'playing');
   if (playing !== null) out.playing = playing;
-  if (status.mode === 'history' || status.mode === 'live')
-    out.mode = status.mode;
+  const mode = status.mode;
+  if (mode === 'history' || mode === 'live') out.mode = mode;
   const rate = finiteNumber(status.rate);
   if (rate !== null) out.rate = rate;
   if (reportedBoolean(status, 'unavailable')) out.unavailable = true;
+  const time = status.time;
   if (
-    typeof status.time === 'string' &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(status.time)
+    typeof time === 'string' &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(time)
   )
-    out.time = status.time;
+    out.time = time;
   const feeds = Array.isArray(status.playingFeeds)
     ? status.playingFeeds
         .filter((id) =>
@@ -306,17 +306,18 @@ function compactDronePlanState(status) {
     out.aircraft = preset.name;
     out.presetId = preset.id;
   }
+  const mode = status.mode;
   if (
     [
       'mapping-grid',
       'mapping-grid-timed',
       'splat-orbit',
       'fast-survey',
-    ].includes(status.mode)
+    ].includes(mode)
   )
-    out.mode = status.mode;
-  if (['grid', 'double', 'orbit'].includes(status.pattern))
-    out.pattern = status.pattern;
+    out.mode = mode;
+  const pattern = status.pattern;
+  if (['grid', 'double', 'orbit'].includes(pattern)) out.pattern = pattern;
   for (const key of ['aglM', 'speedMs']) {
     const value = finiteNumber(status[key]);
     if (value !== null) out[key] = value;
