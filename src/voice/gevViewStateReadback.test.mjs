@@ -133,6 +133,20 @@ test('Sky playback never returns an untrusted opening error', async () => {
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test('view readback suppresses errors from owner state getters', async () => {
+  const hostile = {
+    get open() {
+      throw new Error('synthetic_getter_error');
+    },
+  };
+  const state = await readHostViewState({
+    sky: { status: () => hostile },
+    history: { status: () => ({ mode: 'live' }) },
+  });
+  assert.equal(state.sky, null);
+  assert.equal(state.historyPlayback.mode, 'live');
+});
+
 test('view readback suppresses errors from numeric owner values', async () => {
   const untrusted = {
     valueOf() {

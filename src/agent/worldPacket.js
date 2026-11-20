@@ -419,11 +419,18 @@ export async function readHostViewState(providers = {}) {
       readAdapterStatus(imagery),
       readMapStackAuto(mapStack),
     ]);
+  const compact = (convert, value) => {
+    try {
+      return convert(value);
+    } catch {
+      return null;
+    }
+  };
   return {
-    sky: compactSkyState(skyStatus),
-    historyPlayback: compactHistoryState(historyStatus),
-    dronePlan: compactDronePlanState(droneStatus),
-    imagery: compactImageryState(imageryStatus),
+    sky: compact(compactSkyState, skyStatus),
+    historyPlayback: compact(compactHistoryState, historyStatus),
+    dronePlan: compact(compactDronePlanState, droneStatus),
+    imagery: compact(compactImageryState, imageryStatus),
     mapStackAuto,
   };
 }
