@@ -43,6 +43,9 @@ function normalizeModel(raw) {
     heightOffsetM: finite(raw.heightOffsetM, -300, 300) ? raw.heightOffsetM : 0,
     canopyOptionsFt: options,
     canopyDefaultFt: def,
+    // A splat has no canopy cut or per-tile opacity; only a literal true
+    // survives, so a tampered block cannot switch the controls off by accident.
+    ...(raw.splat === true ? { splat: true } : {}),
   };
 }
 

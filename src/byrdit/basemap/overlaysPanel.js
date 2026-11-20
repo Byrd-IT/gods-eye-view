@@ -54,6 +54,11 @@ function noteText(layer) {
   return layer.phoneMode ? t('Phone mode: softer model to save memory') : '';
 }
 
+/** A Gaussian-splat 3D row: no canopy cut and no opacity control. */
+const isSplatRow = (layer) =>
+  layer?.kind === '3d' &&
+  (layer.splat === true || layer.model?.splat === true);
+
 function el(doc, tag, parent, { text, cls, attrs } = {}) {
   const node = doc.createElement(tag);
   if (text != null) node.textContent = text;
@@ -220,6 +225,10 @@ export function createOverlaysPanel({
     });
     // A 3D model is not part of the imagery stack: nothing to raise or lower.
     if (layer.kind === '3d') moves.hidden = true;
+    // A splat is drawn as one surface: its opacity and canopy cut do not
+    // apply. Keep the same DOM so the update path stays one code path, but
+    // hide those controls (the row's checkbox, phone chip and note remain).
+    const splat = isSplatRow(layer);
     const line = el(doc, 'div', row, { cls: 'gev-ov-line' });
     const range = createSlider({
       documentRef: doc,
@@ -230,6 +239,11 @@ export function createOverlaysPanel({
     });
     line.append(range);
     const out = el(doc, 'output', line, { cls: 'gev-slider-value' });
+    if (splat) {
+      line.hidden = true;
+      range.hidden = true;
+      out.hidden = true;
+    }
     // 3D builds: canopy cut (Off / 90 ft / 120 ft above local ground) and a
     // shortcut to fly to the model. Rows of flat layers have neither.
     let cut = null;
@@ -239,15 +253,17 @@ export function createOverlaysPanel({
         cls: 'gev-ov-cut',
         attrs: { role: 'group', 'aria-label': t('Cut canopy above') },
       });
+      if (splat) cut.hidden = true;
       note = el(doc, 'span', row, {
         cls: 'gev-ov-3d-note',
         attrs: { role: 'status' },
       });
     }
+    if (splat) row.setAttribute?.('data-splat', 'true');
     box.addEventListener('change', () =>
       onEnabled(layer.id, Boolean(box.checked)),
     );
-    range.addEventListener('input', () =>
+    range?.addEventListener('input', () =>
       onOpacity(layer.id, Number(range.value) / 100),
     );
     rows.set(layer.id, {
@@ -346,10 +362,12 @@ export function createOverlaysPanel({
         const pct = Math.round(layer.opacity * 100);
         row.on = Boolean(layer.enabled);
         row.box.checked = row.on;
-        row.range.value = String(pct);
-        row.range.disabled = !layer.enabled;
-        row.range.setAttribute('aria-valuetext', `${pct}%`);
-        row.out.textContent = `${pct}%`;
+        if (row.range) {
+          row.range.value = String(pct);
+          row.range.disabled = !layer.enabled;
+          row.range.setAttribute('aria-valuetext', `${pct}%`);
+          row.out.textContent = `${pct}%`;
+        }
         if (row.cut) {
           const feet = layer.canopyFt ?? null;
           syncChipGroup(row.cut, [
@@ -394,9 +412,10 @@ export function createOverlaysPanel({
               else onCanopy(layer.id, chip === 'off' ? null : Number(chip));
             });
           }
-          // The note is composed and translated NOW, in this render pass.
-          row.note.textContent = noteText(layer);
         }
+        // The note is composed and translated NOW, in this render pass. A
+        // splat has a note but no canopy cut, so it sits outside that block.
+        if (row.note) row.note.textContent = noteText(layer);
         if (nextOrder.length === rows.size) {
           row.up.disabled = index === 0;
           row.down.disabled = index === nextOrder.length - 1;

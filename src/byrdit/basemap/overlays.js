@@ -107,8 +107,12 @@ export function attachOverlays({
       {
         enabled: false,
         opacity: entry.defaultOpacity,
-        // 3D builds only: canopy cut in feet above local ground (null = off)
-        canopyFt: entry.kind === '3d' ? entry.model.canopyDefaultFt : null,
+        // 3D builds only: canopy cut in feet above local ground (null = off).
+        // A splat row has no canopy control at all.
+        canopyFt:
+          entry.kind === '3d' && entry.model.splat !== true
+            ? entry.model.canopyDefaultFt
+            : null,
       },
     ]),
   );
@@ -246,6 +250,8 @@ export function attachOverlays({
         ? {
             canopyFt: state.get(entry.id).canopyFt,
             canopyOptionsFt: entry.model.canopyOptionsFt,
+            // Splat rows hide the canopy and opacity controls.
+            splat: entry.model.splat === true,
             phoneMode,
             status: models.get(entry.id)?.status ?? 'idle',
             alignedM: models.get(entry.id)?.alignedM ?? 0,
@@ -333,7 +339,8 @@ export function attachOverlays({
     setCanopy(id, feet) {
       const s = state.get(id);
       const entry = order.find((e) => e.id === id);
-      if (!s || entry?.kind !== '3d') return false;
+      if (!s || entry?.kind !== '3d' || entry.model.splat === true)
+        return false;
       const ft = Number(feet);
       if (feet === null || ft === 0) s.canopyFt = null;
       else if (entry.model.canopyOptionsFt.includes(ft)) s.canopyFt = ft;

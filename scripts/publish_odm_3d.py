@@ -1,25 +1,36 @@
 #!/usr/bin/env python3
-"""Publish one OpenDroneMap 3D build as a God's Eye View 3D layer.
+"""Publish one 3D build as a God's Eye View 3D layer.
 
+ODM build (OpenDroneMap):
     publish_odm_3d.py --source S4:/srv/odm/data/<build-uuid> \
         --id odm-3d-9be42b4f --name "Byrd Ranch shop area 3D (2026-10-31)"
 
+Gaussian splat, already exported as a 3D Tiles directory:
+    publish_odm_3d.py --splat S4:/srv/splats/<name>/tileset \
+        --ground-m 112.4 --id odm-3d-9be42b4f --name "Byrd Ranch splat"
+
 Runs on any host that can ssh to the source host and to S1 (the map store).
-The build's 3d_tiles/model folder is streamed to S1 (no local copy), every
-file is checked against a SHA256 list taken at the source, and only then is
-the layer added to hires/m2/overlays.json (atomic write, backup kept). The
-GEV server picks the new layer up from the manifest on its own; no restart.
+The build's tile folder is streamed to S1 (no local copy), every file is
+checked against a SHA256 list taken at the source, and only then is the layer
+added to hires/m2/overlays.json (atomic write, backup kept). The GEV server
+picks the new layer up from the manifest on its own; no restart.
 
 What it does, in order (any failure stops and leaves the manifest untouched):
-  1. check the arguments and the source (tileset.json, size, DTM present)
+  1. check the arguments and the source (tileset.json, size; for ODM a DTM)
   2. stream the tileset to S1 staging, verify every SHA256, check that every
      tile file the tileset names exists
   3. read the bare-ground height (median of the ODM DTM, via the gdal python
-     on S1) and the footprint (from the georeferenced tileset)
+     on S1; a splat has no DTM and needs an explicit --ground-m) and the
+     footprint (from the georeferenced tileset)
   4. move the folder into hires/odm3d/<id>/, add the manifest entry
   5. fetch tileset.json back over HTTP from the S1 origin and compare
 
-Nothing in the ODM data is changed or deleted. Re-running with an existing
+A splat tileset is already Z-up: the ODM bounding-box correction is not
+applied to it (the file is published unchanged). --phone-splat publishes a
+lower-detail phone variant next to it and records phone_archive, which the
+GEV relay and the panel already understand.
+
+Nothing in the source data is changed or deleted. Re-running with an existing
 id is refused (use a new id for a new build). --dry-run does steps 1 and 3
 only and prints the manifest entry.
 
@@ -35,6 +46,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import shlex
 import subprocess
@@ -49,6 +61,9 @@ GDAL_PY = "/opt/gev-basemap/gdalenv/bin/python3"
 # The GEV relay (overlaysProxy.js ODM3D_FILE_ROUTE) serves only these file names.
 TILE_URI_RE = re.compile(r"^(?:[A-Za-z0-9_-]{1,64}/){0,2}[A-Za-z0-9_-]{1,96}\.(?:json|b3dm|glb|i3dm|pnts|cmpt|jpg|png)$")
 ID_RE = re.compile(r"^odm-[a-z0-9][a-z0-9-]{0,26}$")
+# overlaysProxy.js ID: the phone variant's id is `<id>-phone`, and the relay
+# refuses anything longer than 32 characters.
+RELAY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9 /&+().,'-]{1,80}$")
 CREDIT_RE = NAME_RE
 SRC_RE = re.compile(r"^(?:(?P<host>[A-Za-z0-9._-]+):)?(?P<path>/[A-Za-z0-9._/-]+)$")
@@ -252,10 +267,23 @@ def check_args(args) -> None:
         raise Fail("--credit has characters the GEV manifest check refuses")
     if args.canopy_default_ft not in ("none", "90", "120"):
         raise Fail("--canopy-default-ft must be none, 90 or 120")
+    source = getattr(args, "source", None)
+    splat = getattr(args, "splat", None)
+    phone_splat = getattr(args, "phone_splat", None)
+    if bool(source) == bool(splat):
+        raise Fail("give exactly one source: --source (an ODM build folder) or --splat (a 3D Tiles directory)")
+    if splat and args.ground_m is None:
+        raise Fail("--splat requires an explicit --ground-m: a splat tileset has no ODM DTM to read the ground height from")
+    if phone_splat:
+        if not splat:
+            raise Fail("--phone-splat is the phone variant of --splat; it cannot be used with --source")
+        phone_id = f"{args.id}-phone"
+        if not RELAY_ID_RE.fullmatch(phone_id):
+            raise Fail("--id is too long for a phone variant: '<id>-phone' must fit the GEV relay id (32 chars)")
 
 
-def read_source(host, path):
-    model = f"{path}/3d_tiles/model"
+def read_tileset(host, model):
+    """tileset.json, byte size and file count of a tile folder (ODM or splat)."""
     out = sh(host, f"cat {shlex.quote(model)}/tileset.json").stdout
     try:
         tileset = json.loads(out)
@@ -263,8 +291,20 @@ def read_source(host, path):
         raise Fail(f"tileset.json is not JSON: {error}") from None
     size = int(sh(host, f"du -sb {shlex.quote(model)} | cut -f1").stdout.strip())
     count = int(sh(host, f"find {shlex.quote(model)} -type f | wc -l").stdout.strip())
+    return tileset, size, count
+
+
+def read_source(host, path):
+    model = f"{path}/3d_tiles/model"
+    tileset, size, count = read_tileset(host, model)
     sh(host, f"test -f {shlex.quote(path)}/odm_dem/dtm.tif")
     return model, tileset, size, count
+
+
+def read_splat(host, path):
+    """--splat names the tileset directory itself; there is no ODM DTM."""
+    tileset, size, count = read_tileset(host, path)
+    return path, tileset, size, count
 
 
 def source_hashes(host, model) -> dict[str, str]:
@@ -399,9 +439,69 @@ print("backup", bak, "layers", len(d["layers"]))
     log("info", f"manifest updated: {out}")
 
 
+def publish_folder(host, model, final, stage, count, tileset, fixed_text=None):
+    """Copy one tile folder to S1 staging, verify it, and move it into place.
+
+    fixed_text is the corrected ODM tileset.json; None publishes the source
+    tileset unchanged (a splat export). Returns (published hashes, digest).
+    The caller's existence check is only a fast exit: the no-clobber move at
+    the end is the race-safe decision, and it fails closed when final is taken.
+    """
+    sh(S1, f"rm -rf {shlex.quote(stage)}")
+    try:
+        hashes = source_hashes(host, model)
+        if len(hashes) != count:
+            raise Fail("source changed while reading it (file count differs); stop the build first")
+        log("info", f"copying {count} files to S1 staging")
+        stream(host, model, stage)
+        verify_stage(stage, hashes)
+        log("info", f"all {len(hashes)} SHA256 match the source")
+        names = set()
+        tile_uris(tileset["root"], names)
+        if fixed_text is not None:
+            run(
+                ["ssh", "-o", "BatchMode=yes", S1, f"cd {shlex.quote(stage)} && mv tileset.json tileset.original.json && cat > tileset.json"],
+                input=fixed_text,
+            )
+        missing = sorted(n for n in names if n not in hashes)
+        if missing:
+            raise Fail(f"tileset names {len(missing)} files that are not in the build")
+        unservable = sorted(n for n in names if not TILE_URI_RE.fullmatch(n))
+        if unservable:
+            raise Fail(f"{len(unservable)} tile file names are not ones the GEV server will serve (folders and names of letters, digits, - and _ only)")
+        published = dict(hashes)
+        if fixed_text is not None:
+            published["tileset.original.json"] = hashes["tileset.json"]
+            published["tileset.json"] = hashlib.sha256(fixed_text.encode()).hexdigest()
+        sums = "".join(f"{published[n]}  {n}\n" for n in sorted(published))
+        digest = hashlib.sha256(sums.encode()).hexdigest()
+        run(
+            ["ssh", "-o", "BatchMode=yes", S1, f"cat > {shlex.quote(stage)}/SHA256SUMS.txt"],
+            input=sums,
+        )
+        # The check in main() is only a fast exit: another publisher can create
+        # final at any time after it. -T renames the staging folder itself
+        # (plain `mv` would move it *inside* an existing directory, nesting one
+        # build in another) and -n refuses to replace whatever is already there.
+        # mv -n still exits 0 when it declines, so look for the staging folder:
+        # if it is still present, another writer owns final and this run fails
+        # closed, leaving that writer's folder untouched.
+        sh(S1, f"mv -T -n -- {shlex.quote(stage)} {shlex.quote(final)}", check=False)
+        if sh(S1, f"test -e {shlex.quote(stage)}", check=False).returncode == 0:
+            if sh(S1, f"test -e {shlex.quote(final)}", check=False).returncode == 0:
+                raise Fail(f"{final} appeared while publishing; another publisher owns it, so it was left untouched")
+            raise Fail(f"could not move the verified folder into {final}")
+    except BaseException:
+        sh(S1, f"rm -rf {shlex.quote(stage)}", check=False)
+        raise
+    return published, digest
+
+
 def main(argv=None) -> int:
     ap = QuietParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--source", required=True, help="[host:]/path of the ODM build folder")
+    ap.add_argument("--source", help="[host:]/path of the ODM build folder")
+    ap.add_argument("--splat", help="[host:]/path of a 3D Tiles directory exported from a Gaussian splat")
+    ap.add_argument("--phone-splat", "--splat-phone", "--phone-tileset", dest="phone_splat", help="[host:]/path of the phone variant of --splat")
     ap.add_argument("--id", required=True)
     ap.add_argument("--name", required=True)
     ap.add_argument("--credit", default="Byrd-IT ODM drone survey")
@@ -416,23 +516,50 @@ def main(argv=None) -> int:
     started = time.time()
     try:
         check_args(args)
-        host, path = parse_source(args.source)
-        log("info", f"start id={args.id} source={safe_source(host, path)}")
-        model, tileset, size, count = read_source(host, path)
+        is_splat = bool(args.splat)
+        host, path = parse_source(args.splat if is_splat else args.source)
+        log(
+            "info",
+            f"start id={args.id} source={safe_source(host, path)} kind={'splat' if is_splat else 'odm'}",
+        )
+        if is_splat:
+            model, tileset, size, count = read_splat(host, path)
+        else:
+            model, tileset, size, count = read_source(host, path)
         gb = size / 1e9
         log("info", f"source tileset: {count} files, {gb:.2f} GB")
         if gb > args.max_gb and not args.allow_large:
             raise Fail(f"model is {gb:.1f} GB, above --max-gb {args.max_gb}: get the owner's OK, then add --allow-large")
-        fixed = fix_tileset(tileset)
+
+        phone = None
+        if args.phone_splat:
+            phone_host, phone_path = parse_source(args.phone_splat)
+            phone_model, phone_tileset, phone_size, phone_count = read_splat(phone_host, phone_path)
+            phone_gb = phone_size / 1e9
+            log("info", f"phone tileset: {phone_count} files, {phone_gb:.2f} GB")
+            if phone_gb > args.max_gb and not args.allow_large:
+                raise Fail(f"phone model is {phone_gb:.1f} GB, above --max-gb {args.max_gb}: get the owner's OK, then add --allow-large")
+            phone = {
+                "host": phone_host,
+                "model": phone_model,
+                "tileset": phone_tileset,
+                "count": phone_count,
+            }
+
+        # A splat export is already Z-up; only the ODM mesh has bad boxes.
+        fixed = tileset if is_splat else fix_tileset(tileset)
         bounds, origin_h, (zlo, zhi) = footprint(fixed)
         if abs(origin_h) > 1.0:
-            raise Fail(f"tileset origin is {origin_h:.1f} m above the ellipsoid; the cut maths assumes 0 (not an ODM export?)")
+            raise Fail(f"tileset origin is {origin_h:.1f} m above the ellipsoid; the cut maths assumes 0 (not a georeferenced tileset?)")
         if not (-180 < bounds[0] < bounds[2] < 180 and -90 < bounds[1] < bounds[3] < 90):
             raise Fail(f"footprint {bounds} is not a valid lon/lat box")
-        lo, mid, hi = (args.ground_m,) * 3 if args.ground_m is not None else ground_height(host, path)
+        if args.ground_m is not None:
+            lo, mid, hi = (args.ground_m,) * 3
+        else:
+            lo, mid, hi = ground_height(host, path)
         log("info", f"footprint {bounds}; ground height median {mid:.1f} m (5%-95%: {lo:.1f}-{hi:.1f} m)")
         if not (zlo - 5 <= mid <= zhi + 5):
-            raise Fail(f"ground height {mid:.1f} m is outside the model's heights {zlo:.1f}-{zhi:.1f} m: DTM and tileset do not match")
+            raise Fail(f"ground height {mid:.1f} m is outside the model's heights {zlo:.1f}-{zhi:.1f} m: ground height and tileset do not match")
         default_ft = None if args.canopy_default_ft == "none" else int(args.canopy_default_ft)
         entry = {
             "id": args.id,
@@ -440,7 +567,7 @@ def main(argv=None) -> int:
             "kind": "overlay-3d",
             "group": "byrd-ranch",
             "year": time.strftime("%Y"),
-            "resolution": "ODM textured 3D mesh",
+            "resolution": "Gaussian splat 3D tiles" if is_splat else "ODM textured 3D mesh",
             "format": "3dtiles",
             "archive": f"odm3d/{args.id}",
             "file": f"hires/odm3d/{args.id}/tileset.json",
@@ -456,69 +583,76 @@ def main(argv=None) -> int:
             "status": "live-data",
             "credit": args.credit,
             "source": safe_source(host, path),
+            # A splat row hides the canopy and opacity controls in the panel;
+            # the flag is what tells it to.
+            **({"splat": True} if is_splat else {}),
         }
+        if phone:
+            entry["phone_archive"] = f"odm3d/{args.id}-phone"
+            entry["phone_bytes"] = phone_size
+            entry["phone_files"] = phone["count"]
         if args.dry_run:
             log("info", "dry run: nothing copied")
             print(json.dumps(entry, indent=1))
             return 0
 
         final = f"{STORE}/odm3d/{args.id}"
-        stage = f"{STORE}/odm3d/.staging-{args.id}"
-        if sh(S1, f"test -e {shlex.quote(final)}", check=False).returncode == 0:
-            raise Fail(f"{final} already exists on S1; use a new --id")
-        sh(S1, f"rm -rf {shlex.quote(stage)}")
+        # One staging folder per run: two publishers of the same id must not
+        # overwrite (or rm -rf) each other's copy, and the post-move check in
+        # publish_folder must see only this run's staging path.
+        run_token = f"{os.getpid()}-{time.time_ns()}"
+        stage = f"{STORE}/odm3d/.staging-{args.id}.{run_token}"
+        phone_final = f"{STORE}/odm3d/{args.id}-phone" if phone else None
+        phone_stage = f"{STORE}/odm3d/.staging-{args.id}-phone.{run_token}" if phone else None
+        # Fast, non-authoritative exit. Another publisher can create either name
+        # after this check; publish_folder's no-clobber move is what decides.
+        for target in [final, phone_final]:
+            if target and sh(S1, f"test -e {shlex.quote(target)}", check=False).returncode == 0:
+                raise Fail(f"{target} already exists on S1; use a new --id")
+        fixed_text = None if is_splat else json.dumps(fixed, indent=1)
+        # Only folders this run actually placed may be taken back. A failure
+        # before a publish_folder returns (or in the phone step) must never
+        # delete a folder another publisher owns.
+        placed = []
         try:
-            hashes = source_hashes(host, model)
-            if len(hashes) != count:
-                raise Fail("source changed while reading it (file count differs); stop the build first")
-            log("info", f"copying {count} files to S1 staging")
-            stream(host, model, stage)
-            verify_stage(stage, hashes)
-            log("info", f"all {len(hashes)} SHA256 match the source")
-            names = set()
-            tile_uris(tileset["root"], names)
-            fixed_text = json.dumps(fixed, indent=1)
-            run(
-                ["ssh", "-o", "BatchMode=yes", S1, f"cd {shlex.quote(stage)} && mv tileset.json tileset.original.json && cat > tileset.json"],
-                input=fixed_text,
+            published, digest = publish_folder(
+                host, model, final, stage, count, fixed, fixed_text
             )
-            missing = sorted(n for n in names if n not in hashes)
-            if missing:
-                raise Fail(f"tileset names {len(missing)} files that are not in the build")
-            unservable = sorted(n for n in names if not TILE_URI_RE.fullmatch(n))
-            if unservable:
-                raise Fail(f"{len(unservable)} tile file names are not ones the GEV server will serve (folders and names of letters, digits, - and _ only)")
-            published = dict(hashes)
-            published["tileset.original.json"] = hashes["tileset.json"]
-            published["tileset.json"] = hashlib.sha256(fixed_text.encode()).hexdigest()
-            sums = "".join(f"{published[n]}  {n}\n" for n in sorted(published))
-            digest = hashlib.sha256(sums.encode()).hexdigest()
-            run(
-                ["ssh", "-o", "BatchMode=yes", S1, f"cat > {shlex.quote(stage)}/SHA256SUMS.txt"],
-                input=sums,
-            )
+            placed.append(final)
             entry["sha256"] = digest
-            sh(S1, f"mv {shlex.quote(stage)} {shlex.quote(final)}")
-        except BaseException:
-            sh(S1, f"rm -rf {shlex.quote(stage)}", check=False)
-            raise
-        try:
+            if phone:
+                phone_published, phone_digest = publish_folder(
+                    phone["host"],
+                    phone["model"],
+                    phone_final,
+                    phone_stage,
+                    phone["count"],
+                    phone["tileset"],
+                )
+                placed.append(phone_final)
+                entry["phone_sha256"] = phone_digest
             add_manifest_entry(entry)
         except BaseException:
-            # The folder was created by this run (it did not exist before). Take it
-            # back out so the same id can be tried again, but ONLY when the manifest
-            # does not list the id: a write that succeeded before the error (a
-            # dropped ssh) means the build is live and its files must stay. If the
-            # manifest cannot be read, nothing is deleted. ODM data is never touched.
-            if manifest_lacks(args.id):
-                sh(S1, f"rm -rf {shlex.quote(final)}", check=False)
-            else:
+            # Each folder in `placed` was created by this run (it did not exist
+            # before and the no-clobber move succeeded). Take those back out so
+            # the same id can be tried again, but ONLY when the manifest does not
+            # list the id: a write that succeeded before the error (a dropped ssh)
+            # means the build is live and its files must stay. If the manifest
+            # cannot be read, nothing is deleted. Source data is never touched.
+            if placed and manifest_lacks(args.id):
+                for target in placed:
+                    sh(S1, f"rm -rf {shlex.quote(target)}", check=False)
+            elif placed:
                 log("error", "manifest state unknown or the layer is listed: the folder on S1 was left in place")
             raise
 
         got = run(["curl", "-sf", "--max-time", "60", f"{ORIGIN}/odm3d/{args.id}/tileset.json"]).stdout
         if hashlib.sha256(got.encode()).hexdigest() != published["tileset.json"]:
             raise Fail("tileset.json served by the S1 origin differs from what was published (manifest already updated: check by hand)")
+        if phone:
+            got_phone = run(["curl", "-sf", "--max-time", "60", f"{ORIGIN}/odm3d/{args.id}-phone/tileset.json"]).stdout
+            if hashlib.sha256(got_phone.encode()).hexdigest() != phone_published["tileset.json"]:
+                raise Fail("phone tileset.json served by the S1 origin differs from what was published (manifest already updated: check by hand)")
         log("info", f"published {args.id}: {count} files, {gb:.2f} GB, served and verified in {time.time() - started:.0f}s")
         return 0
     except Fail as error:

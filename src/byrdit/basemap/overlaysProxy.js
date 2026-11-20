@@ -99,20 +99,30 @@ const num = (v, lo, hi) =>
 
 /**
  * The 3D build facts the browser needs, from an overlay-3d manifest entry.
- * ground_m is the median bare-ground height (ODM DTM) in the model's own
- * heights; the canopy cut is measured from it. Null = entry unusable.
+ * ground_m is the median bare-ground height (ODM DTM, or the explicit value
+ * published with a splat) in the model's own heights; the canopy cut is
+ * measured from it. `splat` marks a Gaussian-splat tileset, whose row hides
+ * the canopy and opacity controls. Null = entry unusable.
  */
 function tileset3d(raw) {
-  const groundM = num(raw?.ground_m, -500, 9000);
+  // The publisher writes the facts flat, next to the layer's other fields;
+  // tolerate a nested `model` block as well (only documented values are read).
+  const model = raw?.model && typeof raw.model === 'object' ? raw.model : {};
+  const groundM = num(raw?.ground_m ?? model.ground_m, -500, 9000);
   if (groundM === null) return null;
-  const offset = num(raw?.height_offset_m, -300, 300);
+  const offset = num(raw?.height_offset_m ?? model.height_offset_m, -300, 300);
+  const suppliedOptions = raw?.canopy_options_ft ?? model.canopy_options_ft;
+  const preferred = raw?.canopy_default_ft ?? model.canopy_default_ft;
   const options = withCanopyLow(
-    (Array.isArray(raw?.canopy_options_ft) ? raw.canopy_options_ft : [90, 120])
+    (Array.isArray(suppliedOptions) ? suppliedOptions : [90, 120])
       .map((v) => num(v, 10, CANOPY_MAX_FT))
       .filter((v) => v !== null),
-    raw?.canopy_default_ft,
+    preferred,
   );
-  const def = raw?.canopy_default_ft;
+  const def = preferred;
+  // Accept both the top-level flag the publisher writes and a nested
+  // model.splat, so a manifest shaped either way keeps the fact.
+  const splat = raw?.splat === true || model.splat === true;
   return {
     groundM,
     heightOffsetM: offset ?? 0,
@@ -123,6 +133,7 @@ function tileset3d(raw) {
         : options.includes(def)
           ? def
           : null,
+    ...(splat ? { splat: true } : {}),
   };
 }
 

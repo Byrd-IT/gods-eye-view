@@ -47,6 +47,25 @@ the boxes mapped to Z-up and `asset.gltfUpAxis: "Z"`; the original is kept as
 ground height come from the corrected boxes and the ODM DTM
 (`odm_dem/dtm.tif`, median, 5% and 95% recorded).
 
+## Publish a Gaussian splat
+
+A splat is exported to a 3D Tiles directory and published by the same script.
+That export is already Z-up, so the ODM bounding-box correction is not applied
+and `tileset.json` is published exactly as exported. There is no ODM DTM in a
+splat export, so the ground height must be given explicitly:
+
+    python3 scripts/publish_odm_3d.py \
+        --splat S4:/srv/splats/shop-2026-11/tileset \
+        --ground-m 112.4 \
+        --id odm-3d-9be42b4f \
+        --name "Byrd Ranch shop area splat"
+
+`--phone-splat` (also `--splat-phone` / `--phone-tileset`) publishes a second,
+lighter tileset as `<id>-phone` and records `phone_archive`; the existing
+Phone mode chip then picks it. The manifest entry carries `splat: true`; the
+proxy and browser validator keep it as `model.splat`, and the panel uses it to
+hide the canopy and opacity controls, which a splat surface does not have.
+
 ## How the canopy cut works
 
 A level clipping plane in the tileset frame at `ground_m + cut` (90 ft =
