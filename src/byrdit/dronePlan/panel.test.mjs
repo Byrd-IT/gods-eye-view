@@ -255,9 +255,11 @@ function makeWorld({ sample, wrapPositions = false }) {
     ...fakes.viewer,
     terrainProvider: { requestTileGeometry() {} },
   };
-  // The area box preview draws through the scene draw port (#1760).
-  bindDroneRenderer(viewer);
-  return { viewer, cesium, fakes };
+  // The area box preview draws through the scene draw port (#1760), and the
+  // box tool takes pointer events from the scene dispatcher; the polygon and
+  // area-edit tools still use their legacy handler.
+  const renderer = bindDroneRenderer(viewer);
+  return { viewer, cesium, fakes, renderer };
 }
 
 const boxM = (w, h) => {
@@ -2473,10 +2475,23 @@ function drawingWorld() {
   w.doc.addEventListener = w.fakes.documentRef.addEventListener;
   w.doc.removeEventListener = w.fakes.documentRef.removeEventListener;
   const fire = (type, event) => w.fakes.fire(type, event);
+  // Two pointer paths: the box tool listens on the scene dispatcher (#1760),
+  // the polygon and area-edit tools on their own Cesium handler. A drag feeds
+  // both; no session runs a tool from each family at once.
+  const pointer = w.renderer.input;
   const click = (x, y) => fire('LEFT_CLICK', { position: { x, y } });
-  const down = (x, y) => fire('LEFT_DOWN', { position: { x, y } });
-  const move = (x, y) => fire('MOUSE_MOVE', { endPosition: { x, y } });
-  const up = (x, y) => fire('LEFT_UP', { position: { x, y } });
+  const down = (x, y) => {
+    fire('LEFT_DOWN', { position: { x, y } });
+    pointer.down({ x, y });
+  };
+  const move = (x, y) => {
+    fire('MOUSE_MOVE', { endPosition: { x, y } });
+    pointer.move({ x, y });
+  };
+  const up = (x, y) => {
+    fire('LEFT_UP', { position: { x, y } });
+    pointer.up({ x, y });
+  };
   const tap = (x, y) => {
     down(x, y);
     up(x, y);
@@ -2647,6 +2662,96 @@ test('edit: EDIT is disabled while a draw tool runs, and drawing ends editing', 
   w.handle.drawPolygon();
   assert.equal(edit().getAttribute('aria-pressed'), 'false');
   assert.equal(pointerOwner(), 'drone-plan-polygon');
+  w.handle.destroy();
+});
+
+test('DRAW BOX arms only: clicking the armed chip never disarms; Escape does, and clears the hint', () => {
+  const w = drawingWorld();
+  const chip = w.action('draw-box');
+  chip.click();
+  assert.equal(chip.getAttribute('aria-pressed'), 'true');
+  assert.equal(pointerOwner(), 'drone-plan-box');
+  assert.match(w.status(), /Press on the ground and drag a box/);
+  // A second click is not a toggle: the box tool stays armed.
+  chip.click();
+  assert.equal(chip.getAttribute('aria-pressed'), 'true');
+  assert.equal(pointerOwner(), 'drone-plan-box');
+  assert.match(w.status(), /Press on the ground and drag a box/);
+  // Escape puts it down and replaces the hint with the cancellation note.
+  w.fakes.key('Escape');
+  assert.equal(chip.getAttribute('aria-pressed'), 'false');
+  assert.equal(pointerOwner(), null);
+  assert.equal(w.status(), 'Box drawing cancelled');
+  w.handle.destroy();
+});
+
+test('a drone box that is too small stays armed and warns in metres and feet', () => {
+  const w = drawingWorld();
+  const chip = w.action('draw-box');
+  chip.click();
+  // One pixel at this view is far below the 20 m minimum.
+  w.drag([200, 125], [201, 126]);
+  assert.equal(w.handle.getState().areas.length, 0);
+  assert.equal(chip.getAttribute('aria-pressed'), 'true', 'still armed');
+  assert.equal(pointerOwner(), 'drone-plan-box');
+  assert.match(w.status(), /20 m/);
+  assert.match(w.status(), /about 65 ft/);
+  // The same armed tool takes the next, big enough drag.
+  w.drag([200, 125], [300, 175]);
+  assert.equal(w.handle.getState().areas.length, 1);
+  assert.equal(chip.getAttribute('aria-pressed'), 'false');
+  assert.equal(pointerOwner(), null);
+  w.handle.destroy();
+});
+
+test('the drone drag preview is a solid rectangle in the committed box colour', () => {
+  const w = drawingWorld();
+  const source = () =>
+    w.viewer.dataSources.sources.find(
+      (item) => item.name === 'gev-drone-plan',
+    );
+  const preview = () =>
+    source()?.entities.values.find((item) => item.name === 'Box preview');
+  w.action('draw-box').click();
+  w.down(200, 125);
+  w.move(300, 175);
+  const live = preview();
+  assert.ok(live, 'the rectangle is on the globe during the drag');
+  assert.ok(live.rectangle, 'it is drawn as a rectangle');
+  assert.equal(live.rectangle.outline, true);
+  assert.equal(live.rectangle.material.alpha, 0.18, 'a solid fill');
+  assert.equal(live.rectangle.outlineColor.alpha, 0.95);
+  w.up(300, 175);
+  assert.equal(preview(), undefined, 'the drag preview goes with the drag');
+  const committed = source()?.entities.values.find((item) => item.polyline);
+  assert.ok(committed, 'the committed area is drawn in its place');
+  w.handle.destroy();
+});
+
+test('arming DRAW BOX dismisses the visible first-run launcher', () => {
+  const w = drawingWorld();
+  const getById = w.doc.getElementById;
+  let clicked = 0;
+  const dismiss = {
+    click() {
+      clicked += 1;
+    },
+  };
+  const launcher = {
+    hidden: false,
+    classList: { contains: (name) => name === 'visible' },
+    querySelector: (selector) =>
+      selector === '[data-first-run-dismiss]' ? dismiss : null,
+  };
+  w.doc.getElementById = (id) =>
+    id === 'first-run-launcher' ? launcher : getById(id);
+  w.action('draw-box').click();
+  assert.equal(clicked, 1, 'the card is put down so the globe can be dragged');
+  // A hidden launcher is left alone (its dismiss would burn the session).
+  w.handle.drawBox();
+  launcher.hidden = true;
+  w.handle.drawBox({ toggle: false });
+  assert.equal(clicked, 1);
   w.handle.destroy();
 });
 

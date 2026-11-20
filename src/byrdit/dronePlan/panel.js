@@ -63,6 +63,7 @@ import {
   setOverlayEntries,
 } from '../../overlays/worldOverlay.js';
 import {
+  createDroneBoxPreview,
   createDronePlanPreview,
   passStyle,
   batteryPauseEstimate,
@@ -749,11 +750,15 @@ export function initDronePlan({
     // are kept per scene object, and one port must have one (#1760).
     viewer: sceneViewer,
     cesium,
+    documentRef: doc,
     owner: BOX_OWNER,
-    previewName: 'gev-drone-plan-box-preview',
+    createPreview: (_scene, dragBox) => createDroneBoxPreview(preview, dragBox),
     bodyClass: 'gev-drone-box',
     validate: validateDroneBox,
     shorterArc: true,
+    // A refused box (too small, too large) keeps the tool armed: the person
+    // drags again without pressing DRAW BOX a second time.
+    keepActiveOnInvalid: true,
     onBox: (box) => {
       addRect(box, { replace: false });
     },
@@ -765,6 +770,9 @@ export function initDronePlan({
       ui.drawButton.setAttribute('aria-pressed', String(active));
       syncAreaEditButtons();
       if (active) status(t('Press on the ground and drag a box'), 'info');
+      // The hint belongs to an armed tool: once the box is put down (Escape,
+      // another tool taking the pointer) it must not keep saying it.
+      else status('');
     },
   });
   const takeoffTool = initPointTool({
@@ -3473,7 +3481,9 @@ export function initDronePlan({
       if (state.result) render();
       else syncControls();
     });
-    ui.drawButton.addEventListener('click', () => drawBox());
+    // The chip arms, it never disarms: clicking DRAW BOX while the tool is
+    // armed leaves it armed (Escape or another tool puts it down).
+    ui.drawButton.addEventListener('click', () => drawBox({ toggle: false }));
     ui.polygonButton.addEventListener('click', () => drawPolygon());
     ui.polygonFinish.addEventListener('click', () => {
       polygonTool?.finish();
@@ -6542,6 +6552,22 @@ export function initDronePlan({
     }
   }
 
+  /**
+   * The first-run welcome card sits over the middle of the globe, so a drag
+   * that starts there presses the card instead of drawing. Put the card down
+   * through its own dismiss control when the box tool arms; the control keeps
+   * the launcher's session rule, so this is the same as the visitor choosing
+   * SKIP. Nothing happens when the launcher is absent or already gone.
+   */
+  function dismissFirstRunLauncher() {
+    const launcher = doc?.getElementById?.('first-run-launcher');
+    if (!launcher || launcher.hidden) return false;
+    if (!launcher.classList?.contains?.('visible')) return false;
+    const dismiss = launcher.querySelector?.('[data-first-run-dismiss]');
+    dismiss?.click?.();
+    return Boolean(dismiss);
+  }
+
   function drawBox({ toggle = true } = {}) {
     takeoffTool?.cancel('switch');
     polygonTool?.cancel('switch');
@@ -6555,6 +6581,7 @@ export function initDronePlan({
       status(t('Another tool is using the pointer. Close it first'), 'warn');
       return false;
     }
+    dismissFirstRunLauncher();
     return true;
   }
 

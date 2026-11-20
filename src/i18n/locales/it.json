@@ -3296,7 +3296,7 @@
   "Move {name} to the trash? It is kept for 30 days.": "Spostare {name} nel cestino? Viene conservato 30 giorni.",
   "Compatibility check of {name}": "Controllo di compatibilità di {name}",
   "{name}: {count} waypoints drawn on the map": "{name}: {count} punti di passaggio disegnati sulla mappa",
-  "Drag a bigger box (at least 20 m a side)": "Trascina un riquadro più grande (almeno 20 m di lato)",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "Trascina un riquadro più grande (almeno 20 m, circa 65 ft di lato)",
   "Box is too big to fly (3 km a side at most)": "Il riquadro è troppo grande per volarlo (3 km di lato al massimo)",
   "tree": "albero",
   "tower": "torre",

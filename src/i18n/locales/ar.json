@@ -3548,7 +3548,7 @@
   "Move {name} to the trash? It is kept for 30 days.": "نقل {name} إلى سلة المحذوفات؟ تُحفظ لمدة 30 يومًا.",
   "Compatibility check of {name}": "فحص توافق {name}",
   "{name}: {count} waypoints drawn on the map": "{name}: {count} نقاط طريق مرسومة على الخريطة",
-  "Drag a bigger box (at least 20 m a side)": "اسحب مربعًا أكبر (20 m على الأقل لكل ضلع)",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "اسحب مربعًا أكبر (20 m على الأقل، نحو 65 قدمًا، لكل ضلع)",
   "Box is too big to fly (3 km a side at most)": "المربع أكبر من أن يُحلَّق فوقه (3 km لكل ضلع كحد أقصى)",
   "tree": "شجرة",
   "tower": "برج",

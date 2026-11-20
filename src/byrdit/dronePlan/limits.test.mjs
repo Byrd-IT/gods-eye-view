@@ -78,10 +78,11 @@ test('a short box across the antimeridian is the short arc, not a 360 degree box
 });
 
 test('boxes that are too small, too big or not numbers are refused with a reason', () => {
-  assert.equal(
-    validateDroneBox(boxM(MIN_BOX_SIDE_M - 5, 200)).reason,
-    'degenerate',
-  );
+  const small = validateDroneBox(boxM(MIN_BOX_SIDE_M - 5, 200));
+  assert.equal(small.reason, 'degenerate');
+  // The warning names both units: 20 m is about 65 ft.
+  assert.match(small.message, /20 m/);
+  assert.match(small.message, /about 65 ft/);
   assert.equal(
     validateDroneBox(boxM(200, MAX_BOX_SIDE_M + 100)).reason,
     'too-large',

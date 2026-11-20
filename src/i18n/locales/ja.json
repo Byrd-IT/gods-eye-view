@@ -3134,7 +3134,7 @@
   "Move {name} to the trash? It is kept for 30 days.": "{name}をゴミ箱に移しますか。30日間保持されます。",
   "Compatibility check of {name}": "{name}の互換性チェック",
   "{name}: {count} waypoints drawn on the map": "{name}: ウェイポイント{count}個を地図に描きました",
-  "Drag a bigger box (at least 20 m a side)": "より大きい枠をドラッグしてください（一辺少なくとも20 m）",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "より大きい枠をドラッグしてください（一辺少なくとも20 m、約65 ft）",
   "Box is too big to fly (3 km a side at most)": "枠が大きすぎて飛べません（一辺最大3 km）",
   "tree": "木",
   "tower": "塔",

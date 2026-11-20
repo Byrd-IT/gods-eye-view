@@ -3697,7 +3697,7 @@
   "Move {name} to the trash? It is kept for 30 days.": "להעביר את {name} לאשפה? הוא נשמר למשך 30 יום.",
   "Compatibility check of {name}": "בדיקת תאימות של {name}",
   "{name}: {count} waypoints drawn on the map": "{name}: {count} נקודות ציון צוירו על המפה",
-  "Drag a bigger box (at least 20 m a side)": "גרור תיבה גדולה יותר (לפחות 20 מ׳ בכל צלע)",
+  "Drag a bigger box (at least 20 m / about 65 ft a side)": "גרור תיבה גדולה יותר (לפחות 20 מ׳, כ־65 רגל, בכל צלע)",
   "Box is too big to fly (3 km a side at most)": "התיבה גדולה מדי לטיסה (3 ק\"מ בכל צלע לכל היותר)",
   "Distance trigger": "טריגר מרחק",
   "Timed shot": "צילום מתוזמן",

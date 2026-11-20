@@ -30,6 +30,12 @@ import {
 import { globeHeightM } from './globeHeight.js';
 
 export const PREVIEW_DATA_SOURCE = 'gev-drone-plan';
+/** The committed single box's outline colour, and the drag preview's. */
+export const BOX_COLOR = '#8be9ff';
+/** The committed areas' colour when more than one area is shown. */
+export const AREA_COLOR = '#ffb547';
+/** The live drag rectangle's entity name (the panel and QA read it). */
+export const DRAG_BOX_NAME = 'Box preview';
 export const MISSION_COLORS = Object.freeze([
   '#39d0ff',
   '#ffb547',
@@ -273,6 +279,7 @@ export function createDronePlanPreview({
   };
 
   let boxEntities = [];
+  let dragEntities = [];
   let areaEntities = [];
   let planEntities = [];
   let suiteEntities = [];
@@ -594,9 +601,69 @@ export function createDronePlanPreview({
               width: 2,
               ...ground,
               material: new cesium.PolylineDashMaterialProperty({
-                color: color('#8be9ff', 0.95),
+                color: color(BOX_COLOR, 0.95),
                 dashLength: 12,
               }),
+            },
+          }),
+        );
+      }
+      requestRender();
+    },
+    /**
+     * The box being dragged: a solid rectangle in the committed box's colour,
+     * so the area does not change appearance when the drag is released.
+     * `null` takes it away. The same data source as the committed plan, so
+     * one clear() removes both.
+     */
+    showDragBox(box) {
+      dragEntities = drop(dragEntities);
+      const { west, south, east, north } = box ?? {};
+      const drawn =
+        [west, south, east, north].every(Number.isFinite) &&
+        (east !== west || north !== south);
+      if (drawn && !destroyed) {
+        dragEntities.push(
+          dataSource.entities.add({
+            name: DRAG_BOX_NAME,
+            pickable: false,
+            rectangle: {
+              coordinates: cesium.Rectangle.fromDegrees(
+                west,
+                south,
+                east,
+                north,
+              ),
+              // Solid, not the imagery tool's dashed preview: the committed
+              // box is this colour, and the drag should read as the same area.
+              material: color(BOX_COLOR, 0.18),
+              outline: true,
+              outlineColor: color(BOX_COLOR, 0.95),
+              outlineWidth: 2,
+              heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
+            },
+          }),
+        );
+        // Ground-clamped rectangle outlines are not consistently rendered by
+        // Cesium. A solid ground polyline makes all four edges visible.
+        dragEntities.push(
+          dataSource.entities.add({
+            polyline: {
+              positions: cesium.Cartesian3.fromDegreesArray([
+                west,
+                south,
+                east,
+                south,
+                east,
+                north,
+                west,
+                north,
+                west,
+                south,
+              ]),
+              width: 4,
+              ...ground,
+              material: color(BOX_COLOR, 1),
             },
           }),
         );
@@ -626,7 +693,7 @@ export function createDronePlanPreview({
                 width: 2,
                 ...ground,
                 material: new cesium.PolylineDashMaterialProperty({
-                  color: color('#ffb547', 0.95),
+                  color: color(AREA_COLOR, 0.95),
                   dashLength: 12,
                 }),
               },
@@ -1132,6 +1199,7 @@ export function createDronePlanPreview({
       lastImports = null;
       refreshCheck();
       boxEntities = drop(boxEntities);
+      dragEntities = drop(dragEntities);
       areaEntities = drop(areaEntities);
       planEntities = drop(planEntities);
       suiteEntities = drop(suiteEntities);
@@ -1157,6 +1225,32 @@ export function createDronePlanPreview({
         }
       });
       return attaching;
+    },
+  };
+}
+
+/**
+ * The Drone Flight Plan's box-drag preview, as the imagery box tool's
+ * `createPreview` dependency: it feeds the live drag box to the plan preview's
+ * own data source, so the preview is a solid rectangle in the committed
+ * area's colour and one clear() removes it with the rest.
+ * @param {{ showDragBox: (box: object|null) => void }} preview
+ * @param {() => ({ west: number, south: number, east: number, north: number }|null)} dragBox
+ * @returns {{ setVisible: (visible: boolean) => void, changed: () => void, destroy: () => Promise<void> }}
+ */
+export function createDroneBoxPreview(preview, dragBox) {
+  let visible = false;
+  const show = () => preview.showDragBox(visible ? dragBox() : null);
+  return {
+    setVisible(on) {
+      visible = Boolean(on);
+      show();
+    },
+    changed: show,
+    destroy() {
+      visible = false;
+      preview.showDragBox(null);
+      return Promise.resolve();
     },
   };
 }

@@ -13,20 +13,25 @@ import { fakeInput } from '../../input/testDoubles.mjs';
  * Bind the drone tools' renderer double to `viewer`: upstream's draw port
  * fake, and a query port that picks the ground through `viewer.camera`
  * (read on each pick, so a test may set the camera after setup).
- * @returns {{draw: object, unbind: () => void}}
+ * @returns {{draw: object, input: object, unbind: () => void}}
  */
 export function bindDroneRenderer(viewer) {
-  // The imagery box tool takes input from the scene dispatcher (#1760).
-  fakeInput(viewer);
+  // The imagery box tool takes input from the scene dispatcher (#1760); the
+  // legacy polygon / area-edit tools keep a ScreenSpaceEventHandler of their
+  // own, so callers need both entry points.
+  const input = fakeInput(viewer);
   const ecef = (c) => (c ? { x: c.x, y: c.y, z: c.z } : null);
-  return bindFakeDraw(viewer, {
-    query: {
-      pickPosition: () => null,
-      pickEllipsoid: (x, y) => ecef(viewer.camera?.pickEllipsoid?.({ x, y })),
-      pickRay: () => null,
-      pickGlobe: () => null,
-    },
-  });
+  return {
+    ...bindFakeDraw(viewer, {
+      query: {
+        pickPosition: () => null,
+        pickEllipsoid: (x, y) => ecef(viewer.camera?.pickEllipsoid?.({ x, y })),
+        pickRay: () => null,
+        pickGlobe: () => null,
+      },
+    }),
+    input,
+  };
 }
 
 const EVENT_TYPES = {
