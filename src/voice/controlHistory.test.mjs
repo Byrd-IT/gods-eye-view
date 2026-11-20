@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createGevActionRunner } from './gevActions.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
 import { ALL_HISTORY_ADAPTERS } from '../byrdit/historyUi/historyEventAdapters.js';
+import { createHistoryVoice } from '../byrdit/historyUi/historyVoice.js';
 import { VOICE_TOGGLE_LAYER_IDS } from './layerManifest.js';
 
 globalThis.window = globalThis.window || {
@@ -245,6 +246,27 @@ test('feeds refuse a layer that has no history, an empty list and a bad mode, ch
   });
   assert.equal(mode.ok, false);
   assert.deepEqual(h.order, [], 'a refused request toggles no layer');
+});
+
+test('feeds executor suppresses unregistered History router IDs', async () => {
+  const adapter = ALL_HISTORY_ADAPTERS[0];
+  const voice = createHistoryVoice({
+    getHandle: () => ({ getState: () => ({ active: false, rate: 1 }) }),
+    getRouter: () => ({
+      adapters: ALL_HISTORY_ADAPTERS,
+      getState: () => ({
+        swapped: [adapter.id, 'synthetic_unregistered_feed'],
+      }),
+    }),
+  });
+  const h = harness({ voiceOverrides: voice });
+  const result = await h.runner('control_history', {
+    action: 'feeds',
+    feeds: [adapter.layerId],
+    feedMode: 'add',
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.playingFeeds, [adapter.layerId]);
 });
 
 test('feeds report a layer that would not switch, and keep going', async () => {

@@ -136,7 +136,7 @@ export function createHistoryVoice({
   return {
     feedLayerIds: () => (getRouter?.()?.adapters ?? []).map((a) => a.layerId),
     status() {
-      return handle() ? done() : unavailable();
+      return handle() ? doneControl() : unavailable();
     },
     jump({ time, minutesAgo } = {}) {
       const h = handle();

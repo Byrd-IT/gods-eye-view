@@ -34,6 +34,20 @@ function setup({ swapped = [] } = {}) {
   return { clock, control, voice, router };
 }
 
+test('History status filters unknown router feed IDs', () => {
+  const unknown = 'synthetic_unregistered_feed';
+  const voice = createHistoryVoice({
+    getHandle: () => ({ getState: () => ({ active: false, rate: 1 }) }),
+    getRouter: () => ({
+      adapters: ALL_HISTORY_ADAPTERS,
+      getState: () => ({ swapped: [ALL_HISTORY_ADAPTERS[0].id, unknown] }),
+    }),
+  });
+  assert.deepEqual(voice.status().playingFeeds, [
+    ALL_HISTORY_ADAPTERS[0].layerId,
+  ]);
+});
+
 test('History control replies retain every real history feed', () => {
   const state = { active: true, preset: '1h', rate: 1 };
   const voice = createHistoryVoice({
