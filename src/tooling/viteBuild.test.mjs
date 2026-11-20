@@ -152,11 +152,13 @@ test('root config retains existing named exports and standalone provider order',
   assert.equal(names[4], 'byrdit-plan-library');
   // The read-only surface-model API follows it, also before any provider.
   assert.equal(names[5], 'byrdit-surfaces');
+  // The authenticated photo-coverage proxy follows the other Byrd-IT APIs.
+  assert.equal(names[6], 'byrdit-coverage');
   // Shared runtime config for the GEV_BASEMAP / GEV_BYRDIT_WAYBACK flag metas
   // (preview-only html middleware; nothing registers when this test env runs).
-  assert.equal(names[6], 'byrdit-feature-flags');
+  assert.equal(names[7], 'byrdit-feature-flags');
   const standaloneProviders = config.plugins
-    .slice(7, -7)
+    .slice(8, -7)
     .map((plugin) => plugin.name);
   assert.equal(
     standaloneProviders.filter((name) => name === 'gemini-live-proxy').length,

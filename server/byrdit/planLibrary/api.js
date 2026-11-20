@@ -72,7 +72,7 @@ function readBody(req, limit) {
   });
 }
 
-function sameOrigin(req) {
+export function sameOrigin(req) {
   const origin = req.headers.origin;
   if (origin === undefined) return true;
   try {
@@ -80,6 +80,18 @@ function sameOrigin(req) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether a state-changing request carries the library's CSRF proof: the
+ * `X-Requested-With: gev` header, and, when the browser sends an Origin, an
+ * Origin host equal to the Host header. This is the one rule every Byrd-IT
+ * write route uses (the plan library and the photo-coverage proxy).
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {boolean}
+ */
+export function admitsStateChange(req) {
+  return req.headers['x-requested-with'] === 'gev' && sameOrigin(req);
 }
 
 /**
@@ -130,14 +142,8 @@ export function createPlanLibraryHandler({
       .filter(Boolean);
     const method = req.method;
     const write = method !== 'GET' && method !== 'HEAD';
-    if (write) {
-      if (req.headers['x-requested-with'] !== 'gev' || !sameOrigin(req)) {
-        throw new LibraryError(
-          'csrf',
-          'Missing or foreign request origin',
-          403,
-        );
-      }
+    if (write && !admitsStateChange(req)) {
+      throw new LibraryError('csrf', 'Missing or foreign request origin', 403);
     }
     // Whose plans: always the caller's own, unless the admin READS another's.
     const asked = url.searchParams.get('owner');

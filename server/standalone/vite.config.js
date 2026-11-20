@@ -14,6 +14,7 @@ import { waybackPlugins } from '../byrdit/wayback/index.js';
 import { featureFlagsHtmlPlugins } from '../byrdit/featureFlags.js';
 import { planLibraryPlugins } from '../byrdit/planLibrary/api.js';
 import { surfacePlugins } from '../byrdit/surfaces/api.js';
+import { coveragePlugins } from '../byrdit/coverage/api.js';
 import { unwatchedRuntimeDirsPlugin } from './unwatched-cache.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -32,6 +33,7 @@ export function standaloneConfig(
     plugins: [
       ...planLibraryPlugins(),
       ...surfacePlugins(),
+      ...coveragePlugins(),
       ...historyPlugins(),
       ...basemapPlugins(),
       ...waybackPlugins(),
