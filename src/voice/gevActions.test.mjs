@@ -7589,7 +7589,7 @@ test('new panels, clean view and opacity reach their owners', async () => {
       camera: { moveEnd: { addEventListener() {} }, positionWC: Cesium.Cartesian3.fromDegrees(-97.7, 30.2, 1000) },
     },
     styleManager,
-    dataManager: { layers: new Map(), isEnabled: () => false, getAll: () => [] },
+    dataManager: { layers: new Map([['flights', {}]]), isEnabled: () => false, getAll: () => [] },
     layerOpacity: () => {
       if (failProvider) throw new Error('secret-fixture');
       return model;
