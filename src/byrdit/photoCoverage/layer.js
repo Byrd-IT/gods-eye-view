@@ -190,7 +190,15 @@ export async function createCoverageLayer({
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     return {
       screenPoints() {
+        const occluder =
+          viewer.scene.mode === Cesium.SceneMode.SCENE3D
+            ? new Cesium.EllipsoidalOccluder(
+                viewer.scene.globe.ellipsoid,
+                viewer.camera.positionWC,
+              )
+            : null;
         return projected
+          .filter((p) => !occluder || occluder.isPointVisible(p.position))
           .map((p) => {
             const xy = Cesium.SceneTransforms.worldToWindowCoordinates(
               viewer.scene,

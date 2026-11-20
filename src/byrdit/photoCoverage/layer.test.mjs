@@ -82,11 +82,20 @@ function harness(fail = false) {
     Cartesian3: { fromDegrees: (...a) => a, fromDegreesArray: (a) => a },
     ScreenSpaceEventHandler: Handler,
     SceneTransforms: { worldToWindowCoordinates: () => ({ x: 3, y: 4 }) },
+    SceneMode: { SCENE3D: 3 },
+    EllipsoidalOccluder: class {
+      isPointVisible() {
+        return true;
+      }
+    },
     ScreenSpaceEventType: { LEFT_CLICK: 1 },
   };
   const viewer = {
     terrainProvider: {},
+    camera: { positionWC: {} },
     scene: {
+      mode: 3,
+      globe: { ellipsoid: {} },
       canvas: {},
       primitives: {
         add(x) {
@@ -150,6 +159,12 @@ test('layer renders ground and terrain-aligned camera then removes both exactly 
   assert.deepEqual(h.dataSources[0].entities.items[0].position, [0, 0, 115]);
   assert.equal(h.dataSources[0].entities.items[1].id, 'direction:p.jpg');
   assert.deepEqual(layer.screenPoints(), [{ name: 'p.jpg', x: 3, y: 4 }]);
+  h.C.EllipsoidalOccluder = class {
+    isPointVisible() {
+      return false;
+    }
+  };
+  assert.deepEqual(layer.screenPoints(), []);
   h.viewer.scene.pick = () => ({ id: { type: 'coverage-cell', key: 0 } });
   h.handlers[0].fn({ position: {} });
   assert.deepEqual(picks, [{ type: 'cell', key: 0 }]);
