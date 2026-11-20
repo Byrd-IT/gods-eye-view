@@ -163,6 +163,7 @@ test('terrain failure removes all partially created resources', async () => {
   const h = harness(true);
   await assert.rejects(
     createCoverageLayer({ Cesium: h.C, viewer: h.viewer, state }),
+    /Terrain height unavailable/,
   );
   assert.equal(h.primitives.length, 0);
   assert.equal(h.dataSources.length, 0);

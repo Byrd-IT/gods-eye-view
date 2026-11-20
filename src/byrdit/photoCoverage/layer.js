@@ -28,12 +28,17 @@ export async function createCoverageLayer({
     const cartographics = positions.map((p) =>
       Cesium.Cartographic.fromDegrees(p.lon, p.lat),
     );
-    const terrain = cartographics.length
-      ? await Cesium.sampleTerrainMostDetailed(
-          viewer.terrainProvider,
-          cartographics,
-        )
-      : [];
+    let terrain;
+    try {
+      terrain = cartographics.length
+        ? await Cesium.sampleTerrainMostDetailed(
+            viewer.terrainProvider,
+            cartographics,
+          )
+        : [];
+    } catch {
+      throw new Error('Terrain height unavailable');
+    }
     if (
       terrain.length !== positions.length ||
       terrain.some((p) => !Number.isFinite(p.height))

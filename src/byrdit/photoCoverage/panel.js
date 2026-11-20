@@ -286,8 +286,13 @@ export function attachCoveragePanel({
       report(
         `${s.photos.length} photos; ${s.discarded.size} discarded${s.footprintNames.length > 50 ? '; first 50 footprints shown' : ''}`,
       );
-    } catch {
-      if (g === epoch) report('Coverage or terrain is unavailable');
+    } catch (error) {
+      if (g === epoch)
+        report(
+          error?.message === 'Terrain height unavailable'
+            ? 'Terrain heights unavailable; enable a terrain source and reopen coverage'
+            : 'Coverage map is unavailable',
+        );
     }
   }
   async function load() {
