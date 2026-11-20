@@ -9,9 +9,9 @@ export async function createCoverageLayer({Cesium,viewer,state,onPick=()=>{}}) {
   let destroyed = false, handler;
   try {
     await viewer.dataSources.add(cameras);
-    const positions = state.photos.filter(p=>p.placed && Number.isFinite(p.lat) && Number.isFinite(p.lon));
+    const positions = state.photos.filter(p=>p.placed && Number.isFinite(p.lat) && Number.isFinite(p.lon) && (!state.visibleNames || state.visibleNames.has(p.name)));
     const cartographics = positions.map(p=>Cesium.Cartographic.fromDegrees(p.lon,p.lat));
-    const terrain = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider,cartographics);
+    const terrain = cartographics.length ? await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider,cartographics) : [];
     if (terrain.length !== positions.length || terrain.some(p=>!Number.isFinite(p.height))) throw new Error('Terrain height unavailable');
     const byCell = new Map(state.cells.k.map((k,i)=>[k,state.counts[i]]));
     const palette={red:Cesium.Color.RED,orange:Cesium.Color.ORANGE,yellow:Cesium.Color.YELLOW,green:Cesium.Color.LIME};

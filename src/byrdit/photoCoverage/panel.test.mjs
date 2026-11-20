@@ -10,10 +10,12 @@ const tick=()=>new Promise(r=>setImmediate(r));
 test('no fetch before opt-in; photo selection, discard, and teardown',async()=>{
  const doc=fakeDocument(),root=doc.createElement('div');let requests=[],layers=[],pick;
  const fetchImpl=async(url)=>{requests.push(url);if(url.endsWith('/model.json'))return ok({id:model,origin:{lat:0,lon:0},ground_z:0});if(url.endsWith('/photos.json'))return ok({model,photos});if(url.endsWith('/cells.json'))return ok(cells);return ok([])};
- const createLayer=async x=>{pick=x.onPick;const layer={dead:false,destroy(){this.dead=true}};layers.push(layer);return layer};
+ const createLayer=async x=>{pick=x.onPick;const layer={dead:false,visible:x.state.visibleNames,counts:x.state.counts,destroy(){this.dead=true}};layers.push(layer);return layer};
  const detach=attachCoveragePanel({doc,container:root,viewer:{},Cesium:{},fetchImpl,createLayer});assert.equal(requests.length,0);
  const toggle=root.find(n=>n.textContent==='Show photo coverage');toggle.onclick();await tick();await tick();assert.equal(layers.length,1);
  pick({type:'photo',name:'p.jpg'});assert(root.textContent.includes('p.jpg'));
- const discard=root.find(n=>n.textContent==='Discard');discard.onclick();await tick();assert.equal(layers.length,2);assert(layers[0].dead);
- toggle.onclick();assert(layers[1].dead);detach();assert.equal(root.children.length,0);
+ const date=root.find(n=>n.getAttribute('aria-label')==='Flight date');date.value='2026-11-17';date.onchange();await tick();assert.equal(layers.length,2);assert.equal(layers[1].visible.size,0);assert.deepEqual(layers[1].counts,[0]);assert(layers[0].dead);
+ date.value='';date.onchange();await tick();assert.equal(layers.length,3);
+ const discard=root.find(n=>n.textContent==='Discard');discard.onclick();await tick();assert.equal(layers.length,4);assert(layers[2].dead);
+ toggle.onclick();assert(layers[3].dead);detach();assert.equal(root.children.length,0);
 });
