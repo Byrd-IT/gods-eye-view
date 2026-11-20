@@ -209,6 +209,36 @@ test('imagery readback retains every available year', async () => {
   assert.deepEqual(state.imagery.years, years);
 });
 
+test('CCTV new feed summary fields suppress accessor exceptions', async () => {
+  let feedHits = 0;
+  let noFeedHits = 0;
+  const activeCamera = {
+    id: 'cam',
+    get feedType() {
+      feedHits++;
+      throw new Error('synthetic_feed_error');
+    },
+    get noFeed() {
+      noFeedHits++;
+      throw new Error('synthetic_nofeed_error');
+    },
+  };
+  const module = {
+    getUIState: () => ({ activeCamera, count: 1 }),
+    cycleCamera: () => true,
+    focusCamera: () => true,
+  };
+  const manager = {
+    layers: new Map([['cctv', { module }]]),
+    isEnabled: () => true,
+  };
+  const result = await controlCctv(manager, { action: 'next' });
+  assert.equal(feedHits, 1);
+  assert.equal(noFeedHits, 1);
+  assert.equal(result.feedType, null);
+  assert.equal(result.noFeed, null);
+});
+
 test('CCTV never echoes an untrusted feed type', async () => {
   const secret = 'SYNTHETIC_FEEDTYPE_SECRET_49d8a1';
   const module = {

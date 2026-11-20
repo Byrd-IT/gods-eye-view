@@ -2701,6 +2701,21 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
   const summarize = () => {
     const ui = cctv.getUIState?.() || {};
     const active = ui.activeCamera || null;
+    let feedType = null;
+    let noFeed = null;
+    try {
+      const reported = active?.feedType;
+      if (['none', 'image', 'mjpeg', 'mp4', 'hls', 'webm'].includes(reported))
+        feedType = reported;
+    } catch {
+      /* unavailable */
+    }
+    try {
+      const reported = active?.noFeed;
+      if (typeof reported === 'boolean') noFeed = reported;
+    } catch {
+      /* unavailable */
+    }
     return {
       activeCameraId: ui.activeCameraId || null,
       activeCamera: active?.name || active?.id || null,
@@ -2715,13 +2730,8 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
       // feed at all: a location-only camera (feed type 'none') shows no
       // picture. The feed type is the camera's own configuration — it is
       // never a claim that the feed is live.
-      feedType: ['none', 'image', 'mjpeg', 'mp4', 'hls', 'webm'].includes(
-        active?.feedType,
-      )
-        ? active.feedType
-        : null,
-      noFeed:
-        active && typeof active.noFeed === 'boolean' ? active.noFeed : null,
+      feedType,
+      noFeed,
     };
   };
 
