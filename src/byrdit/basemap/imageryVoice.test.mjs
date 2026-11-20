@@ -24,6 +24,26 @@ test('Wayback playback suppresses untrusted transport state', async () => {
   assert.equal(JSON.stringify(result).includes(marker), false);
 });
 
+test('imagery step refuses an owner that loses state while stepping', async () => {
+  let state = { year: 2018, ticks: [2018, 2024], layers: [] };
+  const handle = {
+    state: () => state,
+    setYear() {},
+    step() {
+      state = null;
+    },
+  };
+  const voice = createImageryVoice({
+    getNaip: () => handle,
+    getCatalog: () => ({
+      years: [{ year: 2018 }, { year: 2024 }],
+      regional: [],
+    }),
+  });
+  const result = await voice.move({ delta: 1 });
+  assert.equal(result.ok, false);
+});
+
 test('imagery step suppresses untrusted year state', async () => {
   const marker = `SYNTHETIC_${crypto.randomUUID()}`;
   const handle = {

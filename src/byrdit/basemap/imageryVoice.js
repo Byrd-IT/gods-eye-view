@@ -247,8 +247,8 @@ export function createImageryVoice({
       ? value
       : null;
 
-  const controlSnapshot = (handle, block) => {
-    const state = handle?.state?.() ?? {};
+  const controlSnapshot = (handle, block, observed = handle?.state?.()) => {
+    const state = observed ?? {};
     const validYear = (year) =>
       Number.isInteger(year) && year >= 1800 && year <= 2999;
     const compare = state.compare === true && state.yearB != null;
@@ -466,9 +466,11 @@ export function createImageryVoice({
           handle.step(delta);
         else
           return fail('step needs an integer direction and available control');
-        if (latest && handle.state?.()?.year !== state.ticks.at(-1))
+        const observed = handle.state?.();
+        if (!observed) return unavailable();
+        if (latest && observed.year !== state.ticks.at(-1))
           return fail('Latest year could not be set');
-        return { ok: true, ...controlSnapshot(handle, block) };
+        return { ok: true, ...controlSnapshot(handle, block, observed) };
       }
       if (target !== 'wayback') return fail('Choose aerial or wayback');
       const handle = wayback();
