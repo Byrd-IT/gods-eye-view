@@ -22,6 +22,8 @@ import { createOverlaysMenuPanel } from './overlaysPanel.js';
 import { ensureTimeTravelMenu } from '../timeTravel/menu.js';
 import { createBasemapHealthMonitor, loadBasemapHealth } from './health.js';
 import { cesiumViewerFor } from '../cesiumViewer.js';
+import { ensureMapLayersCard } from './mapLayersCard.js';
+import { attachCoveragePanel } from '../photoCoverage/panel.js';
 
 /**
  * Entry point used by src/app/scene.js (BASEMAP.md 4.3).
@@ -219,6 +221,10 @@ export async function openBasemap({
             })
           : null;
       const hookWindow = viewer?.container?.ownerDocument?.defaultView ?? null;
+      const coverageCard = ensureMapLayersCard(viewer?.container?.ownerDocument ?? doc);
+      const detachCoverage = coverageCard
+        ? attachCoveragePanel({ Cesium, viewer, container: coverageCard.body, fetchImpl })
+        : null;
       const imageryVoice = createImageryVoice({
         getNaip: () => naip,
         getCatalog: () => config.naip,
@@ -247,6 +253,7 @@ export async function openBasemap({
         if (hookWindow?.__gevOverlays === overlays)
           delete hookWindow.__gevOverlays;
         overlays?.();
+        detachCoverage?.();
         naip?.();
         buildings?.();
         detachSwitch();
