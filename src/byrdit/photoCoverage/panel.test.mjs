@@ -15,7 +15,7 @@ test('no fetch before opt-in; photo selection, discard, and teardown',async()=>{
  const toggle=root.find(n=>n.textContent==='Show photo coverage');toggle.onclick();await tick();await tick();assert.equal(layers.length,1);
  pick({type:'photo',name:'p.jpg'});await tick();assert(root.textContent.includes('p.jpg'));assert.equal(layers.length,2);
  const date=root.find(n=>n.getAttribute('aria-label')==='Flight date');date.value='2026-11-17';date.onchange();await tick();assert.equal(layers.length,3);assert.equal(layers[2].visible.size,0);assert.deepEqual(layers[2].counts,[0]);assert(layers[1].dead);
- date.value='';date.onchange();await tick();assert.equal(layers.length,4);
- const discard=root.find(n=>n.textContent==='Discard');discard.onclick();await tick();assert.equal(layers.length,5);assert(layers[3].dead);
- toggle.onclick();assert(layers[4].dead);detach();assert.equal(root.children.length,0);
+ date.value='';date.onchange();await tick();assert.equal(layers.length,4);pick({type:'photo',name:'p.jpg'});await tick();assert.equal(layers.length,5);
+ const discard=root.find(n=>n.textContent==='Discard');discard.onclick();await tick();assert.equal(layers.length,6);assert(layers[4].dead);
+ toggle.onclick();assert(layers[5].dead);detach();assert.equal(root.children.length,0);
 });
