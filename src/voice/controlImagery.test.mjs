@@ -61,6 +61,89 @@ test('imagery status suppresses owner exceptions', async () => {
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test('imagery status copies only allowlisted typed state from an owner', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = harness({
+    status: async () => ({
+      ok: true,
+      year: 2018,
+      enabled: true,
+      compare: true,
+      drawn: true,
+      yearB: 2024,
+      years: [2018, 2024, secret],
+      label: secret,
+      counties: ['Titus', secret],
+      sets: [{ id: 'hist-titus-1940', name: secret, greyscale: true }],
+      wayback: {
+        available: true,
+        on: false,
+        date: secret,
+        years: [2018, secret],
+      },
+      error: secret,
+      say: secret,
+      extra: secret,
+      get hostile() {
+        throw new Error(secret);
+      },
+    }),
+  });
+  const result = await h.runner('control_imagery', { action: 'status' });
+  assert.equal(result.ok, true);
+  assert.equal(result.year, 2018);
+  assert.equal(result.enabled, true);
+  assert.equal(result.compare, true);
+  assert.equal(result.drawn, true);
+  assert.equal(result.yearB, 2024);
+  assert.deepEqual(result.years, [2018, 2024]);
+  assert.equal(result.countyCount, 2);
+  assert.equal(result.setCount, 1);
+  assert.equal('counties' in result, false);
+  assert.equal('sets' in result, false);
+  assert.deepEqual(result.wayback, {
+    available: true,
+    on: false,
+    date: null,
+    years: [2018],
+  });
+  assert.equal('label' in result, false);
+  assert.equal('error' in result, false);
+  assert.equal('say' in result, false);
+  assert.equal('extra' in result, false);
+  assert.equal('hostile' in result, false);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test('imagery status drops an untrusted year and replaces an owner error', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = harness({
+    status: async () => ({
+      ok: true,
+      year: secret,
+      years: [secret],
+      wayback: { available: 'yes', date: secret },
+    }),
+  });
+  const result = await h.runner('control_imagery', { action: 'status' });
+  assert.equal(result.ok, true);
+  assert.equal('year' in result, false);
+  assert.deepEqual(result.years, []);
+  assert.deepEqual(result.wayback, {
+    available: false,
+    date: null,
+  });
+  assert.equal(JSON.stringify(result).includes(secret), false);
+
+  const failed = harness({
+    status: async () => ({ ok: false, error: secret }),
+  });
+  const refused = await failed.runner('control_imagery', { action: 'status' });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, 'Imagery status is unavailable');
+  assert.equal(JSON.stringify(refused).includes(secret), false);
+});
+
 test('control_imagery stays just before control_droneplan and does not reorder control_sky', () => {
   const names = GEV_REALTIME_TOOLS.map((tool) => tool.name);
   const imagery = names.indexOf('control_imagery');

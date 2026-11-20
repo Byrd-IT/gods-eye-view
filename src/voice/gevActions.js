@@ -2640,7 +2640,56 @@ async function controlImagery(voice, args = {}, dataManager = null) {
       ok: false,
       error: 'Aerial imagery is not available in this host',
     });
-  if (action === 'status') return wrap(await safeAdapterCall(voice, 'status'));
+  if (action === 'status') {
+    const status = await safeAdapterCall(voice, 'status');
+    try {
+      if (status.ok !== true)
+        return wrap({ ok: false, error: 'Imagery status is unavailable' });
+      const result = { ok: true };
+      const validYear = (value) =>
+        Number.isInteger(value) && value >= 1800 && value <= 2999;
+      for (const key of ['year', 'yearB']) {
+        const value = status[key];
+        if (value === null && key === 'year') result[key] = null;
+        else if (validYear(value)) result[key] = value;
+      }
+      for (const key of ['enabled', 'compare', 'drawn']) {
+        const value = status[key];
+        if (typeof value === 'boolean') result[key] = value;
+      }
+      const filteredYears = (values) => {
+        const result = [];
+        for (const value of values) if (validYear(value)) result.push(value);
+        return result;
+      };
+      const years = status.years;
+      if (Array.isArray(years)) result.years = filteredYears(years);
+      const counties = status.counties;
+      const countyCount = Array.isArray(counties) ? counties.length : null;
+      if (Number.isSafeInteger(countyCount)) result.countyCount = countyCount;
+      const sets = status.sets;
+      const setCount = Array.isArray(sets) ? sets.length : null;
+      if (Number.isSafeInteger(setCount)) result.setCount = setCount;
+      const wayback = status.wayback;
+      if (wayback && typeof wayback === 'object') {
+        const available = wayback.available === true;
+        const out = { available };
+        const on = wayback.on;
+        if (typeof on === 'boolean') out.on = on;
+        const timestamp = Date.parse(wayback.date);
+        out.date = Number.isFinite(timestamp)
+          ? new Date(timestamp).toISOString().slice(0, 10)
+          : null;
+        const waybackYears = wayback.years;
+        if (Array.isArray(waybackYears))
+          out.years = filteredYears(waybackYears);
+        result.wayback = out;
+      }
+      return wrap(result);
+    } catch {
+      return wrap({ ok: false, error: 'Imagery status is unavailable' });
+    }
+  }
   if (action === 'compare')
     return wrap(
       await safeAdapterCall(voice, 'compare', {
