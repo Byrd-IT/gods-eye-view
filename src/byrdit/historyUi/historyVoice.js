@@ -106,24 +106,24 @@ export function createHistoryVoice({
   };
 
   const done = (extra = {}) => ({ ok: true, ...snapshot(), ...extra });
+  const allowedFeeds = new Set([
+    'flights',
+    'military',
+    'ais-live-vessels',
+    'earthquakes',
+    'local-firms',
+    'fire-perimeters',
+    'weather-cyclones',
+    'rocket-launches',
+    'transit',
+    'bikeshare',
+    'wind',
+    'air-quality',
+    'gnss-integrity',
+    'local-usgs-water',
+  ]);
   const doneControl = (extra = {}) => {
     const state = snapshot();
-    const allowedFeeds = new Set([
-      'flights',
-      'military',
-      'ais-live-vessels',
-      'earthquakes',
-      'local-firms',
-      'fire-perimeters',
-      'weather-cyclones',
-      'rocket-launches',
-      'transit',
-      'bikeshare',
-      'wind',
-      'air-quality',
-      'gnss-integrity',
-      'local-usgs-water',
-    ]);
     return {
       ok: true,
       ...state,
@@ -134,7 +134,10 @@ export function createHistoryVoice({
   };
 
   return {
-    feedLayerIds: () => (getRouter?.()?.adapters ?? []).map((a) => a.layerId),
+    feedLayerIds: () =>
+      (getRouter?.()?.adapters ?? [])
+        .map((a) => a.layerId)
+        .filter((id) => allowedFeeds.has(id)),
     status() {
       return handle() ? doneControl() : unavailable();
     },

@@ -248,6 +248,27 @@ test('feeds refuse a layer that has no history, an empty list and a bad mode, ch
   assert.deepEqual(h.order, [], 'a refused request toggles no layer');
 });
 
+test('feed refusal suppresses unregistered History adapter layer IDs', async () => {
+  const adapter = ALL_HISTORY_ADAPTERS[0];
+  const voice = createHistoryVoice({
+    getHandle: () => ({ getState: () => ({ active: false, rate: 1 }) }),
+    getRouter: () => ({
+      adapters: [
+        adapter,
+        { id: 'other', layerId: 'synthetic_unregistered_feed' },
+      ],
+      getState: () => ({ swapped: [] }),
+    }),
+  });
+  const h = harness({ voiceOverrides: voice });
+  const result = await h.runner('control_history', {
+    action: 'feeds',
+    feeds: ['invalid'],
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.feedLayers, [adapter.layerId]);
+});
+
 test('feeds executor suppresses unregistered History router IDs', async () => {
   const adapter = ALL_HISTORY_ADAPTERS[0];
   const voice = createHistoryVoice({

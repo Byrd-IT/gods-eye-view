@@ -34,6 +34,19 @@ function setup({ swapped = [] } = {}) {
   return { clock, control, voice, router };
 }
 
+test('History feed registry filters untrusted layer IDs', () => {
+  const voice = createHistoryVoice({
+    getHandle: () => ({ getState: () => ({ active: false, rate: 1 }) }),
+    getRouter: () => ({
+      adapters: [
+        ALL_HISTORY_ADAPTERS[0],
+        { id: 'other', layerId: 'synthetic_unregistered_feed' },
+      ],
+    }),
+  });
+  assert.deepEqual(voice.feedLayerIds(), [ALL_HISTORY_ADAPTERS[0].layerId]);
+});
+
 test('History status filters unknown router feed IDs', () => {
   const unknown = 'synthetic_unregistered_feed';
   const voice = createHistoryVoice({
