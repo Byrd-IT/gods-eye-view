@@ -152,6 +152,27 @@ test('readback retains observer, history availability, drone takeoff and imagery
   assert.equal(state.imagery.enabled, true);
 });
 
+test('view readback suppresses errors from adapter method getters', async () => {
+  const hostile = {
+    get status() {
+      throw new Error('synthetic_status_error');
+    },
+  };
+  const hostileStack = {
+    get getState() {
+      throw new Error('synthetic_stack_error');
+    },
+  };
+  const state = await readHostViewState({
+    sky: hostile,
+    mapStack: hostileStack,
+    history: { status: () => ({ mode: 'live' }) },
+  });
+  assert.equal(state.sky, null);
+  assert.equal(state.mapStackAuto, null);
+  assert.equal(state.historyPlayback.mode, 'live');
+});
+
 test('view readback suppresses errors from owner state getters', async () => {
   const hostile = {
     get open() {

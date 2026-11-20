@@ -178,8 +178,8 @@ async function boundedRead(fn) {
 
 async function readAdapterStatus(provider) {
   const adapter = resolveHandle(provider);
-  if (!adapter || typeof adapter.status !== 'function') return null;
   try {
+    if (!adapter || typeof adapter.status !== 'function') return null;
     const status = await boundedRead(() => adapter.status());
     if (adapter.destroyed || resolveHandle(provider) !== adapter) return null;
     if (!status || typeof status !== 'object') return null;
@@ -379,8 +379,8 @@ function compactImageryState(status) {
  */
 async function readMapStackAuto(provider) {
   const controller = resolveHandle(provider);
-  if (!controller || typeof controller.getState !== 'function') return null;
   try {
+    if (!controller || typeof controller.getState !== 'function') return null;
     const state = await boundedRead(() => controller.getState());
     const mode = state?.autoMode;
     if (typeof mode !== 'string') return null;
