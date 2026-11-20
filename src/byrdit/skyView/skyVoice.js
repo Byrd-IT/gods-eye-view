@@ -147,9 +147,10 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         'No ground at the screen centre. Move the map onto land first.',
         'Sky view is not available in this mode.',
       ];
+      const reportedError = opened?.error;
       return fail(
-        knownErrors.includes(opened?.error)
-          ? opened.error
+        knownErrors.includes(reportedError)
+          ? reportedError
           : 'Could not open Sky view',
       );
     }

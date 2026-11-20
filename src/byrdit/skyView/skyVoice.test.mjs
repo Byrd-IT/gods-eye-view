@@ -189,6 +189,24 @@ test('open reports a fixed reason when the map centre has no ground', async () =
   assert.equal(h.state.active, false);
 });
 
+test('open does not echo a changing owner error', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  let reads = 0;
+  const h = voiceFor({
+    openResult: {
+      ok: false,
+      get error() {
+        return ++reads === 1
+          ? 'Sky view is not available in this mode.'
+          : secret;
+      },
+    },
+  });
+  const result = await h.voice.open();
+  assert.equal(result.error, 'Sky view is not available in this mode.');
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('close leaves the sky; closing a closed sky does not call exit', () => {
   const h = voiceFor();
   const closed = h.voice.close();
@@ -230,7 +248,13 @@ test('look treats ISS, the ISS and the space station as ISS (ZARYA)', async () =
     search: (query) =>
       query === 'ISS (ZARYA)' ? [hit('ISS (ZARYA)', 'satellite', 0)] : [],
   });
-  for (const name of ['ISS', 'the ISS', 'international space station', 'the space station', 'the international space station']) {
+  for (const name of [
+    'ISS',
+    'the ISS',
+    'international space station',
+    'the space station',
+    'the international space station',
+  ]) {
     h.calls.length = 0;
     h.state.active = true;
     const r = await h.voice.look(name);
