@@ -211,8 +211,9 @@ async function postPlaces(fetchImpl, route, url, init, secrets = []) {
           `json_type=${data === null ? 'null' : typeof data} status=${response.status} ` +
           `elapsed_ms=${elapsed()} body=${snippet()}`,
       );
-    if (response.ok && (data === null || typeof data !== 'object'))
-      return { response, data: {}, unreadable: true };
+    // Upstream's rule: a 200 whose body is falsy (JSON null) is unreadable, like
+    // a body that does not parse. A JSON number or string stays an empty answer.
+    if (response.ok && !data) return { response, data: {}, unreadable: true };
     return { response, data };
   } catch (error) {
     console.warn(

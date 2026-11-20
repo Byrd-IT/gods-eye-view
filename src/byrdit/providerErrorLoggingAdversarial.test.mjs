@@ -582,33 +582,43 @@ test('HUD: a healthy reply adds no log line', async (t) => {
 
 // --------------------------------------------- 3/4. Google contracts + body phase
 
-// Replies c3884c6 gives for these upstream replies (verified side by side
+// Replies for these upstream replies (c3884c6 parity, 67/67 identical, until the 98a26787 merge; see UNREADABLE_502 below) (verified side by side
 // against c3884c6 by the repair's contract-parity probe, 67/67 identical).
 const NULL_502 = {
   status: 502,
   body: { error: "Cannot read properties of null (reading 'places')", places: [] },
 };
 const EMPTY_200 = { status: 200, body: { places: [], error: null } };
+// Upstream merge 98a26787: a 200 we could not read (null, malformed, empty or a
+// failed body read) is an upstream failure, a 502 with Cache-Control no-store,
+// not an empty answer. The fork still logs it once (postPlaces), and the route
+// catch does not log it again.
+const UNREADABLE_502 = {
+  status: 502,
+  body: { error: 'Google Places request failed', places: [] },
+};
 const GOOGLE_CASES = [
-  ['JSON null', () => new Response('null'), NULL_502, /reply is not a JSON object .*json_type=null status=200/],
+  ['JSON null', () => new Response('null'), UNREADABLE_502, /reply is not a JSON object .*json_type=null status=200/],
   ['JSON null on 500', () => new Response('null', { status: 500 }), NULL_502, /upstream HTTP 500 .*body="null"/],
   ['JSON number', () => new Response('5'), EMPTY_200, /json_type=number status=200 .*body="5"/],
   ['JSON string', () => new Response('"str"'), EMPTY_200, /json_type=string/],
-  ['malformed JSON', () => new Response('{"places": [tru'), EMPTY_200, /upstream body malformed .*class=malformed status=200 .*body="\{\\"places\\": \[tru"/],
-  ['empty body', () => new Response(''), EMPTY_200, /class=malformed status=200 .*body=""/],
-  ['body read timeout', () => bodyThrows(200, bodyTimeout()), EMPTY_200, /upstream body read failed .*class=timeout status=200 elapsed_ms=\d+ timeout_ms=60000/],
-  ['body reset', () => bodyThrows(200, bodyReset()), EMPTY_200, /body read failed .*class=network code=ECONNRESET status=200/],
+  ['malformed JSON', () => new Response('{"places": [tru'), UNREADABLE_502, /upstream body malformed .*class=malformed status=200 .*body="\{\\"places\\": \[tru"/],
+  ['empty body', () => new Response(''), UNREADABLE_502, /class=malformed status=200 .*body=""/],
+  ['body read timeout', () => bodyThrows(200, bodyTimeout()), UNREADABLE_502, /upstream body read failed .*class=timeout status=200 elapsed_ms=\d+ timeout_ms=60000/],
+  ['body reset', () => bodyThrows(200, bodyReset()), UNREADABLE_502, /body read failed .*class=network code=ECONNRESET status=200/],
 ];
 
 for (const route of ['/api/google/nearby-places', '/api/google/text-search'])
   for (const [label, reply, expected, logPattern] of GOOGLE_CASES)
-    test(`Google ${route.split('/').pop()}: ${label} keeps the c3884c6 reply and is logged`, async (t) => {
+    test(`Google ${route.split('/').pop()}: ${label} gives the settled reply and is logged`, async (t) => {
       const logs = captureLogs(t);
       const res = await callGoogle(googleHandler(async () => reply(), route));
       assert.deepEqual(res, expected);
       assert.ok(logs.some((l) => logPattern.test(l)), logs.join('\n'));
-      if (expected.status === 502)
+      if (expected === NULL_502)
         assert.ok(logs.some((l) => /reply processing failed class=TypeError response=502/.test(l)));
+      if (expected === UNREADABLE_502)
+        assert.ok(!logs.some((l) => /reply processing failed/.test(l)), 'logged once, not again by the route');
       assertNoCanary(logs, label);
     });
 

@@ -359,10 +359,11 @@ test('toggling touches only the body class, the buttons and the rail layout hold
 
 test('markup: the eye is a labelled toggle button beside EXIT CLEAN VIEW', () => {
   const vue = read('src/ui/views/DisplayControlsView.vue');
-  const eye = vue.match(/<button id="clean-view-eye"[^>]*>/)?.[0];
-  assert.ok(eye, 'eye button in the Display view');
-  assert.match(eye, /type="button"/);
-  assert.match(eye, /aria-pressed="false"/);
+  const eye = vue.match(/<UiButton id="clean-view-eye"[^>]*>/)?.[0];
+  assert.ok(eye, 'eye kit button in the Display view');
+  // The kit button is type="button" by default and starts aria-pressed at
+  // false; bindCleanViewEye keeps it in step.
+  assert.match(eye, /:pressed="false"/);
   assert.match(eye, /:aria-label="[^"]+"/);
   assert.doesNotMatch(eye, /tabindex="-1"/);
   assert.ok(

@@ -39,7 +39,8 @@ const SURFACES = {
   'views/panels/OmnibarGuide.vue': [3, 1, 0],
   // The overlay targets' buttons and the title logo.
   'views/SceneChromeView.vue': [2, 0, 0],
-  'views/DisplayControlsView.vue': [1, 0, 0],
+  // EXIT CLEAN VIEW and, Byrd-IT, the corner eye.
+  'views/DisplayControlsView.vue': [2, 0, 0],
   'views/IntelHudView.vue': [1, 0, 1],
   // The card's face and the selected card's clear chip.
   'news/NewsCard.vue': [2, 0, 0],
