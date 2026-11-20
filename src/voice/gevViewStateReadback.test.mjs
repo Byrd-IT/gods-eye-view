@@ -133,6 +133,25 @@ test('Sky playback never returns an untrusted opening error', async () => {
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test('readback retains observer, history availability, drone takeoff and imagery enabled state', async () => {
+  const state = await readHostViewState({
+    sky: { status: () => ({ latitude: 32, longitude: -95 }) },
+    history: { status: () => ({ unavailable: true }) },
+    dronePlan: {
+      status: () => ({
+        takeoff: { lat: 32, lon: -95 },
+        suite: { passes: [{ planned: true }, { planned: false }] },
+      }),
+    },
+    imagery: { status: () => ({ enabled: true }) },
+  });
+  assert.deepEqual(state.sky.observer, { latitude: 32, longitude: -95 });
+  assert.equal(state.historyPlayback.unavailable, true);
+  assert.deepEqual(state.dronePlan.takeoff, { lat: 32, lon: -95 });
+  assert.deepEqual(state.dronePlan.suite, { passCount: 2, plannedCount: 1 });
+  assert.equal(state.imagery.enabled, true);
+});
+
 test('view readback suppresses errors from owner state getters', async () => {
   const hostile = {
     get open() {
