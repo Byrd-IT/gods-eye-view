@@ -161,7 +161,7 @@ export function createHistoryVoice({
       const clamped = ms > t ? 'future' : ms < earliest ? 'past' : null;
       const target = Math.min(t, Math.max(earliest, ms));
       h.seek(target, { snap: true });
-      return done({
+      return doneControl({
         requested: new Date(target).toISOString(),
         ...(clamped ? { clamped } : {}),
       });

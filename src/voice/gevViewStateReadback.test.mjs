@@ -10,6 +10,32 @@ import { createSkyVoice } from '../byrdit/skyView/skyVoice.js';
 import { createHistoryVoice } from '../byrdit/historyUi/historyVoice.js';
 import { readHostViewState } from '../agent/worldPacket.js';
 
+test('History floor jump suppresses untrusted owner state', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const now = Date.parse('2026-10-14T16:00:00Z');
+  const voice = createHistoryVoice({
+    getHandle: () => ({
+      seek() {},
+      getState: () => ({ active: true, timeMs: now, rate: secret }),
+    }),
+    getRouter: () => ({
+      adapters: [{ id: 'unknown', layerId: secret }],
+      getState: () => ({ swapped: ['unknown'] }),
+    }),
+    now: () => now,
+  });
+  const { runner } = harness({ adapters: { history: () => voice } });
+  const result = await runner('control_history', {
+    action: 'jump',
+    minutesAgo: 100_000_000,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.requested, '1957-10-04T00:00:00.000Z');
+  assert.equal(result.rate, null);
+  assert.deepEqual(result.playingFeeds, []);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
 test('History lock refuses an untrusted row even if owner accepts it', async () => {
   const secret = `SYNTHETIC_${crypto.randomUUID()}`;
   const voice = createHistoryVoice({
