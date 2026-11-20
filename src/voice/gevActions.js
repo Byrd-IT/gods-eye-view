@@ -2230,9 +2230,14 @@ async function controlHistory(voice, args = {}, setLayer) {
       ok: false,
       error: 'History playback is not available in this host',
     });
-  if (action === 'status') return wrap(voice.status());
+  if (action === 'status') return wrap(await safeAdapterCall(voice, 'status'));
   if (action === 'jump')
-    return wrap(voice.jump({ time: args.time, minutesAgo: args.minutesAgo }));
+    return wrap(
+      await safeAdapterCall(voice, 'jump', {
+        time: args.time,
+        minutesAgo: args.minutesAgo,
+      }),
+    );
   if (action === 'play') return wrap(voice.play());
   if (action === 'pause') return wrap(voice.pause());
   if (action === 'speed') return wrap(voice.speed(args.rate));
