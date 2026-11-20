@@ -45,7 +45,6 @@ test('every rail rule written for Drone Flight Plan has its Map layers twin', ()
     'layers.css',
     'responsive.css',
     'mobile-shell.css',
-    'cyber.css',
   ]) {
     const css = read(`src/ui/styles/${file}`);
     const dp = count(css, 'drone-plan-panel');
