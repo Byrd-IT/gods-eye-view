@@ -2297,7 +2297,10 @@ async function controlHistory(voice, args = {}, setLayer) {
     // Report already-applied feed changes even if state readback throws.
     let state;
     try {
-      const { ok: _ok, error: _error, ...snapshot } = await voice.status();
+      const result = await voice.status();
+      if (!result || typeof result !== 'object' || result.ok !== true)
+        throw new Error('History readback unavailable');
+      const { ok: _ok, error: _error, ...snapshot } = result;
       state = snapshot;
     } catch {
       return wrap({
