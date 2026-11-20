@@ -247,8 +247,7 @@ export function createImageryVoice({
       ? value
       : null;
 
-  const controlSnapshot = (handle, block, observed = handle?.state?.()) => {
-    const state = observed ?? {};
+  const controlSnapshot = (block, state) => {
     const validYear = (year) =>
       Number.isInteger(year) && year >= 1800 && year <= 2999;
     const compare = state.compare === true && state.yearB != null;
@@ -440,7 +439,7 @@ export function createImageryVoice({
         (enabled && yearB !== undefined && observed.yearB !== yearB)
       )
         return fail('Compare could not be set');
-      return { ok: true, ...controlSnapshot(handle, block) };
+      return { ok: true, ...controlSnapshot(block, observed) };
     },
     async yearB({ yearB } = {}) {
       const handle = naip();
@@ -450,9 +449,10 @@ export function createImageryVoice({
       if (!handle.state?.().ticks?.includes(yearB))
         return fail('Choose an available second year');
       handle.setYearB(yearB);
-      if (handle.state?.()?.yearB !== yearB)
+      const observed = handle.state?.();
+      if (observed?.yearB !== yearB)
         return fail('Second year could not be set');
-      return { ok: true, ...controlSnapshot(handle, block) };
+      return { ok: true, ...controlSnapshot(block, observed) };
     },
     async move({ target = 'aerial', latest = false, delta } = {}) {
       if (target === 'aerial') {
@@ -470,7 +470,7 @@ export function createImageryVoice({
         if (!observed) return unavailable();
         if (latest && observed.year !== state.ticks.at(-1))
           return fail('Latest year could not be set');
-        return { ok: true, ...controlSnapshot(handle, block, observed) };
+        return { ok: true, ...controlSnapshot(block, observed) };
       }
       if (target !== 'wayback') return fail('Choose aerial or wayback');
       const handle = wayback();

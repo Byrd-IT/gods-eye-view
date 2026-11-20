@@ -24,6 +24,39 @@ test('Wayback playback suppresses untrusted transport state', async () => {
   assert.equal(JSON.stringify(result).includes(marker), false);
 });
 
+test('imagery compare and second-year replies use the verified owner snapshot', async () => {
+  for (const action of ['compare', 'yearB']) {
+    let reads = 0;
+    const state = {
+      compare: true,
+      year: 2018,
+      yearB: 2024,
+      ticks: [2018, 2024],
+      layers: [],
+    };
+    const handle = {
+      state: () => (++reads <= 2 ? state : null),
+      setYear() {},
+      setCompare() {},
+      setYearB() {},
+    };
+    const voice = createImageryVoice({
+      getNaip: () => handle,
+      getCatalog: () => ({
+        years: [{ year: 2018 }, { year: 2024 }],
+        regional: [],
+      }),
+    });
+    const result =
+      action === 'compare'
+        ? await voice.compare({ enabled: true, yearB: 2024 })
+        : await voice.yearB({ yearB: 2024 });
+    assert.equal(result.ok, true);
+    assert.equal(result.yearB, 2024);
+    assert.equal(reads, 2);
+  }
+});
+
 test('imagery step refuses an owner that loses state while stepping', async () => {
   let state = { year: 2018, ticks: [2018, 2024], layers: [] };
   const handle = {
