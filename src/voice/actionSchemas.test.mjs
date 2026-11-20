@@ -86,7 +86,12 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Upstream merge fa6d9547 (2026-11-17): upstream's open_stories joins the
     // fork's 39 tools (40); upstream's own pin moved 0c27f620... -> 5a2deb65...
     // over its renderer-seam work. The fork pin before the merge was bec0ddca....
-    '5f94528fbbb5297f1b9b00fdaa770eee0f8915fc87a67adbfc0f798b8a1a862a',
+    // Upstream merge 98a26787 (2026-11-20): the fork's payload moved by exactly
+    // upstream's own delta (verified by a structural diff of both, 7 changed
+    // paths each, identical): the Cyber HUD layout leaves set_hud's layout enum
+    // and the Space Missions panel joins set_panel_open's panelId enum. Upstream's
+    // own pin moved 5a2deb65... -> 09abe70e...; the fork pin before was 5f94528f....
+    '57a5b746b182a37647c37d39295c725c1419d745192365b7e0edf48a7b8e9268',
   );
 });
 

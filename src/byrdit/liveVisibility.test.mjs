@@ -247,6 +247,8 @@ test('UI state does not build frame URLs for every catalog camera', () => {
   const state = {
     _records: records,
     _viewRecords: records,
+    // Upstream's camera picker reads its own list.
+    _pickerRecords: records,
     _healthById: new Map(),
     _cardIds: new Set(),
     _listeners: new Set(),

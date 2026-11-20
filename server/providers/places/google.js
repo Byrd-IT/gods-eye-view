@@ -53,6 +53,13 @@ export function googlePlacesTimeoutMs(env = process.env) {
 /** Errors postPlaces already logged (the route catch must not log them twice). */
 const loggedPlacesFailures = new WeakSet();
 
+/** The error for a 200 whose body could not be read; postPlaces already logged it. */
+function unreadablePlacesError() {
+  const error = new Error('Google Places request failed');
+  loggedPlacesFailures.add(error);
+  return error;
+}
+
 /**
  * URL for a log line. The key travels in X-Goog-Api-Key, but an override
  * endpoint could still carry `?key=`: drop userinfo, mask secret-looking
@@ -177,7 +184,7 @@ async function postPlaces(fetchImpl, route, url, init, secrets = []) {
           `class=${failureClass(error)} status=${response.status} elapsed_ms=${elapsed()} ` +
           `timeout_ms=${timeoutMs}`,
       );
-      return { response, data: {} };
+      return { response, data: {}, unreadable: response.ok };
     }
     const snippet = () => JSON.stringify(redactSnippet(raw, secrets));
     if (!response.ok)
@@ -194,7 +201,9 @@ async function postPlaces(fetchImpl, route, url, init, secrets = []) {
           `[Google Places] ${route} upstream body malformed target="${target}" ` +
             `class=malformed status=${response.status} elapsed_ms=${elapsed()} body=${snippet()}`,
         );
-      return { response, data: {} };
+      // A 200 we could not read is an upstream failure, not an empty answer
+      // (upstream fix, kept with the fork's logging).
+      return { response, data: {}, unreadable: response.ok };
     }
     if (response.ok && (data === null || typeof data !== 'object'))
       console.warn(
@@ -202,6 +211,8 @@ async function postPlaces(fetchImpl, route, url, init, secrets = []) {
           `json_type=${data === null ? 'null' : typeof data} status=${response.status} ` +
           `elapsed_ms=${elapsed()} body=${snippet()}`,
       );
+    if (response.ok && (data === null || typeof data !== 'object'))
+      return { response, data: {}, unreadable: true };
     return { response, data };
   } catch (error) {
     console.warn(
@@ -353,7 +364,7 @@ export function googlePlacesContextProxy({
       );
 
       try {
-        const { response, data } = await postPlaces(
+        const { response, data, unreadable } = await postPlaces(
           fetchImpl,
           'nearby-places',
           endpoints.nearby ||
@@ -388,6 +399,7 @@ export function googlePlacesContextProxy({
           },
           [apiKey, String(latitude), String(longitude)],
         );
+        if (unreadable) throw unreadablePlacesError();
         const places = projectNearbyPlaces(data, latitude, longitude);
 
         res.statusCode = response.ok ? 200 : response.status;
@@ -478,7 +490,7 @@ export function googlePlacesContextProxy({
       );
 
       try {
-        const { response, data } = await postPlaces(
+        const { response, data, unreadable } = await postPlaces(
           fetchImpl,
           'text-search',
           endpoints.textSearch ||
@@ -512,6 +524,7 @@ export function googlePlacesContextProxy({
           },
           [apiKey, textQuery, String(latitude), String(longitude)],
         );
+        if (unreadable) throw unreadablePlacesError();
         const places = projectTextSearchPlaces(data, latitude, longitude);
 
         res.statusCode = response.ok ? 200 : response.status;

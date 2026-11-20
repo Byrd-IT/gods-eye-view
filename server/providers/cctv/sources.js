@@ -1681,6 +1681,18 @@ export async function loadTarkteeSourcesFromDatex() {
         accept: 'application/xml,text/xml,*/*',
         maxBytes: TARKTEE_MAX_CATALOG_BYTES,
         timeoutMs: TARKTEE_FETCH_TIMEOUT_MS,
+        // Byrd-IT p16 (R3): the failure line names its URL, stage, class,
+        // status, elapsed and timeout, as for every other loader here.
+        describeFailure: ({ url, response, error, startedAt, stage }) =>
+          response
+            ? p16HttpFailure({ url, response, startedAt })
+            : p16ThrownFailure({
+                url,
+                error,
+                startedAt,
+                timeoutMs: TARKTEE_FETCH_TIMEOUT_MS,
+                stage,
+              }),
       },
     );
     const locations = parseTarkteeDatexLocations(locXml);
