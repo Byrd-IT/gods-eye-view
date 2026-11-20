@@ -1561,6 +1561,7 @@ export class StyleManager extends ShellFacade {
       for (const [id, value] of this._layerOpacityModel?.entries?.() ?? []) {
         if (
           typeof id === 'string' &&
+          this._dataManager?.layers?.has?.(id) === true &&
           /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) &&
           Number.isFinite(value)
         )

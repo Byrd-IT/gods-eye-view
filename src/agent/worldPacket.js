@@ -100,9 +100,10 @@ export function activeContactsWindow(dataManager) {
  * A host without an opacity model, or one whose entries are all non-finite,
  * reports nothing (null) rather than an empty map.
  * @param {object|null} model The app's opacity model, when it has one.
+ * @param {object|null} knownLayers Optional registry; unregistered ids are omitted.
  * @returns {object|null} Layer id → percent, or null when there is no model.
  */
-export function readLayerOpacity(model) {
+export function readLayerOpacity(model, knownLayers = null) {
   if (!model || typeof model.get !== 'function') return null;
   try {
     const out = {};
@@ -111,7 +112,11 @@ export function readLayerOpacity(model) {
         ? model.entries().map(([id]) => id)
         : [];
     for (const id of ids) {
-      if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(id))
+      if (
+        typeof id !== 'string' ||
+        !/^[a-z0-9][a-z0-9-]{0,63}$/.test(id) ||
+        (knownLayers !== null && knownLayers.has?.(id) !== true)
+      )
         continue;
       const value = Number(model.get(id));
       if (!Number.isFinite(value)) continue;
@@ -490,7 +495,10 @@ export function getWorldPacket(options = {}) {
     typeof styleManager?.getContextModeState === 'function'
       ? withContextModeVocabulary(styleManager.getContextModeState())
       : null;
-  const opacity = readLayerOpacity(layerOpacity);
+  const opacity = readLayerOpacity(
+    layerOpacity,
+    dataManager?.layers ?? new Map(),
+  );
   const controls = readControlState(styleManager, {
     mapStackAuto,
     imagery,

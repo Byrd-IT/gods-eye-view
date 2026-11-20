@@ -273,7 +273,10 @@ function harness({
     },
   ];
   const dataManager = {
-    layers: new Map([['traffic', { module: null }]]),
+    layers: new Map([
+      ['traffic', { module: null }],
+      ['flights', { module: null }],
+    ]),
     getAll: () => rows,
     ...extra,
   };
