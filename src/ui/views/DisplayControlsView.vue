@@ -2,6 +2,7 @@
 import { t } from '../../i18n/index.js';
 import { useDisplayStore } from '../stores/display.js';
 import DisplayPanel from './panels/DisplayPanel.vue';
+import UiButton from '../kit/UiButton.vue';
 
 const display = useDisplayStore();
 
@@ -21,7 +22,7 @@ function eyeTitle() {
 
 <template>
   <DisplayPanel />
-  <button id="clean-view-exit" @click="display.act('exitCleanView')" :title="t('Return UI controls')">{{ t('EXIT CLEAN VIEW') }}</button>
+  <UiButton id="clean-view-exit" @click="display.act('exitCleanView')" :title="t('Return UI controls')">{{ t('EXIT CLEAN VIEW') }}</UiButton>
   <!-- Byrd-IT: the corner eye mirrors clean view (ui/cleanViewEye.js). -->
   <button id="clean-view-eye" type="button" aria-pressed="false" @click="display.act('toggleCleanView')" :aria-label="eyeLabel()" :title="eyeTitle()">
     <span class="clean-view-eye-icon" aria-hidden="true"></span>

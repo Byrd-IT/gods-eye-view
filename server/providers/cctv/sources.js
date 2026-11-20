@@ -43,6 +43,7 @@ import {
   TARKTEE_IMAGE_ORIGIN,
   DEFAULT_TARKTEE_MAX_SOURCES,
   TARKTEE_MAX_CATALOG_BYTES,
+  TARKTEE_FETCH_TIMEOUT_MS,
   TARKTEE_ANCHORS,
   DEFAULT_WARENDORF_SOURCE_FILE,
   WARENDORF_IMAGE_ORIGINS,
@@ -82,7 +83,6 @@ import {
   HK_ANCHORS,
   HK_MAX_CATALOG_BYTES,
   CCTV_SOURCE_FETCH_TIMEOUT_MS,
-  TARKTEE_FETCH_TIMEOUT_MS,
   DELDOT_CCTV_URL,
   DEFAULT_DELDOT_MAX_SOURCES,
   DELDOT_ANCHORS,
@@ -172,6 +172,7 @@ import {
   pinnedCameraUrl,
 } from './normalize.js';
 import { directionToHeading } from '../../../src/data/directionText.js';
+import { readCatalogsTogether } from './catalogPair.js';
 import {
   readResponseBytesCapped,
   readResponseJsonCapped,
@@ -888,6 +889,22 @@ export function _resetOntarioKeyWarningForTest() {
 }
 
 /**
+ * What failed in an Ontario download, without upstream text: the error class,
+ * plus the system code (`ENOTFOUND`) or a refused redirect when there is one.
+ * @param {unknown} error
+ * @returns {string}
+ */
+function ontarioFailureKind(error) {
+  const name = /^[A-Za-z]{1,40}$/.test(error?.name) ? error.name : 'Error';
+  if (error?.cause?.message === 'unexpected redirect')
+    return `${name}, redirect refused`;
+  const code = error?.cause?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)
+    ? `${name} ${code}`
+    : name;
+}
+
+/**
  * Fetch Ontario 511 CCTV cameras. The camera list comes from the 511 API,
  * which now requires a free developer key (511on.ca/developers/doc, "Requires a
  * developer key"; unkeyed calls answer 400 "Invalid Key"), read from
@@ -920,6 +937,7 @@ export async function loadOntarioSourcesFromOpenData(
     url.searchParams.set('key', key);
     const resp = await fetch(url, {
       headers: { Accept: 'application/json' },
+      redirect: 'error',
       signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS),
     });
     if (!resp.ok) {
@@ -937,6 +955,7 @@ export async function loadOntarioSourcesFromOpenData(
           secrets: [key],
         }),
       );
+      await resp.body?.cancel().catch(() => {});
       return [];
     }
     const rows = await resp.json();
@@ -991,7 +1010,7 @@ export async function loadOntarioSourcesFromOpenData(
         url: view.url,
         snapshotUrl: view.url,
         sourceKind: 'ontario-511-open-data',
-        license: 'Open Government Licence - Ontario',
+        license: 'Open Government Licence – Ontario',
       });
     }
 
@@ -1010,9 +1029,10 @@ export async function loadOntarioSourcesFromOpenData(
     );
     return prioritized;
   } catch (error) {
+    // Transport and JSON errors may reflect the credential-bearing request,
+    // so only the error class and a system code are logged, never the text.
     console.warn(
-      '[CCTV] Ontario 511 camera download error:',
-      error?.message || error,
+      `[CCTV] Ontario 511 camera download error (${ontarioFailureKind(error)})`,
     );
     return [];
   }
@@ -1652,113 +1672,17 @@ export function parseTarkteeDatexImages(xml) {
  */
 export async function loadTarkteeSourcesFromDatex() {
   try {
-    // Byrd-IT p16 (R3): each failure names its URL, stage (headers/body),
-    // class, elapsed and timeout for the existing "download error" line.
-    const startedAt = performance.now();
-    const p16Thrown = (url, stage, error) =>
-      p16Annotate(
-        error,
-        p16ThrownFailure({
-          url,
-          error,
-          startedAt,
-          timeoutMs: TARKTEE_FETCH_TIMEOUT_MS,
-          stage,
-        }),
-      );
-    const responses = await Promise.allSettled([
-      fetch(TARKTEE_LOCATIONS_URL, {
-        headers: { Accept: 'application/xml,text/xml,*/*' },
-        redirect: 'manual',
-        signal: AbortSignal.timeout(TARKTEE_FETCH_TIMEOUT_MS),
-      }),
-      fetch(TARKTEE_IMAGES_URL, {
-        headers: { Accept: 'application/xml,text/xml,*/*' },
-        redirect: 'manual',
-        signal: AbortSignal.timeout(TARKTEE_FETCH_TIMEOUT_MS),
-      }),
-    ]);
-    const [locResp, imgResp] = responses.map((result) =>
-      result.status === 'fulfilled' ? result.value : undefined,
+    const [locXml, imgXml] = await readCatalogsTogether(
+      [
+        { url: TARKTEE_LOCATIONS_URL, label: 'locations' },
+        { url: TARKTEE_IMAGES_URL, label: 'images' },
+      ],
+      {
+        accept: 'application/xml,text/xml,*/*',
+        maxBytes: TARKTEE_MAX_CATALOG_BYTES,
+        timeoutMs: TARKTEE_FETCH_TIMEOUT_MS,
+      },
     );
-    // Both responses are fetched in parallel; if either is rejected or overflows
-    // its byte cap, both bodies must be released so neither transport leaks.
-    const discardBoth = async () => {
-      await Promise.allSettled([
-        locResp?.body?.cancel(),
-        imgResp?.body?.cancel(),
-      ]);
-      return [];
-    };
-    const rejectedAt = responses.findIndex(
-      (result) => result.status === 'rejected',
-    );
-    if (rejectedAt !== -1) {
-      await discardBoth();
-      throw p16Thrown(
-        rejectedAt === 0 ? TARKTEE_LOCATIONS_URL : TARKTEE_IMAGES_URL,
-        'headers',
-        responses[rejectedAt].reason,
-      );
-    }
-    if (
-      (locResp.status >= 300 && locResp.status < 400) ||
-      (imgResp.status >= 300 && imgResp.status < 400)
-    ) {
-      console.warn(
-        '[CCTV] Tarktee DATEX catalog redirected; redirects are not followed',
-      );
-      return discardBoth();
-    }
-    if (!locResp.ok) {
-      console.warn(
-        '[CCTV] Tarktee locations download failed:',
-        locResp.status,
-        await p16HttpFailure({
-          url: TARKTEE_LOCATIONS_URL,
-          response: locResp,
-          startedAt,
-        }),
-      );
-      return discardBoth();
-    }
-    if (!imgResp.ok) {
-      console.warn(
-        '[CCTV] Tarktee images download failed:',
-        imgResp.status,
-        await p16HttpFailure({
-          url: TARKTEE_IMAGES_URL,
-          response: imgResp,
-          startedAt,
-        }),
-      );
-      return discardBoth();
-    }
-    let locXml;
-    let imgXml;
-    const readAbort = new AbortController();
-    try {
-      [locXml, imgXml] = await Promise.all([
-        readResponseTextCapped(
-          locResp,
-          TARKTEE_MAX_CATALOG_BYTES,
-          readAbort.signal,
-        ).catch((error) => {
-          throw p16Thrown(TARKTEE_LOCATIONS_URL, 'body', error);
-        }),
-        readResponseTextCapped(
-          imgResp,
-          TARKTEE_MAX_CATALOG_BYTES,
-          readAbort.signal,
-        ).catch((error) => {
-          throw p16Thrown(TARKTEE_IMAGES_URL, 'body', error);
-        }),
-      ]);
-    } catch (error) {
-      readAbort.abort();
-      await discardBoth();
-      throw error;
-    }
     const locations = parseTarkteeDatexLocations(locXml);
     const images = parseTarkteeDatexImages(imgXml);
     if (!locations.size || !images.size) {

@@ -3,6 +3,7 @@ import { describeError } from './standalone/errors.js';
 import { fetchGoogleKey, fetchIonCredential } from './byrdit/serverKeys.js';
 import { t } from './i18n/index.js';
 import { installEsLiveFetch } from './byrdit/esLive/clientRedirect.js';
+import { PHOTON_SETTING as photonSetting } from './search/photonSetting.js';
 
 // GEV_ES_LIVE_*: send the USGS quake and ECCC air-quality requests to this
 // server (our Elasticsearch copy). First, so the history router wraps it.
@@ -14,8 +15,6 @@ installEsLiveFetch();
 // at runtime from a same-origin endpoint in obfuscated form and decoded in
 // memory (Google 3D Tiles are requested by the browser itself). No top-level
 // await: the production build targets es2020, which rejects it.
-// The Vite boundary exposes only undefined, null, or a validated URL.
-const photonSetting = import.meta.env.PHOTON_URL;
 
 const application = Promise.all([fetchIonCredential(), fetchGoogleKey()]).then(
   ([cesiumToken, googleApiKey]) => {

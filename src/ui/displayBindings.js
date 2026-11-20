@@ -54,7 +54,7 @@ export class DisplayBindings {
       documentRef: document,
       searchInput: this._locationSearch,
       actions: {
-        setStyle: (style) => this.setStyle(style, { userInitiated: true }),
+        setStyle: (style) => this.setStyle(style),
         dismissSearch: () => this._closeLocationSearch?.({ ifOpen: true }),
         toggleHud: () => {
           this.shareLinkManager?.claimRestoreLane?.('visual');
@@ -68,8 +68,8 @@ export class DisplayBindings {
           if (document.body.classList.contains('ui-clean-view'))
             this.toggleCleanView(false);
         },
-        toggleLayers: () =>
-          document.getElementById('data-panel').classList.toggle('active'),
+        // Same collapse as the panel's own button, so its rail entry stays.
+        toggleLayers: () => this._togglePanel('data-panel'),
         cycleDetection: () => {
           this.shareLinkManager?.claimRestoreLane?.('visual');
           this.claimDetection();
@@ -86,7 +86,7 @@ export class DisplayBindings {
     this._detachDisplayControls?.();
     const store = this.displayStore ?? useDisplayStore(applicationPinia());
     const token = store.connect({
-      setStyle: (style) => this.setStyle(style, { userInitiated: true }),
+      setStyle: (style) => this.setStyle(style),
       toggleBloom: () => {
         this.shareLinkManager?.claimRestoreLane?.('visual');
         this._setBloomEnabled(!this.bloomEnabled);
@@ -120,7 +120,7 @@ export class DisplayBindings {
       },
       setHudLayout: (value) => {
         this.shareLinkManager?.claimRestoreLane?.('visual');
-        this._setHudVariant(value, { applyVisualDefaults: true });
+        this._setHudVariant(value);
       },
       toggleCleanView: () => this.toggleCleanView(),
       exitCleanView: () => this.toggleCleanView(false),
@@ -159,7 +159,10 @@ export class DisplayBindings {
         this._updateHudButtonState();
         this._syncShareState();
       },
-      toggleSonar: () => this._setCyberSonarEnabled(),
+      toggleSonar: () => {
+        this.shareLinkManager?.claimRestoreLane?.('visual');
+        this._setCyberSonarEnabled();
+      },
       setSonarRings: (value) => this._setCyberSonarSetting('rings', value),
       setSonarRange: (value) => this._setCyberSonarSetting('range', value),
       setSonarIntensity: (value) =>
@@ -182,9 +185,8 @@ export class DisplayBindings {
       // feather and opacity, 3D aircraft on in Proximity.
       resetVisual: () => {
         this.shareLinkManager?.claimRestoreLane?.('visual');
-        this.setStyle('normal', { userInitiated: true });
-        // The HUD layout follows the Normal style, as choosing it does: the
-        // Cyber HUD stays Cyber.
+        this.setStyle('normal');
+        // The HUD layout and the Sonar style stay as the viewer set them.
         this._applyGlobalPostDefaults({ keepHudVariant: true });
         this._setDetectionAllocation('ELASTIC');
         this._setScope({ enabled: true, featherPct: 100, opacityPct: 100 });

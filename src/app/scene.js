@@ -1,6 +1,7 @@
 import { createApplicationOperations } from './operations.js';
 import { registerDataCredits } from '../data/dataCredits.js';
 import { mountCreditsView } from '../ui/creditsView.js';
+import { trackCreditLineHeight } from '../ui/creditLineHeight.js';
 import { MapStackController } from '../mapStackController.js';
 import { mapEngineFor } from '../maps/engine.js';
 import { initLogoGaze } from '../logoGaze.js';
@@ -179,6 +180,8 @@ export async function createApplicationScene({
     signal,
   });
   defer(() => basemap?.destroy());
+  // The HUD corners above the line clear it when it wraps.
+  defer(trackCreditLineHeight(document));
   loaderStatus.textContent =
     googleApiKey || googleTokens
       ? t('Loading Google 3D Tiles...')
