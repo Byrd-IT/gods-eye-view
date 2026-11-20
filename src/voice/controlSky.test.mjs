@@ -84,6 +84,11 @@ test('new Sky calls suppress owner exceptions and report absent adapters', async
     (await h.runner('control_sky', { action: 'layers', layer: 'grid' })).ok,
     false,
   );
+  const nullAdapter = harness({ voiceOverrides: { playback: () => null } });
+  assert.equal(
+    (await nullAdapter.runner('control_sky', { action: 'play' })).ok,
+    false,
+  );
 });
 
 test('control_sky open, close, look, time, lines, preset and status reach Sky', async () => {
