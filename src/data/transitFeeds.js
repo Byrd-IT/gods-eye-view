@@ -854,6 +854,14 @@ export const TRANSIT_FEED_REGISTRY = Object.freeze([
     center: Object.freeze({ lat: 30.2672, lon: -97.7431 }),
     loadRadiusKm: 60,
     url: 'https://data.texas.gov/download/eiei-9rpf/application%2Foctet-stream',
+    // data.texas.gov answers this feed with 302 -> 303 -> this exact S3 blob
+    // host (signed query). The transit proxy follows a redirect hop only on the
+    // feed's own origin, so the blob host is named here, per feed; no other
+    // host and no http hop is accepted, and the S3 request carries no custom
+    // headers or conditional validators.
+    allowedRedirectHosts: Object.freeze([
+      'sa-core-blob-storage-us-east-1-fedramp-prod.s3-fips.us-east-1.amazonaws.com',
+    ]),
     license: 'CapMetro Developer Tools license',
     licenseUrl: 'https://www.capmetro.org/developertools',
     attribution:
