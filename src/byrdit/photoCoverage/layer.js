@@ -25,9 +25,12 @@ export async function createCoverageLayer({
         Number.isFinite(p.lon) &&
         (!state.visibleNames || state.visibleNames.has(p.name)),
     );
-    const cartographics = positions.map((p) =>
-      Cesium.Cartographic.fromDegrees(p.lon, p.lat),
-    );
+    // The solved z coordinates share one model datum. Anchor that datum once
+    // at the model origin; sampling at each camera would add terrain slope twice.
+    const origin = modelLatLon(state.meta.origin, 0, 0);
+    const cartographics = positions.length
+      ? [Cesium.Cartographic.fromDegrees(origin.lon, origin.lat)]
+      : [];
     let terrain;
     try {
       terrain = cartographics.length
@@ -40,7 +43,7 @@ export async function createCoverageLayer({
       throw new Error('Terrain height unavailable');
     }
     if (
-      terrain.length !== positions.length ||
+      terrain.length !== cartographics.length ||
       terrain.some((p) => !Number.isFinite(p.height))
     )
       throw new Error('Terrain height unavailable');
@@ -120,7 +123,7 @@ export async function createCoverageLayer({
         }),
       );
     const projected = [];
-    positions.forEach((p, i) => {
+    positions.forEach((p) => {
       const status = state.discarded.has(p.name)
         ? Cesium.Color.GRAY
         : p.flags?.length
@@ -129,7 +132,7 @@ export async function createCoverageLayer({
       const position = Cesium.Cartesian3.fromDegrees(
         p.lon,
         p.lat,
-        modelHeight(p.z, state.meta.ground_z, terrain[i].height),
+        modelHeight(p.z, state.meta.ground_z, terrain[0].height),
       );
       projected.push({ name: p.name, position });
       cameras.entities.add({
@@ -150,7 +153,7 @@ export async function createCoverageLayer({
       if (Number.isFinite(length) && length > 1e-6) {
         const ux = dx / length,
           uy = dy / length,
-          h = modelHeight(p.z, state.meta.ground_z, terrain[i].height);
+          h = modelHeight(p.z, state.meta.ground_z, terrain[0].height);
         const a = modelLatLon(
             state.meta.origin,
             p.x + ux * 10 - uy * 3,

@@ -183,3 +183,27 @@ test('terrain failure removes all partially created resources', async () => {
   assert.equal(h.primitives.length, 0);
   assert.equal(h.dataSources.length, 0);
 });
+test('all cameras share the single terrain anchor at model origin', async () => {
+  const h = harness();
+  let sampled;
+  h.C.sampleTerrainMostDetailed = async (_, positions) => {
+    sampled = positions;
+    return positions.map((p) => ({ ...p, height: 100 }));
+  };
+  const s = {
+    ...state,
+    photos: [
+      state.photos[0],
+      { ...state.photos[0], name: 'p2.jpg', lon: 0.01, x: 900 },
+    ],
+  };
+  const layer = await createCoverageLayer({
+    Cesium: h.C,
+    viewer: h.viewer,
+    state: s,
+  });
+  assert.deepEqual(sampled, [{ lon: 0, lat: 0 }]);
+  assert.equal(h.dataSources[0].entities.items[0].position[2], 115);
+  assert.equal(h.dataSources[0].entities.items[2].position[2], 115);
+  layer.destroy();
+});
