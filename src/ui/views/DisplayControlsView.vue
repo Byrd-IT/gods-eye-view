@@ -24,7 +24,8 @@ function eyeTitle() {
   <DisplayPanel />
   <UiButton id="clean-view-exit" @click="display.act('exitCleanView')" :title="t('Return UI controls')">{{ t('EXIT CLEAN VIEW') }}</UiButton>
   <!-- Byrd-IT: the corner eye mirrors clean view (ui/cleanViewEye.js). -->
-  <button id="clean-view-eye" type="button" aria-pressed="false" @click="display.act('toggleCleanView')" :aria-label="eyeLabel()" :title="eyeTitle()">
+  <!-- aria-pressed is kept in step by bindCleanViewEye (sync); the kit button starts it at false. -->
+  <UiButton id="clean-view-eye" :pressed="false" @click="display.act('toggleCleanView')" :aria-label="eyeLabel()" :title="eyeTitle()">
     <span class="clean-view-eye-icon" aria-hidden="true"></span>
-  </button>
+  </UiButton>
 </template>
