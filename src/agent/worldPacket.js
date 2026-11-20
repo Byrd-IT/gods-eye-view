@@ -198,8 +198,12 @@ async function readAdapterStatus(provider) {
  */
 function finiteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  try {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -133,6 +133,20 @@ test('Sky playback never returns an untrusted opening error', async () => {
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
+test('view readback suppresses errors from numeric owner values', async () => {
+  const untrusted = {
+    valueOf() {
+      throw new Error('synthetic_numeric_error');
+    },
+  };
+  const state = await readHostViewState({
+    sky: { status: () => ({ latitude: untrusted, longitude: 1 }) },
+    history: { status: () => ({ rate: Symbol('synthetic_rate') }) },
+  });
+  assert.equal(state.sky, null);
+  assert.equal(state.historyPlayback, null);
+});
+
 test('imagery readback retains every available year', async () => {
   const years = Array.from({ length: 40 }, (_, i) => 1980 + i);
   const state = await readHostViewState({
