@@ -23,12 +23,12 @@ function photoNumber(photo, keys) {
 
 /** Small Map Layers card section. No request is made until explicitly enabled. */
 export function attachCoveragePanel({
-  Cesium,
   viewer,
   container,
   doc = container?.ownerDocument,
   fetchImpl = globalThis.fetch,
   createLayer = createCoverageLayer,
+  beginSelection = beginScreenSelection,
 }) {
   if (!container || !doc) return () => {};
   const store = createCoverageStore({ fetchImpl });
@@ -307,7 +307,6 @@ export function attachCoveragePanel({
     showGaps(s);
     try {
       const next = await createLayer({
-        Cesium,
         viewer,
         state: s,
         onPick: (p) => {
@@ -397,7 +396,7 @@ export function attachCoveragePanel({
     }
     cancelSelection?.();
     report(`Drag a ${mode} around camera markers; Escape cancels`);
-    cancelSelection = beginScreenSelection({
+    cancelSelection = beginSelection({
       viewer,
       mode,
       getPoints: () => layer.screenPoints(),

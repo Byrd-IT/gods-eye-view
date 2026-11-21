@@ -1,20 +1,25 @@
+import { claimPointer, releasePointer } from '../../data/inputOwnership.js';
+import { inputFor } from '../../input/dispatcher.js';
+import { canvasOf } from '../../render/rendererOf.js';
 import { selectScreenPoints } from './selection.js';
 
-// One-shot drag selection. Restores the exact previous camera-input state on
-// pointer cancellation, completion, Escape or disposal.
+/** The id this tool claims the pointer under. */
+export const COVERAGE_SELECTION_POINTER_OWNER = 'photo-coverage-selection';
+
+// One-shot drag selection. Holds the pointer for the session, suppresses the
+// stock clicks, freezes the camera only mid-drag, and gives everything back
+// on completion, Escape, a newer pointer claim or disposal.
 export function beginScreenSelection({
   viewer,
   mode,
   getPoints,
   onSelect,
-  doc = viewer.container.ownerDocument,
+  input = inputFor(viewer),
+  canvas = canvasOf(viewer),
+  doc = canvas?.ownerDocument ?? globalThis.document,
 }) {
   if (!['box', 'circle'].includes(mode))
     throw new Error('Invalid selection mode');
-  const canvas = viewer.scene.canvas,
-    controller = viewer.scene.screenSpaceCameraController;
-  const prior = controller.enableInputs;
-  controller.enableInputs = false;
   const overlay = doc.createElement('div');
   Object.assign(overlay.style, {
     position: 'absolute',
@@ -24,30 +29,28 @@ export function beginScreenSelection({
     display: 'none',
     zIndex: '99',
   });
-  viewer.container.append(overlay);
+  (canvas?.parentElement ?? viewer.container)?.append(overlay);
   let start = null,
-    pointer = null,
-    done = false;
-  function point(e) {
-    const r = canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  }
-  function swallow(e) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
+    done = false,
+    releaseCamera = null;
+  const lease = claimPointer(COVERAGE_SELECTION_POINTER_OWNER, {
+    onLost: () => {
+      if (lease && !done) dispose();
+    },
+  });
+  function thaw() {
+    releaseCamera?.();
+    releaseCamera = null;
   }
   function down(e) {
-    if (pointer !== null || e.button !== 0) return;
-    swallow(e);
-    pointer = e.pointerId;
-    start = point(e);
-    canvas.setPointerCapture?.(pointer);
+    if (start || !e?.position) return;
+    start = { x: e.position.x, y: e.position.y };
+    releaseCamera ??= input.suspendCamera('photo-coverage-selection');
     overlay.style.display = 'block';
   }
   function move(e) {
-    if (e.pointerId !== pointer) return;
-    swallow(e);
-    const p = point(e);
+    const p = e?.endPosition;
+    if (!start || !p) return;
     const dx = p.x - start.x,
       dy = p.y - start.y,
       r = Math.hypot(dx, dy);
@@ -71,9 +74,8 @@ export function beginScreenSelection({
     );
   }
   function up(e) {
-    if (e.pointerId !== pointer) return;
-    swallow(e);
-    const end = point(e);
+    if (!start || !e?.position) return;
+    const end = { x: e.position.x, y: e.position.y };
     let selected = [];
     try {
       selected = selectScreenPoints(getPoints(), start, end, mode);
@@ -82,33 +84,28 @@ export function beginScreenSelection({
     }
     onSelect(selected);
   }
-  function cancel(e) {
-    if (pointer === null || e.pointerId === pointer) {
+  function key(e) {
+    if (e.key === 'Escape') {
       e.preventDefault?.();
       dispose();
     }
   }
-  function key(e) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      dispose();
-    }
-  }
+  const held = { lease: () => lease };
+  const offs = [
+    input.onPointer('down', down, held),
+    input.onPointer('move', move, held),
+    input.onPointer('up', up, held),
+    input.suppressStockClicks(),
+  ];
+  doc.addEventListener('keydown', key, true);
   function dispose() {
     if (done) return;
     done = true;
-    controller.enableInputs = prior;
+    thaw();
     overlay.remove();
-    canvas.removeEventListener('pointerdown', down, true);
-    canvas.removeEventListener('pointermove', move, true);
-    canvas.removeEventListener('pointerup', up, true);
-    canvas.removeEventListener('pointercancel', cancel, true);
+    offs.forEach((off) => off());
     doc.removeEventListener('keydown', key, true);
+    releasePointer(lease);
   }
-  canvas.addEventListener('pointerdown', down, true);
-  canvas.addEventListener('pointermove', move, true);
-  canvas.addEventListener('pointerup', up, true);
-  canvas.addEventListener('pointercancel', cancel, true);
-  doc.addEventListener('keydown', key, true);
   return dispose;
 }

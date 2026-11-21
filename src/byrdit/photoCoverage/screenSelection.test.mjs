@@ -1,57 +1,49 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { beginScreenSelection } from './screenSelection.js';
-function target() {
-  const handlers = {};
-  return {
-    handlers,
-    addEventListener(k, f) {
-      handlers[k] = f;
-    },
-    removeEventListener(k) {
-      delete handlers[k];
-    },
-    getBoundingClientRect() {
-      return { left: 10, top: 20 };
-    },
-    setPointerCapture() {},
-  };
-}
+import {
+  pointerOwner,
+  claimPointer,
+  resetPointerOwnership,
+} from '../../data/inputOwnership.js';
+import {
+  beginScreenSelection,
+  COVERAGE_SELECTION_POINTER_OWNER,
+} from './screenSelection.js';
+import { fakeInput } from '../../testSupport/fakeCoverageInput.mjs';
+
 function setup() {
-  const canvas = target(),
-    doc = target(),
+  resetPointerOwnership();
+  const docHandlers = {},
     children = [];
-  doc.createElement = () => ({
-    style: {},
-    remove() {
-      children.pop();
-    },
-  });
-  const control = { enableInputs: true };
-  const viewer = {
-    container: {
-      ownerDocument: doc,
-      append(x) {
-        children.push(x);
+  const doc = {
+    addEventListener: (k, f) => (docHandlers[k] = f),
+    removeEventListener: (k) => delete docHandlers[k],
+    createElement: () => ({
+      style: {},
+      remove() {
+        children.pop();
       },
-    },
-    scene: { canvas, screenSpaceCameraController: control },
+    }),
   };
-  const event = (x, y) => ({
-    pointerId: 1,
-    button: 0,
-    clientX: x + 10,
-    clientY: y + 20,
-    preventDefault() {},
-    stopImmediatePropagation() {},
-  });
-  return { canvas, doc, viewer, control, children, event };
+  const canvas = {
+    ownerDocument: doc,
+    parentElement: { append: (x) => children.push(x) },
+  };
+  const input = fakeInput();
+  const begin = (options) =>
+    beginScreenSelection({ viewer: {}, input, canvas, doc, ...options });
+  const drag = (a, b) => {
+    input.fire('down', { position: a });
+    input.fire('move', { startPosition: a, endPosition: b });
+    input.fire('up', { position: b });
+  };
+  return { doc, docHandlers, children, input, begin, drag };
 }
-test('selection disables camera, selects region and restores it', () => {
+
+test('selection claims the pointer, freezes the camera mid-drag, selects and gives everything back', () => {
   const h = setup();
   let selected;
-  const dispose = beginScreenSelection({
-    viewer: h.viewer,
+  const dispose = h.begin({
     mode: 'box',
     getPoints: () => [
       { name: 'a', x: 5, y: 6 },
@@ -59,29 +51,89 @@ test('selection disables camera, selects region and restores it', () => {
     ],
     onSelect: (x) => (selected = x),
   });
-  assert.equal(h.control.enableInputs, false);
-  h.canvas.handlers.pointerdown(h.event(0, 0));
-  h.canvas.handlers.pointermove(h.event(10, 10));
-  h.canvas.handlers.pointerup(h.event(10, 10));
+  assert.equal(pointerOwner(), COVERAGE_SELECTION_POINTER_OWNER);
+  assert.equal(h.input.state.stockHolds, 1);
+  assert.equal(h.input.state.cameraHolds, 0);
+  h.input.fire('down', { position: { x: 0, y: 0 } });
+  assert.equal(h.input.state.cameraHolds, 1);
+  h.input.fire('move', {
+    startPosition: { x: 0, y: 0 },
+    endPosition: { x: 10, y: 10 },
+  });
+  assert.equal(h.children[0].style.width, '10px');
+  h.input.fire('up', { position: { x: 10, y: 10 } });
   assert.deepEqual(selected, ['a']);
-  assert.equal(h.control.enableInputs, true);
+  assert.equal(h.input.state.cameraHolds, 0);
+  assert.equal(h.input.state.stockHolds, 0);
+  assert.equal(h.input.subscriberCount(), 0);
   assert.equal(h.children.length, 0);
-  assert.equal(Object.keys(h.canvas.handlers).length, 0);
+  assert.equal(Object.keys(h.docHandlers).length, 0);
+  assert.equal(pointerOwner(), null);
   dispose();
 });
-test('cancel restores the prior input state and does not select', () => {
+
+test('circle mode selects inside the radius', () => {
   const h = setup();
-  h.control.enableInputs = false;
-  let calls = 0;
-  beginScreenSelection({
-    viewer: h.viewer,
+  let selected;
+  h.begin({
     mode: 'circle',
-    getPoints: () => [],
-    onSelect: () => calls++,
+    getPoints: () => [
+      { name: 'in', x: 3, y: 0 },
+      { name: 'out', x: 30, y: 0 },
+    ],
+    onSelect: (x) => (selected = x),
   });
-  h.canvas.handlers.pointerdown(h.event(1, 1));
-  h.canvas.handlers.pointercancel(h.event(1, 1));
-  assert.equal(h.control.enableInputs, false);
+  h.drag({ x: 0, y: 0 }, { x: 10, y: 0 });
+  assert.deepEqual(selected, ['in']);
+});
+
+test('Escape mid-drag restores the camera and does not select', () => {
+  const h = setup();
+  let calls = 0;
+  h.begin({ mode: 'circle', getPoints: () => [], onSelect: () => calls++ });
+  h.input.fire('down', { position: { x: 1, y: 1 } });
+  assert.equal(h.input.state.cameraHolds, 1);
+  h.docHandlers.keydown({ key: 'Escape', preventDefault() {} });
+  assert.equal(h.input.state.cameraHolds, 0);
+  assert.equal(h.input.state.stockHolds, 0);
   assert.equal(calls, 0);
   assert.equal(h.children.length, 0);
+  assert.equal(pointerOwner(), null);
+});
+
+test('a newer pointer claim cancels the session and restores the camera', () => {
+  const h = setup();
+  let calls = 0;
+  h.begin({ mode: 'box', getPoints: () => [], onSelect: () => calls++ });
+  h.input.fire('down', { position: { x: 1, y: 1 } });
+  claimPointer('draw');
+  assert.equal(h.input.state.cameraHolds, 0);
+  assert.equal(h.input.state.stockHolds, 0);
+  assert.equal(h.input.subscriberCount(), 0);
+  assert.equal(calls, 0);
+  assert.equal(pointerOwner(), 'draw');
+});
+
+test('disposal is idempotent and returns the camera', () => {
+  const h = setup();
+  const dispose = h.begin({
+    mode: 'box',
+    getPoints: () => [],
+    onSelect: () => {},
+  });
+  h.input.fire('down', { position: { x: 1, y: 1 } });
+  dispose();
+  dispose();
+  assert.equal(h.input.state.cameraHolds, 0);
+  assert.equal(h.input.state.stockHolds, 0);
+  assert.equal(h.children.length, 0);
+});
+
+test('an invalid mode is refused before anything is taken', () => {
+  const h = setup();
+  assert.throws(
+    () => h.begin({ mode: 'lasso', getPoints: () => [], onSelect() {} }),
+    /Invalid selection mode/,
+  );
+  assert.equal(pointerOwner(), null);
 });

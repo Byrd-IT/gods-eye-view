@@ -226,7 +226,6 @@ export async function openBasemap({
       );
       const detachCoverage = coverageCard
         ? attachCoveragePanel({
-            Cesium,
             viewer,
             container: coverageCard.body,
             fetchImpl,

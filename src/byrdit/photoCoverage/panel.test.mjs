@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fakeDocument } from '../historyUi/fakeDom.mjs';
 import { attachCoveragePanel } from './panel.js';
+import { beginScreenSelection } from './screenSelection.js';
+import { fakeInput } from '../../testSupport/fakeCoverageInput.mjs';
 const model = 's4_today';
 const photos = [
   {
@@ -60,7 +62,6 @@ test('no fetch before opt-in; photo selection, discard, and teardown', async () 
     doc,
     container: root,
     viewer: {},
-    Cesium: {},
     fetchImpl,
     createLayer,
   });
@@ -157,7 +158,6 @@ test('pitch and date filters read the coverage photo schema', async () => {
     doc,
     container: root,
     viewer: {},
-    Cesium: {},
     fetchImpl,
     createLayer,
   });
@@ -210,13 +210,8 @@ test('unplaced photos show read-only detail and never enter bulk selection', asy
     root = doc.createElement('div'),
     container = doc.createElement('div'),
     canvas = doc.createElement('canvas');
-  const viewer = {
-    container,
-    scene: {
-      canvas,
-      screenSpaceCameraController: { enableInputs: true },
-    },
-  };
+  const viewer = { container };
+  const input = fakeInput();
   const placed = {
     name: 'p.jpg',
     placed: true,
@@ -268,9 +263,9 @@ test('unplaced photos show read-only detail and never enter bulk selection', asy
     doc,
     container: root,
     viewer,
-    Cesium: {},
     fetchImpl,
     createLayer,
+    beginSelection: (o) => beginScreenSelection({ ...o, input, canvas }),
   });
   root.find((n) => n.textContent === 'Show photo coverage').onclick();
   await tick();
@@ -294,18 +289,12 @@ test('unplaced photos show read-only detail and never enter bulk selection', asy
   assert(root.find((n) => n.textContent === 'Keep'));
   assert(root.find((n) => n.textContent === 'Discard'));
   root.find((n) => n.textContent === 'Box select').onclick();
-  const event = (x, y) => ({
-    __fake: true,
-    button: 0,
-    pointerId: 1,
-    clientX: x,
-    clientY: y,
-    preventDefault() {},
-    stopImmediatePropagation() {},
+  input.fire('down', { position: { x: 0, y: 0 } });
+  input.fire('move', {
+    startPosition: { x: 0, y: 0 },
+    endPosition: { x: 10, y: 10 },
   });
-  canvas.dispatch('pointerdown', event(0, 0));
-  canvas.dispatch('pointermove', event(10, 10));
-  canvas.dispatch('pointerup', event(10, 10));
+  input.fire('up', { position: { x: 10, y: 10 } });
   await tick();
   assert(root.find((n) => n.textContent === '1 selected'));
   detach();

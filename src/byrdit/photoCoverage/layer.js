@@ -1,23 +1,61 @@
+import { fromDegrees } from '../../geo/ellipsoid.js';
+import { inputFor } from '../../input/dispatcher.js';
+import { heightsOf } from '../../queries/heights.js';
+import { drawOf, queryOf } from '../../render/rendererOf.js';
 import { cellCorners, modelHeight, modelLatLon } from './coordinates.js';
 import { coverageColor } from './coverageCore.js';
 import { footprintMask } from './footprintMask.js';
 
-/** Ground coverage and camera positions; caller owns the primitive collection. */
+// Linear [r, g, b] in 0..1, as the named colours the layer always used.
+const RED = [1, 0, 0],
+  ORANGE = [1, 0.6470588235294118, 0],
+  YELLOW = [1, 1, 0],
+  LIME = [0, 1, 0],
+  GRAY = [0.5, 0.5, 0.5],
+  MAGENTA = [1, 0, 1],
+  CYAN = [0, 1, 1],
+  BLACK = [0, 0, 0, 1];
+const withAlpha = (rgb, a) => [rgb[0], rgb[1], rgb[2], a];
+
+/**
+ * Ground coverage and camera positions. The layer owns the draw sets it
+ * makes and the click subscription; `destroy()` gives them all back. The
+ * ports default to the viewer's renderer; tests pass their own.
+ */
 export async function createCoverageLayer({
-  Cesium,
   viewer,
   state,
   onPick = () => {},
+  draw,
+  query,
+  input,
+  heights,
 }) {
-  if (!Cesium || !viewer || !state) throw new Error('Coverage map unavailable');
-  const collection = viewer.scene.primitives.add(
-    new Cesium.PrimitiveCollection(),
-  );
-  const cameras = new Cesium.CustomDataSource('Photo coverage cameras');
-  let destroyed = false,
-    handler;
+  if (!viewer || !state) throw new Error('Coverage map unavailable');
   try {
-    await viewer.dataSources.add(cameras);
+    draw ??= drawOf(viewer);
+    query ??= queryOf(viewer);
+    input ??= inputFor(viewer);
+    heights ??= heightsOf(viewer);
+  } catch {
+    throw new Error('Coverage map unavailable');
+  }
+  if (!draw || !query || !input || !heights)
+    throw new Error('Coverage map unavailable');
+  const sets = [];
+  let destroyed = false,
+    offClick = null;
+  const release = () => {
+    offClick?.();
+    offClick = null;
+    for (const set of sets.splice(0)) set.dispose();
+  };
+  const make = (kind, id, extra) => {
+    const set = draw[kind]({ id, pickable: true, ...extra });
+    sets.push(set);
+    return set;
+  };
+  try {
     const visible = (p) =>
       !state.visibleNames || state.visibleNames.has(p.name);
     const positions = state.photos.filter(
@@ -45,124 +83,78 @@ export async function createCoverageLayer({
     // The solved z coordinates share one model datum. Anchor that datum once
     // at the model origin; sampling at each camera would add terrain slope twice.
     const origin = modelLatLon(state.meta.origin, 0, 0);
-    const cartographics =
-      positions.length || gpsOnly.length
-        ? [Cesium.Cartographic.fromDegrees(origin.lon, origin.lat)]
-        : [];
-    let terrain;
-    try {
-      terrain = cartographics.length
-        ? await Cesium.sampleTerrainMostDetailed(
-            viewer.terrainProvider,
-            cartographics,
-          )
-        : [];
-    } catch {
-      throw new Error('Terrain height unavailable');
+    let terrainHeight = null;
+    if (positions.length || gpsOnly.length) {
+      let terrain;
+      try {
+        terrain = await heights.batch([{ lon: origin.lon, lat: origin.lat }], {
+          against: 'terrain',
+          ellipsoidMisses: true,
+        });
+      } catch {
+        throw new Error('Terrain height unavailable');
+      }
+      if (terrain?.length !== 1 || !Number.isFinite(terrain[0]))
+        throw new Error('Terrain height unavailable');
+      terrainHeight = terrain[0];
     }
-    if (
-      terrain.length !== cartographics.length ||
-      terrain.some((p) => !Number.isFinite(p.height))
-    )
-      throw new Error('Terrain height unavailable');
+    const heightOf = (z) => modelHeight(z, state.meta.ground_z, terrainHeight);
     const byCell = new Map(state.cells.k.map((k, i) => [k, state.counts[i]]));
-    const palette = {
-      red: Cesium.Color.RED,
-      orange: Cesium.Color.ORANGE,
-      yellow: Cesium.Color.YELLOW,
-      green: Cesium.Color.LIME,
-    };
-    const instances = [...state.mask].map((key) => {
+    const palette = { red: RED, orange: ORANGE, yellow: YELLOW, green: LIME };
+    const rectOf = (key) => {
       const corners = cellCorners(state.cells, state.meta.origin, key),
         a = corners[0],
         b = corners[2];
-      const color =
-        palette[coverageColor(byCell.get(key) ?? 0)].withAlpha(0.45);
-      return new Cesium.GeometryInstance({
-        id: { type: 'coverage-cell', key },
-        geometry: new Cesium.RectangleGeometry({
-          rectangle: Cesium.Rectangle.fromDegrees(a.lon, a.lat, b.lon, b.lat),
-          vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
-        }),
-        attributes: {
-          color: Cesium.ColorGeometryInstanceAttribute.fromColor(color),
-        },
-      });
-    });
-    if (instances.length)
-      collection.add(
-        new Cesium.GroundPrimitive({
-          geometryInstances: instances,
-          appearance: new Cesium.PerInstanceColorAppearance({
-            flat: true,
-            translucent: true,
-          }),
-          asynchronous: true,
-        }),
+      return { west: a.lon, south: a.lat, east: b.lon, north: b.lat };
+    };
+    const cells = [...state.mask].map((key) => ({
+      id: `cell:${key}`,
+      geometry: { kind: 'rectangle', rect: rectOf(key) },
+      fill: withAlpha(palette[coverageColor(byCell.get(key) ?? 0)], 0.45),
+      height: 'clampGround',
+      meta: { type: 'coverage-cell', key },
+    }));
+    if (cells.length)
+      make('shapes', 'photo-coverage-cells', { blend: 'translucent' }).set(
+        cells,
       );
     const footprints = [];
     for (const name of (state.footprintNames ?? []).slice(0, 50)) {
       const index = state.photos.findIndex((p) => p.name === name);
       if (index < 0) continue;
-      for (const key of footprintMask(state, index)) {
-        const corners = cellCorners(state.cells, state.meta.origin, key),
-          a = corners[0],
-          b = corners[2];
-        footprints.push(
-          new Cesium.GeometryInstance({
-            id: { type: 'footprint', name },
-            geometry: new Cesium.RectangleGeometry({
-              rectangle: Cesium.Rectangle.fromDegrees(
-                a.lon,
-                a.lat,
-                b.lon,
-                b.lat,
-              ),
-              vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
-            }),
-            attributes: {
-              color: Cesium.ColorGeometryInstanceAttribute.fromColor(
-                Cesium.Color.CYAN.withAlpha(0.24),
-              ),
-            },
-          }),
-        );
-      }
+      for (const key of footprintMask(state, index))
+        footprints.push({
+          id: `footprint:${name}:${key}`,
+          geometry: { kind: 'rectangle', rect: rectOf(key) },
+          fill: withAlpha(CYAN, 0.24),
+          height: 'clampGround',
+          meta: { type: 'footprint', name },
+        });
     }
     if (footprints.length)
-      collection.add(
-        new Cesium.GroundPrimitive({
-          geometryInstances: footprints,
-          appearance: new Cesium.PerInstanceColorAppearance({
-            flat: true,
-            translucent: true,
-          }),
-          asynchronous: true,
-        }),
-      );
-    const projected = [];
+      make('shapes', 'photo-coverage-footprints', {
+        blend: 'translucent',
+      }).set(footprints);
+    const projected = [],
+      points = [],
+      lines = [];
     positions.forEach((p) => {
       const status = state.discarded.has(p.name)
-        ? Cesium.Color.GRAY
+        ? GRAY
         : p.flags?.length
-          ? Cesium.Color.MAGENTA
-          : Cesium.Color.CYAN;
-      const position = Cesium.Cartesian3.fromDegrees(
-        p.lon,
-        p.lat,
-        modelHeight(p.z, state.meta.ground_z, terrain[0].height),
-      );
+          ? MAGENTA
+          : CYAN;
+      const h = heightOf(p.z);
+      const position = fromDegrees(p.lon, p.lat, h);
       projected.push({ name: p.name, position });
-      cameras.entities.add({
+      points.push({
         id: `photo:${p.name}`,
-        position,
-        point: {
-          pixelSize: 7,
-          color: status,
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 1,
-        },
-        properties: { photoName: p.name },
+        pos: position,
+        pixelSize: 7,
+        color: status,
+        outlineColor: BLACK,
+        outlineWidth: 1,
+        meta: { type: 'photo', name: p.name },
       });
       // A short horizontal direction V at camera altitude, not a ground-coverage polygon.
       const dx = p.fwd?.[0],
@@ -170,8 +162,7 @@ export async function createCoverageLayer({
         length = Math.hypot(dx, dy);
       if (Number.isFinite(length) && length > 1e-6) {
         const ux = dx / length,
-          uy = dy / length,
-          h = modelHeight(p.z, state.meta.ground_z, terrain[0].height);
+          uy = dy / length;
         const a = modelLatLon(
             state.meta.origin,
             p.x + ux * 10 - uy * 3,
@@ -182,70 +173,61 @@ export async function createCoverageLayer({
             p.x + ux * 10 + uy * 3,
             p.y + uy * 10 - ux * 3,
           );
-        cameras.entities.add({
+        lines.push({
           id: `direction:${p.name}`,
-          polyline: {
-            positions: [
-              Cesium.Cartesian3.fromDegrees(a.lon, a.lat, h),
-              position,
-              Cesium.Cartesian3.fromDegrees(b.lon, b.lat, h),
-            ],
-            width: 2,
-            material: status,
-          },
-          properties: { photoName: p.name },
+          positions: [
+            fromDegrees(a.lon, a.lat, h),
+            position,
+            fromDegrees(b.lon, b.lat, h),
+          ],
+          widthPx: 2,
+          mode: '3d',
+          style: { kind: 'solid', color: status },
+          meta: { type: 'direction', name: p.name },
         });
       }
     });
     // Yellow GPS-only markers are click-selectable for details, but they are
     // deliberately absent from projected/screenPoints so box and circle
     // selection can never hand an unplaced name to the server-backed keep set.
-    for (const p of gpsOnly) {
-      cameras.entities.add({
+    // The click detail panel says they are not placed in this model.
+    for (const p of gpsOnly)
+      points.push({
         id: `photo:${p.name}`,
-        position: Cesium.Cartesian3.fromDegrees(
-          p.lon,
-          p.lat,
-          modelHeight(p.z, state.meta.ground_z, terrain[0].height),
-        ),
-        point: {
-          pixelSize: 7,
-          color: Cesium.Color.YELLOW,
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 1,
-        },
-        label: { text: 'not placed in this model' },
-        properties: { photoName: p.name, placed: false },
+        pos: fromDegrees(p.lon, p.lat, heightOf(p.z)),
+        pixelSize: 7,
+        color: YELLOW,
+        outlineColor: BLACK,
+        outlineWidth: 1,
+        meta: { type: 'photo', name: p.name, placed: false },
       });
-    }
-    handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-    handler.setInputAction((event) => {
-      const hit = viewer.scene.pick(event.position);
-      const id = hit?.id;
-      if (id?.type === 'coverage-cell') onPick({ type: 'cell', key: id.key });
-      else if (id?.type === 'footprint')
-        onPick({ type: 'photo', name: id.name });
-      else if (typeof id?.id === 'string' && id.id.startsWith('photo:'))
-        onPick({ type: 'photo', name: id.id.slice(6) });
-      else if (typeof id?.id === 'string' && id.id.startsWith('direction:'))
-        onPick({ type: 'photo', name: id.id.slice(10) });
-    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    if (points.length) make('points', 'photo-coverage-cameras').set(points);
+    if (lines.length) make('lines', 'photo-coverage-directions').set(lines);
+    const ours = new Set([
+      'photo-coverage-cells',
+      'photo-coverage-footprints',
+      'photo-coverage-cameras',
+      'photo-coverage-directions',
+    ]);
+    offClick = input.onClick((event) => {
+      const hit = event?.drawHit;
+      if (!hit || !ours.has(hit.set)) return;
+      const meta = hit.meta;
+      if (meta?.type === 'coverage-cell')
+        onPick({ type: 'cell', key: meta.key });
+      else if (
+        meta?.type === 'footprint' ||
+        meta?.type === 'photo' ||
+        meta?.type === 'direction'
+      )
+        onPick({ type: 'photo', name: meta.name });
+    });
     return {
       screenPoints() {
-        const occluder =
-          viewer.scene.mode === Cesium.SceneMode.SCENE3D
-            ? new Cesium.EllipsoidalOccluder(
-                viewer.scene.globe.ellipsoid,
-                viewer.camera.positionWC,
-              )
-            : null;
         return projected
-          .filter((p) => !occluder || occluder.isPointVisible(p.position))
+          .filter((p) => query.isOccluded(p.position) !== true)
           .map((p) => {
-            const xy = Cesium.SceneTransforms.worldToWindowCoordinates(
-              viewer.scene,
-              p.position,
-            );
+            const xy = query.project(p.position);
             return xy ? { name: p.name, x: xy.x, y: xy.y } : null;
           })
           .filter(Boolean);
@@ -253,15 +235,11 @@ export async function createCoverageLayer({
       destroy() {
         if (destroyed) return;
         destroyed = true;
-        handler?.destroy();
-        viewer.dataSources.remove(cameras, true);
-        viewer.scene.primitives.remove(collection);
+        release();
       },
     };
   } catch (error) {
-    handler?.destroy();
-    viewer.dataSources.remove(cameras, true);
-    viewer.scene.primitives.remove(collection);
+    release();
     throw error;
   }
 }
