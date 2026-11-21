@@ -59,6 +59,8 @@
     "qa:map-source-tray": "node scripts/qa-map-source-tray.mjs",
     "qa:street-level": "node scripts/qa-street-level.mjs",
     "qa:street-level:fixtures": "node scripts/qa-street-level.mjs --fixtures",
+    "qa:locale": "node scripts/qa-locale-placement.mjs",
+    "qa:locale:delta": "node scripts/qa-locale-delta.mjs",
     "check:boundaries": "node scripts/check-import-directions.mjs && node scripts/check-package-boundaries.mjs",
     "qa:history-store": "node scripts/qa-history-store.mjs",
     "qa:history-recorder": "node scripts/qa-history-recorder.mjs",

@@ -80,7 +80,7 @@
   letter-spacing: 0.4px;
 }
 .gev-nav-slider {
-  /* Vertical range: top is near-horizon, bottom is top-down. */
+  /* Vertical range: top is straight up, bottom is top-down. */
   writing-mode: vertical-lr;
   direction: rtl;
   width: 20px;

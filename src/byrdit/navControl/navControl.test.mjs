@@ -92,8 +92,9 @@ function createDocument() {
 }
 
 // ── a real Cesium camera orbiting a fixed ground point ───────────────────
-function createViewer({ pick = GROUND, ground = GROUND } = {}) {
+function createViewer({ pick = GROUND, ground = GROUND, sampleHeight } = {}) {
   const scene = {
+    ...(sampleHeight ? { sampleHeight } : {}),
     canvas: new FakeElement('canvas'),
     drawingBufferWidth: 1200,
     drawingBufferHeight: 800,
@@ -190,8 +191,10 @@ function setup(options = {}) {
   const doc = createDocument();
   const clock = createClock();
   const navigations = [];
+  const toasts = [];
   const handle = mountNavControl({
     viewer,
+    showToast: (message) => toasts.push(message),
     parent: doc.body,
     document: doc,
     now: clock.now,
@@ -208,7 +211,17 @@ function setup(options = {}) {
     clock.advance(ms, () => viewer.scene.preUpdate.raiseEvent());
   const button = (name) =>
     handle.root.querySelectorAll(`[data-nav="${name}"]`)[0];
-  return { viewer, doc, clock, handle, navigations, frame, settle, button };
+  return {
+    viewer,
+    doc,
+    clock,
+    handle,
+    navigations,
+    toasts,
+    frame,
+    settle,
+    button,
+  };
 }
 
 test('the control mounts once per viewer and removes itself on destroy', () => {
@@ -273,7 +286,10 @@ test('every control is a focusable, labelled element', () => {
     (n) => n.getAttribute('data-nav') === 'tilt-slider',
   );
   assert.equal(slider.getAttribute('type'), 'range');
-  assert.equal(slider.getAttribute('max'), '79');
+  assert.equal(slider.getAttribute('max'), '179');
+  const title = 'Tilt: top-down (bottom) to straight up (top)';
+  assert.equal(slider.getAttribute('title'), title);
+  assert.equal(slider.getAttribute('aria-label'), title);
 });
 
 test('zoom buttons move the real camera toward and away from the target', () => {
@@ -343,15 +359,51 @@ test('tilt buttons change the pitch in 10 degree steps and stop at the ends', ()
   button('tilt-down').fire('click', { detail: 0 });
   settle();
   assert.ok(Math.abs(Cesium.Math.toDegrees(frame().pitch) + 55) < 0.05);
-  for (let i = 0; i < 12; i++) button('tilt-up').fire('click', { detail: 0 });
-  settle();
-  assert.ok(
-    Math.abs(Cesium.Math.toDegrees(frame().pitch) + 10) < 0.05,
-    `pitch stops at the horizon limit: ${Cesium.Math.toDegrees(frame().pitch)}`,
-  );
+  for (let i = 0; i < 3; i++) {
+    button('tilt-up').fire('click', { detail: 0 });
+    settle();
+  }
+  assert.ok(Math.abs(Cesium.Math.toDegrees(frame().pitch) + 25) < 0.05);
   for (let i = 0; i < 12; i++) button('tilt-down').fire('click', { detail: 0 });
   settle();
   assert.ok(Math.abs(Cesium.Math.toDegrees(frame().pitch) + 89) < 0.05);
+});
+
+test('tilt-up from the orbit limit enters look-up and runs on to straight up', () => {
+  const { button, viewer, handle, settle } = setup({
+    view: { pitch: -10, range: 4_000 },
+  });
+  const before = Cesium.Cartesian3.clone(viewer.camera.positionWC);
+  button('tilt-up').fire('click', { detail: 0 });
+  settle();
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.ok(
+    Cesium.Cartesian3.distance(before, viewer.camera.positionWC) < 1,
+    'the camera stays at the orbit limit',
+  );
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 0) < 0.1);
+  for (let i = 0; i < 12; i++) button('tilt-up').fire('click', { detail: 0 });
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 90) < 0.1);
+  for (let i = 0; i < 30; i++) button('tilt-down').fire('click', { detail: 0 });
+  settle();
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'orbit');
+  assert.ok(
+    Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) + 89) < 0.1,
+    `back to top-down: ${Cesium.Math.toDegrees(viewer.camera.pitch)}`,
+  );
+});
+
+test('the top-down button leaves look-up around its orbit', () => {
+  const { button, viewer, frame, settle } = setup({
+    view: { pitch: -10, range: 4_000 },
+  });
+  button('tilt-slider').value = '179';
+  button('tilt-slider').fire('input');
+  button('top-down').fire('click', { detail: 0 });
+  settle();
+  assert.ok(Math.abs(frame().pitch - TOP_DOWN_PITCH) < 1e-3);
+  assert.ok(Math.abs(frame().range - 4_000) < 1);
+  assert.ok(viewer.camera.positionCartographic.height > 3_900);
 });
 
 test('the top-down button returns to straight down', () => {
@@ -428,13 +480,236 @@ test('the tilt slider sets the pitch directly and the clamp applies', () => {
   assert.ok(Math.abs(Cesium.Math.toDegrees(after.pitch) + 29) < 0.05);
   assert.ok(Math.abs(Cesium.Math.toDegrees(after.heading) - 25) < 0.05);
   assert.ok(Math.abs(after.range - 3_000) < 1);
-  slider.value = '500';
+  slider.value = '79';
   slider.fire('input');
   assert.ok(Math.abs(Cesium.Math.toDegrees(frame().pitch) + 10) < 0.05);
   slider.value = '0';
   slider.fire('input');
   assert.ok(Math.abs(Cesium.Math.toDegrees(frame().pitch) + 89) < 0.05);
   assert.ok(viewer.camera.positionCartographic.height > 0);
+});
+
+test('the slider top looks straight up without moving the camera off its orbit limit', () => {
+  const { button, viewer, handle, frame } = setup({
+    view: { heading: 25, pitch: -45, range: 3_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.value = '79';
+  slider.fire('input');
+  const atLimit = Cesium.Cartesian3.clone(viewer.camera.positionWC);
+  const limitHeight = viewer.camera.positionCartographic.height;
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'orbit');
+  assert.ok(
+    Math.abs(limitHeight - 3_000 * Math.sin(10 * DEG)) < 1,
+    `orbit limit height ${limitHeight}`,
+  );
+
+  slider.value = '179';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.ok(
+    Cesium.Cartesian3.distance(atLimit, viewer.camera.positionWC) < 1e-6,
+    'the camera did not move',
+  );
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 90) < 0.1);
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), null);
+
+  // Back to the bottom: the orbit around the stored anchor, top-down.
+  slider.value = '0';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'orbit');
+  const after = frame();
+  assert.ok(Math.abs(after.pitch - TOP_DOWN_PITCH) < 1e-3);
+  assert.ok(Math.abs(after.range - 3_000) < 1);
+  assert.ok(Math.abs(Cesium.Math.toDegrees(after.heading) - 25) < 0.1);
+  assert.ok(Cesium.Cartesian3.distance(after.target, GROUND) < 1);
+});
+
+test('the slider midway up the look range orbits to the limit and tilts the gaze above the horizon', () => {
+  const { button, viewer, handle } = setup({
+    view: { pitch: -45, range: 2_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.value = '99'; // 10 degrees above the horizon
+  slider.fire('input');
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 10) < 0.1);
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  // The camera that actually ended up there is above the ground.
+  assert.ok(viewer.camera.positionCartographic.height > 300);
+});
+
+test('a camera moved after look-up is no longer anchored', () => {
+  const { button, viewer, handle } = setup({
+    view: { pitch: -45, range: 2_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.value = '179';
+  slider.fire('input');
+  // The user pans: anything else moves the camera.
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(-97.7, 30.3, 2_000),
+    orientation: { heading: 0, pitch: Math.PI / 2, roll: 0 },
+  });
+  const moved = Cesium.Cartesian3.clone(viewer.camera.positionWC);
+  slider.value = '100';
+  slider.fire('input');
+  assert.ok(Cesium.Cartesian3.distance(moved, viewer.camera.positionWC) < 1e-3);
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 11) < 0.1);
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+});
+
+test('terrain keeps the camera high: the orbit lifts, the view tilts, the toast shows once', () => {
+  const heights = [];
+  // Ground rises to 168 m under the camera, which the 10-degree lean at
+  // 1000 m (174 m up) would nearly touch.
+  const { button, viewer, handle, toasts } = setup({
+    viewer: {
+      sampleHeight: (carto) => {
+        heights.push(carto.height);
+        return 168;
+      },
+    },
+    view: { pitch: -45, range: 1_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.fire('pointerdown');
+  slider.value = '150';
+  slider.fire('input');
+  slider.value = '179';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), 'terrain');
+  assert.equal(
+    slider.getAttribute('title'),
+    'Tilt: camera held at a safe height above the terrain; the view tilts instead',
+  );
+  assert.deepEqual(toasts, [
+    'Camera held above the terrain; tilting the view instead',
+  ]);
+  const height = viewer.camera.positionCartographic.height;
+  assert.ok(height - 168 >= 8, `camera clears the terrain: ${height - 168} m`);
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 90) < 0.1);
+
+  // A new gesture may toast again; the limit clears once the orbit is free.
+  slider.fire('pointerup');
+  slider.fire('pointerdown');
+  slider.value = '179';
+  slider.fire('input');
+  assert.equal(toasts.length, 2);
+  slider.value = '0';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), null);
+  assert.equal(
+    slider.getAttribute('title'),
+    'Tilt: top-down (bottom) to straight up (top)',
+  );
+});
+
+test('a terrain-lifted orbit limit holds the camera and turns the gaze to the wanted pitch', () => {
+  const { button, viewer, handle, toasts } = setup({
+    viewer: { sampleHeight: () => 168 },
+    view: { pitch: -45, range: 1_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.value = '79';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) + 10) < 0.1);
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), 'terrain');
+  assert.equal(toasts.length, 1);
+  assert.ok(viewer.camera.positionCartographic.height - 168 >= 8);
+});
+
+test('holding tilt-up into the terrain limit toasts once per press, not per repeat', () => {
+  const { button, handle, toasts, settle } = setup({
+    viewer: { sampleHeight: () => 168 },
+    view: { pitch: -15, range: 1_000 },
+  });
+  const tiltUp = button('tilt-up');
+  tiltUp.fire('pointerdown', { button: 0 });
+  settle(380 + 130 * 5 + 20); // the press plus five repeats
+  tiltUp.fire('pointerup', { button: 0 });
+  settle(1_000);
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), 'terrain');
+  assert.equal(toasts.length, 1, `one toast for one hold: ${toasts.length}`);
+  // A new press, or a keyboard activation, is a new gesture.
+  tiltUp.fire('pointerdown', { button: 0 });
+  tiltUp.fire('pointerup', { button: 0 });
+  assert.equal(toasts.length, 2);
+  tiltUp.fire('click', { detail: 0 });
+  assert.equal(toasts.length, 3);
+});
+
+test('a slider drag or key press after a button press is a new gesture and may toast again', () => {
+  const { button, toasts, settle } = setup({
+    viewer: { sampleHeight: () => 168 },
+    view: { pitch: -15, range: 1_000 },
+  });
+  const tiltUp = button('tilt-up');
+  tiltUp.fire('pointerdown', { button: 0 });
+  tiltUp.fire('pointerup', { button: 0 });
+  settle(1_000);
+  assert.equal(toasts.length, 1);
+  const slider = button('tilt-slider');
+  slider.fire('pointerdown');
+  slider.value = '170';
+  slider.fire('input');
+  slider.value = '175';
+  slider.fire('input');
+  slider.fire('pointerup');
+  assert.equal(toasts.length, 2, 'the drag toasts once');
+  // Keyboard: a fresh key press is a gesture; its auto-repeat is not.
+  slider.fire('keydown', { key: 'ArrowUp', repeat: false });
+  slider.value = '176';
+  slider.fire('input');
+  slider.fire('keydown', { key: 'ArrowUp', repeat: true });
+  slider.value = '177';
+  slider.fire('input');
+  assert.equal(toasts.length, 3);
+});
+
+test('rotating and looking around while looking up keep the raised gaze', () => {
+  const { button, viewer, settle } = setup({
+    view: { pitch: -45, range: 2_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.value = '159'; // 70 degrees above the horizon
+  slider.fire('input');
+  const at = Cesium.Cartesian3.clone(viewer.camera.positionWC);
+  const heading = viewer.camera.heading;
+  button('ring').fire('keydown', { key: 'ArrowLeft' });
+  settle(1_000);
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 70) < 0.1);
+  assert.ok(Cesium.Cartesian3.distance(at, viewer.camera.positionWC) < 1e-3);
+  assert.notEqual(viewer.camera.heading, heading);
+  button('look-down').fire('click', { detail: 0 });
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 67) < 0.1);
+  assert.ok(Cesium.Cartesian3.distance(at, viewer.camera.positionWC) < 1e-3);
+});
+
+test('looking up after the camera was moved clears a stale terrain-limit title', () => {
+  const { button, viewer, handle } = setup({
+    viewer: { sampleHeight: () => 168 },
+    view: { pitch: -45, range: 1_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.value = '179';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), 'terrain');
+  // Something else moves the camera (still looking up): the anchor is gone.
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(-97.7, 30.3, 2_000),
+    orientation: { heading: 0, pitch: Math.PI / 4, roll: 0 },
+  });
+  slider.value = '150';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), null);
+  assert.equal(
+    slider.getAttribute('title'),
+    'Tilt: top-down (bottom) to straight up (top)',
+  );
 });
 
 test('look around turns the gaze without moving the camera', () => {

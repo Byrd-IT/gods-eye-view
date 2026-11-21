@@ -233,6 +233,22 @@ watch(
         :aria-label="t('Solunar')"
       ></div>
     </RailPanel>
+    <!-- byrdit/skyView/skyView.js fills the body: the Sky view launcher (stand
+         at a spot and look up). It replaces the old floating Sky button. -->
+    <RailPanel
+      id="sky-view-panel"
+      start-collapsed
+      :title="t('SKY')"
+      sideways
+      rail-scroller
+    >
+      <div
+        id="gev-sky-body"
+        class="gev-sky-body"
+        role="group"
+        :aria-label="t('SKY')"
+      ></div>
+    </RailPanel>
     <RailPanel
       id="drone-plan-panel"
       start-collapsed

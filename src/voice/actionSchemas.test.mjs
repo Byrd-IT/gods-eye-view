@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { GEV_ACTION_SCHEMAS, createActionTools } from './actionSchemas.js';
+import { TILT_SPAN_DEG } from '../byrdit/navControl/navMath.js';
 import { VOICE_TOGGLE_LAYER_IDS } from './layerManifest.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
 import { createAreaStore } from '../data/areaStore.js';
@@ -505,7 +506,10 @@ test('the complete current Realtime tool inventory is pinned', () => {
     // index maximum removed; ring description reworded).
     // Re-pinned for the photoSpacingM schema repair (exclusiveMinimum: 0 ->
     // minimum: 0, -9 characters; no tool, argument or enum change).
-    '7b915d4db6ea69805ccd05ef6532a8186ecb87528a3b1c1774f947f3ed1c5a9f',
+    // Re-pinned for the merged navigation voice: control_nav tilt's maximum is
+    // the live tilt slider's span (TILT_SPAN_DEG, 179 = straight up) instead of
+    // the pre-merge 79, so voice can ask for the raised gaze the slider reaches.
+    '8d7f3a1b6b2ef629c50137f012e1501eb5f343afdf45e1b8bc1949e923bcb7c1',
   );
 });
 
@@ -560,7 +564,7 @@ test('the appended navigation and solunar voice tools are pinned', () => {
   ]);
   assert.equal(nav.parameters.properties.tilt.type, 'integer');
   assert.equal(nav.parameters.properties.tilt.minimum, 0);
-  assert.equal(nav.parameters.properties.tilt.maximum, 79);
+  assert.equal(nav.parameters.properties.tilt.maximum, TILT_SPAN_DEG);
   assert.equal(nav.parameters.properties.heading.type, 'integer');
   assert.equal(nav.parameters.properties.heading.minimum, 0);
   assert.equal(nav.parameters.properties.heading.maximum, 359);

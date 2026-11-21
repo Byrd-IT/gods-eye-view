@@ -248,6 +248,30 @@ body.cockpit-mode .cockpit-position-readout {
   bottom: max(clamp(22px, 4vh, 42px), 3.5rem);
 }
 
+/* Wide screens, left-to-right: the map navigation control
+   (src/byrdit/navControl/navControl.css: right 36px, bottom 14px, 84px plus
+   18px of padding and border tall; 96px plus 18px with a coarse pointer)
+   fills this corner, so the row stands on top of it, right edges aligned,
+   with an 8px gap, where the old floating Sky button was (Sky is a rail card
+   now). Right-to-left puts the row in the other corner, and the cockpit,
+   scene playback and recording hide the control, so those keep the corner.
+   The right rail treats the row as an obstacle (panelLayoutController.js). */
+@media (min-width: 901px) {
+  :root:not([dir='rtl'])
+    body:not(.cockpit-mode, .scene-playback-mode, .recording-mode)
+    #corner-actions {
+    right: 36px;
+    bottom: calc(14px + 84px + 18px + 8px);
+  }
+}
+@media (min-width: 901px) and (pointer: coarse) {
+  :root:not([dir='rtl'])
+    body:not(.cockpit-mode, .scene-playback-mode, .recording-mode)
+    #corner-actions {
+    bottom: calc(14px + 96px + 18px + 8px);
+  }
+}
+
 /* Below this width the full chip label runs into the centred dock: the chip
    keeps its bolt, and its count stays in its title and aria-label. */
 @media (max-width: 1180px) {

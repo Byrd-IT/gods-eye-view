@@ -73,6 +73,11 @@ class FakeElement extends EventTarget {
     return { left: 100, top: 100, width: 80, height: 80 };
   }
   setPointerCapture() {}
+  fire(type, fields = {}) {
+    const event = Object.assign(new Event(type, { cancelable: true }), fields);
+    this.dispatchEvent(event);
+    return event;
+  }
 }
 
 function createDocument() {
@@ -84,8 +89,9 @@ function createDocument() {
 }
 
 // ── a real Cesium camera orbiting a fixed ground point ───────────────────
-function createViewer({ pick = GROUND, ground = GROUND } = {}) {
+function createViewer({ pick = GROUND, ground = GROUND, sampleHeight } = {}) {
   const scene = {
+    ...(sampleHeight ? { sampleHeight } : {}),
     canvas: new FakeElement('canvas'),
     drawingBufferWidth: 1200,
     drawingBufferHeight: 800,
@@ -134,12 +140,14 @@ function setup(options = {}) {
   const doc = createDocument();
   const hookWindow = options.hookWindow ?? {};
   const navigations = [];
+  const toasts = [];
   const handle = mountNavControl({
     viewer,
     parent: doc.body,
     document: doc,
     hookWindow,
     now: options.now,
+    showToast: (message) => toasts.push(message),
     runNavigation:
       options.runNavigation ||
       ((noun, navigate) => {
@@ -148,7 +156,10 @@ function setup(options = {}) {
       }),
   });
   const frame = () => readCameraTargetFrame(viewer);
-  return { viewer, doc, hookWindow, handle, navigations, frame };
+  // The slider the operator drags, reached the same way the widget does.
+  const slider = () =>
+    handle.root.querySelectorAll('[data-nav="tilt-slider"]')[0];
+  return { viewer, doc, hookWindow, handle, navigations, toasts, frame, slider };
 }
 
 // ── the adapter on its own, over a fake widget ──────────────────────────
@@ -439,6 +450,140 @@ test('a refused navigation leaves the camera alone and says so', async () => {
     Cesium.Cartesian3.distance(before, viewer.camera.positionWC) < 1e-6,
     'a refused move does not touch the camera',
   );
+});
+
+// ── voice tilt is the slider's own path: same orbit, same look-up ───────
+const cameraState = (viewer) => ({
+  pitch: viewer.camera.pitch,
+  heading: viewer.camera.heading,
+  position: Cesium.Cartesian3.clone(viewer.camera.positionWC),
+  range: Cesium.Cartesian3.distance(
+    viewer.camera.positionWC,
+    GROUND,
+  ),
+});
+
+test('voice tilt matches the slider exactly, upward gaze included', async () => {
+  const view = { heading: 25, pitch: -45, range: 3_000 };
+  // 60 and 79 stay inside the orbit limit; 120 and 179 turn the gaze up.
+  for (const tilt of [60, 79, 120, 179]) {
+    const voiced = setup({ view });
+    const result = await voiced.handle.voice.tilt({ tilt });
+    assert.equal(result.ok, true, `tilt ${tilt} accepted`);
+
+    const dragged = setup({ view });
+    const slider = dragged.slider();
+    slider.value = String(tilt);
+    slider.fire('input');
+
+    const left = cameraState(voiced.viewer);
+    const right = cameraState(dragged.viewer);
+    assert.ok(
+      Cesium.Cartesian3.distance(left.position, right.position) < 1e-6,
+      `tilt ${tilt}: the camera lands where the slider puts it`,
+    );
+    assert.ok(
+      Math.abs(left.pitch - right.pitch) < 1e-9,
+      `tilt ${tilt}: pitch ${left.pitch} vs ${right.pitch}`,
+    );
+    assert.ok(
+      Math.abs(left.heading - right.heading) < 1e-9,
+      `tilt ${tilt}: heading`,
+    );
+    for (const attribute of ['data-tilt-mode', 'data-tilt-limited'])
+      assert.equal(
+        voiced.handle.root.getAttribute(attribute),
+        dragged.handle.root.getAttribute(attribute),
+        `tilt ${tilt}: ${attribute}`,
+      );
+    assert.equal(
+      voiced.handle.root.getAttribute('data-tilt-limited'),
+      null,
+      `tilt ${tilt}: flat ground holds nothing`,
+    );
+    assert.ok(
+      Math.abs(Cesium.Math.toDegrees(voiced.viewer.camera.pitch)) <= 90.001,
+      `tilt ${tilt}: the gaze never passes straight up`,
+    );
+    voiced.handle.destroy();
+    dragged.handle.destroy();
+  }
+});
+
+test('voice tilt to straight up keeps the orbit and the slider reads it back', async () => {
+  const { handle, viewer, frame, slider } = setup({
+    view: { heading: 25, pitch: -45, range: 3_000 },
+  });
+  const result = await handle.voice.tilt({ tilt: 179 });
+  assert.equal(result.ok, true);
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.ok(
+    Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 90) < 0.1,
+    `gaze ${Cesium.Math.toDegrees(viewer.camera.pitch)}`,
+  );
+  assert.ok(
+    Math.abs(viewer.camera.positionCartographic.height - 3_000 * Math.sin(10 * DEG)) < 1,
+    'the camera stays on its safe orbit limit',
+  );
+  assert.ok(Math.abs(result.tilt - 179) <= 1, `readback tilt ${result.tilt}`);
+  assert.equal(slider().value, String(result.tilt));
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), null);
+
+  // Voice tilt back down leaves the look-up around the same orbit.
+  const down = await handle.voice.tilt({ tilt: 0 });
+  assert.equal(down.ok, true);
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'orbit');
+  const after = frame();
+  assert.ok(Math.abs(after.pitch + 89 * DEG) < 1e-3);
+  assert.ok(Math.abs(after.range - 3_000) < 1);
+});
+
+test('voice tilt on raised ground holds the camera high and toasts once per request', async () => {
+  const { handle, viewer, toasts } = setup({
+    viewer: { sampleHeight: () => 168 },
+    view: { pitch: -45, range: 1_000 },
+  });
+  const result = await handle.voice.tilt({ tilt: 150 });
+  assert.equal(result.ok, true);
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), 'terrain');
+  assert.equal(
+    handle.root.querySelectorAll('[data-nav="tilt-slider"]')[0].getAttribute('title'),
+    'Tilt: camera held at a safe height above the terrain; the view tilts instead',
+  );
+  assert.deepEqual(toasts, [
+    'Camera held above the terrain; tilting the view instead',
+  ]);
+  assert.ok(
+    viewer.camera.positionCartographic.height - 168 >= 8,
+    `camera clears the terrain: ${viewer.camera.positionCartographic.height - 168} m`,
+  );
+  assert.ok(
+    Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 61) < 0.1,
+    `the gaze still reaches the wanted pitch: ${Cesium.Math.toDegrees(viewer.camera.pitch)}`,
+  );
+
+  // A second voice request is a new gesture and may say it again.
+  assert.equal((await handle.voice.tilt({ tilt: 179 })).ok, true);
+  assert.equal(toasts.length, 2, `one toast per request: ${toasts.length}`);
+  assert.ok(
+    Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 90) < 0.1,
+    'straight up is still reachable from the held orbit',
+  );
+
+  // Coming back down releases the hold.
+  assert.equal((await handle.voice.tilt({ tilt: 0 })).ok, true);
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), null);
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'orbit');
+});
+
+test('voice tilt enters the navigation policy once per request', async () => {
+  const { handle, navigations } = setup({
+    view: { heading: 25, pitch: -45, range: 1_000 },
+  });
+  await handle.voice.tilt({ tilt: 179 });
+  await handle.voice.tilt({ tilt: 179 });
+  assert.deepEqual(navigations, ['camera', 'camera']);
 });
 
 // ── the published surface ───────────────────────────────────────────────

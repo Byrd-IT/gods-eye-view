@@ -748,7 +748,8 @@ test('the Realtime prompt stays within its size budget', () => {
   // The photoSpacingM schema repair (exclusiveMinimum: 0 -> minimum: 0) shrank
   // both by 9, so the measured ceilings are 76,881 by default and 77,636 with
   // Overpass.
-  const MAX_REALTIME_PROMPT_CHARS = { default: 76_881, overpass: 77_636 };
+  // The live slider's raised-gaze limit changes 79 to 179 (+1 character).
+  const MAX_REALTIME_PROMPT_CHARS = { default: 76_882, overpass: 77_637 };
   const size = (overpass) =>
     realtimeInstructions(undefined, { overpass }).length +
     JSON.stringify(realtimeTools({ overpass })).length;

@@ -1,4 +1,8 @@
 import { HUD_LAYOUTS } from '../hudLayoutPolicy.js';
+// The tilt slider's own span (0 top-down .. straight up): the schema must
+// never offer less than the operator's slider can reach, so voice and pointer
+// share the one number. navMath is pure maths, so the schema stays off Cesium.
+import { TILT_SPAN_DEG } from '../byrdit/navControl/navMath.js';
 import {
   AREA_CANDIDATE_ID_PATTERN,
   MAX_AREA_CANDIDATE_ID_LENGTH,
@@ -1460,7 +1464,7 @@ const schemas = [
             'status',
           ],
         },
-        tilt: { type: 'integer', minimum: 0, maximum: 79 },
+        tilt: { type: 'integer', minimum: 0, maximum: TILT_SPAN_DEG },
         heading: { type: 'integer', minimum: 0, maximum: 359 },
         direction: {
           type: 'string',

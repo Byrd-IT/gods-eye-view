@@ -358,7 +358,8 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // The drone plan bound repair (ring maxItems and index maximum dropped, ring
   // description reworded) brings the measured size to 77,485. The photoSpacingM
   // schema repair (exclusiveMinimum: 0 -> minimum: 0) brings it to 77,476.
-  assert.ok(size <= 77_476, `prompt size ${size}`);
+  // The live slider's raised-gaze limit changes 79 to 179 (+1 character).
+  assert.ok(size <= 77_477, `prompt size ${size}`);
 });
 
 test('after-tool speech allows returned items to answer requested lists and rankings', () => {

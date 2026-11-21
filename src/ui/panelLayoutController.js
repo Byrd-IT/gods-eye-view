@@ -72,6 +72,9 @@ const RIGHT_STACK_OBSTACLE_SELECTOR = [
   '#command-dock',
   '#gev-voice-control',
   '#gev-nav-control',
+  // The language picker row stands on top of the nav control on wide
+  // left-to-right screens (locale-picker.css): panels stop above it too.
+  '#corner-actions',
   '#world-timeline',
 ].join(', ');
 /** Is a CSS transition (the chrome fading back in) still running? */
@@ -155,6 +158,7 @@ export class PanelLayoutController {
     this._timeTravelPanel = document.getElementById('time-travel-panel');
     this._mapLayersPanel = document.getElementById('map-layers-panel');
     this._solunarPanel = document.getElementById('solunar-panel');
+    this._skyViewPanel = document.getElementById('sky-view-panel');
     this._dronePlanPanel = document.getElementById('drone-plan-panel');
   }
   /**
@@ -317,6 +321,7 @@ export class PanelLayoutController {
       this._timeTravelPanel,
       this._mapLayersPanel,
       this._solunarPanel,
+      this._skyViewPanel,
       this._dronePlanPanel,
     ]) {
       if (!panel) continue;
@@ -340,6 +345,7 @@ export class PanelLayoutController {
         this._timeTravelPanel,
         this._mapLayersPanel,
         this._solunarPanel,
+        this._skyViewPanel,
         this._dronePlanPanel,
         globalContextPanel,
         document.getElementById('space-missions-panel'),
