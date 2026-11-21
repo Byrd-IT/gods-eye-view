@@ -8,9 +8,13 @@ export function createCoverageStore({ fetchImpl = globalThis.fetch } = {}) {
   let state = null,
     generation = 0;
   async function json(path, options) {
-    const r = await fetchImpl(`${PREFIX}/${path}`, options);
-    if (!r.ok) throw new Error('Coverage service unavailable');
-    return r.json();
+    try {
+      const r = await fetchImpl(`${PREFIX}/${path}`, options);
+      if (!r.ok) throw new Error('request failed');
+      return await r.json();
+    } catch {
+      throw new Error('Coverage service unavailable');
+    }
   }
   const snapshot = () => {
     if (!state) return null;

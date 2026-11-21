@@ -68,3 +68,24 @@ test('an old load cannot replace the state after clear', async () => {
   assert.equal(await loading, null);
   assert.equal(s.snapshot(), null);
 });
+
+test('transport and JSON parser errors are not exposed to callers', async () => {
+  for (const fetchImpl of [
+    async () => {
+      throw new Error('sensitive upstream detail');
+    },
+    async () => ({
+      ok: true,
+      json: async () => {
+        throw new Error('sensitive upstream detail');
+      },
+    }),
+  ]) {
+    const store = createCoverageStore({ fetchImpl });
+    await assert.rejects(store.load(model), (error) => {
+      assert.equal(error.message, 'Coverage service unavailable');
+      assert.equal(error.cause, undefined);
+      return true;
+    });
+  }
+});
