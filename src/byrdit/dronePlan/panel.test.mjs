@@ -2005,6 +2005,69 @@ test('obstacles: a newer look-up aborts the older one', async () => {
   assert.equal(signals.at(-1).aborted, true);
 });
 
+test('obstacles: refresh answers true only for a look-up it committed, and the voice repeats it', async () => {
+  let down = false;
+  const w = obstacleWorld(async () => {
+    if (down) throw new Error('down');
+    return { obstacles: obstacleRows(), status: {} };
+  });
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  // The look-up landed its rows: that is a refresh.
+  assert.equal(await w.handle.obstacles.refresh(), true);
+  // The service is down: nothing was read, so nothing says it was.
+  down = true;
+  assert.equal(await w.handle.obstacles.refresh(), false);
+  const spoken = await createDronePlanVoice(w.handle).obstacle();
+  assert.equal(spoken.ok, true);
+  assert.equal(
+    spoken.refreshed,
+    false,
+    'a failed look-up is not reported as a refresh',
+  );
+  assert.equal(
+    spoken.obstacleCount,
+    2,
+    'the rows already there are the honest count',
+  );
+  // No area drawn: there is nothing to look up, and no promise to wait on.
+  const empty = obstacleWorld(async () => ({ obstacles: [], status: {} }));
+  assert.equal(empty.handle.obstacles.refresh(), null);
+  empty.handle.destroy();
+  w.handle.destroy();
+});
+
+test('obstacles: a look-up a newer one replaced never reports a refresh', async () => {
+  const gates = [];
+  const w = obstacleWorld((areas, opts) => {
+    return new Promise((resolve, reject) => {
+      // A look-up the panel already replaced is refused, as a fetch would be.
+      if (opts?.signal?.aborted) return reject(new Error('aborted'));
+      gates.push(resolve);
+      opts?.signal?.addEventListener('abort', () =>
+        reject(new Error('aborted')),
+      );
+    });
+  });
+  w.handle.setBox(boxM(300, 200));
+  await w.handle.replan();
+  await settle();
+  const first = w.handle.obstacles.refresh();
+  const second = w.handle.obstacles.refresh();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(gates.length >= 1, 'the look-up that owns the store asked');
+  assert.equal(
+    await first,
+    false,
+    'the look-up a newer one replaced read nothing for this caller',
+  );
+  gates.at(-1)({ obstacles: obstacleRows(), status: {} });
+  assert.equal(await second, true, 'the look-up that owns the store refreshed');
+  assert.equal(w.handle.obstacles.list().length, 2);
+  w.handle.destroy();
+});
+
 test('obstacles: an obstacle the operator added can be set to a tower, and the credit line is shown', async () => {
   const w = obstacleWorld(async () => ({
     obstacles: obstacleRows(),

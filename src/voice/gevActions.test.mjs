@@ -6607,6 +6607,142 @@ test('imagery siblings from one response serialize panel ownership in call order
   assert.equal((await second).ok, true);
 });
 
+test('drone plan siblings from one response take the panel in call order', async () => {
+  const order = [];
+  let releaseObstacle;
+  const obstacleGate = new Promise((resolve) => {
+    releaseObstacle = resolve;
+  });
+  const voice = {
+    async open() {
+      return { ok: true, open: true };
+    },
+    async obstacle() {
+      order.push('obstacle:start');
+      await obstacleGate;
+      order.push('obstacle:end');
+      return { ok: true, refreshed: true, obstacleCount: 1 };
+    },
+    async options() {
+      order.push('options');
+      return { ok: true, aglM: 60 };
+    },
+    async replan() {
+      order.push('replan');
+      return { ok: true, planned: true };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+  const group = { authorityGroup: 'drone-response' };
+  const first = runner('control_droneplan', { action: 'obstacle' }, group);
+  const second = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 60 },
+    group,
+  );
+  const third = runner('control_droneplan', { action: 'replan' }, group);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    order,
+    ['obstacle:start'],
+    'a later edit waits while one is still on the panel',
+  );
+  releaseObstacle();
+  assert.equal((await first).ok, true);
+  assert.equal((await second).ok, true);
+  assert.equal((await third).ok, true);
+  assert.deepEqual(
+    order,
+    ['obstacle:start', 'obstacle:end', 'options', 'replan'],
+    'each sibling reports after the one before it settled',
+  );
+});
+
+test('a newer reply retires a queued drone plan sibling instead of interleaving it', async () => {
+  const order = [];
+  let releaseObstacle;
+  const obstacleGate = new Promise((resolve) => {
+    releaseObstacle = resolve;
+  });
+  const voice = {
+    async open() {
+      return { ok: true, open: true };
+    },
+    async obstacle() {
+      order.push('obstacle:start');
+      await obstacleGate;
+      return { ok: true, refreshed: true, obstacleCount: 1 };
+    },
+    async options() {
+      order.push('options');
+      return { ok: true, aglM: 60 };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+  const older = { authorityGroup: 'older-response' };
+  const first = runner('control_droneplan', { action: 'obstacle' }, older);
+  const queued = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 60 },
+    older,
+  );
+  // The first edit is under way and the second is still queued behind it.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['obstacle:start']);
+  // The person speaks again while the reply is still working.
+  const newer = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 90 },
+    { authorityGroup: 'newer-response' },
+  );
+  assert.equal((await newer).ok, true);
+  releaseObstacle();
+  assert.equal(
+    (await first).ok,
+    true,
+    'the edit already on the panel finishes its own work',
+  );
+  const retired = await queued;
+  assert.equal(retired.ok, false);
+  assert.equal(retired.cancelled, true);
+  assert.equal(retired.code, 'CANCELLED');
+  assert.deepEqual(
+    order,
+    ['obstacle:start', 'options'],
+    'the retired sibling never touched the panel',
+  );
+});
+
 test('different OSM siblings from one response do not race the server slot or memory', async () => {
   const releases = [];
   const searches = [];

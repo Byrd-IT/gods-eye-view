@@ -1962,6 +1962,12 @@ export function createGevActionRunner({
     'resolve_area',
     'find_imagery',
     'osm_query',
+    // The Drone Flight Plan is one panel holding one plan: a reply that both
+    // edits it and reads it back ("set the obstacle height and replan", "add
+    // a target and plan the passes") run beside each other interleaves their
+    // writes and reports a state neither one made. Read-backs queue too, so a
+    // status in the same reply answers the panel the edit left behind.
+    'control_droneplan',
   ]);
   let serializedAttempt = 0;
   let serializedSiblingGroup = null;
@@ -1984,7 +1990,8 @@ export function createGevActionRunner({
     const epoch = conversation;
     let attempt = null;
     let releaseSerializedSibling = null;
-    if (serializedSiblingActions.has(name)) {
+    const serialized = serializedSiblingActions.has(name);
+    if (serialized) {
       const siblingGroup = callerOptions.authorityGroup || null;
       if (siblingGroup) {
         if (siblingGroup !== serializedSiblingGroup) {
@@ -2005,9 +2012,7 @@ export function createGevActionRunner({
         attempt = ++serializedAttempt;
       }
     }
-    const runnerSignal = serializedSiblingActions.has(name)
-      ? conversationAbort.signal
-      : null;
+    const runnerSignal = serialized ? conversationAbort.signal : null;
     const signal = runnerSignal
       ? callerOptions.signal
         ? AbortSignal.any([runnerSignal, callerOptions.signal])

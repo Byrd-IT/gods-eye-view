@@ -1431,9 +1431,12 @@ export function initDronePlan({
 
   /**
    * Look up the open-data heights for the drawn areas. `force` re-reads even
-   * when the areas have not changed; the promise resolves when the rows are
-   * in the store, and is null when there was nothing to look up (no area, or
-   * no source wired in) so a caller never waits on an older look-up.
+   * when the areas have not changed; the promise resolves true only when its
+   * rows are in the store, and false when the look-up failed or a newer one
+   * (or closing the panel) superseded it, so a caller is never told the
+   * heights were read when they were not. Null when there was nothing to look
+   * up (no area, or no source wired in) so a caller never waits on an older
+   * look-up.
    */
   function syncObstacles({ force = false } = {}) {
     if (!state.areas.length) {
@@ -1459,7 +1462,9 @@ export function initDronePlan({
             : { obstacles: [], status: {} },
           buildingsFor(key),
         ]);
-        if (destroyed || token !== obstacleToken) return;
+        // A newer look-up (or a destroyed panel) owns the store now: this
+        // one's rows are stale, and saying it refreshed would be a lie.
+        if (destroyed || token !== obstacleToken) return false;
         const osm = buildingObstacles(buildings);
         const found = open?.obstacles ?? [];
         const towers = found.filter((x) => x.source === 'faa');
@@ -1501,14 +1506,17 @@ export function initDronePlan({
             ? ` ${t('{count} more not planned (too many).', { count: num(obstacleStore.dropped()) })}`
             : '');
         renderObstacleStatus();
+        return true;
       })
       .catch(() => {
-        if (destroyed || token !== obstacleToken) return;
+        if (destroyed || token !== obstacleToken) return false;
         obstacleStatusText = t(
           'Open-data heights are unavailable. The plan uses the default height.',
         );
         renderObstacleStatus();
+        return false;
       });
+    return obstaclePending;
   }
 
   function addObstacle(point) {
@@ -7275,12 +7283,13 @@ export function initDronePlan({
       remove: (id) => obstacleStore.remove(id),
       setHeight: (id, h) => obstacleStore.setHeight(id, h),
       reset: (id) => obstacleStore.reset(id),
-      // Resolves true once the look-up's rows are in the store, so a caller
-      // reads the new counts and not the ones from before the request. Null:
+      // Resolves true only once the look-up's rows are in the store, so a
+      // caller reads the new counts and not the ones from before the request.
+      // False when the look-up failed or a newer refresh replaced it; null:
       // there was nothing to look up (no area drawn, no source wired in).
       refresh: () => {
         const pending = syncObstacles({ force: true });
-        return pending ? pending.then(() => true) : null;
+        return pending ? pending.then((ok) => ok === true) : null;
       },
     },
     // The photo the 3D check is showing: { count, index, current }.
