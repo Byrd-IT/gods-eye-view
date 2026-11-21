@@ -269,7 +269,9 @@ try {
           rect.top + rect.height / 2,
         );
         if (!pickerHit || !(pickerHit === button || button.contains(pickerHit)))
-          failures.push('picker centre covered');
+          failures.push(
+            `picker centre covered=>${pickerHit ? label(pickerHit) : 'outside'}`,
+          );
         // Interactive controls and non-interactive surface obstacles are reported separately.
         const controls = [
           ...document.querySelectorAll(

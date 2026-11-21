@@ -35,15 +35,19 @@ export function involvesControls(finding) {
 }
 
 /**
- * Whether a finding is a control covered by a popup the case opened on
- * purpose: the open language list, or the open Sky panel.
+ * Whether a finding is a control covered by, or meeting, a popup the case
+ * opened on purpose: the open language list, or the open Sky panel.
  * @param {string} finding
  * @param {{picker: boolean, sky: boolean}} opened
  */
 export function coveredByOpenPopup(finding, opened) {
-  const hit = /^hit:.*=>(.*)$/.exec(finding);
-  if (!hit) return false;
-  const by = hit[1];
+  // `hit:A=>B` and `picker centre covered=>B`: B covers A. `overlap:B`: the
+  // closed picker's box meets B.
+  const match =
+    /^(?:hit:.*|picker centre covered)=>(.*)$/.exec(finding) ||
+    /^overlap:(.*)$/.exec(finding);
+  if (!match) return false;
+  const by = match[1];
   if (opened.picker && /locale-picker/.test(by)) return true;
   if (opened.sky && /sky/.test(by)) return true;
   return false;

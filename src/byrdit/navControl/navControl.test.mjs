@@ -620,6 +620,51 @@ test('a terrain-lifted orbit limit holds the camera and turns the gaze to the wa
   assert.ok(viewer.camera.positionCartographic.height - 168 >= 8);
 });
 
+test('holding tilt-up into the terrain limit toasts once per press, not per repeat', () => {
+  const { button, handle, toasts, settle } = setup({
+    viewer: { sampleHeight: () => 168 },
+    view: { pitch: -15, range: 1_000 },
+  });
+  const tiltUp = button('tilt-up');
+  tiltUp.fire('pointerdown', { button: 0 });
+  settle(380 + 130 * 5 + 20); // the press plus five repeats
+  tiltUp.fire('pointerup', { button: 0 });
+  settle(1_000);
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), 'terrain');
+  assert.equal(toasts.length, 1, `one toast for one hold: ${toasts.length}`);
+  // A new press, or a keyboard activation, is a new gesture.
+  tiltUp.fire('pointerdown', { button: 0 });
+  tiltUp.fire('pointerup', { button: 0 });
+  assert.equal(toasts.length, 2);
+  tiltUp.fire('click', { detail: 0 });
+  assert.equal(toasts.length, 3);
+});
+
+test('looking up after the camera was moved clears a stale terrain-limit title', () => {
+  const { button, viewer, handle } = setup({
+    viewer: { sampleHeight: () => 168 },
+    view: { pitch: -45, range: 1_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.value = '179';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), 'terrain');
+  // Something else moves the camera (still looking up): the anchor is gone.
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(-97.7, 30.3, 2_000),
+    orientation: { heading: 0, pitch: Math.PI / 4, roll: 0 },
+  });
+  slider.value = '150';
+  slider.fire('input');
+  assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
+  assert.equal(handle.root.getAttribute('data-tilt-limited'), null);
+  assert.equal(
+    slider.getAttribute('title'),
+    'Tilt: top-down (bottom) to straight up (top)',
+  );
+});
+
 test('look around turns the gaze without moving the camera', () => {
   const { button, viewer } = setup({ view: { heading: 30, pitch: -45 } });
   const before = Cesium.Cartesian3.clone(viewer.camera.positionWC);

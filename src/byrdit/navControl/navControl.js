@@ -511,15 +511,21 @@ export function mountNavControl({
       let frame;
       let heading;
       let range;
+      // No orbit to keep (looking up after the camera was moved, or no map
+      // under the view): turn the gaze in place. Nothing holds the camera,
+      // so no terrain limit is shown.
+      const turnGaze = () => {
+        animator.cancel();
+        const turned = lookInPlace(camera.heading, clampGaze(wantedPitch));
+        if (turned) showTiltState(looksUp(), false);
+        return turned;
+      };
       if (anchor) {
         ({ frame, heading, range } = anchor);
       } else {
-        if (looksUp()) {
-          animator.cancel();
-          return lookInPlace(camera.heading, clampGaze(wantedPitch));
-        }
+        if (looksUp()) return turnGaze();
         frame = animator.active ? animator.frame : readFrame();
-        if (!frame) return lookInPlace(camera.heading, clampGaze(wantedPitch));
+        if (!frame) return turnGaze();
         heading = animator.destination?.heading ?? frame.heading;
         range = animator.destination?.range ?? frame.range;
       }
@@ -581,7 +587,6 @@ export function mountNavControl({
    * animated orbit path.
    */
   function performTilt(action) {
-    toastedThisGesture = false;
     const step = action === 'tilt-up' ? TILT_STEP_DEG : -TILT_STEP_DEG;
     if (validAnchor() || looksUp())
       return applyTilt(pitchToTiltDeg(camera.pitch) + step, true);
@@ -685,6 +690,8 @@ export function mountNavControl({
   }
   function startHold(action) {
     stopHold();
+    // One press, held or not, is one gesture: at most one terrain toast.
+    toastedThisGesture = false;
     perform(action);
     if (!REPEATING.has(action)) return;
     const token = {};
@@ -712,6 +719,7 @@ export function mountNavControl({
     // Pointer clicks were already handled on pointerdown.
     listen(node, 'click', (event) => {
       if (event.detail) return;
+      toastedThisGesture = false;
       perform(act);
     });
   }

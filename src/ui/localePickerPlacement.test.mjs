@@ -131,6 +131,18 @@ test('delta: a control covered by a popup the case opened is allowed', () => {
     false,
   );
   assert.equal(coveredByOpenPopup('overlap:#gev-nav-control', opened), false);
+  // The open Sky panel in its rail card meets or covers the picker.
+  assert.equal(coveredByOpenPopup('overlap:#sky-view-panel', opened), true);
+  assert.equal(
+    coveredByOpenPopup('picker centre covered=>div.gev-sky-panel', opened),
+    true,
+  );
+  const closed = { picker: false, sky: false };
+  assert.equal(coveredByOpenPopup('overlap:#sky-view-panel', closed), false);
+  assert.equal(
+    coveredByOpenPopup('picker centre covered=>div.gev-sky-panel', closed),
+    false,
+  );
 });
 
 test('delta: baseline findings are allowed, new ones fail, fixed ones are counted', () => {
