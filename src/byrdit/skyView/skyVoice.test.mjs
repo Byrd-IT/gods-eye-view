@@ -951,3 +951,68 @@ test('preset failure does not echo an owner reason', async () => {
   assert.equal(r.error, 'That preset was not found');
   assert.equal(JSON.stringify(r).includes(secret), false);
 });
+
+test('playback, magnitude and preset read hostile accessors once and omit marker labels', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const flip = (good) => {
+    let reads = 0;
+    return () => (++reads === 1 ? good : secret);
+  };
+  const h = voiceFor();
+  h.state.active = true;
+  h.state.marker = { label: secret };
+  const base = h.sky;
+  let playingRead = flip(true);
+  let rateRead = flip(10);
+  let limitRead = flip(5);
+  let onRead = flip(true);
+  const stub = Object.create(base, {
+    clock: {
+      get: () => ({
+        mode: 'fixed',
+        play: () => true,
+        get rate() {
+          return rateRead();
+        },
+        get playing() {
+          return playingRead();
+        },
+      }),
+    },
+    content: {
+      get: () => ({
+        ...base.content,
+        get marker() {
+          return { label: secret };
+        },
+        setUserLimit() {},
+        get userLimit() {
+          return limitRead();
+        },
+      }),
+    },
+    nakedEye: {
+      get: () => ({
+        get limit() {
+          return limitRead();
+        },
+        get on() {
+          return onRead();
+        },
+      }),
+    },
+    setNakedEye: { value() {} },
+  });
+  const voice = createSkyVoice({ getHandle: () => stub, satelliteWaitMs: 0 });
+  const playback = await voice.playback('play');
+  assert.equal(JSON.stringify(playback).includes(secret), false);
+  limitRead = flip(5);
+  const stars = await voice.magnitude(5, 'stars');
+  assert.equal(JSON.stringify(stars).includes(secret), false);
+  limitRead = flip(5);
+  const sats = await voice.magnitude(5, 'satellites');
+  assert.equal(JSON.stringify(sats).includes(secret), false);
+  const preset = await voice.preset('sunset');
+  assert.equal(JSON.stringify(preset).includes(secret), false);
+  assert.equal('lookingAt' in preset, false);
+});

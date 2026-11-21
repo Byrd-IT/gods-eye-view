@@ -2230,7 +2230,34 @@ async function controlHistory(voice, args = {}, setLayer) {
       ok: false,
       error: 'History playback is not available in this host',
     });
-  if (action === 'status') return wrap(await safeAdapterCall(voice, 'status'));
+  if (action === 'status') {
+    const status = await safeAdapterCall(voice, 'status');
+    try {
+      if (status.ok !== true)
+        return wrap({ ok: false, error: 'History status is unavailable' });
+      const out = { ok: true };
+      const mode = status.mode;
+      if (mode === 'history' || mode === 'live') out.mode = mode;
+      const timestamp = Date.parse(status.time);
+      out.time = Number.isFinite(timestamp)
+        ? new Date(timestamp).toISOString()
+        : null;
+      for (const key of ['playing', 'unavailable']) {
+        const value = status[key];
+        if (typeof value === 'boolean') out[key] = value;
+      }
+      const rate = status.rate;
+      out.rate = Number.isFinite(rate) ? rate : null;
+      const known = voice.feedLayerIds();
+      const feeds = status.playingFeeds;
+      out.playingFeeds = Array.isArray(feeds)
+        ? feeds.filter((id) => known.includes(id))
+        : [];
+      return wrap(out);
+    } catch {
+      return wrap({ ok: false, error: 'History status is unavailable' });
+    }
+  }
   if (action === 'jump')
     return wrap(
       await safeAdapterCall(voice, 'jump', {

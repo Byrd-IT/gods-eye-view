@@ -389,3 +389,24 @@ test('control_history play, pause, speed and live contain owner throws', async (
     assert.equal(JSON.stringify(result).includes(secret), false);
   }
 });
+
+test('control_history status copies only typed state', async () => {
+  const secret = `SYNTHETIC_${crypto.randomUUID()}`;
+  const h = harness({
+    voiceOverrides: {
+      status: () => ({
+        ok: true,
+        mode: secret,
+        time: secret,
+        playing: secret,
+        rate: secret,
+        playingFeeds: [FEEDS[0], secret],
+        extra: secret,
+      }),
+    },
+  });
+  const result = await h.runner('control_history', { action: 'status' });
+  assert.equal(result.ok, true);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+  assert.deepEqual(result.playingFeeds, [FEEDS[0]]);
+});

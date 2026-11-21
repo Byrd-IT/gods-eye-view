@@ -309,9 +309,11 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
       )
         ok = clock.step?.(value);
       if (!ok) return fail('Sky playback action could not be applied');
+      const reportedRate = clock.rate;
+      const reportedPlaying = clock.playing;
       return doneControl(sky, {
-        rate: Number.isFinite(clock.rate) ? clock.rate : null,
-        playing: typeof clock.playing === 'boolean' ? clock.playing : null,
+        rate: Number.isFinite(reportedRate) ? reportedRate : null,
+        playing: typeof reportedPlaying === 'boolean' ? reportedPlaying : null,
       });
     },
     async layers(layer, enabled) {
@@ -349,23 +351,26 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         if (typeof sky.content?.setUserLimit !== 'function')
           return unavailable();
         sky.content.setUserLimit(limit);
-        if (sky.content.userLimit !== limit)
+        const appliedLimit = sky.content.userLimit;
+        if (appliedLimit !== limit)
           return fail('Star magnitude did not change');
         sky.redraw?.();
         return doneControl(sky, {
           magnitudeTarget: target,
-          magnitude: sky.content.userLimit,
+          magnitude: limit,
         });
       }
       if (typeof sky.setNakedEye !== 'function') return unavailable();
       sky.setNakedEye({ limit });
-      if (sky.nakedEye?.limit !== limit)
+      const nakedEye = sky.nakedEye;
+      const appliedSatelliteLimit = nakedEye?.limit;
+      if (appliedSatelliteLimit !== limit)
         return fail('Satellite magnitude did not change');
+      const filterOn = nakedEye.on;
       return doneControl(sky, {
         magnitudeTarget: target,
-        magnitude: sky.nakedEye?.limit,
-        filterEnabled:
-          typeof sky.nakedEye?.on === 'boolean' ? sky.nakedEye.on : null,
+        magnitude: limit,
+        filterEnabled: typeof filterOn === 'boolean' ? filterOn : null,
       });
     },
     async location(latitude, longitude) {
@@ -430,7 +435,7 @@ export function createSkyVoice({ getHandle, satelliteWaitMs = 2000 }) {
         Math.abs(clockMs - result.timeMs) > 1500
       )
         return fail('A newer time change won. Ask again.');
-      return done(after, {
+      return doneControl(after, {
         opened: opened.opened,
         preset,
         ...(historyOwned ? { historyMoved: true } : {}),
