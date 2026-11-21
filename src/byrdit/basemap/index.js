@@ -1,6 +1,10 @@
 import { createDefaultMapSources } from '../../maps/defaultSources.js';
 import { mapEngineFor } from '../../maps/engine.js';
 import { loadPhotorealisticTileset } from '../../render/cesium/google3d.js';
+// The photo coverage layer draws through `drawOf(viewer)`; load the Cesium
+// adapter's unbound draw factory with the scene that reaches it, as the
+// render/unboundCamera ratchet requires of every entry with a findDraw caller.
+import '../../render/cesium/draw.js';
 import { basemapFlagOn, loadBasemapConfig } from './config.js';
 import {
   createBasemapMapSource,
