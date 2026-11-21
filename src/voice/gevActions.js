@@ -1867,7 +1867,10 @@ export function createGevActionRunner({
     }
 
     if (name === 'control_droneplan') {
-      return controlDronePlan(dronePlan?.(), args);
+      // The host is read, and the action dispatched, inside the guard: a panel
+      // bug, a throwing getter or a caller-supplied value whose toString
+      // throws must never carry its message out of this action.
+      return controlDronePlanGuarded(dronePlan, args);
     }
 
     if (name === 'set_clean_view') {
@@ -2928,10 +2931,102 @@ async function controlDronePlan(voice, args = {}) {
   if (action === 'finish') return wrap(await voice.finish());
   if (action === 'undo') return wrap(await voice.undo());
   if (action === 'corner') return wrap(await voice.corner());
-  // A token that is not a short word is not repeated: the model may have
-  // put a secret in the action field.
-  const token = /^[a-z]{1,20}$/.test(action) ? action : 'missing';
-  throw new Error(`Unknown drone plan action: ${token}`);
+  // The action is caller text (the model writes it), so the refusal never
+  // repeats it: even an all-lower-case secret in that field stays here.
+  throw dronePlanUnknownActionError();
+}
+
+/** Fixed text for an action this module does not recognise. */
+const DRONE_PLAN_ACTION_UNKNOWN = 'Unknown drone plan action';
+/** Fixed text for a drone-plan action that failed in the host. */
+const DRONE_PLAN_ACTION_FAILED = 'Drone Flight Plan action failed';
+/** Fixed text for a drone-plan call cancelled by a newer request or a reset. */
+const DRONE_PLAN_ACTION_CANCELLED = 'Drone Flight Plan action cancelled';
+
+/**
+ * Refusals this module minted. Authenticated by identity, so a host cannot
+ * forge the tag with `code`/`message` and nothing has to be read off the
+ * untrusted object to recognise our own error.
+ */
+const dronePlanRefusals = new WeakSet();
+
+function dronePlanActionError(message, code, name = 'Error') {
+  const error = new Error(message);
+  error.code = code;
+  if (name !== 'Error') error.name = name;
+  return error;
+}
+
+function dronePlanUnknownActionError() {
+  const error = dronePlanActionError(
+    DRONE_PLAN_ACTION_UNKNOWN,
+    'UNKNOWN_ACTION',
+  );
+  dronePlanRefusals.add(error);
+  return error;
+}
+
+/**
+ * Cancellation markers are read only behind try/catch: a hostile thrown object
+ * can carry throwing getters, and inspecting one must not turn the fixed
+ * failure into whatever the getter threw.
+ */
+function isDronePlanCancellation(error) {
+  try {
+    return (
+      error?.name === 'AbortError' ||
+      error?.code === 'ABORT_ERR' ||
+      error?.code === 'CANCELLED' ||
+      error?.cancelled === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Anything a drone-plan host throws is replaced here with fixed text. The host
+ * is outside this action's trust boundary: a panel bug can throw a provider
+ * URL, a throwing getter can throw whatever it was closed over, and a
+ * caller-supplied action object can throw from its own toString. That message
+ * used to travel unchanged into the thrown error, and the voice controller puts
+ * `error.message` into the tool result the model reads — so it left the action.
+ *
+ * Cancellations are preserved as cancellations (an AbortError the caller's
+ * abort handling still recognises) rather than being swallowed or reported as a
+ * failure; only their text is replaced. Our own refusals are recognised by
+ * identity and keep their fixed text. Every other error becomes one fixed
+ * string with no cause, so no secret is reachable through the error object.
+ */
+function dronePlanFailure(error) {
+  if (isDronePlanCancellation(error))
+    return dronePlanActionError(
+      DRONE_PLAN_ACTION_CANCELLED,
+      'ABORT_ERR',
+      'AbortError',
+    );
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    dronePlanRefusals.has(error)
+  )
+    return dronePlanActionError(DRONE_PLAN_ACTION_UNKNOWN, 'UNKNOWN_ACTION');
+  return dronePlanActionError(DRONE_PLAN_ACTION_FAILED, 'DRONE_PLAN_FAILED');
+}
+
+/**
+ * `control_droneplan` action boundary. The host handle is resolved and the
+ * action dispatched inside one guard, so a synchronous host getter throw or a
+ * throwing `args.action` is covered as well as a rejected voice method.
+ */
+async function controlDronePlanGuarded(host, args) {
+  try {
+    const voice =
+      host == null ? null : typeof host === 'function' ? host() : host;
+    return await controlDronePlan(voice, args);
+  } catch (error) {
+    throw dronePlanFailure(error);
+  }
 }
 
 /** Voice CCTV control over the cctv layer module's public surface. */

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { inspect } from 'node:util';
 import { createGevActionRunner } from './gevActions.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
 import { realtimeInstructions } from '../../server/providers/openai/instructions.js';
@@ -121,16 +122,269 @@ test('a missing Drone Flight Plan host does not repeat the request', async () =>
   assert.equal(JSON.stringify(missing).includes(SECRET), false);
 });
 
-test('an unknown drone plan action does not repeat a secret token', async () => {
+test('an unknown drone plan action never repeats the action text', async () => {
   const { runner } = harness();
+  // An all-lower-case alphabetic secret used to pass the `[a-z]{1,20}` shape
+  // check and be echoed back inside the refusal.
+  const alphabetic = 'abcdefghijklmnop';
+  for (const action of [SECRET, alphabetic, 'missing', 'options ']) {
+    await assert.rejects(
+      () => runner('control_droneplan', { action }),
+      (err) => {
+        assert.equal(err.message, 'Unknown drone plan action');
+        assert.equal(err.code, 'UNKNOWN_ACTION');
+        assert.equal(err.message.includes(action), false);
+        assert.equal(err.message.includes(alphabetic), false);
+        assert.equal(err.message.includes(SECRET), false);
+        return true;
+      },
+    );
+  }
+});
+
+// ---------------------------------------------------------------- failures --
+// The host adapter is outside this action's trust boundary. Whatever it throws
+// — a provider URL, an Authorization header, a token closed over by a throwing
+// getter — must stop at `control_droneplan`: the voice controller copies
+// `error.message` into the tool result the model reads.
+const FIXED_FAILURE = 'Drone Flight Plan action failed';
+
+/** Every string reachable from a thrown error: message, stack, props, cause. */
+function leakText(error) {
+  const parts = [];
+  const seen = new Set();
+  const walk = (value, depth) => {
+    if (value == null || depth > 6) return;
+    if (typeof value === 'string') {
+      parts.push(value);
+      return;
+    }
+    if (typeof value !== 'object') return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    for (const key of Object.keys(value)) {
+      parts.push(key);
+      try {
+        walk(value[key], depth + 1);
+      } catch {
+        parts.push('[getter threw]');
+      }
+    }
+  };
+  walk(error, 0);
+  parts.push(String(error?.stack ?? ''));
+  try {
+    parts.push(
+      inspect(error, {
+        depth: 8,
+        getters: true,
+        showHidden: true,
+      }),
+    );
+  } catch {
+    parts.push('[inspect threw]');
+  }
+  return parts.join('\n');
+}
+
+function runnerWithOptions(options) {
+  return createGevActionRunner({
+    viewer: VIEWER,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    ...options,
+  });
+}
+
+const rejectsWithFixedFailure = async (call, expected = FIXED_FAILURE) => {
+  await assert.rejects(call, (err) => {
+    assert.equal(err.message, expected);
+    assert.equal(err.cause, undefined);
+    assert.equal(err.errors, undefined, 'no aggregate of the original errors');
+    assert.equal(leakText(err).includes(SECRET), false, 'a secret survived');
+    return true;
+  });
+};
+
+test('a host that throws does not escape its message, cause or stack', async () => {
+  const cause = new Error(`provider refused ${SECRET}`);
+  cause.request = { headers: { authorization: `Bearer ${SECRET}` } };
+  const thrown = new Error(`upstream said ${SECRET}`);
+  thrown.cause = cause;
+  thrown.providerUrl = `https://svc:${SECRET}@example.test/plan`;
+  thrown.stack = `${thrown.stack}\n    at leak (${SECRET})`;
+  const { runner } = harness({
+    async options() {
+      throw thrown;
+    },
+  });
+  await rejectsWithFixedFailure(() =>
+    runner('control_droneplan', { action: 'options' }),
+  );
+});
+
+test('a throwing member getter on the host does not escape its message', async () => {
+  const hostile = {};
+  Object.defineProperty(hostile, 'options', {
+    get() {
+      throw new Error(`getter kept ${SECRET}`);
+    },
+  });
+  const { runner } = harness(hostile);
+  await rejectsWithFixedFailure(() =>
+    runner('control_droneplan', { action: 'options' }),
+  );
+});
+
+test('a caller action whose toString throws does not escape its message', async () => {
+  const { runner } = harness();
+  await rejectsWithFixedFailure(() =>
+    runner('control_droneplan', {
+      action: {
+        toString() {
+          throw new Error(`toString kept ${SECRET}`);
+        },
+      },
+    }),
+  );
+});
+
+test('a throwing action getter on the arguments does not escape its message', async () => {
+  const { runner } = harness();
+  const args = {
+    get action() {
+      throw new Error(`args getter kept ${SECRET}`);
+    },
+  };
+  await rejectsWithFixedFailure(() => runner('control_droneplan', args));
+});
+
+test('a throwing host handle does not escape its message', async () => {
+  const runner = runnerWithOptions({
+    dronePlan: () => {
+      throw new Error(`handle kept ${SECRET}`);
+    },
+  });
+  await rejectsWithFixedFailure(() =>
+    runner('control_droneplan', { action: 'status' }),
+  );
+});
+
+test('a host error faking the unknown-action tag still cannot smuggle text', async () => {
+  const forged = [
+    `Unknown drone plan action: ${SECRET}`,
+    'Unknown drone plan action: abcdefghijklmnop',
+    'Unknown drone plan action',
+  ];
+  for (const message of forged) {
+    const thrown = new Error(message);
+    thrown.code = 'UNKNOWN_ACTION';
+    const { runner } = harness({
+      async status() {
+        throw thrown;
+      },
+    });
+    await rejectsWithFixedFailure(() =>
+      runner('control_droneplan', { action: 'status' }),
+    );
+  }
+});
+
+test('a thrown object whose code or name getter throws stays a fixed failure', async () => {
+  // Inspecting the thrown object for cancellation markers used to run those
+  // getters, so a hostile object could replace the fixed text with its own.
+  for (const key of ['name', 'code', 'cancelled', 'message']) {
+    const hostile = {};
+    Object.defineProperty(hostile, key, {
+      get() {
+        throw new Error(`getter ${key} kept ${SECRET}`);
+      },
+    });
+    const { runner } = harness({
+      async options() {
+        throw hostile;
+      },
+    });
+    await rejectsWithFixedFailure(() =>
+      runner('control_droneplan', { action: 'options' }),
+    );
+  }
+});
+
+test('a getter that throws an AbortError shape still cannot fake a cancellation', async () => {
+  const hostile = {};
+  Object.defineProperty(hostile, 'name', {
+    get() {
+      throw new Error('not a cancellation');
+    },
+  });
+  Object.defineProperty(hostile, 'cancelled', {
+    get() {
+      throw new Error('nor this one');
+    },
+  });
+  const { runner } = harness({
+    async options() {
+      throw hostile;
+    },
+  });
   await assert.rejects(
-    () => runner('control_droneplan', { action: SECRET }),
+    () => runner('control_droneplan', { action: 'options' }),
     (err) => {
-      assert.match(err.message, /Unknown drone plan action: missing/);
-      assert.equal(err.message.includes(SECRET), false);
+      assert.equal(err.name, 'Error');
+      assert.equal(err.message, FIXED_FAILURE);
+      assert.equal(leakText(err).includes('not a cancellation'), false);
       return true;
     },
   );
+});
+
+test('a cancellation stays a cancellation and loses only its text', async () => {
+  const aborted = new Error(`cancelled with ${SECRET}`);
+  aborted.name = 'AbortError';
+  const { runner } = harness({
+    async status() {
+      throw aborted;
+    },
+  });
+  await assert.rejects(
+    () => runner('control_droneplan', { action: 'status' }),
+    (err) => {
+      assert.equal(err.name, 'AbortError');
+      assert.equal(err.code, 'ABORT_ERR');
+      assert.equal(err.message, 'Drone Flight Plan action cancelled');
+      assert.equal(leakText(err).includes(SECRET), false, 'a secret survived');
+      return true;
+    },
+  );
+});
+
+test('a failed drone plan action still releases its serialized sibling', async () => {
+  const order = [];
+  const voice = {
+    async status() {
+      order.push('status');
+      throw new Error(`panel kept ${SECRET}`);
+    },
+    async options() {
+      order.push('options');
+      return { ok: true, aglM: 60 };
+    },
+  };
+  const { runner } = harness(voice);
+  const group = { authorityGroup: 'reply-1' };
+  const first = runner('control_droneplan', { action: 'status' }, group).then(
+    () => 'ok',
+    (err) => {
+      assert.equal(leakText(err).includes(SECRET), false, 'a secret survived');
+      return err.message;
+    },
+  );
+  const second = runner('control_droneplan', { action: 'options' }, group);
+  const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+  assert.equal(firstOutcome, FIXED_FAILURE);
+  assert.equal(secondOutcome.ok, true);
+  assert.deepEqual(order, ['status', 'options']);
 });
 
 test('control_droneplan option bounds are the panel sliders, not guesswork', async () => {
