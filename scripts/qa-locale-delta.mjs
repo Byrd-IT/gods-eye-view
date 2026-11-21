@@ -116,6 +116,8 @@ export function formatComparison(result) {
   return lines.join('\n');
 }
 
+const HARNESS_FAILED = 'the placement harness failed';
+
 function runHarness(rootDir, jsonFile) {
   const harness = fileURLToPath(
     new URL('./qa-locale-placement.mjs', import.meta.url),
@@ -127,7 +129,9 @@ function runHarness(rootDir, jsonFile) {
   );
   // 0 = every strict case passed, 1 = strict findings (expected), 2 = error.
   if (result.status !== 0 && result.status !== 1)
-    throw new Error(`harness failed on ${rootDir}`);
+    throw Object.assign(new Error(HARNESS_FAILED), {
+      code: `exit ${result.status ?? result.signal}`,
+    });
   return JSON.parse(readFileSync(jsonFile, 'utf8'));
 }
 
@@ -169,7 +173,14 @@ if (import.meta.url === invoked) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
-    console.error(String(error?.message || error).slice(0, 300));
+    // Fixed text only: never echo paths, arguments or file contents.
+    const what =
+      error?.message === HARNESS_FAILED
+        ? HARNESS_FAILED
+        : 'could not read or compare the runs';
+    console.error(
+      `qa-locale-delta: ${what} (${error?.code || error?.name || 'error'})`,
+    );
     process.exitCode = 2;
   }
 }

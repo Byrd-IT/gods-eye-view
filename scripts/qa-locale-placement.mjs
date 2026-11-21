@@ -7,7 +7,7 @@
 //   node scripts/qa-locale-placement.mjs [--root DIR] [--json FILE] [--css FILE]
 // --root measures another checkout (the baseline for a before/after delta,
 // scripts/qa-locale-delta.mjs); --json writes every case's findings.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -29,6 +29,15 @@ for (let i = 0; i < args.length; i += 2) {
 const root = options.root
   ? path.resolve(options.root) + path.sep
   : fileURLToPath(new URL('../', import.meta.url));
+// A root that is not a checkout of this app stops here, before Vite (whose
+// own errors would print the path) starts.
+if (
+  !existsSync(path.join(root, 'index.html')) ||
+  !existsSync(path.join(root, 'src/ui/views/ContextView.vue'))
+) {
+  console.error('Not a checkout of the app: --root needs index.html and src/');
+  process.exit(2);
+}
 let candidate = '';
 try {
   if (options.css) candidate = readFileSync(options.css, 'utf8');
@@ -134,7 +143,9 @@ const server = await createServer({
   envFile: false,
   plugins: [plugin, vue()],
   server: { host: '127.0.0.1', port: 0, strictPort: false },
-  logLevel: 'error',
+  // Silent: Vite's own messages carry paths; failures surface as the
+  // harness's fixed error below.
+  logLevel: 'silent',
 });
 let browser;
 try {
@@ -397,8 +408,8 @@ try {
   if (passed !== rows.length) process.exitCode = 1;
 } catch (error) {
   console.error(
-    'Harness error: failed to load or exercise the real shell:',
-    String(error?.message || error).slice(0, 300),
+    'Harness error: failed to load or exercise the real shell',
+    `(${error?.code || error?.name || 'error'})`,
   );
   process.exitCode = 2;
 } finally {
