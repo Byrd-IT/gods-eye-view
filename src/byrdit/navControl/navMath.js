@@ -20,8 +20,10 @@ const TWO_PI = Math.PI * 2;
 export const TOP_DOWN_PITCH = -89 * DEG;
 /** Closest-to-the-horizon orbit pitch the control will command. */
 export const HORIZON_PITCH = -10 * DEG;
+/** Gaze straight up. Only reachable by turning in place, never by orbiting. */
+export const LOOK_UP_PITCH = 90 * DEG;
 /** Tilt slider span in degrees measured up from the top-down view. */
-export const TILT_SPAN_DEG = Math.round((HORIZON_PITCH - TOP_DOWN_PITCH) / DEG);
+export const TILT_SPAN_DEG = Math.round((LOOK_UP_PITCH - TOP_DOWN_PITCH) / DEG);
 /** Smallest and largest orbit distance a zoom step may reach, in metres. */
 export const MIN_RANGE_M = 40;
 export const MAX_RANGE_M = 40_000_000;
@@ -90,7 +92,7 @@ export function clampRange(range) {
   return Math.min(MAX_RANGE_M, Math.max(MIN_RANGE_M, range));
 }
 
-/** Slider value (0 top-down .. TILT_SPAN_DEG near-horizon) for a pitch. */
+/** Slider value (0 top-down .. TILT_SPAN_DEG straight up) for a gaze pitch. */
 export function pitchToTiltDeg(pitch) {
   if (!Number.isFinite(pitch)) return 0;
   const tilt = (pitch - TOP_DOWN_PITCH) / DEG;
@@ -101,6 +103,32 @@ export function pitchToTiltDeg(pitch) {
 export function tiltDegToPitch(tiltDeg) {
   const tilt = Number.isFinite(tiltDeg) ? tiltDeg : 0;
   return TOP_DOWN_PITCH + Math.min(TILT_SPAN_DEG, Math.max(0, tilt)) * DEG;
+}
+
+/**
+ * Split a wanted gaze pitch into a safe orbit pitch and the gaze to turn to in
+ * place. Above the orbit limit the camera stays at the limit and only the gaze
+ * rotates (`lookUp`), so the camera never goes under the ground.
+ */
+export function splitTilt(wantedPitch, orbitLimitPitch) {
+  const wanted = Number.isFinite(wantedPitch) ? wantedPitch : TOP_DOWN_PITCH;
+  const limit = Number.isFinite(orbitLimitPitch)
+    ? orbitLimitPitch
+    : HORIZON_PITCH;
+  const orbitPitch = Math.max(TOP_DOWN_PITCH, Math.min(wanted, limit));
+  const gazePitch = Math.min(LOOK_UP_PITCH, Math.max(TOP_DOWN_PITCH, wanted));
+  return { orbitPitch, gazePitch, lookUp: gazePitch > orbitPitch + 1e-9 };
+}
+
+/** Short spoken description of a slider value. */
+export function tiltDescription(tiltDeg) {
+  const pitch = tiltDegToPitch(tiltDeg);
+  if (pitch === TOP_DOWN_PITCH) return 'top-down';
+  const degrees = Math.round(Math.abs(pitch) / DEG);
+  if (degrees === 0) return 'level with the horizon';
+  if (pitch < 0) return `${degrees} degrees below the horizon`;
+  if (degrees === 90) return 'straight up';
+  return `${degrees} degrees above the horizon`;
 }
 
 /**

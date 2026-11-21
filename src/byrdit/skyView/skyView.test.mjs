@@ -102,6 +102,68 @@ function fakeDocument() {
   return doc;
 }
 
+/**
+ * The right-hand rail's SKY card (ContextView.vue #sky-view-panel): a card
+ * with a collapse button that toggles `collapsed` the way PanelChrome does,
+ * its body, and a MutationObserver that reports class changes on the card.
+ */
+function addSkyRail(doc) {
+  const card = new FakeElement('section');
+  card.id = 'sky-view-panel';
+  const body = new FakeElement('div');
+  body.id = 'gev-sky-body';
+  card.append(body);
+  const toggle = new FakeElement('button');
+  card.append(toggle);
+  const classes = new Set(['collapsed']);
+  const observers = new Set();
+  const notify = () => {
+    for (const observer of [...observers]) observer.callback([]);
+  };
+  card.classList = {
+    contains: (c) => classes.has(c),
+    add: (c) => {
+      classes.add(c);
+      notify();
+    },
+    remove: (c) => {
+      classes.delete(c);
+      notify();
+    },
+    toggle: (c, force = !classes.has(c)) => {
+      if (force) classes.add(c);
+      else classes.delete(c);
+      notify();
+      return force;
+    },
+  };
+  toggle.clicks = 0;
+  toggle.click = () => {
+    toggle.clicks += 1;
+    card.classList.toggle('collapsed');
+  };
+  card.querySelector = (selector) =>
+    selector === '.panel-collapse-btn' ? toggle : null;
+  doc.getElementById = (id) =>
+    ({ 'sky-view-panel': card, 'gev-sky-body': body })[id] ?? null;
+  doc.defaultView = {
+    MutationObserver: class {
+      constructor(callback) {
+        this.callback = callback;
+      }
+      observe(target, options) {
+        assert.equal(target, card);
+        assert.deepEqual(options.attributeFilter, ['class']);
+        observers.add(this);
+      }
+      disconnect() {
+        observers.delete(this);
+      }
+    },
+  };
+  return { card, body, toggle, observers };
+}
+
 function fakeTimers() {
   let id = 1;
   const pending = new Map();
@@ -215,6 +277,7 @@ function fakeHistory(location) {
 
 function setup(options = {}) {
   const doc = fakeDocument();
+  const rail = options.rail ? addSkyRail(doc) : null;
   const viewer = fakeViewer(options.viewer);
   const timers = fakeTimers();
   const location = {
@@ -252,7 +315,7 @@ function setup(options = {}) {
     ...(options.declinationAt ? { declinationAt: options.declinationAt } : {}),
     ...(options.voiceWindow !== undefined ? { voiceWindow: options.voiceWindow } : {}),
   });
-  return { doc, viewer, timers, location, history, handle };
+  return { doc, viewer, timers, location, history, handle, rail };
 }
 
 const click = (node) => node.dispatchEvent(new Event('click'));
@@ -289,6 +352,63 @@ test('mount: Sky button, panel, toolbar, overlay canvas; once per viewer; null w
   handle.destroy();
   assert.equal(doc.body.find('open'), null);
   assert.equal(skyViewFor(viewer), null);
+});
+
+test('rail: Sky mounts in the SKY rail card; no floating button; the card opens and closes the panel', () => {
+  const { doc, rail, handle } = setup({ rail: true });
+  assert.equal(doc.body.find('open'), null, 'no floating Sky button');
+  const panel = rail.body.find('panel');
+  assert.ok(panel, 'the panel lives in the card body');
+  assert.equal(doc.body.find('panel'), null);
+  assert.ok(doc.body.find('bar'), 'the Sky toolbar still floats over the map');
+  assert.equal(panel.hidden, true);
+  assert.ok(rail.card.classList.contains('collapsed'));
+  rail.toggle.click();
+  assert.equal(panel.hidden, false, 'opening the card shows the panel');
+  rail.toggle.click();
+  assert.equal(panel.hidden, true, 'closing the card hides the panel');
+  // The rail's accordion or Cockpit collapsing the card (no click) too.
+  rail.toggle.click();
+  rail.card.classList.add('collapsed');
+  assert.equal(panel.hidden, true);
+  handle.destroy();
+  assert.equal(rail.body.find('panel'), null);
+  assert.equal(rail.observers.size, 0, 'destroy stops watching the card');
+});
+
+test('rail: voice open/close drives the card through its own button', async () => {
+  const voiceWindow = {};
+  const { rail, handle } = setup({ rail: true, voiceWindow });
+  const opened = await handle.voice.open();
+  assert.equal(opened.ok, true);
+  assert.equal(handle.active, true);
+  assert.ok(
+    rail.card.classList.contains('collapsed'),
+    'entering the sky folds the launcher card',
+  );
+  assert.equal(rail.body.find('panel').hidden, true);
+  // Opening the card while the sky is shown goes back to the map and
+  // leaves the panel up to pick a new spot, as the old button did.
+  rail.toggle.click();
+  assert.equal(handle.active, false);
+  assert.equal(rail.body.find('panel').hidden, false);
+  const closed = await handle.voice.close();
+  assert.equal(closed.ok, true);
+  handle.destroy();
+});
+
+test('rail: following an entity hides the SKY card; it comes back after', async () => {
+  const { viewer, rail, handle } = setup({ rail: true });
+  rail.toggle.click();
+  viewer.trackedEntity = {};
+  viewer.trackedEntityChanged.raiseEvent();
+  assert.equal(rail.card.hidden, true);
+  assert.equal(rail.body.find('panel').hidden, true);
+  assert.ok(rail.card.classList.contains('collapsed'));
+  viewer.trackedEntity = undefined;
+  viewer.trackedEntityChanged.raiseEvent();
+  assert.equal(rail.card.hidden, false);
+  handle.destroy();
 });
 
 test('voice hook: open stands at the map centre, close leaves, destroy drops the hook', async () => {

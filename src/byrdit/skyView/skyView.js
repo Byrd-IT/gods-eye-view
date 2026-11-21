@@ -1,6 +1,7 @@
 /**
- * Sky view (byrdit fork, SKYVIEW.md): a "Sky" button next to the map
- * navigation control. Pick a point on the globe, use the browser location,
+ * Sky view (byrdit fork, SKYVIEW.md): a SKY card in the right-hand rail of
+ * panels (#sky-view-panel; a host without the rail gets a floating "Sky"
+ * button instead). Pick a point on the globe, use the browser location,
  * or type "lat, lon" / a place; the camera drops to eye height there and
  * looks UP. Drag/pinch/wheel/keys look around (zoom = field of view), the
  * horizon is the real terrain (or a flat painted ground), the sky follows the
@@ -119,6 +120,13 @@ import {
 import { cesiumViewerFor } from '../cesiumViewer.js';
 
 const mounted = new WeakMap();
+/**
+ * The right-hand rail card that launches Sky view (ContextView.vue), and its
+ * body, which holds the "where do you stand?" panel. Without them (a host
+ * with no rail) the view keeps its own floating Sky button.
+ */
+export const SKY_RAIL_ID = 'sky-view-panel';
+export const SKY_RAIL_BODY_ID = 'gev-sky-body';
 const PHASE_TEXT = {
   day: 'Day',
   civil: 'Civil twilight',
@@ -509,7 +517,35 @@ export function mountSkyView({
 
   const dom = buildDom(doc);
   const satDom = buildSatPanel(doc);
-  host.append(dom.button, dom.panel, dom.bar, satDom.root);
+  const railCard = doc.getElementById?.(SKY_RAIL_ID) ?? null;
+  const railBody = railCard ? doc.getElementById?.(SKY_RAIL_BODY_ID) : null;
+  const rail = railCard && railBody ? { card: railCard, body: railBody } : null;
+  if (rail) {
+    // The rail card is the launcher: its own collapse button opens and
+    // closes the panel, so there is no floating Sky button.
+    dom.panel.classList?.add?.('gev-sky-panel--rail');
+    rail.body.append(dom.panel);
+    host.append(dom.bar, satDom.root);
+  } else {
+    host.append(dom.button, dom.panel, dom.bar, satDom.root);
+  }
+  /** Whether the rail card is open (expanded). */
+  const railOpen = () => !rail.card.classList.contains('collapsed');
+  /**
+   * Open or close the rail card through its own button, so the rail's
+   * accordion, aria-expanded and saved state follow, as a click would.
+   */
+  const setRailOpen = (open) => {
+    if (railOpen() === open) return;
+    const toggle = rail.card.querySelector?.('.panel-collapse-btn');
+    if (toggle) toggle.click();
+    else rail.card.classList.toggle('collapsed', !open);
+  };
+  /** The launcher shows the panel as closed (Sky view entered or put down). */
+  const closeLauncher = () => {
+    if (rail) setRailOpen(false);
+    else dom.button.setAttribute('aria-expanded', 'false');
+  };
   const canvasHost = viewer.container || host;
   canvasHost.append(dom.canvas, dom.crosshair);
   const clearView = createClearView({
@@ -1466,7 +1502,7 @@ export function mountSkyView({
       dom.canvas.hidden = false;
       dom.bar.hidden = false;
       dom.panel.hidden = true;
-      dom.button.setAttribute('aria-expanded', 'false');
+      closeLauncher();
       doc.body?.classList?.add('gev-sky-active');
       content.start(observer, time.getTime());
       timeControl.sync();
@@ -1896,13 +1932,37 @@ export function mountSkyView({
   // ── wiring ───────────────────────────────────────────────────────────────
   const togglePanel = (open = dom.panel.hidden) => {
     dom.panel.hidden = !open;
-    dom.button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (rail) setRailOpen(open);
+    else dom.button.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (!open) stopPicking();
   };
   listen(dom.button, 'click', () => {
     if (active) exit();
     else togglePanel();
   });
+  if (rail) {
+    // The card opened or closed from the rail (its button, the accordion
+    // closing it for a peer, Cockpit, Escape): the panel follows. Opening the
+    // card while the sky is shown goes back to the map first, as the old
+    // button did, and leaves the panel up to pick a new spot.
+    const syncFromRail = () => {
+      if (destroyed) return;
+      const open = railOpen();
+      if (open && active) exit();
+      if (open === !dom.panel.hidden) return;
+      dom.panel.hidden = !open;
+      if (!open) stopPicking();
+    };
+    const Observer =
+      doc.defaultView?.MutationObserver ?? globalThis.MutationObserver;
+    const railObserver = Observer ? new Observer(syncFromRail) : null;
+    railObserver?.observe(rail.card, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    if (railObserver) removers.push(() => railObserver.disconnect());
+    syncFromRail();
+  }
   listen(dom.buttons.close, 'click', () => togglePanel(false));
   listen(dom.buttons.pick, 'click', () => startPicking());
   listen(dom.buttons.here, 'click', () => screenCentre());
@@ -2081,7 +2141,8 @@ export function mountSkyView({
   // playback, recording and clean-view modes, like the nav control).
   const syncFollowing = () => {
     const following = Boolean(viewer.trackedEntity);
-    dom.button.hidden = following && !active;
+    if (rail) rail.card.hidden = following && !active;
+    else dom.button.hidden = following && !active;
     if (following) togglePanel(false);
   };
   const removeTracked =
@@ -2244,6 +2305,7 @@ export function mountSkyView({
       for (const remove of removers.splice(0)) remove();
       dom.button.remove?.();
       dom.panel.remove?.();
+      if (rail) rail.card.hidden = false;
       dom.bar.remove?.();
       satDom.root.remove?.();
       dom.canvas.remove?.();

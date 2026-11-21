@@ -17,7 +17,10 @@ import {
   setCameraTargetFrame,
 } from '../../ui/cameraOrientationControls.js';
 import {
+  HORIZON_PITCH,
+  LOOK_UP_PITCH,
   TILT_SPAN_DEG,
+  TILT_STEP_DEG,
   clampPitch,
   easeInOut,
   headingDegrees,
@@ -29,7 +32,9 @@ import {
   pitchToTiltDeg,
   pointerAngle,
   shortestTurn,
+  splitTilt,
   tiltDegToPitch,
+  tiltDescription,
   TOP_DOWN_PITCH,
   ZOOM_FRACTION,
 } from './navMath.js';
@@ -44,6 +49,7 @@ import { cesiumViewerFor } from '../cesiumViewer.js';
 export const MIN_TARGET_HEIGHT_M = -1500;
 export const MAX_TARGET_HEIGHT_M = 25_000;
 
+const DEG = Math.PI / 180;
 const ROOT_ATTRIBUTE = 'data-gev-nav-control';
 const STEP_ANIMATION_MS = 220;
 const FIRST_REPEAT_MS = 380;
@@ -70,7 +76,7 @@ const LOOK_ACTIONS = new Set([
 const LABELS = {
   'zoom-in': 'Zoom in',
   'zoom-out': 'Zoom out',
-  'tilt-up': 'Tilt up toward the horizon',
+  'tilt-up': 'Tilt up toward straight up',
   'tilt-down': 'Tilt down toward top-down view',
   'top-down': 'Top-down view',
   'look-left': 'Look left',
@@ -78,6 +84,11 @@ const LABELS = {
   'look-up': 'Look up',
   'look-down': 'Look down',
 };
+const TILT_TITLE = 'Tilt: top-down (bottom) to straight up (top)';
+const TILT_LIMITED_TITLE =
+  'Tilt: camera held at a safe height above the terrain; the view tilts instead';
+const TILT_LIMITED_TOAST =
+  'Camera held above the terrain; tilting the view instead';
 const GLYPHS = {
   'zoom-in': '+',
   'zoom-out': '\u2212',
@@ -281,9 +292,9 @@ function build(doc) {
     step: 1,
     value: 0,
     'data-nav': 'tilt-slider',
-    'aria-label': 'Tilt',
+    'aria-label': TILT_TITLE,
     'aria-orientation': 'vertical',
-    title: 'Tilt: top-down (bottom) to near horizon (top)',
+    title: TILT_TITLE,
   });
   const tiltDown = button('tilt-down', 'gev-nav-tilt-down');
   tilt.append(tiltUp, slider, tiltDown);
@@ -442,9 +453,158 @@ export function mountNavControl({
     }
   };
 
+  // ── tilt beyond the orbit limit: look up in place ─────────────────────
+  // The orbit stays at its safe limit; only the gaze turns. `lookUpAnchor`
+  // remembers the orbit so tilting back returns to it while the camera has
+  // not been moved by anything else.
+  let lookUpAnchor = null;
+  let toastedThisGesture = false;
+
+  /** The anchor, if the camera is still where applyTilt left it. */
+  const validAnchor = () => {
+    if (!lookUpAnchor) return null;
+    const moved = Cesium.Cartesian3.distance(
+      camera.positionWC,
+      lookUpAnchor.cameraPosition,
+    );
+    if (moved <= Math.max(1, lookUpAnchor.range * 1e-3)) return lookUpAnchor;
+    lookUpAnchor = null;
+    return null;
+  };
+  /** The camera gazes above what an orbit can reach (small slack for float noise). */
+  const looksUp = () => camera.pitch > HORIZON_PITCH + 1e-4;
+  const clearAnchor = () => {
+    lookUpAnchor = null;
+  };
+  const onGesture = () => {
+    animator.cancel();
+    if (!lookUpAnchor) return;
+    clearAnchor();
+    root.removeAttribute('data-tilt-limited');
+    slider.setAttribute('title', TILT_TITLE);
+  };
+  /** Highest orbit pitch that is safe at this range, terrain included. */
+  const orbitLimit = (frame, heading, range) => {
+    const horizon = clampPitch(HORIZON_PITCH, range);
+    return {
+      horizon,
+      limit: liftPitchForClearance(
+        horizon,
+        clearanceProbe(frame, { heading, range, pitch: horizon }),
+      ),
+    };
+  };
+  const clampGaze = (pitch) =>
+    Math.min(LOOK_UP_PITCH, Math.max(TOP_DOWN_PITCH, pitch));
+
+  /**
+   * Tilt to a slider value: orbit as far as is safe, then turn the gaze in
+   * place for the rest. `direct` skips the navigation policy when the caller
+   * already runs inside it.
+   */
+  function applyTilt(tiltDeg, direct = false) {
+    const run = (navigate) =>
+      direct ? navigate() : runNavigation('camera', navigate);
+    const result = run(() => {
+      const wantedPitch = tiltDegToPitch(tiltDeg);
+      const anchor = validAnchor();
+      let frame;
+      let heading;
+      let range;
+      if (anchor) {
+        ({ frame, heading, range } = anchor);
+      } else {
+        if (looksUp()) {
+          animator.cancel();
+          return lookInPlace(camera.heading, clampGaze(wantedPitch));
+        }
+        frame = animator.active ? animator.frame : readFrame();
+        if (!frame) return lookInPlace(camera.heading, clampGaze(wantedPitch));
+        heading = animator.destination?.heading ?? frame.heading;
+        range = animator.destination?.range ?? frame.range;
+      }
+      const { horizon, limit } = orbitLimit(frame, heading, range);
+      const split = splitTilt(wantedPitch, limit);
+      let orbitPitch = split.orbitPitch;
+      if (!split.lookUp && orbitPitch > TOP_DOWN_PITCH)
+        orbitPitch = liftPitchForClearance(
+          orbitPitch,
+          clearanceProbe(frame, { heading, range, pitch: orbitPitch }),
+        );
+      animator.cancel();
+      const placed = setCameraTargetFrame(viewer, {
+        ...frame,
+        heading,
+        range,
+        pitch: orbitPitch,
+      });
+      if (!placed) return false;
+      const terrainHeld = split.lookUp
+        ? limit < horizon - 1e-6
+        : orbitPitch < wantedPitch - 1e-6;
+      if (split.lookUp) {
+        lookInPlace(heading, split.gazePitch);
+        lookUpAnchor = {
+          frame,
+          heading,
+          range,
+          cameraPosition: Cesium.Cartesian3.clone(camera.positionWC),
+        };
+      } else {
+        clearAnchor();
+      }
+      showTiltState(split.lookUp, terrainHeld);
+      return true;
+    });
+    refreshHeading();
+    return Boolean(result);
+  }
+
+  function showTiltState(lookUp, terrainHeld) {
+    root.setAttribute('data-tilt-mode', lookUp ? 'look-up' : 'orbit');
+    if (terrainHeld) {
+      root.setAttribute('data-tilt-limited', 'terrain');
+      slider.setAttribute('title', TILT_LIMITED_TITLE);
+      if (!toastedThisGesture) {
+        toastedThisGesture = true;
+        showToast?.(TILT_LIMITED_TOAST);
+      }
+    } else {
+      root.removeAttribute('data-tilt-limited');
+      slider.setAttribute('title', TILT_TITLE);
+    }
+  }
+
+  /**
+   * Tilt buttons: when the next step would pass the orbit limit, or the camera
+   * already looks up, tilt through applyTilt. Returns null to keep the
+   * animated orbit path.
+   */
+  function performTilt(action) {
+    toastedThisGesture = false;
+    const step = action === 'tilt-up' ? TILT_STEP_DEG : -TILT_STEP_DEG;
+    if (validAnchor() || looksUp())
+      return applyTilt(pitchToTiltDeg(camera.pitch) + step, true);
+    if (step < 0) return null;
+    const frame = animator.active ? animator.frame : readFrame();
+    if (!frame) return null;
+    const base = animator.active ? animator.destination || frame : frame;
+    const { limit } = orbitLimit(frame, base.heading, base.range);
+    const next = pitchToTiltDeg(base.pitch) + step;
+    return next > pitchToTiltDeg(limit) ? applyTilt(next, true) : null;
+  }
+
   /** One discrete action; returns whether the camera accepted it. */
   function perform(action) {
     const result = runNavigation('camera', () => {
+      if (action === 'tilt-up' || action === 'tilt-down') {
+        const done = performTilt(action);
+        if (done !== null) return done;
+      }
+      // Top-down and north come back out of a look-up around its orbit.
+      const anchored =
+        action === 'top-down' || action === 'north' ? validAnchor() : null;
+      if (action === 'top-down' || action === 'north') clearAnchor();
       if (LOOK_ACTIONS.has(action)) {
         if (viewer.trackedEntity) return false;
         animator.cancel();
@@ -455,7 +615,11 @@ export function mountNavControl({
         return lookInPlace(next.heading, next.pitch);
       }
       const pending = animator.active ? animator.destination : null;
-      const frame = animator.active ? animator.frame : readFrame();
+      const frame = anchored
+        ? frameForTarget(camera, anchored.frame.target)
+        : animator.active
+          ? animator.frame
+          : readFrame();
       if (!frame) return performWithoutTarget(action);
       const base = pending || frame;
       const plan = planAction(base, action);
@@ -497,7 +661,11 @@ export function mountNavControl({
       case 'top-down':
         return lookInPlace(heading, -Math.PI / 2);
       case 'tilt-up':
-      case 'tilt-down':
+      case 'tilt-down': {
+        const step =
+          (action === 'tilt-up' ? TILT_STEP_DEG : -TILT_STEP_DEG) * DEG;
+        return lookInPlace(heading, clampGaze(pitch + step));
+      }
       case 'rotate-left':
       case 'rotate-right': {
         const next = planAction({ heading, pitch, range: 1_000 }, action);
@@ -624,26 +792,10 @@ export function mountNavControl({
   for (const type of ['pointerup', 'pointercancel', 'blur'])
     listen(slider, type, () => {
       sliderDragging = false;
+      toastedThisGesture = false;
       refreshTilt();
     });
-  listen(slider, 'input', () => {
-    const pitchWanted = tiltDegToPitch(Number(slider.value));
-    runNavigation('camera', () => {
-      const frame = animator.active ? animator.frame : readFrame();
-      if (!frame) return lookInPlace(camera.heading, pitchWanted);
-      const heading = animator.destination?.heading ?? frame.heading;
-      const range = animator.destination?.range ?? frame.range;
-      animator.cancel();
-      let pitch = clampPitch(pitchWanted, range);
-      if (pitch > TOP_DOWN_PITCH)
-        pitch = liftPitchForClearance(
-          pitch,
-          clearanceProbe(frame, { heading, range, pitch }),
-        );
-      return setCameraTargetFrame(viewer, { ...frame, heading, range, pitch });
-    });
-    refreshHeading();
-  });
+  listen(slider, 'input', () => applyTilt(Number(slider.value)));
 
   // ── state shown on the control ───────────────────────────────────────
   function refreshHeading() {
@@ -666,14 +818,16 @@ export function mountNavControl({
   /** Exact tilt costs one depth read, so it refreshes once per gesture. */
   function refreshTilt() {
     if (destroyed || sliderDragging) return;
-    const frame = animator.active ? null : readFrame();
+    const lookUp = Boolean(validAnchor()) || looksUp();
+    const frame = animator.active || lookUp ? null : readFrame();
     const pitch = frame ? frame.pitch : camera.pitch;
     const tilt = pitchToTiltDeg(pitch);
     if (applied?.tilt !== tilt) {
       applied = { ...applied, tilt };
       slider.value = String(tilt);
-      slider.setAttribute('aria-valuetext', `${tilt} degrees from top-down`);
+      slider.setAttribute('aria-valuetext', tiltDescription(tilt));
     }
+    root.setAttribute('data-tilt-mode', lookUp ? 'look-up' : 'orbit');
     const following = Boolean(viewer.trackedEntity);
     if (applied.following !== following) {
       applied = { ...applied, following };
@@ -692,7 +846,7 @@ export function mountNavControl({
   });
   // A physical gesture on the globe supersedes any step still easing.
   for (const type of ['pointerdown', 'wheel'])
-    listen(viewer.scene.canvas, type, animator.cancel, { passive: true });
+    listen(viewer.scene.canvas, type, onGesture, { passive: true });
   refreshHeading();
   refreshTilt();
 

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   HORIZON_PITCH,
   LOOK_MAX_PITCH,
+  LOOK_UP_PITCH,
   MAX_RANGE_M,
   MIN_RANGE_M,
   TILT_SPAN_DEG,
@@ -21,7 +22,9 @@ import {
   planLook,
   pointerAngle,
   shortestTurn,
+  splitTilt,
   tiltDegToPitch,
+  tiltDescription,
   zoomRange,
 } from './navMath.js';
 
@@ -71,19 +74,88 @@ test('close in, the horizon limit tightens so the camera cannot sink', () => {
   assert.equal(horizonPitchForRange(4), TOP_DOWN_PITCH);
 });
 
-test('the tilt slider maps top-down to 0 and near-horizon to its maximum', () => {
+test('the tilt slider maps top-down to 0 and straight up to its maximum', () => {
+  assert.equal(TILT_SPAN_DEG, 179);
+  assert.equal(LOOK_UP_PITCH, 90 * DEG);
   assert.equal(pitchToTiltDeg(TOP_DOWN_PITCH), 0);
-  assert.equal(pitchToTiltDeg(HORIZON_PITCH), TILT_SPAN_DEG);
-  assert.equal(TILT_SPAN_DEG, 79);
+  assert.equal(pitchToTiltDeg(HORIZON_PITCH), 79);
+  assert.equal(pitchToTiltDeg(0), 89);
+  assert.equal(pitchToTiltDeg(LOOK_UP_PITCH), 179);
   assert.equal(pitchToTiltDeg(-200 * DEG), 0);
-  assert.equal(pitchToTiltDeg(10 * DEG), TILT_SPAN_DEG);
+  assert.equal(pitchToTiltDeg(120 * DEG), TILT_SPAN_DEG);
   assert.equal(pitchToTiltDeg(Number.NaN), 0);
   near(tiltDegToPitch(0), TOP_DOWN_PITCH);
-  near(tiltDegToPitch(TILT_SPAN_DEG), HORIZON_PITCH);
-  near(tiltDegToPitch(500), HORIZON_PITCH, 1e-9, 'over-range slider value');
+  near(tiltDegToPitch(79), HORIZON_PITCH);
+  near(tiltDegToPitch(89), 0);
+  near(tiltDegToPitch(179), LOOK_UP_PITCH);
+  near(tiltDegToPitch(500), LOOK_UP_PITCH, 1e-9, 'over-range slider value');
   near(tiltDegToPitch(-5), TOP_DOWN_PITCH);
+  for (const tilt of [0, 79, 89, 179])
+    assert.equal(pitchToTiltDeg(tiltDegToPitch(tilt)), tilt);
   for (let tilt = 0; tilt <= TILT_SPAN_DEG; tilt++)
     assert.equal(pitchToTiltDeg(tiltDegToPitch(tilt)), tilt);
+});
+
+test('the orbit clamp and clearance lift are unchanged by the look-up range', () => {
+  assert.equal(clampPitch(LOOK_UP_PITCH), HORIZON_PITCH);
+  assert.equal(clampPitch(5 * DEG), HORIZON_PITCH);
+  assert.equal(HORIZON_PITCH, -10 * DEG);
+  assert.equal(liftPitchForClearance(-10 * DEG, () => 100), -10 * DEG);
+  near(
+    liftPitchForClearance(-10 * DEG, (p) => (p < -11 * DEG ? 20 : 2)),
+    -12 * DEG,
+  );
+});
+
+test('splitTilt orbits up to the limit and looks the rest', () => {
+  const below = splitTilt(-45 * DEG, HORIZON_PITCH);
+  assert.equal(below.orbitPitch, -45 * DEG);
+  assert.equal(below.gazePitch, -45 * DEG);
+  assert.equal(below.lookUp, false);
+
+  const above = splitTilt(-5 * DEG, HORIZON_PITCH);
+  assert.equal(above.orbitPitch, HORIZON_PITCH);
+  assert.equal(above.gazePitch, -5 * DEG);
+  assert.equal(above.lookUp, true);
+
+  const up = splitTilt(LOOK_UP_PITCH, HORIZON_PITCH);
+  assert.equal(up.orbitPitch, HORIZON_PITCH);
+  assert.equal(up.gazePitch, LOOK_UP_PITCH);
+  assert.equal(up.lookUp, true);
+  assert.equal(splitTilt(200 * DEG, HORIZON_PITCH).gazePitch, LOOK_UP_PITCH);
+
+  const exact = splitTilt(HORIZON_PITCH, HORIZON_PITCH);
+  assert.equal(exact.lookUp, false);
+
+  // Non-finite wanted reads as top-down, non-finite limit as the horizon.
+  const bad = splitTilt(Number.NaN, HORIZON_PITCH);
+  assert.deepEqual(bad, {
+    orbitPitch: TOP_DOWN_PITCH,
+    gazePitch: TOP_DOWN_PITCH,
+    lookUp: false,
+  });
+  const badLimit = splitTilt(LOOK_UP_PITCH, Number.NaN);
+  assert.equal(badLimit.orbitPitch, HORIZON_PITCH);
+  assert.equal(badLimit.lookUp, true);
+
+  // Terrain lowered the limit: the orbit stays there, the gaze does the rest.
+  const lowered = splitTilt(-10 * DEG, -30 * DEG);
+  assert.equal(lowered.orbitPitch, -30 * DEG);
+  assert.equal(lowered.gazePitch, -10 * DEG);
+  assert.equal(lowered.lookUp, true);
+  // A limit below top-down never takes the orbit past top-down.
+  assert.equal(splitTilt(-80 * DEG, -120 * DEG).orbitPitch, TOP_DOWN_PITCH);
+});
+
+test('tiltDescription speaks the slider value', () => {
+  assert.equal(tiltDescription(0), 'top-down');
+  assert.equal(tiltDescription(1), '88 degrees below the horizon');
+  assert.equal(tiltDescription(79), '10 degrees below the horizon');
+  assert.equal(tiltDescription(89), 'level with the horizon');
+  assert.equal(tiltDescription(99), '10 degrees above the horizon');
+  assert.equal(tiltDescription(179), 'straight up');
+  assert.equal(tiltDescription(500), 'straight up');
+  assert.equal(tiltDescription(Number.NaN), 'top-down');
 });
 
 test('zoom steps travel a fraction of the distance and are clamped', () => {

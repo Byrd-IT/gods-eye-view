@@ -1123,3 +1123,88 @@ body.gev-sky-active :is(#gev-naip-slider, #gev-naip-split-line) {
     bottom: calc(var(--mobile-tab-space) + 12px);
   }
 }
+
+/* ── SKY card in the right-hand rail (ContextView.vue #sky-view-panel) ──
+   The rail card is the Sky view launcher, laid out by the rail like SOLUNAR
+   (position, width and the collapsed size come from layers.css). Its body
+   holds the "where do you stand?" panel, which then flows in the card instead
+   of floating over the map. */
+.sky-view-panel-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  max-height: 100%;
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--panel-radius);
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 212, 255, 0.46) rgba(255, 255, 255, 0.06);
+}
+#sky-view-panel .panel-glow {
+  position: absolute;
+  inset: -18px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 212, 255, 0.16) 0%,
+    transparent 65%
+  );
+  filter: blur(16px);
+  opacity: 0.25;
+  pointer-events: none;
+}
+#sky-view-panel .panel-header {
+  flex: 0 0 auto;
+}
+#sky-view-panel[hidden],
+#sky-view-panel.collapsed .gev-sky-body {
+  display: none !important;
+}
+#right-context-rail #sky-view-panel .panel-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  line-height: 1.2;
+}
+#right-context-rail #sky-view-panel .panel-collapse-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+#right-context-rail #sky-view-panel.collapsed .panel-divider {
+  display: none;
+}
+.gev-sky-body {
+  min-width: 0;
+}
+/* In the card the panel is ordinary content: no fixed box of its own, and
+   the card's own button closes it (no second close button). */
+.gev-sky-panel.gev-sky-panel--rail {
+  position: static;
+  z-index: auto;
+  width: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.gev-sky-panel--rail .gev-sky-close {
+  display: none;
+}
+.gev-sky-panel--rail .gev-sky-title {
+  margin-inline-end: 0;
+}
