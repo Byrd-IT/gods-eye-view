@@ -80,7 +80,8 @@ export function rankGaps(cells, mask, counts) {
     visited.add(start);
     let x = 0,
       y = 0,
-      zero = 0;
+      zero = 0,
+      minCell = start;
     while (todo.length) {
       const k = todo.pop(),
         i = k % nx,
@@ -88,6 +89,7 @@ export function rankGaps(cells, mask, counts) {
       group.push(k);
       x += x0 + (i + 0.5) * size;
       y += y0 + (j + 0.5) * size;
+      if (k < minCell) minCell = k;
       if (!(byCell.get(k) ?? 0)) zero++;
       for (const [di, dj] of [
         [1, 0],
@@ -112,9 +114,15 @@ export function rankGaps(cells, mask, counts) {
         x: x / group.length,
         y: y / group.length,
         areaM2: group.length * size * size,
+        minCell,
       });
   }
+  // Most zero-coverage squares first, then the largest component, then a
+  // canonical cell key so equal-sized components never depend on Set order.
   return gaps.sort(
-    (a, b) => b.zero * 3 + b.cells.length - (a.zero * 3 + a.cells.length),
+    (a, b) =>
+      b.zero - a.zero ||
+      b.cells.length - a.cells.length ||
+      a.minCell - b.minCell,
   );
 }

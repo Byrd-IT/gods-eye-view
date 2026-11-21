@@ -18,19 +18,37 @@ export async function createCoverageLayer({
     handler;
   try {
     await viewer.dataSources.add(cameras);
+    const visible = (p) =>
+      !state.visibleNames || state.visibleNames.has(p.name);
     const positions = state.photos.filter(
       (p) =>
         p.placed &&
         Number.isFinite(p.lat) &&
         Number.isFinite(p.lon) &&
-        (!state.visibleNames || state.visibleNames.has(p.name)),
+        visible(p),
+    );
+    // GPS-only photos never took part in the reconstruction: they have no
+    // solved pose, frustum, footprint or coverage, but they do have a real
+    // position and height to show. Missing or malformed fields fail closed.
+    const gpsOnly = state.photos.filter(
+      (p) =>
+        p.placed === false &&
+        typeof p.name === 'string' &&
+        p.name.length > 0 &&
+        Number.isFinite(p.lat) &&
+        Number.isFinite(p.lon) &&
+        Number.isFinite(p.z) &&
+        Math.abs(p.lat) <= 90 &&
+        Math.abs(p.lon) <= 180 &&
+        visible(p),
     );
     // The solved z coordinates share one model datum. Anchor that datum once
     // at the model origin; sampling at each camera would add terrain slope twice.
     const origin = modelLatLon(state.meta.origin, 0, 0);
-    const cartographics = positions.length
-      ? [Cesium.Cartographic.fromDegrees(origin.lon, origin.lat)]
-      : [];
+    const cartographics =
+      positions.length || gpsOnly.length
+        ? [Cesium.Cartographic.fromDegrees(origin.lon, origin.lat)]
+        : [];
     let terrain;
     try {
       terrain = cartographics.length
@@ -179,6 +197,27 @@ export async function createCoverageLayer({
         });
       }
     });
+    // Yellow GPS-only markers are click-selectable for details, but they are
+    // deliberately absent from projected/screenPoints so box and circle
+    // selection can never hand an unplaced name to the server-backed keep set.
+    for (const p of gpsOnly) {
+      cameras.entities.add({
+        id: `photo:${p.name}`,
+        position: Cesium.Cartesian3.fromDegrees(
+          p.lon,
+          p.lat,
+          modelHeight(p.z, state.meta.ground_z, terrain[0].height),
+        ),
+        point: {
+          pixelSize: 7,
+          color: Cesium.Color.YELLOW,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 1,
+        },
+        label: { text: 'not placed in this model' },
+        properties: { photoName: p.name, placed: false },
+      });
+    }
     handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     handler.setInputAction((event) => {
       const hit = viewer.scene.pick(event.position);

@@ -33,11 +33,12 @@ function harness(fail = false) {
       this.dead = true;
     }
   }
-  const color = {
+  const color = (name) => ({
+    name,
     withAlpha() {
       return this;
     },
-  };
+  });
   const C = {
     PrimitiveCollection: Collection,
     CustomDataSource: DataSource,
@@ -47,14 +48,14 @@ function harness(fail = false) {
       return p.map((x) => ({ ...x, height: 100 }));
     },
     Color: {
-      RED: color,
-      ORANGE: color,
-      YELLOW: color,
-      LIME: color,
-      GRAY: color,
-      MAGENTA: color,
-      CYAN: color,
-      BLACK: color,
+      RED: color('RED'),
+      ORANGE: color('ORANGE'),
+      YELLOW: color('YELLOW'),
+      LIME: color('LIME'),
+      GRAY: color('GRAY'),
+      MAGENTA: color('MAGENTA'),
+      CYAN: color('CYAN'),
+      BLACK: color('BLACK'),
     },
     GeometryInstance: class {
       constructor(x) {
@@ -216,5 +217,72 @@ test('all cameras share the single terrain anchor at model origin', async () => 
   assert.deepEqual(sampled, [{ lon: 0, lat: 0 }]);
   assert.equal(h.dataSources[0].entities.items[0].position[2], 115);
   assert.equal(h.dataSources[0].entities.items[2].position[2], 115);
+  layer.destroy();
+});
+test('GPS-only unplaced photos render yellow and clickable without pose or bulk selection', async () => {
+  const h = harness(),
+    picks = [];
+  const s = {
+    ...state,
+    photos: [
+      state.photos[0],
+      { name: 'gps.jpg', placed: false, lat: 1, lon: 2, z: 30 },
+      { name: 'no-height.jpg', placed: false, lat: 1, lon: 2 },
+      { name: 'bad-lat.jpg', placed: false, lat: NaN, lon: 2, z: 30 },
+    ],
+  };
+  const layer = await createCoverageLayer({
+    Cesium: h.C,
+    viewer: h.viewer,
+    state: s,
+    onPick: (p) => picks.push(p),
+  });
+  const entities = h.dataSources[0].entities.items;
+  const gps = entities.find((e) => e.id === 'photo:gps.jpg');
+  assert(gps);
+  assert.equal(gps.point.color.name, 'YELLOW');
+  assert.equal(gps.label.text, 'not placed in this model');
+  assert.deepEqual(gps.position, [2, 1, 140]);
+  assert.equal(
+    entities.some((e) => e.id === 'direction:gps.jpg'),
+    false,
+  );
+  assert.equal(
+    entities.some((e) => e.id === 'photo:no-height.jpg'),
+    false,
+  );
+  assert.equal(
+    entities.some((e) => e.id === 'photo:bad-lat.jpg'),
+    false,
+  );
+  // Coverage stays driven by the placed model, never by GPS-only photos.
+  assert.equal(h.primitives[0].items.length, 1);
+  assert.deepEqual(layer.screenPoints(), [{ name: 'p.jpg', x: 3, y: 4 }]);
+  h.viewer.scene.pick = () => ({ id: { id: 'photo:gps.jpg' } });
+  h.handlers[0].fn({ position: {} });
+  assert.deepEqual(picks, [{ type: 'photo', name: 'gps.jpg' }]);
+  layer.destroy();
+});
+test('a model with only GPS-only photos uses the shared terrain datum', async () => {
+  const h = harness();
+  let sampled = false;
+  h.C.sampleTerrainMostDetailed = async (_, positions) => {
+    sampled = true;
+    return positions.map((p) => ({ ...p, height: 100 }));
+  };
+  const layer = await createCoverageLayer({
+    Cesium: h.C,
+    viewer: h.viewer,
+    state: {
+      ...state,
+      photos: [{ name: 'gps.jpg', placed: false, lat: 1, lon: 2, z: 30 }],
+    },
+  });
+  assert.equal(sampled, true);
+  assert.deepEqual(h.dataSources[0].entities.items[0].position, [2, 1, 140]);
+  assert.equal(
+    h.dataSources[0].entities.items[0].point.color.name,
+    'YELLOW',
+  );
   layer.destroy();
 });

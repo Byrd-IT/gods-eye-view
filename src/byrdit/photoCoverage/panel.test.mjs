@@ -205,3 +205,108 @@ test('pitch and date filters read the coverage photo schema', async () => {
   assert.deepEqual([...visible], ['legacy.jpg']);
   detach();
 });
+test('unplaced photos show read-only detail and never enter bulk selection', async () => {
+  const doc = fakeDocument(),
+    root = doc.createElement('div'),
+    container = doc.createElement('div'),
+    canvas = doc.createElement('canvas');
+  const viewer = {
+    container,
+    scene: {
+      canvas,
+      screenSpaceCameraController: { enableInputs: true },
+    },
+  };
+  const placed = {
+    name: 'p.jpg',
+    placed: true,
+    looks_at_ground: true,
+    x: 0,
+    y: 0,
+    lat: 0,
+    lon: 0,
+    z: 1,
+    height_ft: 100,
+    gimbal_pitch: -45,
+    thumb: 'thumbs/p.jpg',
+    flags: [],
+  };
+  const unplaced = {
+    name: 'gps.jpg',
+    placed: false,
+    lat: 1,
+    lon: 2,
+    z: 30,
+    height_ft: 120,
+    gimbal_pitch: -30,
+    thumb: 'thumbs/gps.jpg',
+  };
+  const photoCells = { ...cells, photos: [[0, 1]] };
+  const fetchImpl = async (url) => {
+    if (url.endsWith('/model.json'))
+      return ok({ id: model, origin: { lat: 0, lon: 0 }, ground_z: 0 });
+    if (url.endsWith('/photos.json'))
+      return ok({ model, photos: [placed, unplaced] });
+    if (url.endsWith('/cells.json')) return ok(photoCells);
+    return ok([]);
+  };
+  let pick = null,
+    counts = null;
+  const createLayer = async (x) => {
+    pick = x.onPick;
+    counts = x.state.counts;
+    return {
+      destroy() {},
+      // Deliberately offer the GPS-only name too: the panel must filter it.
+      screenPoints: () => [
+        { name: 'gps.jpg', x: 2, y: 2 },
+        { name: 'p.jpg', x: 4, y: 4 },
+      ],
+    };
+  };
+  const detach = attachCoveragePanel({
+    doc,
+    container: root,
+    viewer,
+    Cesium: {},
+    fetchImpl,
+    createLayer,
+  });
+  root.find((n) => n.textContent === 'Show photo coverage').onclick();
+  await tick();
+  await tick();
+  // GPS-only photos never contribute to coverage counts.
+  assert.deepEqual(counts, [1]);
+  pick({ type: 'photo', name: 'gps.jpg' });
+  await tick();
+  assert(root.textContent.includes('gps.jpg'));
+  assert(root.textContent.includes('not placed in this model'));
+  assert.equal(
+    root.find((n) => n.textContent === 'Keep'),
+    null,
+  );
+  assert.equal(
+    root.find((n) => n.textContent === 'Discard'),
+    null,
+  );
+  pick({ type: 'photo', name: 'p.jpg' });
+  await tick();
+  assert(root.find((n) => n.textContent === 'Keep'));
+  assert(root.find((n) => n.textContent === 'Discard'));
+  root.find((n) => n.textContent === 'Box select').onclick();
+  const event = (x, y) => ({
+    __fake: true,
+    button: 0,
+    pointerId: 1,
+    clientX: x,
+    clientY: y,
+    preventDefault() {},
+    stopImmediatePropagation() {},
+  });
+  canvas.dispatch('pointerdown', event(0, 0));
+  canvas.dispatch('pointermove', event(10, 10));
+  canvas.dispatch('pointerup', event(10, 10));
+  await tick();
+  assert(root.find((n) => n.textContent === '1 selected'));
+  detach();
+});

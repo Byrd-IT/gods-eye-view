@@ -150,6 +150,9 @@ export function attachCoveragePanel({
         /^thumbs\/[A-Za-z0-9][A-Za-z0-9._-]{0,150}\.jpg$/.test(p.thumb)
       )
         img.src = `/api/byrdit/coverage/${s.model}/${p.thumb}`;
+      // Keep/Discard are server-backed and the service only knows placed
+      // photos, so an unplaced photo's detail is read-only.
+      if (!p.placed) el('div', 'not placed in this model', detail);
       for (const [name, key, unit] of [
         ['Height', 'height_ft', 'ft'],
         ['Gimbal pitch', 'gimbal_pitch', 'deg'],
@@ -161,11 +164,12 @@ export function attachCoveragePanel({
         ['Splat loss', 'splat_loss', ''],
       ])
         el('div', `${name}: ${p[key] ?? 'unavailable'} ${unit}`, detail);
-      for (const keep of [true, false]) {
-        const b = el('button', keep ? 'Keep' : 'Discard', detail);
-        b.type = 'button';
-        b.onclick = () => update(store.setKept([p.name], keep));
-      }
+      if (p.placed)
+        for (const keep of [true, false]) {
+          const b = el('button', keep ? 'Keep' : 'Discard', detail);
+          b.type = 'button';
+          b.onclick = () => update(store.setKept([p.name], keep));
+        }
     } else {
       const index = s.cells.k.indexOf(selected.key);
       const list =
@@ -262,10 +266,18 @@ export function attachCoveragePanel({
         .map((p) => p.name),
     );
   }
+  // Only placed photos exist in the server's keep model. Bulk selection can
+  // never carry a GPS-only name into Keep selected / Discard selected.
+  function selectableNames(s) {
+    return new Set(
+      (s?.photos ?? []).filter((p) => p.placed).map((p) => p.name),
+    );
+  }
   async function update(s) {
     if (!s) return;
-    const shown = visibleNames(s);
-    multi = multi.filter((n) => shown.has(n));
+    const shown = visibleNames(s),
+      selectable = selectableNames(s);
+    multi = multi.filter((n) => shown.has(n) && selectable.has(n));
     multiStatus.textContent = `${multi.length} selected`;
     if (selected?.type === 'photo' && !shown.has(selected.name))
       selected = null;
@@ -391,7 +403,8 @@ export function attachCoveragePanel({
       getPoints: () => layer.screenPoints(),
       doc,
       onSelect: (names) => {
-        multi = names;
+        const selectable = selectableNames(current);
+        multi = names.filter((n) => selectable.has(n));
         multiStatus.textContent = `${multi.length} selected`;
         cancelSelection = null;
         update(store.snapshot());
