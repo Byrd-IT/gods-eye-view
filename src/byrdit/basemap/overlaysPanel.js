@@ -56,8 +56,7 @@ function noteText(layer) {
 
 /** A Gaussian-splat 3D row: no canopy cut and no opacity control. */
 const isSplatRow = (layer) =>
-  layer?.kind === '3d' &&
-  (layer.splat === true || layer.model?.splat === true);
+  layer?.kind === '3d' && (layer.splat === true || layer.model?.splat === true);
 
 function el(doc, tag, parent, { text, cls, attrs } = {}) {
   const node = doc.createElement(tag);
