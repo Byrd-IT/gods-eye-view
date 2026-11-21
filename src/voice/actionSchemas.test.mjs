@@ -2,6 +2,7 @@ import { realtimeInstructions } from '../../server/providers/openai/instructions
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { GEV_ACTION_SCHEMAS, createActionTools } from './actionSchemas.js';
 import { VOICE_TOGGLE_LAYER_IDS } from './layerManifest.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
@@ -45,6 +46,10 @@ const NEW_PANEL_TARGETS = [
   'solunar-panel',
   'drone-plan-panel',
 ];
+// The live S4 merge adds the Space Missions panel target. It is upstream's
+// deliberate set_panel_open addition, so it is removed from the legacy payload
+// too, but it does not sit at the tail like the fork's four right-rail panels.
+const UPSTREAM_PANEL_TARGETS = ['space-missions-panel'];
 // The view-state description before it started naming layer opacity.
 const LEGACY_VIEW_STATE_DESCRIPTION =
   'Read the current camera, style, Context, Cockpit, HUD, detection, map stack, post-processing, scene-playback, tracked-entity, and layer state before choosing another action. Tracked aircraft emergency status is a crowd-sourced transponder broadcast, not a confirmed incident: quote emergencyBroadcast and never infer a hijack or an incident ending from a code change.';
@@ -63,7 +68,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
   const panel = tools.find((tool) => tool.name === 'set_panel_open');
   panel.parameters.properties.panelId.enum =
     panel.parameters.properties.panelId.enum.filter(
-      (id) => !NEW_PANEL_TARGETS.includes(id),
+      (id) =>
+        !NEW_PANEL_TARGETS.includes(id) && !UPSTREAM_PANEL_TARGETS.includes(id),
     );
   const viewState = tools.find(
     (tool) => tool.name === 'get_current_view_state',
@@ -130,7 +136,17 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // opacity. The digest removes those additions and navigation/solunar tools,
     // but changes for the shortened drone description; re-pinned accordingly.
     // Imagery/Sky/History extensions and prompt compaction re-pin this payload.
-    'cccaae72d5ee198794c62719806f0586e7084fb4efb7c004557b98bcc524518f',
+    // The live S4 merge adds the Space Missions panel target (upstream's
+    // deliberate set_panel_open addition), also removed before hashing.
+    // The Drone Flight Plan voice surface grows to the panel's own controls:
+    // twelve more control_droneplan actions (edit/obstacle/target/path/preview/
+    // library/loadPlan/photoCheck/check/units/finish/undo/corner), the 3D check,
+    // surface, orbit, waypoint and camera-interval options, photoSpacingM,
+    // captureMode, frontOverlap maximum 98 and timedIntervalS minimum 0.1.
+    // Re-pinned for the control_droneplan prompt compaction: the same actions
+    // and arguments, with each description cut to its concise meaning so the
+    // Realtime prompt grows as little as the tool allows.
+    '3d2944977aa035b791556f82b07b33de04513b9679c4256a483350620239f96e',
   );
 });
 
@@ -281,6 +297,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'map-layers-panel',
         'solunar-panel',
         'drone-plan-panel',
+        'space-missions-panel',
       ].includes(id),
   );
   for (const tool of legacy) {
@@ -315,9 +332,9 @@ test('all legacy action arguments are byte-identical after removing the delibera
     delete center.properties[axis].minimum;
     delete center.properties[axis].maximum;
   }
-  // Cyber adds one HUD layout and Operator was retired.
+  // Operator and then Cyber were retired.
   const hud = property('set_hud').layout;
-  assert.deepEqual(hud.enum, ['tactical', 'minimal', 'cyber']);
+  assert.deepEqual(hud.enum, ['tactical', 'minimal']);
   hud.enum = ['tactical', 'operator', 'minimal'];
   // Snow is retired from set_visual_style; restore it to keep the legacy pin.
   const visualStyle = legacy.find((tool) => tool.name === 'set_visual_style')
@@ -446,9 +463,20 @@ test('control_droneplan timedIntervalS has the same rule as the panel field and 
   const prop = schema.parameters.properties.timedIntervalS;
   assert.equal(prop.type, 'number');
   assert.equal(prop.maximum, 3600);
-  // Any positive number is usable (0.05 is accepted by the handler and the panel),
-  // so the schema must not add a higher floor of its own.
-  assert.equal(prop.minimum, undefined);
+  // The schema states the DJI Fly floor of 0.1 s. The panel field and the
+  // adapter still take any positive number, so a lower value is refused here
+  // before it can reach them.
+  assert.equal(prop.minimum, 0.1);
+  assert.deepEqual(
+    validateArgs(schema.parameters, { action: 'options', timedIntervalS: 0.1 }),
+    [],
+  );
+  assert.ok(
+    validateArgs(schema.parameters, {
+      action: 'options',
+      timedIntervalS: 0.05,
+    }).length > 0,
+  );
 });
 
 test('the complete current Realtime tool inventory is pinned', () => {
@@ -462,7 +490,12 @@ test('the complete current Realtime tool inventory is pinned', () => {
     // Re-pinned for navigation and solunar voice and the deliberately
     // shortened descriptions needed to keep the prompt within budget.
     // Re-pinned again for Imagery/Sky/History and prompt compaction.
-    'e8ae4bc5258870495c31bd845333495731a3819922a55f402289d86e5b007a09',
+    // Re-pinned for the Drone Flight Plan voice surface (twelve more actions,
+    // the 3D check/surface/orbit/waypoint options, frontOverlap 98,
+    // timedIntervalS minimum 0.1).
+    // Re-pinned for the control_droneplan prompt compaction (descriptions only,
+    // no tool, argument or enum change).
+    '32349d724fbfd4ecc87495bf6f7762ee3dcb82d68a8248de233b3a6f90d7be70',
   );
 });
 
@@ -600,4 +633,56 @@ test("the opacity tool takes only whole percents inside the app's range", () => 
       `opacityPct ${pct}`,
     );
   assert.ok(validateArgs(schema, { layerId: 'flights' }).length > 0);
+});
+
+test('control_droneplan option bounds are the panel sliders', () => {
+  const panel = readFileSync(
+    new URL('../byrdit/dronePlan/panel.js', import.meta.url),
+    'utf8',
+  );
+  // The panel sliders the voice tool mirrors. A schema bound tighter than the
+  // UI silently refuses a value the person can set by hand.
+  assert.match(panel, /slider\(t\('Front overlap'\), 50, 98, 0\.5\)/);
+  assert.match(panel, /slider\(t\('Side overlap'\), 40, 95, 1\)/);
+  assert.match(panel, /slider\(t\('Camera tilt'\), -80, -45, 5\)/);
+  assert.match(panel, /minM: 10,\s*maxM: 300,/);
+  const props = GEV_ACTION_SCHEMAS.find((s) => s.name === 'control_droneplan')
+    .parameters.properties;
+  assert.deepEqual(
+    [props.frontOverlap.minimum, props.frontOverlap.maximum],
+    [50, 98],
+  );
+  assert.deepEqual(
+    [props.sideOverlap.minimum, props.sideOverlap.maximum],
+    [40, 95],
+  );
+  assert.deepEqual(
+    [props.tiltPitchDeg.minimum, props.tiltPitchDeg.maximum],
+    [-80, -45],
+  );
+  assert.deepEqual(
+    [props.orbitRadiusM.minimum, props.orbitRadiusM.maximum],
+    [10, 300],
+  );
+  assert.equal(
+    validateArgs(
+      GEV_ACTION_SCHEMAS.find((s) => s.name === 'control_droneplan').parameters,
+      { action: 'options', frontOverlap: 98 },
+    ).length,
+    0,
+  );
+});
+
+test('set_panel_open accepts the Space Missions panel', () => {
+  const schema = GEV_ACTION_SCHEMAS.find(
+    (tool) => tool.name === 'set_panel_open',
+  ).parameters;
+  assert.deepEqual(
+    validateArgs(schema, { panelId: 'space-missions-panel', open: true }),
+    [],
+  );
+  assert.ok(
+    validateArgs(schema, { panelId: 'space-missions', open: true }).length > 0,
+    'the Context mode name is not a panel id',
+  );
 });

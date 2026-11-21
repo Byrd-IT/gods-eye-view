@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createGevActionRunner } from './gevActions.js';
 import { GEV_REALTIME_TOOLS } from '../../server/providers/openai/tools.js';
 import { realtimeInstructions } from '../../server/providers/openai/instructions.js';
-import { DRONEPLAN_VOICE_ACTIONS } from '../byrdit/dronePlan/dronePlanVoice.js';
+import {
+  DRONEPLAN_VOICE_ACTIONS,
+  createDronePlanVoice,
+} from '../byrdit/dronePlan/dronePlanVoice.js';
 
 globalThis.window = globalThis.window || {
   clearTimeout,
@@ -126,4 +130,50 @@ test('an unknown drone plan action does not repeat a secret token', async () => 
       return true;
     },
   );
+});
+
+test('control_droneplan option bounds are the panel sliders, not guesswork', async () => {
+  const panel = readFileSync(
+    new URL('../byrdit/dronePlan/panel.js', import.meta.url),
+    'utf8',
+  );
+  // The four sliders the voice options mirror, as panel.js builds them.
+  assert.match(panel, /slider\(t\('Front overlap'\), 50, 98, 0\.5\)/);
+  assert.match(panel, /slider\(t\('Side overlap'\), 40, 95, 1\)/);
+  assert.match(panel, /slider\(t\('Camera tilt'\), -80, -45, 5\)/);
+  assert.match(panel, /minM: 10,\s*maxM: 300,/);
+
+  const props = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'control_droneplan',
+  ).parameters.properties;
+  assert.equal(props.frontOverlap.minimum, 50);
+  assert.equal(props.frontOverlap.maximum, 98);
+  assert.equal(props.sideOverlap.minimum, 40);
+  assert.equal(props.sideOverlap.maximum, 95);
+  assert.equal(props.tiltPitchDeg.minimum, -80);
+  assert.equal(props.tiltPitchDeg.maximum, -45);
+  assert.equal(props.orbitRadiusM.minimum, 10);
+  assert.equal(props.orbitRadiusM.maximum, 300);
+
+  // The voice validation uses the same ends: 98% is a panel value, 98.1 is not.
+  const state = {
+    open: true,
+    areas: [],
+    options: { presetId: 'dji-mini-5-pro', frontOverlap: 80 },
+  };
+  const calls = [];
+  const voice = createDronePlanVoice({
+    isOpen: () => true,
+    getState: () => state,
+    open() {},
+    applyOptions(patch) {
+      calls.push(patch);
+      Object.assign(state.options, patch);
+      return true;
+    },
+    replan: async () => {},
+  });
+  assert.equal((await voice.options({ frontOverlap: 98 })).ok, true);
+  assert.equal(calls.at(-1).frontOverlap, 98);
+  assert.equal((await voice.options({ frontOverlap: 98.1 })).ok, false);
 });

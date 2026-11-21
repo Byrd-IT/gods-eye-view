@@ -214,7 +214,7 @@ const SET_KINDS = [
 /**
  * Wrap a renderer's draw port so greyable layers' sets can be drawn grey.
  * Returns the wrapped port; its control is `greyControlOf(port)` (and the
- * page's one control, `greyDrawControl`, for the first port wrapped).
+ * page's one control, `greyDrawControl`, for the latest port wrapped).
  * @param {object} draw The renderer's draw port.
  * @param {{layers?: typeof GREY_SET_LAYERS, report?: (e: unknown) => void}} [options]
  */
@@ -225,7 +225,17 @@ export function greyDrawPort(draw, { layers = GREY_SET_LAYERS, report } = {}) {
   const tracked = new Set();
   let modeOf = () => MODE_LIVE;
   let enabled = false;
-  const stats = { greyItems: 0, repaints: 0, hiddenSets: 0 };
+  const stats = { greyItems: 0, repaints: 0 };
+  // How many of this port's sets are hidden now, not a running total: a set
+  // that is shown again, or disposed, no longer counts.
+  Object.defineProperty(stats, 'hiddenSets', {
+    enumerable: true,
+    get() {
+      let hidden = 0;
+      for (const record of tracked) if (record.hidden) hidden += 1;
+      return hidden;
+    },
+  });
 
   const modeFor = (layerId) => {
     if (!enabled) return MODE_LIVE;
@@ -260,19 +270,23 @@ export function greyDrawPort(draw, { layers = GREY_SET_LAYERS, report } = {}) {
 
     const record = {
       entry,
+      /** Whether this set is hidden now (its layer's cleared mode). */
+      get hidden() {
+        return state.hidden;
+      },
       /** Bring the drawn set in line with the layer's mode. */
-      repaint() {
+      repaint({ writeItems = true, writeColumns = true } = {}) {
         const next = desired();
         if (next.hidden !== state.hidden) {
           state = { ...state, hidden: next.hidden };
           set.show = next.hidden ? false : ownShow;
-          stats.hiddenSets += next.hidden ? 1 : 0;
         }
         if (next.grey === state.grey) return;
         state = { ...state, grey: next.grey };
         stats.repaints += 1;
-        if (columns && set.setColumns) set.setColumns(drawnColumns(columns));
-        if (items.size) set.set([...items.values()].map(drawn));
+        if (writeColumns && columns && set.setColumns)
+          set.setColumns(drawnColumns(columns));
+        if (writeItems && items.size) set.set([...items.values()].map(drawn));
       },
     };
 
@@ -283,12 +297,14 @@ export function greyDrawPort(draw, { layers = GREY_SET_LAYERS, report } = {}) {
       set(list) {
         items.clear();
         for (const item of list) items.set(item.id, item);
-        record.repaint();
+        // The write below is this call's: repaint only brings the columns
+        // along, so the set is not written twice.
+        record.repaint({ writeItems: false });
         set.set(state.grey ? list.map(drawn) : list);
       },
       upsert(list) {
         for (const item of list) items.set(item.id, item);
-        record.repaint();
+        record.repaint({ writeItems: false });
         set.upsert(state.grey ? list.map(drawn) : list);
       },
       remove(ids) {
@@ -320,8 +336,13 @@ export function greyDrawPort(draw, { layers = GREY_SET_LAYERS, report } = {}) {
     };
     if (typeof set.setColumns === 'function')
       wrapped.setColumns = (cols) => {
+        // An empty column set is a clear. Drop the item cache too, so a later
+        // grey/live repaint cannot replay rows the layer has cleared.
+        if (Array.isArray(cols?.ids) && cols.ids.length === 0) items.clear();
         columns = cols;
-        record.repaint();
+        // repaint only brings the items along when the mode changed; the
+        // caller's columns are written once, below.
+        record.repaint({ writeColumns: false });
         set.setColumns(drawnColumns(cols));
       };
     tracked.add(record);
@@ -370,7 +391,9 @@ export function greyDrawPort(draw, { layers = GREY_SET_LAYERS, report } = {}) {
   };
   controls.set(port, control);
   wrappers.set(draw, port);
-  pageControl ??= control;
+  // The page's control is the renderer it is drawing through now: a re-init
+  // makes a new port, and the painter must follow the latest one.
+  pageControl = control;
   return port;
 }
 
@@ -384,9 +407,25 @@ export function greyControlOf(port) {
   return controls.get(port) ?? controls.get(wrappers.get(port)) ?? null;
 }
 
-/** The control of the page's (first wrapped) draw port, or null. */
+/** The control of the page's latest wrapped draw port, or null. */
 export function greyDrawControl() {
   return pageControl;
+}
+
+/** Stop publishing `control` as the page's, if it still is. */
+function unpublishGreyControl(control) {
+  if (pageControl === control) pageControl = null;
+}
+
+/**
+ * Stop publishing a draw port's control as the page's: the renderer that
+ * owned it is gone (its ports are disposed). Only this port's control goes;
+ * a port wrapped later (a newer renderer) keeps the page.
+ * @param {object} port A raw or wrapped draw port.
+ */
+export function releaseGreyDrawPort(port) {
+  const control = greyControlOf(port);
+  if (control) unpublishGreyControl(control);
 }
 
 /** Tests only: forget the page's control. */
@@ -405,6 +444,15 @@ export function _resetGreyDrawForTest() {
  */
 export function createGreyPainter({ viewer, modeOf, control, requestFrame }) {
   const controlNow = () => control ?? greyDrawControl();
+  /** The controls this painter has set a mode on (one, or two per re-init). */
+  const bound = new Set();
+  const bind = (mode) => {
+    const c = controlNow();
+    if (!c) return null;
+    bound.add(c);
+    c.setModeOf(mode);
+    return c;
+  };
   // Writes to draw sets ask the renderer for a frame themselves; an extra
   // nudge (request-render mode before any write) is the caller's.
   const frame = () => {
@@ -418,20 +466,27 @@ export function createGreyPainter({ viewer, modeOf, control, requestFrame }) {
   return {
     start() {
       started = true;
-      controlNow()?.setModeOf(modeOf);
+      bind(modeOf);
       frame();
     },
     changed() {
       if (!started) return;
-      const c = controlNow();
       // a renderer made after start (a re-init) is told the mode once
-      c?.setModeOf(modeOf);
+      bind(modeOf);
       frame();
     },
     stats: () => ({ ...(controlNow()?.stats ?? {}) }),
     setsByLayer: () => controlNow()?.setsByLayer() ?? {},
     destroy() {
-      if (started) controlNow()?.setModeOf(null);
+      // The painter goes with the renderer it drew through (the shell's
+      // lifetime ends with the scene): everything live again, and the page
+      // stops publishing a control over a draw port that is gone. Only the
+      // controls this painter bound go: a newer renderer keeps the page.
+      for (const c of bound) {
+        c.setModeOf(null);
+        unpublishGreyControl(c);
+      }
+      bound.clear();
       started = false;
       frame();
     },

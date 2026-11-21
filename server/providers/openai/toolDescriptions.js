@@ -224,7 +224,7 @@ export const ACTION_DESCRIPTIONS = {
   },
   set_cyber_sonar: {
     description:
-      'Adjust Cyber-only sonar controls. Requires the Cyber HUD layout; never switches layout or HUD visibility. Omitted fields stay unchanged. Returns actual settings and separate map/contact sweep activity. A saved setting does not mean the effect is active.',
+      'Adjust the Sonar visual style, which works over any HUD layout. Never switches layout or HUD visibility. Omitted fields stay unchanged. Returns actual settings and separate map/contact sweep activity. A saved setting does not mean the effect is active.',
     $position: 1,
     parameters: {
       properties: {
@@ -861,35 +861,268 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_droneplan: {
     description:
-      'Drone Flight Plan: open shows the rail; draw starts box or polygon (person must draw); box/polygon set coordinates. recommend applies current-aircraft settings; options changes controls. takeoff: pick, clear (box centre), or point (lat/lon). suite plans recommended passes; download requires downloads=true. close clears globe plan. Report actual aircraft, mode and counts. NOT FLIGHT-TESTED: never claim a mission is safe.',
+      'Drone Flight Plan: open shows the rail; draw starts box or polygon (the person must draw); box/polygon set coordinates. recommend applies current-aircraft settings; options changes controls. takeoff: pick, clear (box centre) or point (lat/lon). suite plans recommended passes; download requires downloads=true. finish/undo/corner edit the polygon; edit drags a committed area; obstacle/target/path manage those lists; check and photoCheck read the 3D check and photo coverage; units switches feet and metres; library and loadPlan read and restore saved plans; preview draws a flight picture. close clears the globe plan. Report actual aircraft, mode and counts. NOT FLIGHT-TESTED: never claim a mission is safe.',
     $position: 1,
     parameters: {
       properties: {
         action: {
           description:
-            'open, close, status, draw (kind box or polygon), box (west south east north), polygon (ring), recommend (mode optional), options, takeoff (pick, clear, or point), remove (areaId), replan, suite, or download (which mission, all, or suite; index for one mission).',
+            'open, close, status, draw (kind box or polygon), box (west south east north), polygon (ring), recommend (mode optional), options, takeoff (pick, clear or point), remove (areaId), replan, suite, download (which mission, all or suite; index for one), edit (areaId or index), obstacle, target, path, preview (index), library, loadPlan (plan), photoCheck, check (index and the 3D switches or surface settings), units (ft or m), finish, undo, or corner.',
           $position: 2,
         },
         kind: {
-          description: 'For draw: box or polygon.',
+          description: 'draw: box or polygon.',
+          $position: 1,
+        },
+        west: {
+          description: 'box: west longitude.',
+          $position: 1,
+        },
+        south: {
+          description: 'box: south latitude.',
+          $position: 1,
+        },
+        east: {
+          description: 'box: east longitude.',
+          $position: 1,
+        },
+        north: {
+          description: 'box: north latitude.',
+          $position: 1,
+        },
+        ring: {
+          description:
+            'polygon: 3 to 64 corners as lon/lat, in order. For path: the camera aim points, in order.',
           $position: 1,
         },
         aircraft: {
           description:
-            'For options: a catalog aircraft name or preset id, such as Mini 5 Pro or dji-phantom-4. An unknown name returns no match.',
+            'options: a catalog aircraft name or preset id, such as Mini 5 Pro or dji-phantom-4. Unknown names return no match.',
+          $position: 1,
+        },
+        mode: {
+          description:
+            'recommend/options: mapping-grid, mapping-grid-timed, splat-orbit or fast-survey; sets the pattern, photo mode and trigger it implies.',
+          $position: 1,
+        },
+        pattern: {
+          description:
+            'options: grid (one grid), double (crossed) or orbit (rings round a target).',
+          $position: 1,
+        },
+        direction: {
+          description:
+            'options: auto, ew (east-west lines) or ns (north-south lines).',
+          $position: 1,
+        },
+        jobs: {
+          description:
+            'options: per-area (one mission per drawn area) or whole (one mission over all).',
+          $position: 1,
+        },
+        photoMode: {
+          description:
+            'options: waypoint (stop at each waypoint to shoot) or interval (shoot along the leg).',
+          $position: 1,
+        },
+        aglM: {
+          description: 'options: height above ground, m, 10-457.2 (1500 ft).',
+          $position: 1,
+        },
+        frontOverlap: {
+          description: 'options: front overlap percent, 50-98.',
+          $position: 1,
+        },
+        sideOverlap: {
+          description: 'options: side overlap percent, 40-95.',
+          $position: 1,
+        },
+        tiltPitchDeg: {
+          description:
+            'options: grid camera tilt from nadir, deg, -80 to -45 (-90 is straight down, not a survey tilt).',
+          $position: 1,
+        },
+        orbitRadiusM: {
+          description: 'options: orbit ring radius, m, 10-300.',
+          $position: 1,
+        },
+        orbitHeightsM: {
+          description:
+            'options: up to 6 fixed ring heights above ground, m, 10-457.2; setting them switches the rings to heights.',
+          $position: 1,
+        },
+        speedMs: {
+          description: 'options: flight speed, m/s, 0.1-15.',
           $position: 1,
         },
         timedIntervalS: {
           description:
-            'For options: Timed-shot interval in seconds, as set in DJI Fly.',
+            'options: Timed-shot interval, seconds, as set in DJI Fly; any value above 0 up to 3600.',
           $position: 1,
         },
-        which: {
-          description: 'For download: mission, all, or suite.',
+        shutterDenominator: {
+          description:
+            'options: shutter speed as a denominator: 250, 500, 1000, 2000 or 4000.',
+          $position: 1,
+        },
+        batteryMin: {
+          description:
+            'options: usable minutes per battery for the pause estimate, 5-60.',
+          $position: 1,
+        },
+        droneEnumValue: {
+          description:
+            'options: the DJI model code written into the KMZ, 0-999.',
+          $position: 1,
+        },
+        clearDroneCode: {
+          description:
+            'options: true removes the model code, so DJI Fly asks for the model once.',
           $position: 1,
         },
         takeoff: {
-          description: 'For takeoff: pick, clear, or point.',
+          description: 'takeoff: pick, clear, or point.',
+          $position: 1,
+        },
+        lat: {
+          description:
+            'takeoff point, target or obstacle: latitude. For path, put points in ring.',
+          $position: 1,
+        },
+        lon: {
+          description:
+            'takeoff point, target or obstacle: longitude. For path, put points in ring.',
+          $position: 1,
+        },
+        areaId: {
+          description:
+            'remove/edit: the area id (area-1, area-2 ...) as status reports it.',
+          $position: 1,
+        },
+        which: {
+          description: 'download: mission, all, or suite.',
+          $position: 1,
+        },
+        index: {
+          description:
+            'A zero-based position in a list status reports: the mission for download/preview, the area for edit, the obstacle/target/path to remove, or the flight whose photos the 3D check shows.',
+          $position: 1,
+        },
+        checkEnabled: {
+          description: 'check: true shows the 3D check, false hides it.',
+          $position: 1,
+        },
+        checkZone: {
+          description:
+            'check: true shows the safety zone along the route, false hides it.',
+          $position: 1,
+        },
+        checkCurtain: {
+          description: 'check: true shows the height curtain, false hides it.',
+          $position: 1,
+        },
+        checkFootprints: {
+          description:
+            'check: photo footprints to draw: selected (the photo in view), all, or off.',
+          $position: 1,
+        },
+        checkFrustum: {
+          description:
+            'check: camera view shape: one (the photo in view), thinned, neighbors (that photo and the ones beside it), or off.',
+          $position: 1,
+        },
+        zoneHalfWidthM: {
+          description:
+            'check: safety zone half-width each side of the route, m, 2-30.',
+          $position: 1,
+        },
+        surfaceEnabled: {
+          description:
+            'check: true checks the route against the photogrammetry surface model, false does not; warns only, never moves it.',
+          $position: 1,
+        },
+        surfaceMinM: {
+          description: 'check: surface model minimum clearance, m, 0-61.',
+          $position: 1,
+        },
+        surfaceMarginM: {
+          description:
+            'check: position error margin added to the surface clearance, m, 0-61.',
+          $position: 1,
+        },
+        captureMode: {
+          description:
+            'options: shot trigger: stop, distance, or timed (needs timedIntervalS).',
+          $position: 1,
+        },
+        photoSpacingM: {
+          description:
+            'options: metres between photos on the distance (or timed-with-distance) trigger, above 0.',
+          $position: 1,
+        },
+        orbitAnglesDeg: {
+          description:
+            'options: up to 6 viewing angles down from level, deg, each 10-80.',
+          $position: 1,
+        },
+        orbitOutward: {
+          description:
+            'options: true takes a second, outward-facing photo at each orbit stop.',
+          $position: 1,
+        },
+        orbitOutwardPitchDeg: {
+          description:
+            'options: outward photo tilt, deg down, -45 to 0 (0 is level).',
+          $position: 1,
+        },
+        orbitTargetHeightM: {
+          description:
+            'options: height of the aim point above the target, m, 0-60.',
+          $position: 1,
+        },
+        obstacleHeightM: {
+          description:
+            'options: default obstacle height, m, 0-60; for obstacle with an index, that obstacle new height.',
+          $position: 1,
+        },
+        maxWaypoints: {
+          description:
+            'options: most waypoints per file, 20-200; larger plans split into more missions.',
+          $position: 1,
+        },
+        usableBatteryMin: {
+          description:
+            'options: usable minutes per battery for the pause estimate, 5-60.',
+          $position: 1,
+        },
+        continuousRoute: {
+          description:
+            'options: true keeps one continuous route; false breaks it between lines.',
+          $position: 1,
+        },
+        cameraPresetId: {
+          description:
+            'options: a camera preset id from the panel list, such as mapping-50mp.',
+          $position: 1,
+        },
+        minPhotoIntervalS: {
+          description:
+            'options: this plan camera minimum interval, seconds, 0.1-60, overriding the aircraft preset.',
+          $position: 1,
+        },
+        exportCompact: {
+          description:
+            'options: true writes the compact KMZ, unverified on a controller.',
+          $position: 1,
+        },
+        units: {
+          description:
+            'units: ft (feet) or m (metres); shown and typed lengths only.',
+          $position: 1,
+        },
+        plan: {
+          description:
+            'loadPlan: a saved .gevplan document as an object; it replaces the panel plan and replans it.',
           $position: 1,
         },
       },

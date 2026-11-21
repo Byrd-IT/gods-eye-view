@@ -15,6 +15,7 @@ import {
   allowedShutter,
   cameraPresetOrDefault,
   evText,
+  isCameraPresetId,
   listCameraPresets,
   shutterForPreset,
 } from './cameraSettings.js';
@@ -63,6 +64,7 @@ import {
   setOverlayEntries,
 } from '../../overlays/worldOverlay.js';
 import {
+  createDroneBoxPreview,
   createDronePlanPreview,
   passStyle,
   batteryPauseEstimate,
@@ -188,6 +190,7 @@ import {
 import {
   ALPHA_RANGE,
   DEFAULT_ALPHA,
+  FOOTPRINT_MODES,
   clampAlpha,
   footprintMode,
 } from './checkLayer.js';
@@ -749,11 +752,15 @@ export function initDronePlan({
     // are kept per scene object, and one port must have one (#1760).
     viewer: sceneViewer,
     cesium,
+    documentRef: doc,
     owner: BOX_OWNER,
-    previewName: 'gev-drone-plan-box-preview',
+    createPreview: (_scene, dragBox) => createDroneBoxPreview(preview, dragBox),
     bodyClass: 'gev-drone-box',
     validate: validateDroneBox,
     shorterArc: true,
+    // A refused box (too small, too large) keeps the tool armed: the person
+    // drags again without pressing DRAW BOX a second time.
+    keepActiveOnInvalid: true,
     onBox: (box) => {
       addRect(box, { replace: false });
     },
@@ -765,6 +772,9 @@ export function initDronePlan({
       ui.drawButton.setAttribute('aria-pressed', String(active));
       syncAreaEditButtons();
       if (active) status(t('Press on the ground and drag a box'), 'info');
+      // The hint belongs to an armed tool: once the box is put down (Escape,
+      // another tool taking the pointer) it must not keep saying it.
+      else status('');
     },
   });
   const takeoffTool = initPointTool({
@@ -1289,8 +1299,17 @@ export function initDronePlan({
     return true;
   }
 
-  function toggleDrawPath() {
-    if (state.pathDraft) return finishPathDraft();
+  /**
+   * The path button toggles: a second press finishes the points already
+   * placed. `toggle: false` (voice) only ever starts a path: with a draft in
+   * progress it changes nothing, so a spoken request never commits corners
+   * the person is still placing.
+   */
+  function startDrawPath({ toggle = true } = {}) {
+    if (state.pathDraft) {
+      if (!toggle) return true;
+      return finishPathDraft();
+    }
     if (!state.areas.length) {
       status(t('Draw a box on the globe first'), 'warn');
       return false;
@@ -1312,6 +1331,8 @@ export function initDronePlan({
     }
     return true;
   }
+
+  const toggleDrawPath = () => startDrawPath({ toggle: true });
 
   function updateLookAtPath(id, patch) {
     const list = state.options.lookAtPaths ?? [];
@@ -1408,15 +1429,21 @@ export function initDronePlan({
     return footprintPromises.get(key).catch(() => []);
   }
 
-  /** Look up open-data estimates once per area set; fail soft. */
+  /**
+   * Look up the open-data heights for the drawn areas. `force` re-reads even
+   * when the areas have not changed; the promise resolves when the rows are
+   * in the store, and is null when there was nothing to look up (no area, or
+   * no source wired in) so a caller never waits on an older look-up.
+   */
   function syncObstacles({ force = false } = {}) {
     if (!state.areas.length) {
       obstacleKey = null;
-      return;
+      obstaclePending = null;
+      return null;
     }
     const key = areasKey();
-    if (!force && key === obstacleKey) return;
-    if (!fetchObstacles && !getBuildingFootprints) return;
+    if (!force && key === obstacleKey) return obstaclePending;
+    if (!fetchObstacles && !getBuildingFootprints) return null;
     obstacleKey = key;
     obstacleAbort?.abort();
     obstacleAbort = new AbortController();
@@ -3473,7 +3500,9 @@ export function initDronePlan({
       if (state.result) render();
       else syncControls();
     });
-    ui.drawButton.addEventListener('click', () => drawBox());
+    // The chip arms, it never disarms: clicking DRAW BOX while the tool is
+    // armed leaves it armed (Escape or another tool puts it down).
+    ui.drawButton.addEventListener('click', () => drawBox({ toggle: false }));
     ui.polygonButton.addEventListener('click', () => drawPolygon());
     ui.polygonFinish.addEventListener('click', () => {
       polygonTool?.finish();
@@ -3833,6 +3862,109 @@ export function initDronePlan({
   }
 
   let checkTimer = null;
+  /** The Camera view choices of the 3D check (panel.js, ui.checkView). */
+  const CHECK_VIEW_MODES = Object.freeze([
+    'one',
+    'thinned',
+    'neighbors',
+    'off',
+  ]);
+
+  /**
+   * The 3D check switches, from voice. Every value is checked before any is
+   * applied, so a refused patch changes nothing; the panel controls are the
+   * same ones the checkboxes and the photo slider call. Unknown keys are
+   * ignored, not rejected, so a wider caller adds no failure.
+   */
+  function setCheck(patch = {}) {
+    const c = state.check;
+    const next = {};
+    if (Object.hasOwn(patch, 'enabled')) {
+      if (typeof patch.enabled !== 'boolean') return false;
+      next.enabled = patch.enabled;
+    }
+    for (const key of ['zone', 'curtain']) {
+      if (!Object.hasOwn(patch, key)) continue;
+      if (typeof patch[key] !== 'boolean') return false;
+      next[key] = patch[key];
+    }
+    if (Object.hasOwn(patch, 'footprints')) {
+      if (!FOOTPRINT_MODES.includes(patch.footprints)) return false;
+      next.footprints = patch.footprints;
+    }
+    if (Object.hasOwn(patch, 'frustum')) {
+      if (!CHECK_VIEW_MODES.includes(patch.frustum)) return false;
+      next.frustum = patch.frustum;
+    }
+    if (Object.hasOwn(patch, 'halfWidthM')) {
+      if (
+        typeof patch.halfWidthM !== 'number' ||
+        !Number.isFinite(patch.halfWidthM) ||
+        patch.halfWidthM < MIN_ZONE_HALF_WIDTH_M ||
+        patch.halfWidthM > MAX_ZONE_HALF_WIDTH_M
+      )
+        return false;
+      next.halfWidthM = patch.halfWidthM;
+    }
+    if (Object.hasOwn(patch, 'index')) {
+      if (!Number.isInteger(patch.index) || patch.index < 0 || patch.index > 59)
+        return false;
+      // The panel's own stepper runs 1..count over the photos that exist
+      // (syncCheckUi sets ui.checkPhoto.max). A higher index would be
+      // silently clamped by the check layer, so it is refused here instead.
+      const count = preview.checkInfo?.().count ?? 0;
+      if (patch.index > Math.max(0, count - 1)) return false;
+      next.index = patch.index;
+    }
+    Object.assign(c, next);
+    pushCheck();
+    syncCheckUi();
+    return true;
+  }
+
+  /**
+   * The surface model settings, from voice: the select and the two sliders
+   * (on/off, minimum clearance, position error margin). Every value is
+   * checked before any is applied, so a refused patch changes nothing.
+   * Unknown keys are ignored, not rejected, so a wider caller adds no
+   * failure. The values are the ones the panel's own controls write, and
+   * they are remembered with the same store (prefs.js readClearance).
+   */
+  function setSurface(patch = {}) {
+    const s = state.surface;
+    const next = {};
+    if (Object.hasOwn(patch, 'enabled')) {
+      if (typeof patch.enabled !== 'boolean') return false;
+      next.enabled = patch.enabled;
+    }
+    for (const key of ['minM', 'marginM']) {
+      if (!Object.hasOwn(patch, key)) continue;
+      if (
+        typeof patch[key] !== 'number' ||
+        !Number.isFinite(patch[key]) ||
+        patch[key] < 0 ||
+        patch[key] > CLEARANCE_MAX_M
+      )
+        return false;
+      next[key] = patch[key];
+    }
+    const toggled =
+      Object.hasOwn(next, 'enabled') && next.enabled !== s.enabled;
+    // Every control that changed, not just the switch: the panel's own
+    // clearance and margin sliders replan on input (onInput → schedule), and
+    // a plan made with the old numbers must not be reported as current.
+    const changed = Object.keys(next).some((key) => next[key] !== s[key]);
+    Object.assign(s, next);
+    writeClearance(unitStorage, s);
+    syncControls();
+    // Switching the check on or off changes what the plan is checked
+    // against; the sliders only change the numbers it is checked with, the
+    // same as the panel's own inputs — but either way the plan is re-run.
+    if (toggled) state.conflictCache = null;
+    if (changed) schedule();
+    return true;
+  }
+
   /** Hand the 3D check options (and the camera of the chosen aircraft) over. */
   function pushCheck() {
     clearTimeout(checkTimer);
@@ -6542,6 +6674,22 @@ export function initDronePlan({
     }
   }
 
+  /**
+   * The first-run welcome card sits over the middle of the globe, so a drag
+   * that starts there presses the card instead of drawing. Put the card down
+   * through its own dismiss control when the box tool arms; the control keeps
+   * the launcher's session rule, so this is the same as the visitor choosing
+   * SKIP. Nothing happens when the launcher is absent or already gone.
+   */
+  function dismissFirstRunLauncher() {
+    const launcher = doc?.getElementById?.('first-run-launcher');
+    if (!launcher || launcher.hidden) return false;
+    if (!launcher.classList?.contains?.('visible')) return false;
+    const dismiss = launcher.querySelector?.('[data-first-run-dismiss]');
+    dismiss?.click?.();
+    return Boolean(dismiss);
+  }
+
   function drawBox({ toggle = true } = {}) {
     takeoffTool?.cancel('switch');
     polygonTool?.cancel('switch');
@@ -6555,6 +6703,7 @@ export function initDronePlan({
       status(t('Another tool is using the pointer. Close it first'), 'warn');
       return false;
     }
+    dismissFirstRunLauncher();
     return true;
   }
 
@@ -6930,6 +7079,27 @@ export function initDronePlan({
       o.continuousRoute = patch.continuousRoute === true;
       plan = true;
     }
+    // The camera settings preset: a stored id only, never a made-up one.
+    if (Object.hasOwn(patch, 'cameraPresetId')) {
+      if (!isCameraPresetId(patch.cameraPresetId)) return false;
+      o.cameraPresetId = patch.cameraPresetId;
+      plan = true;
+    }
+    // This plan's camera interval. Null (or unusable) goes back to the
+    // aircraft preset's own minimum, which is what the panel field does.
+    if (Object.hasOwn(patch, 'minPhotoIntervalS')) {
+      o.minPhotoIntervalS = cleanMinPhotoIntervalS(patch.minPhotoIntervalS);
+      state.intervalReject = false;
+      plan = true;
+    }
+    // The compact export is not a plan change: only the file it writes.
+    if (Object.hasOwn(patch, 'exportCompact')) {
+      state.exportCompact = patch.exportCompact === true;
+      if (ui.compact) {
+        ui.compact.checked = state.exportCompact;
+        ui.compactNote.hidden = !state.exportCompact;
+      }
+    }
     // intervalTriggerProven is not a voice or options control.
     if (Object.hasOwn(patch, 'maxWaypoints')) {
       o.maxWaypoints = cleanMaxWaypoints(patch.maxWaypoints);
@@ -7029,11 +7199,42 @@ export function initDronePlan({
     replan,
     drawBox,
     drawPolygon,
+    // The polygon buttons the panel draws: FINISH, backspace, remove corner.
+    // A caller checks `drafts()` first so it can say why one of them did
+    // nothing instead of guessing.
+    drafts() {
+      const editing = areaEditTool?.areaId?.() ?? null;
+      const edited = editing
+        ? state.areas.find((item) => item.id === editing)
+        : null;
+      return {
+        box: boxTool?.isActive() === true,
+        polygon: polygonTool?.isActive() === true,
+        corners: polygonTool?.vertexCount?.() ?? 0,
+        editAreaId: editing,
+        editKind: edited?.kind ?? null,
+        selectedCorner: areaEditTool?.selectedCorner?.() ?? null,
+        canRemoveCorner: areaEditTool?.canRemoveCorner?.() === true,
+      };
+    },
+    finishPolygon() {
+      return polygonTool?.finish() === true;
+    },
+    undoPolygonCorner() {
+      return polygonTool?.undo() === true;
+    },
+    removePolygonCorner() {
+      return areaEditTool?.removeSelectedCorner() === true;
+    },
     editArea,
+    setCheck,
+    setSurface,
+    chooseUnits,
     useRecommended,
     applyOptions,
     updateOrbitTarget,
     toggleDrawPath,
+    startDrawPath,
     addLookAtPath,
     updateLookAtPath,
     removeLookAtPath,
@@ -7048,8 +7249,16 @@ export function initDronePlan({
       remove: (id) => obstacleStore.remove(id),
       setHeight: (id, h) => obstacleStore.setHeight(id, h),
       reset: (id) => obstacleStore.reset(id),
-      refresh: () => syncObstacles({ force: true }),
+      // Resolves true once the look-up's rows are in the store, so a caller
+      // reads the new counts and not the ones from before the request. Null:
+      // there was nothing to look up (no area drawn, no source wired in).
+      refresh: () => {
+        const pending = syncObstacles({ force: true });
+        return pending ? pending.then(() => true) : null;
+      },
     },
+    // The photo the 3D check is showing: { count, index, current }.
+    checkInfo: () => preview.checkInfo(),
     removeOrbitTarget,
     setOrbitTargetActive,
     recommendTargets,

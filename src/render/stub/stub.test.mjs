@@ -30,6 +30,7 @@ test('the stub passes the conformance suite', async () => {
     'draw.lines.split',
     'draw.lines.outlineDraped',
     'draw.models.blend',
+    'draw.models.paint',
     'globe.imagery.video',
     'globe.weather.drawn',
     'globe.weather.sceneTime',
@@ -37,6 +38,15 @@ test('the stub passes the conformance suite', async () => {
     'effects.setStyleParams',
     ...CAMERA_SCRIPTS.filter(usesInput).map((s) => `camera.trace.${s.name}`),
   ]);
+});
+
+test('point visibility capability is optional and the stub reports unknown', () => {
+  const without = createStubRenderer({ capabilities: [] });
+  const withVisibility = createStubRenderer({
+    capabilities: ['pointVisibility'],
+  });
+  assert.equal(without.camera.visiblePoints, undefined);
+  assert.equal(withVisibility.camera.visiblePoints([], 200), null);
 });
 
 test('a frame runs the contract’s steps in order', () => {

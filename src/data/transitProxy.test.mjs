@@ -204,6 +204,86 @@ test('a redirect is judged before it is followed, not after it has been answered
   );
 });
 
+test('capmetro may follow its 302 -> 303 hop to the named S3 blob host, and only that', () => {
+  const capmetro = getTransitFeed('capmetro-austin');
+  const S3 =
+    'sa-core-blob-storage-us-east-1-fedramp-prod.s3-fips.us-east-1.amazonaws.com';
+  const s3 = (host = S3) =>
+    `https://${host}/files/eiei-9rpf/blob?filename=vehiclepositions.pb&X-Amz-Signature=deadbeef`;
+  const view =
+    'https://data.texas.gov/api/views/eiei-9rpf/files/0f0e-test?filename=vehiclepositions.pb';
+
+  // The registry names exactly this host for exactly this feed.
+  assert.deepEqual(capmetro.allowedRedirectHosts, [S3]);
+  const hop1 = transitRedirectDecision(
+    capmetro.url,
+    capmetro.url,
+    view,
+    capmetro.allowedRedirectHosts,
+  );
+  assert.equal(hop1.ok, true);
+  const hop2 = transitRedirectDecision(
+    capmetro.url,
+    hop1.url,
+    s3(),
+    capmetro.allowedRedirectHosts,
+  );
+  assert.deepEqual(hop2, { ok: true, url: s3() });
+
+  // Same host over http, a lookalike host, and any other host still refuse.
+  assert.match(
+    transitRedirectDecision(
+      capmetro.url,
+      capmetro.url,
+      s3().replace('https:', 'http:'),
+      capmetro.allowedRedirectHosts,
+    ).reason,
+    /left https/,
+  );
+  for (const location of [
+    s3('sa-core-blob-storage-us-east-1-fedramp-prod.s3.amazonaws.com'),
+    s3(`${S3}.evil.test`),
+    'https://cdn.elsewhere.test/a.pb',
+  ]) {
+    assert.match(
+      transitRedirectDecision(
+        capmetro.url,
+        capmetro.url,
+        location,
+        capmetro.allowedRedirectHosts,
+      ).reason,
+      /left https:\/\/data\.texas\.gov/,
+    );
+  }
+  // The exception is per feed: MBTA has no allowlist and refuses the same host.
+  const mbta = getTransitFeed('mbta');
+  assert.equal(mbta.allowedRedirectHosts, undefined);
+  assert.equal(
+    transitRedirectDecision(mbta.url, mbta.url, s3(), mbta.allowedRedirectHosts)
+      .ok,
+    false,
+  );
+});
+
+test('a cross-origin hop is sent without the feed headers or validators', () => {
+  const entur = getTransitFeed('entur-norway');
+  const same = transitUpstreamHeaders(entur, {
+    etag: '"v1"',
+    lastModified: 'Wed, 01 Jan 2025 00:00:00 GMT',
+  });
+  assert.equal(same['ET-Client-Name'], 'gods-eye-view-transit');
+  assert.equal(same['If-None-Match'], '"v1"');
+  const cross = transitUpstreamHeaders(
+    entur,
+    { etag: '"v1"', lastModified: 'Wed, 01 Jan 2025 00:00:00 GMT' },
+    { crossOrigin: true },
+  );
+  assert.equal(cross['ET-Client-Name'], undefined);
+  assert.equal(cross['If-None-Match'], undefined);
+  assert.equal(cross['If-Modified-Since'], undefined);
+  assert.ok(cross['User-Agent']);
+});
+
 test('failure cooldown climbs and stops climbing, and a healthy feed waits for nothing', () => {
   assert.equal(nextTransitBackoffMs(0), 0);
   assert.equal(nextTransitBackoffMs(-3), 0);

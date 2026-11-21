@@ -58,8 +58,16 @@ export function createFlightSnapshotRenderer({
    * jumped), so it stands in for every contact: one it lacks is gone at once.
    * A GEV history frame (fork card B12a, armed by resetForHistoryFrame) is
    * the same kind of snapshot, so both take one replace path below.
+   * `handover`: the first live snapshot after the clock came back to live: it
+   * stands in for every contact too, and those it has keep their icon and
+   * model and ease on from where they are drawn; of those it lacks, only
+   * those absence keeps (judged by their newest fix) stay.
    */
-  return function applySnapshot(snapshot, viewer, { replace = false } = {}) {
+  return function applySnapshot(
+    snapshot,
+    viewer,
+    { replace = false, handover = false } = {},
+  ) {
     // Before init (or after destroy) there is no icon set to draw into.
     if (!flightState._icons) return { count: 0, ids: new Set() };
     // GEV history seam (fork card B12a): a history frame replaces the scene
@@ -227,6 +235,7 @@ export function createFlightSnapshotRenderer({
               {
                 nullAltitude: meta.renderAltitudeInvented === true,
                 track: meta.true_track,
+                estimated: meta.estimated === true,
               },
             );
         } else {
@@ -272,7 +281,7 @@ export function createFlightSnapshotRenderer({
         // freshness change and the cockpit contract all land on the row's
         // style; motion re-plans from the updated history.
         icons._applyIconPresentation(icao24);
-        icons._planIcon(icao24);
+        icons._planIcon(icao24, handover ? { handover } : undefined);
         // Poll-path type or category change: same model resync rule as the
         // enrichment path — the fleet model or its scale may have changed.
         if (
@@ -312,6 +321,23 @@ export function createFlightSnapshotRenderer({
     // EXCEPTION: likely-landed planes (last fix low + slow) get only
     // LANDED_MISSING_POLL_LIMIT — their disappearance means "landed", not a
     // feed gap, and the full grace left phantom planes parked at airports.
+    // Back at live, a contact it lacks is from the time the clock left: it
+    // goes at once, unless absence keeps it as any poll would (a partial or
+    // retaining snapshot, the tracked aircraft), judged by its newest fix.
+    // No missed-poll grace, and a landed tracked aircraft is not kept.
+    const absenceAtHandover = (icao24) => {
+      const likelyLanded = queries._likelyLanded(icao24);
+      const judged = records.absence(icao24, {
+        complete: snapshot.complete,
+        retainIds: snapshot.retainIds,
+        likelyLanded,
+        tracked: icao24 === flightState._trackedIcao && !likelyLanded,
+        nowMs: flightState.now?.(),
+      });
+      return judged === 'stale' && icao24 !== flightState._trackedIcao
+        ? 'remove'
+        : judged;
+    };
     const absentIds = [];
     for (const icao24 of flightState._icons.ids()) {
       if (!currentIcaos.has(icao24)) absentIds.push(icao24);
@@ -319,13 +345,15 @@ export function createFlightSnapshotRenderer({
     for (const icao24 of absentIds) {
       const absence = replaceFrame
         ? 'remove' // replace / GEV history seam: absent from the frame = not there at t
-        : records.absence(icao24, {
-            complete: snapshot.complete,
-            retainIds: snapshot.retainIds,
-            likelyLanded: queries._likelyLanded(icao24),
-            tracked: icao24 === flightState._trackedIcao,
-            nowMs: flightState.now?.(),
-          });
+        : handover
+          ? absenceAtHandover(icao24)
+          : records.absence(icao24, {
+              complete: snapshot.complete,
+              retainIds: snapshot.retainIds,
+              likelyLanded: queries._likelyLanded(icao24),
+              tracked: icao24 === flightState._trackedIcao,
+              nowMs: flightState.now?.(),
+            });
       if (absence === 'retain') continue;
       if (absence === 'stale') {
         icons._applyIconPresentation(icao24); // the faded freshness alpha
@@ -357,8 +385,8 @@ export function createFlightSnapshotRenderer({
       for (const id of [...records.data.keys()])
         if (!currentIcaos.has(id)) records.forget(id);
 
-    // The tracked contact at the new time: its trail starts there. (A history
-    // frame already started it in the contact loop above.)
+    // The tracked contact at the new time: its trail starts there. Back at live its trail goes on.
+    // (A history frame already started it in the contact loop above.)
     if (
       replace &&
       !historyFrame &&

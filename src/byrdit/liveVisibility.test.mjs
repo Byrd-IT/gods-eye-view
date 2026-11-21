@@ -18,7 +18,6 @@ import {
   UPSTREAM_IDLE_RELEASE_MS,
 } from './upstreamDemand.js';
 import { createGeometryQueue } from '../layers/cctv/geometryQueue.js';
-import { createFrames } from '../layers/cctv/frames.js';
 import { createPresentation } from '../layers/cctv/presentation.js';
 import { DataLayerManager } from '../data/manager.js';
 
@@ -197,56 +196,14 @@ test('geometry drain pauses while the tab is hidden', () => {
   }
 });
 
-function framesHarness() {
-  const viewer = fakeViewer();
-  const r = rec('cam', -97.7, 30.3);
-  viewer.screens.set(r.position, { x: 500, y: 300 });
-  r.projection = {
-    mode: 'image',
-    image: {},
-    imageLoading: false,
-    lastImageRefreshAt: 0,
-  };
-  const state = { _viewer: viewer, _activeCameraId: 'cam' };
-  const frames = createFrames({
-    state,
-    services: {},
-    parts: { model: { safeNumber: (v, d) => (Number.isFinite(v) ? v : d) } },
-    source: {
-      getFrameUrl: () => '/api/cctv/frame/cam?x=1',
-      getMediaUrl: () => '',
-    },
-  });
-  return { frames, viewer, r };
-}
-
-test('active camera picture refreshes only while its plane is on screen', () => {
-  const h = framesHarness();
-  h.frames.refreshProjectionImage(h.r);
-  assert.match(String(h.r.projection.image.src), /\/api\/cctv\/frame\/cam/);
-
-  // Pan away: the next due refresh must not fetch.
-  h.r.projection = {
-    mode: 'image',
-    image: {},
-    imageLoading: false,
-    lastImageRefreshAt: 0,
-  };
-  h.viewer.screens.set(h.r.position, { x: 9000, y: 300 });
-  h.frames.refreshProjectionImage(h.r);
-  assert.equal(h.r.projection.image.src, undefined, 'off screen: no fetch');
-
-  // A forced refresh (fresh activation) still runs.
-  h.frames.refreshProjectionImage(h.r, true);
-  assert.match(String(h.r.projection.image.src), /\/api\/cctv\/frame\/cam/);
-});
-
 test('UI state does not build frame URLs for every catalog camera', () => {
   let urlBuilds = 0;
   const records = Array.from({ length: 500 }, (_, i) => rec(`c${i}`, -97, 30));
   const state = {
     _records: records,
     _viewRecords: records,
+    // Upstream's camera picker reads its own list.
+    _pickerRecords: records,
     _healthById: new Map(),
     _cardIds: new Set(),
     _listeners: new Set(),
@@ -289,11 +246,10 @@ test('wiring: layer polling and panel preview consult the visibility gates', () 
     'utf8',
   );
   assert.match(tools, /dataManager\.pollingSuspended = hidden;/);
-  const panel = fs.readFileSync(
-    new URL('../ui/cctvPresentation.js', import.meta.url),
-    'utf8',
-  );
-  assert.match(panel, /panelPreviewVisible\(\{/);
+  // Fork note (2026-11-20 upstream merge 41c792208): the picture refresh and
+  // panel preview gates are upstream's now (#1543: projectionInView in
+  // layers/cctv/frames.js, panelShown/cardShown/popupShown in
+  // ui/cctvPresentation.js), tested in their own files.
   const layerLifecycle = fs.readFileSync(
     new URL('../layers/cctv/lifecycle.js', import.meta.url),
     'utf8',

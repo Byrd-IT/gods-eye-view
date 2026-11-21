@@ -323,7 +323,7 @@ test('Google 3D keeps tiles drawing while draped imagery loads, and has no ion r
   );
   assert.deepEqual(calls[0], [
     { key: 'key', onlyUsingWithGoogleGeocoder: true },
-    { asynchronouslyLoadImagery: true },
+    { asynchronouslyLoadImagery: true, enableCollision: true },
   ]);
   assert.equal('createGoogleIonTileset' in googleModule, false);
 });

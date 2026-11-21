@@ -255,9 +255,11 @@ function makeWorld({ sample, wrapPositions = false }) {
     ...fakes.viewer,
     terrainProvider: { requestTileGeometry() {} },
   };
-  // The area box preview draws through the scene draw port (#1760).
-  bindDroneRenderer(viewer);
-  return { viewer, cesium, fakes };
+  // The area box preview draws through the scene draw port (#1760), and the
+  // box tool takes pointer events from the scene dispatcher; the polygon and
+  // area-edit tools still use their legacy handler.
+  const renderer = bindDroneRenderer(viewer);
+  return { viewer, cesium, fakes, renderer };
 }
 
 const boxM = (w, h) => {
@@ -2473,10 +2475,23 @@ function drawingWorld() {
   w.doc.addEventListener = w.fakes.documentRef.addEventListener;
   w.doc.removeEventListener = w.fakes.documentRef.removeEventListener;
   const fire = (type, event) => w.fakes.fire(type, event);
+  // Two pointer paths: the box tool listens on the scene dispatcher (#1760),
+  // the polygon and area-edit tools on their own Cesium handler. A drag feeds
+  // both; no session runs a tool from each family at once.
+  const pointer = w.renderer.input;
   const click = (x, y) => fire('LEFT_CLICK', { position: { x, y } });
-  const down = (x, y) => fire('LEFT_DOWN', { position: { x, y } });
-  const move = (x, y) => fire('MOUSE_MOVE', { endPosition: { x, y } });
-  const up = (x, y) => fire('LEFT_UP', { position: { x, y } });
+  const down = (x, y) => {
+    fire('LEFT_DOWN', { position: { x, y } });
+    pointer.down({ x, y });
+  };
+  const move = (x, y) => {
+    fire('MOUSE_MOVE', { endPosition: { x, y } });
+    pointer.move({ x, y });
+  };
+  const up = (x, y) => {
+    fire('LEFT_UP', { position: { x, y } });
+    pointer.up({ x, y });
+  };
   const tap = (x, y) => {
     down(x, y);
     up(x, y);
@@ -2647,6 +2662,96 @@ test('edit: EDIT is disabled while a draw tool runs, and drawing ends editing', 
   w.handle.drawPolygon();
   assert.equal(edit().getAttribute('aria-pressed'), 'false');
   assert.equal(pointerOwner(), 'drone-plan-polygon');
+  w.handle.destroy();
+});
+
+test('DRAW BOX arms only: clicking the armed chip never disarms; Escape does, and clears the hint', () => {
+  const w = drawingWorld();
+  const chip = w.action('draw-box');
+  chip.click();
+  assert.equal(chip.getAttribute('aria-pressed'), 'true');
+  assert.equal(pointerOwner(), 'drone-plan-box');
+  assert.match(w.status(), /Press on the ground and drag a box/);
+  // A second click is not a toggle: the box tool stays armed.
+  chip.click();
+  assert.equal(chip.getAttribute('aria-pressed'), 'true');
+  assert.equal(pointerOwner(), 'drone-plan-box');
+  assert.match(w.status(), /Press on the ground and drag a box/);
+  // Escape puts it down and replaces the hint with the cancellation note.
+  w.fakes.key('Escape');
+  assert.equal(chip.getAttribute('aria-pressed'), 'false');
+  assert.equal(pointerOwner(), null);
+  assert.equal(w.status(), 'Box drawing cancelled');
+  w.handle.destroy();
+});
+
+test('a drone box that is too small stays armed and warns in metres and feet', () => {
+  const w = drawingWorld();
+  const chip = w.action('draw-box');
+  chip.click();
+  // One pixel at this view is far below the 20 m minimum.
+  w.drag([200, 125], [201, 126]);
+  assert.equal(w.handle.getState().areas.length, 0);
+  assert.equal(chip.getAttribute('aria-pressed'), 'true', 'still armed');
+  assert.equal(pointerOwner(), 'drone-plan-box');
+  assert.match(w.status(), /20 m/);
+  assert.match(w.status(), /about 65 ft/);
+  // The same armed tool takes the next, big enough drag.
+  w.drag([200, 125], [300, 175]);
+  assert.equal(w.handle.getState().areas.length, 1);
+  assert.equal(chip.getAttribute('aria-pressed'), 'false');
+  assert.equal(pointerOwner(), null);
+  w.handle.destroy();
+});
+
+test('the drone drag preview is a solid rectangle in the committed box colour', () => {
+  const w = drawingWorld();
+  const source = () =>
+    w.viewer.dataSources.sources.find(
+      (item) => item.name === 'gev-drone-plan',
+    );
+  const preview = () =>
+    source()?.entities.values.find((item) => item.name === 'Box preview');
+  w.action('draw-box').click();
+  w.down(200, 125);
+  w.move(300, 175);
+  const live = preview();
+  assert.ok(live, 'the rectangle is on the globe during the drag');
+  assert.ok(live.rectangle, 'it is drawn as a rectangle');
+  assert.equal(live.rectangle.outline, true);
+  assert.equal(live.rectangle.material.alpha, 0.18, 'a solid fill');
+  assert.equal(live.rectangle.outlineColor.alpha, 0.95);
+  w.up(300, 175);
+  assert.equal(preview(), undefined, 'the drag preview goes with the drag');
+  const committed = source()?.entities.values.find((item) => item.polyline);
+  assert.ok(committed, 'the committed area is drawn in its place');
+  w.handle.destroy();
+});
+
+test('arming DRAW BOX dismisses the visible first-run launcher', () => {
+  const w = drawingWorld();
+  const getById = w.doc.getElementById;
+  let clicked = 0;
+  const dismiss = {
+    click() {
+      clicked += 1;
+    },
+  };
+  const launcher = {
+    hidden: false,
+    classList: { contains: (name) => name === 'visible' },
+    querySelector: (selector) =>
+      selector === '[data-first-run-dismiss]' ? dismiss : null,
+  };
+  w.doc.getElementById = (id) =>
+    id === 'first-run-launcher' ? launcher : getById(id);
+  w.action('draw-box').click();
+  assert.equal(clicked, 1, 'the card is put down so the globe can be dragged');
+  // A hidden launcher is left alone (its dismiss would burn the session).
+  w.handle.drawBox();
+  launcher.hidden = true;
+  w.handle.drawBox({ toggle: false });
+  assert.equal(clicked, 1);
   w.handle.destroy();
 });
 
@@ -2984,6 +3089,14 @@ async function server() {
 }
 
 const settleUi = () => new Promise((r) => setTimeout(r, 250));
+// A fixed 250 ms is not enough for a save that goes over real HTTP when the
+// whole suite runs in parallel on a loaded host: wait for the outcome instead.
+const settleUntil = async (ready, limitMs = 8000) => {
+  const start = Date.now();
+  await settleUi();
+  while (!ready() && Date.now() - start < limitMs)
+    await new Promise((r) => setTimeout(r, 50));
+};
 const btn = (w, action) =>
   w.find(
     (n) => n.tagName === 'BUTTON' && n.getAttribute('data-action') === action,
@@ -3774,6 +3887,63 @@ test('surface model: the settings are remembered and clamped, defaults are 20 ft
   w2.handle.destroy();
 });
 
+test('surface model: a changed setting replans, a refused one changes nothing', async () => {
+  const w = setup({ surfaceClient: surfaceStub() });
+  w.handle.setBox(boxM(200, 150));
+  await w.handle.replan();
+  await settleLoad();
+  await w.handle.replan();
+  const s = w.handle.getState();
+  assert.equal(s.dirty, false, 'the plan matches the settings');
+  // The panel's own sliders replan on input, so a setter that writes them
+  // leaves the plan on screen out of date — a file from it would fly the old
+  // clearance numbers.
+  assert.equal(w.handle.setSurface({ minM: 12 }), true);
+  assert.equal(s.surface.minM, 12);
+  assert.equal(s.dirty, true, 'the plan is not current after a setting change');
+  await w.handle.replan();
+  assert.equal(s.dirty, false);
+  // The margin slider counts as a change too, not just the switch.
+  assert.equal(w.handle.setSurface({ marginM: 4 }), true);
+  assert.equal(s.surface.marginM, 4);
+  assert.equal(s.dirty, true);
+  await w.handle.replan();
+  // A refused value leaves the setting, the plan and the dirty flag alone.
+  const before = { ...s.surface };
+  assert.equal(w.handle.setSurface({ minM: 62 }), false);
+  assert.deepEqual(
+    { minM: s.surface.minM, marginM: s.surface.marginM, enabled: s.surface.enabled },
+    { minM: before.minM, marginM: before.marginM, enabled: before.enabled },
+  );
+  assert.equal(s.dirty, false, 'a refusal is not a change');
+  w.handle.destroy();
+});
+
+test('check and surface: a mixed patch is refused whole, and one voice request lands both', async () => {
+  const w = setup({ surfaceClient: surfaceStub() });
+  const s = w.handle.getState();
+  // Each setter is all-or-nothing: one bad value in a patch is not half-kept.
+  const surfaceBefore = { ...s.surface };
+  assert.equal(w.handle.setSurface({ minM: 12, marginM: 99 }), false);
+  assert.equal(s.surface.minM, surfaceBefore.minM);
+  assert.equal(s.surface.marginM, surfaceBefore.marginM);
+  const checkBefore = { ...s.check };
+  assert.equal(w.handle.setCheck({ zone: true, halfWidthM: 99 }), false);
+  assert.deepEqual(s.check, checkBefore);
+  // Through voice the two setters are one request: both halves land, and the
+  // keys the rollback would restore are keys the panel really keeps.
+  const result = await createDronePlanVoice(w.handle).check({
+    checkZone: true,
+    surfaceEnabled: true,
+    surfaceMinM: 12,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(s.check.zone, true);
+  assert.equal(s.surface.enabled, true);
+  assert.equal(s.surface.minM, 12);
+  w.handle.destroy();
+});
+
 test('surface model: no model, no sign-in or a failed read falls back to the tree height and says so', async () => {
   for (const client of [
     { list: async () => [], load: async () => null },
@@ -4159,7 +4329,7 @@ test('mission labels: a saved plan exports as M01_<name>.kmz with a picture, REA
 
     field(w, 'name').value = 'Byrd Ranch ring A';
     btn(w, 'library-save')[0].click();
-    await settleUi();
+    await settleUntil(() => rows(w)[0]);
     assert.match(rows(w)[0].textContent, /^M1 · Byrd Ranch ring A/);
     assert.match(note(), /labelled M1/);
     await w.handle.replan();
@@ -6746,5 +6916,200 @@ test('height mode: a saved spacing outside the choices gets one entry, dropped w
   await w.handle.loadPlan(doc);
   assert.equal(w.control('Terrain points on lines').value, '');
   assert.deepEqual(values(), base);
+  w.handle.destroy();
+});
+
+// ------------------------------------------- voice through the real panel --
+// These use the panel the browser uses (its own tools, buttons and files), not
+// the fake handle of dronePlanVoice.test.mjs: the adapter's job is to make the
+// panel's asynchronous answers honest, so the two have to run together.
+
+test('voice: the compact export downloads the compressed file, and never claims one that did not land', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 200));
+  await w.handle.replan();
+  const voice = createDronePlanVoice(w.handle);
+  // The voice option writes the panel's own Save & export checkbox.
+  const switched = await voice.options({ exportCompact: true });
+  assert.equal(switched.ok, true);
+  assert.equal(switched.exportCompact, true);
+  const box = w.find((n) => n.getAttribute('data-export') === 'compact')[0];
+  assert.equal(box.checked, true, 'the Save & export checkbox followed');
+
+  // A mission: the panel hands back a promise while it compresses, so a
+  // synchronous check would report a file that is not written yet.
+  const mission = await voice.download({ which: 'mission' });
+  assert.equal(mission.ok, true);
+  assert.equal(mission.downloaded, true);
+  assert.equal(
+    w.downloads.length,
+    1,
+    'exactly the one file, and it exists now',
+  );
+  const kmz = w.downloads[0];
+  assert.match(kmz.name, /\.kmz$/);
+  assert.throws(
+    () => readZip(kmz.bytes),
+    /Unsupported ZIP method/,
+    'the entries are deflated',
+  );
+  const files = await readZipAsync(kmz.bytes);
+  const xml = new TextDecoder().decode(files.get('wpmz/waylines.wpml'));
+  assert.equal(/>\s+</.test(xml), false, 'and the XML is compact');
+  assert.equal(
+    (xml.match(/<Placemark>/g) || []).length,
+    w.handle.getResult().missions[0].waypointCount,
+  );
+
+  // All passes in one zip.
+  const all = await voice.download({ which: 'all' });
+  assert.equal(all.ok, true);
+  const bundle = w.downloads.at(-1);
+  assert.match(bundle.name, /-all\.zip$/);
+  assert.match(
+    new TextDecoder().decode(
+      (await readZipAsync(bundle.bytes)).get('README.txt'),
+    ),
+    /^COMPACT TEST FILE:/,
+  );
+
+  // The all-passes zip goes through the same option.
+  await w.handle.planSuite();
+  const suite = await voice.download({ which: 'suite' });
+  assert.equal(suite.ok, true);
+  assert.match(w.downloads.at(-1).name, /-all-passes\.zip$/);
+
+  // A plan replaced while the file is compressing: the panel answers false,
+  // and voice must report a failure instead of a download.
+  const before = w.downloads.length;
+  const late = voice.download({ which: 'mission' });
+  w.handle.setBox(boxM(250, 150));
+  await w.handle.replan();
+  const refused = await late;
+  assert.equal(refused.ok, false);
+  assert.equal(w.downloads.length, before);
+  w.handle.destroy();
+});
+
+test('voice: finish and undo act on the real polygon tool the buttons use', async () => {
+  const w = drawingWorld();
+  const voice = createDronePlanVoice(w.handle);
+  // Nothing is being drawn: each says so instead of acting on another tool.
+  assert.equal((await voice.undo()).ok, false);
+  assert.equal((await voice.finish()).ok, false);
+  assert.equal(w.handle.getState().areas.length, 0);
+
+  assert.equal(w.handle.drawPolygon(), true);
+  w.click(200, 125);
+  w.click(300, 125);
+  assert.equal(w.handle.drafts().corners, 2);
+  // Two corners are not a ring: the panel keeps the draft open and voice
+  // says so rather than pretending the polygon exists.
+  const short = await voice.finish();
+  assert.equal(short.ok, false);
+  assert.equal(w.handle.getState().areas.length, 0);
+  assert.equal(w.handle.drafts().polygon, true, 'the draft is still open');
+  assert.equal(w.action('finish-polygon').hidden, false);
+
+  // Undo takes back the last corner of that same draft.
+  const undone = await voice.undo();
+  assert.equal(undone.ok, true);
+  assert.equal(undone.undone, true);
+  assert.equal(w.handle.drafts().corners, 1);
+  assert.equal(
+    w.action('undo-polygon-corner').disabled,
+    false,
+    'one left to take back',
+  );
+  assert.equal((await voice.undo()).ok, true);
+  assert.equal(w.handle.drafts().corners, 0);
+  assert.equal(w.action('undo-polygon-corner').disabled, true);
+  assert.equal((await voice.undo()).ok, false, 'nothing left to take back');
+
+  w.click(200, 125);
+  w.click(300, 125);
+  w.click(300, 175);
+  const made = await voice.finish();
+  assert.equal(made.ok, true);
+  assert.equal(made.finished, true);
+  assert.equal(made.areaCount, 1);
+  const [area] = w.handle.getState().areas;
+  assert.equal(area.kind, 'polygon');
+  assert.equal(area.ring.length, 3);
+  // The panel's own buttons went back to their idle state.
+  assert.equal(w.handle.drafts().polygon, false);
+  assert.equal(w.action('finish-polygon').hidden, true);
+  assert.equal(w.action('undo-polygon-corner').hidden, true);
+  assert.equal(pointerOwner(), null);
+  w.handle.destroy();
+});
+
+test('voice: corner removes only the corner the person selected in the real editor', async () => {
+  const w = drawingWorld();
+  const voice = createDronePlanVoice(w.handle);
+  w.handle.setPolygon(w.ringAt(...RECT_PX));
+  // No editor open: nothing is removed and the answer says to edit first.
+  assert.equal((await voice.corner()).ok, false);
+  assert.equal(w.handle.getState().areas[0].ring.length, 4);
+
+  w.editButton('area-1').click();
+  assert.equal(pointerOwner(), 'drone-plan-area-edit');
+  assert.equal(
+    w.action('remove-corner').disabled,
+    true,
+    'nothing selected yet',
+  );
+  // Open editor, no corner clicked: the request removes nothing.
+  assert.equal((await voice.corner()).ok, false);
+  assert.equal(w.handle.getState().areas[0].ring.length, 4);
+
+  // Click a corner in the panel, as the REMOVE CORNER button expects.
+  w.tap(300, 175);
+  assert.equal(w.action('remove-corner').disabled, false);
+  const removed = await voice.corner();
+  assert.equal(removed.ok, true);
+  assert.equal(removed.removed, true);
+  assert.equal(w.handle.getState().areas[0].ring.length, 3);
+  assert.equal(
+    w.action('remove-corner').disabled,
+    true,
+    'the selection is gone',
+  );
+  // A second request removes nothing: no corner is selected any more, so it
+  // never guesses and takes another one.
+  assert.equal((await voice.corner()).ok, false);
+  assert.equal(w.handle.getState().areas[0].ring.length, 3);
+
+  // A triangle cannot lose a corner; the ring and the editor stay put.
+  w.tap(200, 125);
+  const refused = await voice.corner();
+  assert.equal(refused.ok, false);
+  assert.equal(w.handle.getState().areas[0].ring.length, 3);
+  assert.equal(pointerOwner(), 'drone-plan-area-edit', 'still editing');
+  w.handle.destroy();
+});
+test('voice: a refused ring is not reported as finished, and a rect has no corners to remove', async () => {
+  const w = drawingWorld();
+  const voice = createDronePlanVoice(w.handle);
+  // A 20 m sliver: the planner refuses it, so the panel keeps the draft.
+  w.handle.drawPolygon();
+  w.click(200, 125);
+  w.click(201, 125);
+  w.click(200, 126);
+  const refused = await voice.finish();
+  assert.equal(refused.ok, false);
+  assert.equal(w.handle.getState().areas.length, 0);
+  assert.equal(w.handle.drafts().polygon, true, 'the draft is still open');
+  assert.equal(w.action('finish-polygon').hidden, false);
+  w.fakes.key('Escape');
+
+  // The editor on a box has corners, but none of them is a polygon corner.
+  w.handle.setBox(EDIT_BOX);
+  w.editButton('area-1').click();
+  assert.equal(w.handle.getState().areas[0].kind, 'rect');
+  const before = JSON.stringify(w.handle.getState().areas[0].box);
+  const rect = await voice.corner();
+  assert.equal(rect.ok, false);
+  assert.equal(JSON.stringify(w.handle.getState().areas[0].box), before);
   w.handle.destroy();
 });

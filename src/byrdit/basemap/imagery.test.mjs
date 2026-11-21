@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ancestorOf,
   coveredMaxzoom,
-  createBasemapImageryProvider,
+  createBasemapImagerySpec,
   cropRect,
   isCovered,
   planTile,
@@ -98,36 +98,77 @@ test('ancestorOf and cropRect address the right quarter, flipped or not', () => 
   });
 });
 
-function fakeCesium(serve) {
+/**
+ * The archive as a fetch: `serve(z, x, y)` answers a tile or throws; every URL
+ * asked is recorded. Decoding, cropping and encoding are replaced by markers
+ * so the tests see which ancestor a tile was made from.
+ */
+function archive(serve) {
   const requests = [];
-  class UrlTemplateImageryProvider {
-    constructor(options) {
-      this.options = options;
-    }
-    requestImage(x, y, level, request) {
-      requests.push(`${level}/${x}/${y}`);
-      return serve(level, x, y, request);
-    }
-  }
-  return { Cesium: { UrlTemplateImageryProvider }, requests };
+  const fetchImpl = async (url) => {
+    const m = /\/(\d+)\/(\d+)\/(\d+)\.webp$/.exec(url);
+    const [z, x, y] = [m[1], m[2], m[3]].map(Number);
+    requests.push(`${z}/${x}/${y}`);
+    const answer = await serve(z, x, y);
+    return (
+      answer ?? {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'image/webp' },
+        arrayBuffer: async () =>
+          new TextEncoder().encode(`${z}/${x}/${y}`).buffer,
+      }
+    );
+  };
+  const options = {
+    fetchImpl,
+    decode: async ({ bytes }) => ({ tile: new TextDecoder().decode(bytes) }),
+    crop: async (image, part) => ({ from: image.tile, part }),
+    encode: async (cropped) => ({ bytes: cropped, contentType: 'image/webp' }),
+  };
+  return { requests, options };
 }
 
-test('the provider is built from the config URL and max zoom', () => {
-  const { Cesium } = fakeCesium(async () => ({}));
-  const provider = createBasemapImageryProvider(Cesium, imagery);
-  assert.equal(provider.options.url, imagery.url);
-  assert.equal(provider.options.maximumLevel, 14);
-  assert.equal(provider.options.tileWidth, 256);
+const ask = (spec, { x, y, z }, url = `/direct/${z}/${x}/${y}`) =>
+  spec.fetchTile({ tile: { x, y, level: z }, url, signal: undefined });
+
+test('the spec is the globe port xyz imagery over the config URL and max zoom', () => {
+  const spec = createBasemapImagerySpec(imagery);
+  assert.equal(spec.kind, 'xyz');
+  assert.equal(spec.url, imagery.url);
+  assert.equal(spec.maxLevel, 14);
+  assert.equal(spec.tileSize, 256);
+  assert.equal(spec.tiling, 'webMercator');
+  assert.equal(typeof spec.fetchTile, 'function');
+});
+
+test('the renderer builds a layer from the spec (a provider object here was the blank globe)', async () => {
+  const { providerFor } = await import('../../render/cesium/imagery.js');
+  const provider = providerFor(createBasemapImagerySpec(imagery));
+  assert.equal(provider.constructor.name, 'UrlTemplateImageryProvider');
+  assert.equal(provider.maximumLevel, 14);
+});
+
+test('a direct tile inside coverage is the archive tile, unchanged', async () => {
+  const a = tileAt(...AUSTIN, 13);
+  const { requests, options } = archive(async () => undefined);
+  const spec = createBasemapImagerySpec(imagery, options);
+  const url = `/basemap/direct/${a.z}/${a.x}/${a.y}.webp`;
+  const out = await spec.fetchTile({
+    tile: { x: a.x, y: a.y, level: a.z },
+    url,
+    signal: undefined,
+  });
+  assert.equal(out.contentType, 'image/webp');
+  assert.deepEqual(requests, [`${a.z}/${a.x}/${a.y}`]);
+  assert.equal(new TextDecoder().decode(out.bytes), `${a.z}/${a.x}/${a.y}`);
 });
 
 test('outside coverage: no request for the missing tile, one shared ancestor request', async () => {
-  const { Cesium, requests } = fakeCesium(async (z, x, y) => ({
-    tile: `${z}/${x}/${y}`,
-    width: 256,
-    height: 256,
-  }));
+  const { requests, options } = archive(async () => undefined);
   const crops = [];
-  const provider = createBasemapImageryProvider(Cesium, imagery, {
+  const spec = createBasemapImagerySpec(imagery, {
+    ...options,
     crop: async (image, part) => {
       crops.push({ from: image.tile, part });
       return { cropped: image.tile };
@@ -135,62 +176,57 @@ test('outside coverage: no request for the missing tile, one shared ancestor req
   });
   const p = tileAt(...PARIS, 12);
   const [a, b] = await Promise.all([
-    provider.requestImage(p.x, p.y, 12),
-    provider.requestImage(p.x + 1, p.y, 12),
+    ask(spec, p),
+    ask(spec, { ...p, x: p.x + 1 }),
   ]);
   const anc = ancestorOf(p.x, p.y, 12, 8);
   assert.deepEqual(requests, [`8/${anc.x}/${anc.y}`]);
-  assert.equal(a.cropped, `8/${anc.x}/${anc.y}`);
-  assert.equal(b.cropped, `8/${anc.x}/${anc.y}`);
+  assert.equal(a.bytes.cropped, `8/${anc.x}/${anc.y}`);
+  assert.equal(b.bytes.cropped, `8/${anc.x}/${anc.y}`);
   assert.equal(crops.length, 2);
 });
 
 test('inside coverage a 204/failed tile falls back to the base ancestor', async () => {
   const a = tileAt(...AUSTIN, 13);
-  const { Cesium, requests } = fakeCesium(async (z, x, y) => {
-    if (z === 13) throw new Error('204 No Content');
-    return { tile: `${z}/${x}/${y}`, width: 256, height: 256 };
-  });
-  const provider = createBasemapImageryProvider(Cesium, imagery, {
+  const { requests, options } = archive(async () => undefined);
+  const failing = {
+    ...options,
+    fetchImpl: async (url) => {
+      if (/^\/direct\//.test(url)) return { ok: true, status: 204 };
+      return options.fetchImpl(url);
+    },
+  };
+  const spec = createBasemapImagerySpec(imagery, {
+    ...failing,
     crop: async (image) => ({ cropped: image.tile }),
   });
-  const image = await provider.requestImage(a.x, a.y, 13, { id: 1 });
+  const out = await ask(spec, a);
   const anc = ancestorOf(a.x, a.y, 13, 8);
-  assert.deepEqual(requests, [`13/${a.x}/${a.y}`, `8/${anc.x}/${anc.y}`]);
-  assert.equal(image.cropped, `8/${anc.x}/${anc.y}`);
+  assert.deepEqual(requests, [`8/${anc.x}/${anc.y}`]);
+  assert.equal(out.bytes.cropped, `8/${anc.x}/${anc.y}`);
 });
 
-test('service down: the failure reaches Cesium (tile-failure fallback counts it)', async () => {
+test('service down: the failure reaches the layer (the tile-failure fallback counts it)', async () => {
   const a = tileAt(...AUSTIN, 13);
-  const { Cesium } = fakeCesium(async () => {
-    throw new Error('502');
+  const down = async () => ({ ok: false, status: 502 });
+  const { options } = archive(down);
+  const spec = createBasemapImagerySpec(imagery, {
+    ...options,
+    fetchImpl: down,
   });
-  const provider = createBasemapImageryProvider(Cesium, imagery, {
-    crop: async (image) => image,
-  });
-  await assert.rejects(provider.requestImage(a.x, a.y, 13, {}));
-  await assert.rejects(provider.requestImage(0, 0, 0, {}), /502/);
-});
-
-test("Cesium's request throttle (undefined) is passed through", () => {
-  const { Cesium } = fakeCesium(() => undefined);
-  const provider = createBasemapImageryProvider(Cesium, imagery);
-  const a = tileAt(...AUSTIN, 14);
-  assert.equal(provider.requestImage(a.x, a.y, 14, {}), undefined);
+  await assert.rejects(ask(spec, a), /502/);
+  await assert.rejects(ask(spec, { x: 0, y: 0, z: 0 }), /502/);
 });
 
 test('a failed ancestor is retried, not cached', async () => {
   let fail = true;
-  const { Cesium, requests } = fakeCesium(async (z, x, y) => {
-    if (fail) throw new Error('down');
-    return { tile: `${z}/${x}/${y}`, width: 256, height: 256 };
-  });
-  const provider = createBasemapImageryProvider(Cesium, imagery, {
-    crop: async (image) => image,
-  });
+  const { requests, options } = archive(async () =>
+    fail ? { ok: false, status: 503 } : undefined,
+  );
+  const spec = createBasemapImagerySpec(imagery, options);
   const p = tileAt(...PARIS, 10);
-  await assert.rejects(provider.requestImage(p.x, p.y, 10));
+  await assert.rejects(ask(spec, p));
   fail = false;
-  await provider.requestImage(p.x, p.y, 10);
+  await ask(spec, p);
   assert.equal(requests.length, 2);
 });

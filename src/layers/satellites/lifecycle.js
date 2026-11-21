@@ -16,7 +16,7 @@ export function createLifecycle({
   // While on with a catalog, satellites can be shown at any time in reach of
   // their element sets. Registered once; off, the layer has no time to show,
   // and each step tells the clock once it has settled.
-  worldClock.register({
+  const clockSource = {
     id: 'satellites',
     coverage: () => {
       if (!layerState._enabled || !layerState._catalog.size) return null;
@@ -26,7 +26,10 @@ export function createLifecycle({
         end: now + SATELLITE_COVERAGE_MS,
       };
     },
-  });
+  };
+  // Unregistered on destroy, so a page that builds the app again holds no old layer; init
+  // registers it again.
+  let uncover = worldClock.register(clockSource);
   const { holdContinuousRender, releaseContinuousRender } = services.render;
   const { registerPickOwner, unregisterPickOwner } = services.picking;
 
@@ -39,10 +42,13 @@ export function createLifecycle({
     // Catalog data refresh; propagation remains preRender-owned.
 
     async init(viewer) {
+      uncover ??= worldClock.register(clockSource);
       // Asked first: a viewer without one fails before anything is built.
       const frame = frameOf(viewer);
       parts.catalog._abortActiveUpdates();
       clearFocusTarget('satellites');
+      for (const model of parts.stationModels ?? [])
+        model._destroyStationModel();
       layerState._viewer = viewer;
       layerState._catalog = new Map();
       layerState._points = new Map();
@@ -134,7 +140,10 @@ export function createLifecycle({
       releaseContinuousRender('satellites');
       parts.rendering._setPointsShown(false);
       parts.rendering._setOrbitPathsShown(false);
+      for (const model of parts.stationModels ?? [])
+        model._updateStationModel(); // off: releases the model
       parts.tracking._clearTracking();
+      parts.stationPanel?._syncStationPanel(); // off: takes the panel down
       parts.labels._syncIssOverlay();
       // Remove click handler + keydown listener + preRender propagation while disabled
       layerState._clickSubscription?.();
@@ -154,6 +163,8 @@ export function createLifecycle({
 
     destroy(viewer) {
       parts.catalog._abortActiveUpdates();
+      uncover?.();
+      uncover = null;
       releaseContinuousRender('satellites'); // direct-destroy path (perf wave 2 fix)
       layerState._enabled = false;
       parts.tracking._clearTracking();
@@ -172,6 +183,9 @@ export function createLifecycle({
       }
       layerState._overlayHost.clearSource(ISS_OVERLAY_SOURCE_ID);
       layerState._overlayHost.setVisible(ISS_OVERLAY_SOURCE_ID, false);
+      for (const model of parts.stationModels ?? [])
+        model._destroyStationModel();
+      parts.stationPanel?._destroyStationPanel();
       // The dots', tracked dot's and rings' sets are disposed of
       parts.rendering._detach(viewer);
       layerState._points.clear();

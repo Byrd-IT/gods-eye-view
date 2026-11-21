@@ -29,7 +29,16 @@ function harness({ viewer = null, floor = null } = {}) {
     _models: new Map(),
     _trackedModel: null,
     _trackedIcao: null,
+    _displayCourse: new Map(),
+    _trailPositions: [],
+    _trailBackfillToken: 0,
     records: { data: new Map() },
+  };
+  // A spy for the live display delay: a history frame must never touch it.
+  const delay = { notes: [], settles: [] };
+  flightState._displayDelay = {
+    noteReport: (...args) => delay.notes.push(args),
+    settle: (...args) => delay.settles.push(args),
   };
   const parts = {
     rendering: {
@@ -60,7 +69,12 @@ function harness({ viewer = null, floor = null } = {}) {
   parts.motion = createMotion({ flightState, services, parts, layer: {} });
   let fix = null;
   const records = {
+    data: new Map(),
     beginSnapshot() {},
+    beginHistoryFrame() {},
+    forget(id) {
+      this.data.delete(id);
+    },
     receive(aircraft) {
       const meta = {
         rawLon: aircraft.lon,
@@ -89,13 +103,14 @@ function harness({ viewer = null, floor = null } = {}) {
   });
   return {
     flightState,
+    delay,
     meshCalls,
     presented,
     apply(aircraft, fixEpochMs) {
       fix = fixEpochMs;
       return apply({
         observedAtMs: fixEpochMs,
-        records: [aircraft],
+        records: [{ ...aircraft, positionTimeMs: fixEpochMs }],
         complete: true,
       });
     },
@@ -176,4 +191,21 @@ test('a stale grounded contact is lifted onto its floor', () => {
   for (const axis of ['x', 'y', 'z'])
     assert.ok(Math.abs(newest.position[axis] - lifted[axis]) < 1e-6, axis);
   assert.ok(h.presented.includes(parked));
+});
+
+test('a live snapshot aims the display delay; a history frame leaves it alone', () => {
+  const h = harness();
+  const t0 = 1_700_000_000_000;
+  h.apply(CONTACT, t0);
+  assert.equal(h.delay.notes.length, 1, 'a live report is noted');
+  assert.equal(h.delay.settles.length, 1, 'a live delivery settles the delay');
+
+  h.delay.notes.length = 0;
+  h.delay.settles.length = 0;
+  // A history frame's reports are hours old by design: they must not be read
+  // as a late live delivery and push the display delay around.
+  h.flightState._historyFrameArmed = true;
+  h.apply(CONTACT, t0 + 1_000);
+  assert.equal(h.delay.notes.length, 0, 'history reports are not live notes');
+  assert.equal(h.delay.settles.length, 0, 'history does not settle the delay');
 });

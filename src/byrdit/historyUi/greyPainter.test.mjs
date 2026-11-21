@@ -10,9 +10,11 @@ import {
   createGreyPainter,
   greyColor,
   greyControlOf,
+  greyDrawControl,
   greyDrawPort,
   greyItem,
   greyLayerOfSet,
+  releaseGreyDrawPort,
 } from './greyPainter.js';
 import {
   LIVE_DRAW_FEEDS,
@@ -118,11 +120,14 @@ test('the grey prefixes are the ids upstream layers give their draw sets', () =>
 
 test('the renderer hands layers the grey-wrapped draw port (one fork line)', () => {
   const app = src('../../render/cesium/appRenderer.js');
-  assert.match(app, /draw: greyDrawPort\(ports\.draw\),/);
+  assert.match(app, /const draw = greyDrawPort\(ports\.draw\);/);
+  assert.match(app, /^\s+draw,$/m, 'the renderer draws through it');
   assert.match(
     app,
-    /import \{ greyDrawPort \} from '\.\.\/\.\.\/byrdit\/historyUi\/greyPainter\.js';/,
+    /import \{\s*greyDrawPort,\s*releaseGreyDrawPort,\s*\} from '\.\.\/\.\.\/byrdit\/historyUi\/greyPainter\.js';/,
   );
+  // a destroyed renderer stops publishing its own control
+  assert.match(app, /releaseGreyDrawPort\(draw\);/);
   // and the painter itself stays Cesium-free and clock-free
   const own = src('./greyPainter.js');
   assert.doesNotMatch(own, /from 'cesium'|import\('cesium'\)/);
@@ -338,4 +343,157 @@ test('wrapping is once per port; the wrapper keeps the port API', () => {
   assert.equal(typeof port.clampState, 'function');
   assert.equal(port.clampState(), raw.clampState());
   assert.equal(greyControlOf(port), greyControlOf(raw));
+});
+
+test('the page control follows the latest draw port after a renderer re-init', () => {
+  const first = greyDrawPort(fakeDrawPort());
+  assert.equal(greyDrawControl(), greyControlOf(first));
+  const second = greyDrawPort(fakeDrawPort());
+  assert.equal(
+    greyDrawControl(),
+    greyControlOf(second),
+    'a new renderer is the one the page must paint through',
+  );
+  assert.notEqual(greyDrawControl(), greyControlOf(first));
+});
+
+test('a column clear drops cached items, so a repaint never replays them', () => {
+  const modes = new Map([['flights', MODE_LIVE]]);
+  const raw = fakeDrawPort();
+  const base = raw.icons;
+  raw.icons = (spec) => {
+    const set = base(spec);
+    const record = raw.sets.get(spec.id);
+    set.setColumns = (cols) => {
+      // This port's columns own its rows: no rows clears the set.
+      if (Array.isArray(cols?.ids) && cols.ids.length === 0)
+        record.items.clear();
+    };
+    return set;
+  };
+  const port = greyDrawPort(raw);
+  const control = greyControlOf(port);
+  control.setModeOf((id) => modes.get(id) ?? MODE_LIVE);
+  const set = port.icons({ id: 'flights-icons:3' });
+  set.set([{ id: 'stale', color: RED }]);
+  set.setColumns({ ids: [] });
+  const record = raw.sets.get('flights-icons:3');
+  assert.equal(record.items.size, 0, 'the layer cleared its rows');
+  modes.set('flights', MODE_GREY);
+  control.changed();
+  assert.equal(
+    record.items.size,
+    0,
+    'a grey repaint must not replay the cleared item',
+  );
+});
+
+test('hiddenSets counts the sets hidden now, and a hidden set disposal leaves it', () => {
+  const { port, control, modes } = setup();
+  const first = port.points({ id: 'satellites:1:points' });
+  const second = port.points({ id: 'satellites:2:points' });
+  first.set([{ id: 'a', color: RED }]);
+  second.set([{ id: 'b', color: RED }]);
+  assert.equal(control.stats.hiddenSets, 0);
+
+  modes.set('satellites', MODE_CLEARED);
+  control.changed();
+  assert.equal(control.stats.hiddenSets, 2, 'both sets are hidden');
+
+  modes.set('satellites', MODE_GREY);
+  control.changed();
+  assert.equal(control.stats.hiddenSets, 0, 'grey shows the sets again');
+
+  modes.set('satellites', MODE_CLEARED);
+  control.changed();
+  assert.equal(control.stats.hiddenSets, 2);
+  first.dispose();
+  assert.equal(
+    control.stats.hiddenSets,
+    1,
+    'a disposed hidden set no longer counts',
+  );
+});
+
+test('the page control is cleared when the renderer it drew through goes', () => {
+  const first = greyDrawPort(fakeDrawPort());
+  const painter = createGreyPainter({ modeOf: () => MODE_LIVE });
+  painter.start();
+  assert.equal(greyDrawControl(), greyControlOf(first));
+  // the shell's lifetime ends with the scene: the painter goes with it
+  painter.destroy();
+  assert.equal(
+    greyDrawControl(),
+    null,
+    'no control is published over a destroyed draw port',
+  );
+
+  const second = greyDrawPort(fakeDrawPort()); // a re-init publishes again
+  assert.equal(greyDrawControl(), greyControlOf(second));
+  // an old renderer's painter clears its own control, never the new one
+  const old = createGreyPainter({
+    modeOf: () => MODE_LIVE,
+    control: greyControlOf(first),
+  });
+  old.start();
+  old.destroy();
+  assert.equal(greyDrawControl(), greyControlOf(second));
+});
+
+test('releasing a draw port unpublishes only its own control', () => {
+  const raw = fakeDrawPort();
+  const first = greyDrawPort(raw);
+  const firstControl = greyControlOf(first);
+  assert.equal(greyDrawControl(), firstControl);
+
+  const second = greyDrawPort(fakeDrawPort());
+  const secondControl = greyControlOf(second);
+  assert.equal(greyDrawControl(), secondControl);
+
+  // a renderer destroyed after a re-init leaves the newer one published
+  releaseGreyDrawPort(first);
+  assert.equal(greyDrawControl(), secondControl);
+  releaseGreyDrawPort(first); // a repeated release is harmless
+  assert.equal(greyDrawControl(), secondControl);
+
+  // the renderer's own raw port releases the same control
+  releaseGreyDrawPort(raw);
+  assert.equal(greyDrawControl(), secondControl, 'the newer port is not that one');
+
+  releaseGreyDrawPort(second);
+  assert.equal(greyDrawControl(), null, 'the latest renderer is unpublished');
+  releaseGreyDrawPort(second);
+  assert.equal(greyDrawControl(), null);
+});
+
+test('a grey flip during a layer write writes the set once', () => {
+  const modes = new Map([['flights', MODE_LIVE]]);
+  const raw = fakeDrawPort();
+  const columns = [];
+  const base = raw.icons;
+  raw.icons = (spec) => {
+    const set = base(spec);
+    set.setColumns = (cols) => columns.push(cols);
+    return set;
+  };
+  const port = greyDrawPort(raw);
+  const control = greyControlOf(port);
+  control.setModeOf((id) => modes.get(id) ?? MODE_LIVE);
+  const set = port.icons({ id: 'flights-icons:7' });
+  set.set([{ id: 'a', color: RED }]);
+  const record = raw.sets.get('flights-icons:7');
+
+  modes.set('flights', MODE_GREY);
+  const writes = record.writes;
+  set.set([{ id: 'a', color: RED }]);
+  assert.equal(record.writes, writes + 1, 'one items write, not two');
+  assert.ok(isGrey(record.items.get('a').color));
+
+  // the flip inside setColumns greys the columns once, not twice
+  const colours = new Uint8Array([255, 0, 0, 255]);
+  set.setColumns({ ids: ['a'], colors: colours });
+  const columnWrites = columns.length;
+  modes.set('flights', MODE_LIVE);
+  set.setColumns({ ids: ['a'], colors: colours });
+  assert.equal(columns.length, columnWrites + 1, 'one columns write, not two');
 });

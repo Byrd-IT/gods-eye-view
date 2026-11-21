@@ -1,5 +1,5 @@
 import { createDefaultMapSources } from '../../maps/defaultSources.js';
-import { createKeylessTerrain } from '../../render/cesium/mapTerrain.js';
+import { mapEngineFor } from '../../maps/engine.js';
 import { loadPhotorealisticTileset } from '../../render/cesium/google3d.js';
 import { basemapFlagOn, loadBasemapConfig } from './config.js';
 import {
@@ -99,9 +99,11 @@ export async function openBasemap({
     : null;
   health?.start();
   const basemapSource = createBasemapMapSource({
-    Cesium,
     config,
-    fallbackTerrain: createKeylessTerrain,
+    // The terrain the open stack opens on when its own cannot be read: the
+    // engine the map stacks switch through makes it (a spec for the globe port).
+    fallbackTerrain: (request) =>
+      mapEngineFor(sceneViewer).terrain.keyless(request),
     health,
   });
   // Base map: the open stack, or Esri while /basemap is down.

@@ -54,9 +54,10 @@ export async function fetchTransitFeed(
 ) {
   let current = feed.url;
   for (let hop = 0; hop <= TRANSIT_MAX_REDIRECTS; hop += 1) {
+    const crossOrigin = new URL(current).origin !== new URL(feed.url).origin;
     const response = await fetchImpl(current, {
       signal,
-      headers: transitUpstreamHeaders(feed, validators),
+      headers: transitUpstreamHeaders(feed, validators, { crossOrigin }),
       redirect: 'manual',
     });
     // Only a real redirect is followed. A 304 is the successful answer to our
@@ -69,6 +70,7 @@ export async function fetchTransitFeed(
       feed.url,
       current,
       response.headers.get('location'),
+      feed.allowedRedirectHosts,
     );
     try {
       await response.body?.cancel();

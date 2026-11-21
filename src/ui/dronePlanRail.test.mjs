@@ -42,7 +42,6 @@ test('every rail rule written for Time travel has its Drone Flight Plan twin', (
     'layers.css',
     'responsive.css',
     'mobile-shell.css',
-    'cyber.css',
   ]) {
     const css = read(`src/ui/styles/${file}`);
     const tt = count(

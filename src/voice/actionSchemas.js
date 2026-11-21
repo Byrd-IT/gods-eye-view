@@ -211,6 +211,7 @@ const schemas = [
             'utilities-panel',
             'pp-toggles',
             'global-context-panel',
+            'space-missions-panel',
             'weather-panel',
             'recent-imagery-panel',
             'voice-settings',
@@ -1268,6 +1269,19 @@ const schemas = [
             'replan',
             'suite',
             'download',
+            'edit',
+            'obstacle',
+            'target',
+            'path',
+            'preview',
+            'library',
+            'loadPlan',
+            'photoCheck',
+            'check',
+            'units',
+            'finish',
+            'undo',
+            'corner',
           ],
         },
         kind: { type: 'string', enum: ['box', 'polygon'] },
@@ -1304,7 +1318,8 @@ const schemas = [
         jobs: { type: 'string', enum: ['per-area', 'whole'] },
         photoMode: { type: 'string', enum: ['waypoint', 'interval'] },
         aglM: { type: 'number', minimum: 10, maximum: 457.2 },
-        frontOverlap: { type: 'number', minimum: 50, maximum: 95 },
+        // The panel's Front overlap slider runs 50-98 (panel.js).
+        frontOverlap: { type: 'number', minimum: 50, maximum: 98 },
         sideOverlap: { type: 'number', minimum: 40, maximum: 95 },
         tiltPitchDeg: { type: 'number', minimum: -80, maximum: -45 },
         orbitRadiusM: { type: 'number', minimum: 10, maximum: 300 },
@@ -1315,7 +1330,8 @@ const schemas = [
           items: { type: 'number', minimum: 10, maximum: 457.2 },
         },
         speedMs: { type: 'number', minimum: 0.1, maximum: 15 },
-        timedIntervalS: { type: 'number', maximum: 3600 },
+        // The adapter takes any number above 0 up to 3600 (dronePlanVoice.js).
+        timedIntervalS: { type: 'number', minimum: 0.1, maximum: 3600 },
         shutterDenominator: {
           type: 'integer',
           enum: [250, 500, 1000, 2000, 4000],
@@ -1329,6 +1345,58 @@ const schemas = [
         areaId: { type: 'string', minLength: 1, maxLength: 20 },
         which: { type: 'string', enum: ['mission', 'all', 'suite'] },
         index: { type: 'integer', minimum: 0, maximum: 59 },
+        // The 3D check switches the panel's own checkboxes drive (panel.js
+        // setCheck, state.check). Omitted: the check is only read.
+        checkEnabled: { type: 'boolean' },
+        checkZone: { type: 'boolean' },
+        checkCurtain: { type: 'boolean' },
+        // The Photo footprints select (checkLayer.js FOOTPRINT_MODES).
+        checkFootprints: { type: 'string', enum: ['selected', 'all', 'off'] },
+        // The Camera view select (checkLayer.js FRUSTUM_MODES).
+        checkFrustum: {
+          type: 'string',
+          enum: ['one', 'thinned', 'neighbors', 'off'],
+        },
+        // The Zone half-width slider: checkGeometry.js 2 to 30 m.
+        zoneHalfWidthM: { type: 'number', minimum: 2, maximum: 30 },
+        // The surface model select and its two sliders (panel.js setSurface;
+        // prefs.js CLEARANCE_MAX_M is 61).
+        surfaceEnabled: { type: 'boolean' },
+        surfaceMinM: { type: 'number', minimum: 0, maximum: 61 },
+        surfaceMarginM: { type: 'number', minimum: 0, maximum: 61 },
+        // The shot trigger, as the panel's select offers it (panel.js).
+        captureMode: { type: 'string', enum: ['stop', 'distance', 'timed'] },
+        // Metres between photos on the Distance trigger. The panel keeps any
+        // positive number (cleanPhotoSpacingM); zero clears the value, so it
+        // is the only number refused here.
+        photoSpacingM: { type: 'number', exclusiveMinimum: 0 },
+        // Viewing angles for the orbit rings (orbitRings.js: 10-80, up to 6).
+        orbitAnglesDeg: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 6,
+          items: { type: 'number', minimum: 10, maximum: 80 },
+        },
+        orbitOutward: { type: 'boolean' },
+        // The outward photo of a building stop: level to 45 degrees down.
+        orbitOutwardPitchDeg: { type: 'number', minimum: -45, maximum: 0 },
+        // Height of the aim point above the target, metres (panel.js).
+        orbitTargetHeightM: { type: 'number', minimum: 0, maximum: 60 },
+        obstacleHeightM: { type: 'number', minimum: 0, maximum: 60 },
+        // The panel's waypoint field accepts 20-200 (planner.js).
+        maxWaypoints: { type: 'integer', minimum: 20, maximum: 200 },
+        usableBatteryMin: { type: 'integer', minimum: 5, maximum: 60 },
+        continuousRoute: { type: 'boolean' },
+        // One id from listCameraPresets() (cameraSettings.js).
+        cameraPresetId: { type: 'string', minLength: 1, maxLength: 40 },
+        // This plan's camera interval, overriding the aircraft's (0.1-60 s).
+        minPhotoIntervalS: { type: 'number', minimum: 0.1, maximum: 60 },
+        // The opt-in compact export: unverified on a controller.
+        exportCompact: { type: 'boolean' },
+        // The unit the panel shows and accepts lengths in (chooseUnits).
+        units: { type: 'string', enum: ['ft', 'm'] },
+        // A saved .gevplan document, for loadPlan (readPlan validates it).
+        plan: { type: 'object' },
       },
       required: ['action'],
     },

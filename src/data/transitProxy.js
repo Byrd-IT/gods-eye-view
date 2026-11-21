@@ -111,12 +111,20 @@ export function resolveTransitRoute(url) {
  * @param {{etag?: string|null, lastModified?: string|null}} [validators] From the cached snapshot.
  * @returns {Record<string, string>}
  */
-export function transitUpstreamHeaders(feed, validators = null) {
-  return {
+export function transitUpstreamHeaders(feed, validators = null, options = {}) {
+  const base = {
     'User-Agent':
       'gods-eye-view-transit-proxy/1.0 (+https://github.com/bilawalsidhu/gods-eye-view)',
     Accept: 'application/x-protobuf, application/octet-stream;q=0.9, */*;q=0.1',
     'Accept-Encoding': 'gzip',
+  };
+  // A hop that leaves the feed's origin (an operator's permitted blob host)
+  // carries the plain request only: the feed's own custom headers (Entur's
+  // ET-Client-Name) and the origin URL's conditional validators do not travel
+  // to a third-party host.
+  if (options.crossOrigin) return base;
+  return {
+    ...base,
     ...(validators?.etag ? { 'If-None-Match': validators.etag } : {}),
     ...(validators?.lastModified
       ? { 'If-Modified-Since': validators.lastModified }
@@ -152,7 +160,12 @@ export function isAcceptableTransitUpstreamUrl(url) {
  * @param {string|null} location Raw `Location` header value.
  * @returns {{ ok: true, url: string } | { ok: false, reason: string }}
  */
-export function transitRedirectDecision(originUrl, currentUrl, location) {
+export function transitRedirectDecision(
+  originUrl,
+  currentUrl,
+  location,
+  allowedRedirectHosts = [],
+) {
   if (!location)
     return { ok: false, reason: 'redirect without a Location header' };
   let origin;
@@ -165,8 +178,17 @@ export function transitRedirectDecision(originUrl, currentUrl, location) {
   }
   if (next.protocol !== 'https:')
     return { ok: false, reason: 'redirect left https' };
-  if (next.origin !== origin)
-    return { ok: false, reason: `redirect left ${origin}` };
+  if (next.origin !== origin) {
+    // Narrow per-feed exception: data.texas.gov hands the CapMetro snapshot to
+    // an Amazon S3 blob host (302 -> 303 -> S3). Only the exact hostnames the
+    // registry entry names for this feed may be reached, and only over
+    // https; any other host still leaves the origin.
+    const host = next.hostname.toLowerCase();
+    const allowed = (allowedRedirectHosts || []).some(
+      (h) => String(h).toLowerCase() === host,
+    );
+    if (!allowed) return { ok: false, reason: `redirect left ${origin}` };
+  }
   return { ok: true, url: next.toString() };
 }
 

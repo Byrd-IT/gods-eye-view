@@ -1,3 +1,4 @@
+import { findCamera } from '../../render/rendererOf.js';
 import {
   FRAME_SIGNATURE_W,
   FRAME_SIGNATURE_H,
@@ -9,12 +10,6 @@ import {
   PROJECTION_IDLE_REFRESH_MS,
   PLACEHOLDER_REPAINT_MS,
 } from './policy.js';
-import {
-  ACTIVE_CAMERA_MARGIN,
-  createViewTest,
-  horizonOccluderOf,
-} from '../../byrdit/liveVisibility.js';
-import { cesiumViewerFor } from '../../byrdit/cesiumViewer.js';
 
 /**
  * Contain-fits a source frame into the projection canvas: scaled to the
@@ -46,6 +41,11 @@ export function fitToProjection(sourceW, sourceH) {
     h,
   };
 }
+
+const PLANE_POINTS = ['mount', 'tl', 'tr', 'br', 'bl'];
+const _scratchPoints = [];
+// Keep the occluding surface below common negative geoid undulations.
+const HORIZON_MARGIN_M = 200;
 
 export function createFrames({ state: layerState, services, parts, source }) {
   /**
@@ -243,23 +243,19 @@ export function createFrames({ state: layerState, services, parts, source }) {
   }
 
   /**
-   * Byrd-IT visibility: is the record's mount (with the wide active-camera
-   * margin for the monitor plane) on screen right now? Unknown → true, so a
-   * missing viewer never blocks a picture.
+   * Whether a camera's monitor plane may be on screen; what cannot be judged counts as visible.
+   * @param {Object} record - Camera record.
+   * @returns {boolean}
    */
-  function activeRecordInView(record) {
-    const viewer = layerState._viewer;
-    // The scene object has no scene of its own: look at the viewer behind it.
-    if (!cesiumViewerFor(viewer)?.scene || !record?.position) return true;
-    try {
-      return createViewTest(
-        viewer,
-        horizonOccluderOf(viewer),
-        ACTIVE_CAMERA_MARGIN,
-      )(record.position);
-    } catch {
-      return true;
-    }
+  function projectionInView(record) {
+    const camera = findCamera(layerState._viewer);
+    if (typeof camera?.visiblePoints !== 'function') return true;
+    const placed = record.frustumPositions;
+    if (!placed) return true;
+    const points = _scratchPoints;
+    points.length = 0;
+    for (const key of PLANE_POINTS) points.push(placed[key]);
+    return camera.visiblePoints(points, HORIZON_MARGIN_M) !== false;
   }
 
   /**
@@ -295,10 +291,8 @@ export function createFrames({ state: layerState, services, parts, source }) {
     // bypass a provider's explicit minimum between image requests.
     if (sourceRefreshMs > 0 && sinceLastRefresh < sourceRefreshMs) return;
     if (!force && sinceLastRefresh < refreshMs) return;
-    // Byrd-IT visibility: no new picture for a camera whose plane is off
-    // screen (panned away / far side of the globe). Forced refreshes (fresh
-    // activation) still run; the next tick after it scrolls back in fetches.
-    if (!force && !activeRecordInView(record)) return;
+    // Skip before stamping lastImageRefreshAt, so the first tick back in view fetches.
+    if (!force && !projectionInView(record)) return;
     runtime.lastImageRefreshAt = now;
 
     const frameUrl = frameUrlFor(record.camera, refreshMs);
@@ -432,7 +426,6 @@ export function createFrames({ state: layerState, services, parts, source }) {
     mediaUrlFor,
     paintProjectionPlaceholder,
     refreshProjectionImage,
-    activeRecordInView,
     paintPlaceholderThrottled,
     drawProjectionFrame,
   };

@@ -96,9 +96,17 @@ function isImageBitmap(image) {
   );
 }
 
-/** Enlarge part of an ancestor image to a full tile (browser only). */
-export async function cropAncestorImage(image, part, size = TILE_SIZE) {
-  const flipped = isImageBitmap(image);
+/**
+ * Enlarge part of an ancestor image to a full tile (browser only).
+ * `flipped` says the image is stored bottom-up (a bitmap decoded with flipY);
+ * by default only an ImageBitmap is taken to be.
+ */
+export async function cropAncestorImage(
+  image,
+  part,
+  size = TILE_SIZE,
+  { flipped = isImageBitmap(image) } = {},
+) {
   const width = image.width;
   const height = image.height;
   const { sx, sy, sw, sh } = cropRect(width, height, part, flipped);
@@ -116,61 +124,116 @@ export async function cropAncestorImage(image, part, size = TILE_SIZE) {
   return canvas;
 }
 
+/** A tile's bytes from the archive; a 204 or a refusal is a failure. */
+async function fetchTileBytes(url, signal, fetchImpl) {
+  const response = await fetchImpl(url, { signal });
+  if (!response.ok || response.status === 204) {
+    const error = new Error(`Basemap tile answered ${response.status}`);
+    error.statusCode = response.status;
+    throw error;
+  }
+  const contentType = response.headers?.get?.('content-type');
+  return { bytes: await response.arrayBuffer(), contentType };
+}
+
+/** Decode tile bytes to an image the browser can draw from (top-down). */
+async function decodeTile({ bytes, contentType }) {
+  const blob = new Blob([bytes], contentType ? { type: contentType } : {});
+  return globalThis.createImageBitmap(blob);
+}
+
+/** Encode a drawn canvas as tile bytes the renderer decodes. */
+async function encodeCanvas(canvas) {
+  const blob = await new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('Tile image not encoded'))),
+      'image/webp',
+      0.92,
+    ),
+  );
+  return { bytes: await blob.arrayBuffer(), contentType: blob.type };
+}
+
+const tileUrl = (template, x, y, z) =>
+  template
+    .replaceAll('{x}', String(x))
+    .replaceAll('{y}', String(y))
+    .replaceAll('{z}', String(z));
+
 /**
- * @param {object} Cesium - the Cesium namespace (injected for tests).
+ * The Byrd-IT Open imagery as the globe port's spec: an `xyz` layer over the
+ * archive whose `fetchTile` makes every missing tile from the nearest
+ * ancestor the archive has (see the file header). Returns finished image
+ * bytes, `missing` never: a tile whose ancestor also fails throws, which the
+ * layer's tile-error event reports and the map stack's fallback to Esri counts.
  * @param {ReturnType<import('./config.js').normalizeBasemapConfig>['imagery']} imagery
- * @param {{crop?: Function, cacheSize?: number}} [options]
+ * @param {{fetchImpl?: typeof fetch, decode?: Function, crop?: Function, encode?: Function, cacheSize?: number}} [options]
  */
-export function createBasemapImageryProvider(
-  Cesium,
+export function createBasemapImagerySpec(
   imagery,
-  { crop = cropAncestorImage, cacheSize = 64 } = {},
+  {
+    fetchImpl = (...args) => globalThis.fetch(...args),
+    decode = decodeTile,
+    crop = (image, part, size) =>
+      cropAncestorImage(image, part, size, { flipped: false }),
+    encode = encodeCanvas,
+    cacheSize = 64,
+  } = {},
 ) {
-  const base = Cesium.UrlTemplateImageryProvider.prototype.requestImage;
   const ancestors = new Map();
 
-  class BasemapImageryProvider extends Cesium.UrlTemplateImageryProvider {
-    requestImage(x, y, level, request) {
-      const plan = planTile(imagery, x, y, level);
-      if (plan.kind === 'ancestor')
-        return this._fromAncestor(x, y, level, plan.level);
-      const pending = super.requestImage(x, y, level, request);
-      // undefined = Cesium's request throttle said "not now"; pass it on.
-      if (!pending || plan.fallbackLevel < 0) return pending;
-      return Promise.resolve(pending).catch(() =>
-        this._fromAncestor(x, y, level, plan.fallbackLevel),
-      );
-    }
-
-    _ancestor(x, y, z) {
-      const key = `${z}/${x}/${y}`;
-      let entry = ancestors.get(key);
-      if (entry) {
-        ancestors.delete(key);
-        ancestors.set(key, entry);
-        return entry;
-      }
-      entry = Promise.resolve(base.call(this, x, y, z, undefined));
-      entry.catch(() => ancestors.delete(key));
+  function ancestor(x, y, z, signal) {
+    const key = `${z}/${x}/${y}`;
+    let entry = ancestors.get(key);
+    if (entry) {
+      ancestors.delete(key);
       ancestors.set(key, entry);
-      while (ancestors.size > cacheSize)
-        ancestors.delete(ancestors.keys().next().value);
       return entry;
     }
-
-    async _fromAncestor(x, y, z, level) {
-      const part = ancestorOf(x, y, z, level);
-      const image = await this._ancestor(part.x, part.y, part.z);
-      if (!image) throw new Error(`No ancestor imagery for ${z}/${x}/${y}`);
-      return crop(image, part, TILE_SIZE);
+    // One shared request per ancestor: never cancelled by one tile's signal.
+    entry = fetchTileBytes(tileUrl(imagery.url, x, y, z), undefined, fetchImpl)
+      .then(decode)
+      .catch((error) => {
+        ancestors.delete(key);
+        throw error;
+      });
+    ancestors.set(key, entry);
+    while (ancestors.size > cacheSize) {
+      const oldest = ancestors.keys().next().value;
+      ancestors.get(oldest)?.then(
+        (image) => image?.close?.(),
+        () => {},
+      );
+      ancestors.delete(oldest);
     }
+    signal?.throwIfAborted();
+    return entry;
   }
 
-  return new BasemapImageryProvider({
+  async function fromAncestor(x, y, z, level, signal) {
+    const part = ancestorOf(x, y, z, level);
+    const image = await ancestor(part.x, part.y, part.z, signal);
+    if (!image) throw new Error(`No ancestor imagery for ${z}/${x}/${y}`);
+    return encode(await crop(image, part, TILE_SIZE));
+  }
+
+  return {
+    kind: 'xyz',
     url: imagery.url,
-    maximumLevel: imagery.maxzoom,
-    tileWidth: TILE_SIZE,
-    tileHeight: TILE_SIZE,
-    hasAlphaChannel: false,
-  });
+    tiling: 'webMercator',
+    maxLevel: imagery.maxzoom,
+    tileSize: TILE_SIZE,
+    async fetchTile({ tile, url, signal }) {
+      const { x, y, level } = tile;
+      const plan = planTile(imagery, x, y, level);
+      if (plan.kind === 'ancestor')
+        return fromAncestor(x, y, level, plan.level, signal);
+      try {
+        return await fetchTileBytes(url, signal, fetchImpl);
+      } catch (error) {
+        if (signal?.aborted || plan.fallbackLevel < 0) throw error;
+        return fromAncestor(x, y, level, plan.fallbackLevel, signal);
+      }
+    },
+  };
 }

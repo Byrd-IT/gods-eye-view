@@ -214,7 +214,6 @@ test('a second tool can reuse the drag under its own claim, preview, cursor clas
   const limits = [];
   const f = fixture({
     owner: 'drone-plan-box',
-    previewName: 'gev-drone-plan-box-preview',
     bodyClass: 'gev-drone-box',
     validate: (box) => {
       limits.push(box);
@@ -269,4 +268,93 @@ test('a second tool keeps its own refusal text for a box that is too small', asy
   f.fire('LEFT_UP', { position: { x: 251, y: 126 } });
   assert.deepEqual(f.cancels.at(-1), ['degenerate', 'at least 20 m a side']);
   await f.tool.destroy();
+});
+
+test('the shared default disarms after a refusal; keepActiveOnInvalid stays armed for the next drag', async () => {
+  // Recent Imagery's behavior is unchanged: one refused box ends the session.
+  const shared = fixture({
+    validate: () => ({ ok: false, reason: 'degenerate' }),
+  });
+  shared.tool.start();
+  shared.fire('LEFT_DOWN', { position: { x: 250, y: 125 } });
+  shared.fire('LEFT_UP', { position: { x: 251, y: 126 } });
+  assert.equal(shared.tool.isActive(), false);
+  assert.equal(pointerOwner(), null);
+  await shared.tool.destroy();
+
+  // The drone box stays armed after its own refusal, keeps the pointer and
+  // the camera is given back for the next drag.
+  let refuse = true;
+  const drone = fixture({
+    owner: 'drone-plan-box',
+    bodyClass: 'gev-drone-box',
+    keepActiveOnInvalid: true,
+    validate: (box) =>
+      refuse
+        ? { ok: false, reason: 'degenerate', message: 'at least 20 m a side' }
+        : { ok: true, box },
+  });
+  drone.tool.start();
+  drone.fire('LEFT_DOWN', { position: { x: 250, y: 125 } });
+  drone.fire('LEFT_UP', { position: { x: 251, y: 126 } });
+  assert.equal(drone.tool.isActive(), true, 'still armed after the refusal');
+  assert.equal(pointerOwner(), 'drone-plan-box');
+  assert.deepEqual(drone.cancels.at(-1), [
+    'degenerate',
+    'at least 20 m a side',
+  ]);
+  assert.equal(drone.camera.enableInputs, true, 'the drag released the camera');
+  assert.equal(drone.preview(), false, 'the refused drag left no box');
+
+  // The next drag is accepted without restarting the tool.
+  refuse = false;
+  drone.fire('LEFT_DOWN', { position: { x: 250, y: 125 } });
+  drone.fire('MOUSE_MOVE', { endPosition: { x: 500, y: 250 } });
+  drone.fire('LEFT_UP', { position: { x: 500, y: 250 } });
+  assert.equal(drone.boxes.length, 1);
+  assert.equal(drone.tool.isActive(), false);
+  assert.equal(pointerOwner(), null);
+  await drone.tool.destroy();
+});
+
+test('createPreview is the tool dependency: it draws the live drag and is destroyed with the tool', async () => {
+  const calls = [];
+  let previewViewer = null;
+  let liveBox = null;
+  const fakePreview = {
+    setVisible: (visible) => calls.push(['visible', visible]),
+    changed: () => calls.push(['changed']),
+    destroy: () => {
+      calls.push(['destroy']);
+      return Promise.resolve();
+    },
+  };
+  const f = fixture({
+    createPreview: (viewer, dragBox) => {
+      previewViewer = viewer;
+      // The box is read at draw time, not at creation.
+      const originalChanged = fakePreview.changed;
+      fakePreview.changed = () => {
+        liveBox = dragBox();
+        originalChanged();
+      };
+      return fakePreview;
+    },
+  });
+  assert.equal(previewViewer, f.viewer);
+  f.tool.start();
+  f.fire('LEFT_DOWN', { position: { x: 250, y: 125 } });
+  assert.deepEqual(calls.at(-1), ['visible', true]);
+  f.fire('MOUSE_MOVE', { endPosition: { x: 500, y: 250 } });
+  assert.equal(calls.at(-1)[0], 'changed');
+  assert.deepEqual(
+    [liveBox.west, liveBox.south, liveBox.east, liveBox.north].map(
+      (v) => Math.round(v * 1e6) / 1e6,
+    ),
+    [-97.85, 30.3, -97.8, 30.35],
+  );
+  f.fire('LEFT_UP', { position: { x: 500, y: 250 } });
+  assert.deepEqual(calls.at(-1), ['visible', false]);
+  await f.tool.destroy();
+  assert.deepEqual(calls.at(-1), ['destroy']);
 });

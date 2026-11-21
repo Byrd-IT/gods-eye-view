@@ -1,5 +1,9 @@
 import { onFollowChanged } from '../data/followed.js';
-import { bootStories, stopVoiceForStories } from '../stories/boot.js';
+import {
+  bootStories,
+  stopVoiceForStories,
+  storiesOpener,
+} from '../stories/boot.js';
 import { t } from '../i18n/index.js';
 import { useStoriesStore } from '../ui/stores/stories.js';
 import { SceneDirector } from '../scenes/director.js';
@@ -49,6 +53,13 @@ import { overlaysVoiceFor } from '../byrdit/basemap/overlaysVoice.js';
  * Attach scene tools, rendering listeners and the application debug handle.
  * `scene` is what `createApplicationScene` returns; its `trimStaleCommands`
  * runs after each layer disable (a scene without one keeps that memory).
+ * `library.fetchTile` and `library.fetchData` fetch the Data Library's tiles
+ * and proxied datasets in place of the defaults (`createLibrarySource`).
+ * `library.fetchImpl` asks the library server (its catalog) in place of the
+ * page's fetch, for a server that wants the application's own credentials.
+ * `library.requireCatalog` offers only what the server's library catalog
+ * names, and nothing while it does not answer. `library: false` leaves the
+ * Data Library out: no catalog is asked, and no Browse button is drawn.
  */
 export function createApplicationTools({
   scene,
@@ -61,6 +72,7 @@ export function createApplicationTools({
   onSceneDirector,
   sceneDataPacks,
   drawMarkActions = [],
+  library = {},
   signal,
   defer,
 }) {
@@ -165,51 +177,60 @@ export function createApplicationTools({
       dronePlan.destroy();
     });
   }
-  // DATA ▸ Library: entries register their layers only when a viewer adds
-  // them, after the core catalog is sealed. The browser dialog and the
-  // controller share the application lifetime.
-  const dataLibrary = createDataLibrary({
-    dataManager,
-    services: localGeoJsonServices,
-    getTileset: () => tileset,
-    mapStackController,
-    shareLink: styleManager.shareLinkManager,
-    requestRender: governorRequestRender,
-    // Zoom to layer: an immediate navigation, so Cockpit can refuse it and
-    // the current follow owner is released first (as for imported files).
-    zoomTo: (extent) =>
-      styleManager.runImmediateNavigation('layer', () =>
-        flyToLibraryExtent(viewer, extent),
-      ) !== false,
-  });
-  defer(() => dataLibrary.destroy());
-  // Browse: the owner presents the dialog through the store; LayerPanelsView
-  // draws the Browse button and the dialog from it.
-  const libraryStore = useDataLibraryStore(applicationPinia());
-  const libraryBrowser = createLibraryBrowser({
-    library: dataLibrary,
-    publish: (view) => libraryStore.publish(view),
-  });
-  libraryStore.connect(libraryBrowser.controls);
-  defer(() => {
-    libraryBrowser.destroy();
-    libraryStore.connect(null);
-  });
-  dataLibrary.start({ signal }).catch((error) => {
-    if (!signal?.aborted) console.warn('[Library] start failed:', error);
-  });
-  // The live gate's handle (scripts/qa-data-library.mjs).
-  const libraryHandle = {
-    library: dataLibrary,
-    browser: libraryBrowser,
-    // What Copy Link would copy.
-    buildShareLink: () => styleManager.shareLinkManager?.buildLink?.() ?? null,
-  };
-  window.__gevDataLibrary = libraryHandle;
-  defer(() => {
-    if (window.__gevDataLibrary === libraryHandle)
-      delete window.__gevDataLibrary;
-  });
+  if (library !== false) {
+    // DATA ▸ Library: entries register their layers only when a viewer adds
+    // them, after the core catalog is sealed. The browser dialog and the
+    // controller share the application lifetime.
+    const dataLibrary = createDataLibrary({
+      dataManager,
+      services: localGeoJsonServices,
+      getTileset: () => tileset,
+      mapStackController,
+      shareLink: styleManager.shareLinkManager,
+      requestRender: governorRequestRender,
+      // An application's own tile and dataset fetches, when it keeps them in
+      // its own cache.
+      fetchImpl: library.fetchImpl ?? undefined,
+      fetchTile: library.fetchTile ?? null,
+      fetchData: library.fetchData ?? null,
+      requireCatalog: library.requireCatalog === true,
+      // Zoom to layer: an immediate navigation, so Cockpit can refuse it and
+      // the current follow owner is released first (as for imported files).
+      zoomTo: (extent) =>
+        styleManager.runImmediateNavigation('layer', () =>
+          flyToLibraryExtent(viewer, extent),
+        ) !== false,
+    });
+    defer(() => dataLibrary.destroy());
+    // Browse: the owner presents the dialog through the store; LayerPanelsView
+    // draws the Browse button and the dialog from it.
+    const libraryStore = useDataLibraryStore(applicationPinia());
+    const libraryBrowser = createLibraryBrowser({
+      library: dataLibrary,
+      publish: (view) => libraryStore.publish(view),
+    });
+    libraryStore.connect(libraryBrowser.controls);
+    defer(() => {
+      libraryBrowser.destroy();
+      libraryStore.connect(null);
+    });
+    dataLibrary.start({ signal }).catch((error) => {
+      if (!signal?.aborted) console.warn('[Library] start failed:', error);
+    });
+    // The live gate's handle (scripts/qa-data-library.mjs).
+    const libraryHandle = {
+      library: dataLibrary,
+      browser: libraryBrowser,
+      // What Copy Link would copy.
+      buildShareLink: () =>
+        styleManager.shareLinkManager?.buildLink?.() ?? null,
+    };
+    window.__gevDataLibrary = libraryHandle;
+    defer(() => {
+      if (window.__gevDataLibrary === libraryHandle)
+        delete window.__gevDataLibrary;
+    });
+  }
   // DATA ▸ Recent Imagery: the box tool claims the pointer like Draw and the
   // panel lives on the right rail, so both belong to the application
   // lifetime. The tileset lets the layer drape while the globe is hidden.
@@ -310,24 +331,27 @@ export function createApplicationTools({
   // loop burning behind a hidden tab. (perf wave 2 fix)
   syncVisibilitySuspension();
 
-  window.__godsEyeView = {
-    viewer,
-    styleManager,
-    tileset,
-    dataManager,
-    sceneDirector,
-    mapStackController,
-    annotations,
-    weatherEffects,
-    cockpitCloudEffects,
-    getRenderGovernorDiagnostics,
-    surfaceServices: operations.surface,
-    requestRender: governorRequestRender,
-    entityRecords: { read: readEntityRecord, write: entityRecord },
-    // What the renderer's plugin lets QA scripts read (the Cesium viewer,
-    // for the default renderer), in place of the scene object above.
-    ...scene.qaHandles,
-  };
+  window.__godsEyeView = Object.defineProperties(
+    {
+      viewer,
+      styleManager,
+      tileset,
+      dataManager,
+      sceneDirector,
+      mapStackController,
+      annotations,
+      weatherEffects,
+      cockpitCloudEffects,
+      getRenderGovernorDiagnostics,
+      surfaceServices: operations.surface,
+      requestRender: governorRequestRender,
+      entityRecords: { read: readEntityRecord, write: entityRecord },
+    },
+    // What the renderer's plugin lets QA scripts read (the Cesium viewer and
+    // its photoreal tileset, for the default renderer), in place of the
+    // scene's objects above; read as they are when asked.
+    Object.getOwnPropertyDescriptors(scene.qaHandles ?? {}),
+  );
   const debug = window.__godsEyeView;
   defer(() => {
     if (window.__godsEyeView === debug) delete window.__godsEyeView;
@@ -335,12 +359,12 @@ export function createApplicationTools({
   voiceCommands = initGevVoiceCommands({
     ...voice,
     canStartVoice: () => !isStoriesOpen(),
-    openStories: storiesStore.available
-      ? ({ isCurrent }) =>
-          storiesStore.mode === 'closed'
-            ? stories.open({ isCurrent })
-            : 'already-open'
-      : null,
+    // An app may supply what open_stories does; the Stories page by default.
+    openStories: storiesOpener({
+      openStories: voice?.openStories,
+      store: storiesStore,
+      stories,
+    }),
     floorServices: operations.surface.groundFloor,
     annotationResolver: operations.annotationResolver,
     searchNavigation: operations.searchAndFlyTo,

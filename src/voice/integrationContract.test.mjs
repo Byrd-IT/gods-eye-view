@@ -735,15 +735,23 @@ test('budget trimming retains imagery, drone and analyst safety rules in both pr
 test('the Realtime prompt stays within its size budget', () => {
   // The actual request contains both the complete instructions and the JSON
   // tool definitions. Exercise both configurations, including optional OSM.
-  const MAX_REALTIME_PROMPT_CHARS = 71_500;
+  //
+  // Byrd-IT fork: the control_droneplan tool (55 arguments) no longer fits the
+  // previous 71,500 ceiling. Its descriptions were compacted to concise text
+  // first (every property and feature kept); what remains is schema the model
+  // needs to call the tool. The owner approved prompt sizes above 55,500 only
+  // as far as needed, so the ceiling is the measured size, pinned exactly:
+  // 76,903 chars by default and 77,658 with the optional Overpass tool.
+  const MAX_REALTIME_PROMPT_CHARS = { default: 76_903, overpass: 77_658 };
   const size = (overpass) =>
     realtimeInstructions(undefined, { overpass }).length +
     JSON.stringify(realtimeTools({ overpass })).length;
   for (const overpass of [false, true]) {
     const actual = size(overpass);
+    const ceiling = MAX_REALTIME_PROMPT_CHARS[overpass ? 'overpass' : 'default'];
     assert.ok(
-      actual <= MAX_REALTIME_PROMPT_CHARS,
-      `${overpass ? 'with Overpass' : 'default'} prompt ${actual} chars exceeds ${MAX_REALTIME_PROMPT_CHARS}`,
+      actual <= ceiling,
+      `${overpass ? 'with Overpass' : 'default'} prompt ${actual} chars exceeds ${ceiling}`,
     );
   }
 });

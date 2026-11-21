@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createBasemapTerrain } from './terrain.js';
 import {
@@ -14,71 +14,68 @@ import { SERVED } from './fixtures/config.mjs';
 
 const config = normalizeBasemapConfig(SERVED);
 
-function fakeCesium({ fail = false } = {}) {
-  const calls = [];
-  class Resource {
-    constructor(options) {
-      this.options = options;
-    }
-  }
-  return {
-    calls,
-    Cesium: {
-      Resource,
-      CesiumTerrainProvider: {
-        async fromUrl(resource, options) {
-          calls.push({ resource, options });
-          if (fail) throw new Error('layer.json 502');
-          return { terrain: 'open' };
-        },
-      },
-      UrlTemplateImageryProvider: class {
-        constructor(options) {
-          this.options = options;
-        }
-      },
-    },
+/** A fetch that answers per URL; records every URL asked. */
+function fakeFetch(answers = {}) {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    const answer = answers[url] ?? answers['*'] ?? { ok: true, status: 200 };
+    if (answer instanceof Error) throw answer;
+    return answer;
   };
+  return { urls, fetchImpl };
 }
 
-test('terrain: same-origin URL, normals + water mask, the shared retry policy', async () => {
-  const { Cesium, calls } = fakeCesium();
-  const result = await createBasemapTerrain(Cesium, config.terrain, {
+const TERRAIN_FOLDER =
+  '/basemap/v/mh0.0.13-wm20261011/terrain/cesium-mesh/ellipsoid';
+
+test('terrain: the same-origin folder as a quantized-mesh spec, normals + water mask', async () => {
+  const { urls, fetchImpl } = fakeFetch();
+  const result = await createBasemapTerrain(config.terrain, {
+    fetchImpl,
     fallback: () => assert.fail('no fallback'),
   });
-  assert.deepEqual(result, { provider: { terrain: 'open' } });
-  assert.equal(calls.length, 1);
-  const { resource, options } = calls[0];
-  assert.equal(
-    resource.options.url,
-    '/basemap/v/mh0.0.13-wm20261011/terrain/cesium-mesh/ellipsoid',
-  );
-  assert.equal(resource.options.retryAttempts, TERRAIN_RETRY_ATTEMPTS);
-  assert.equal(typeof resource.options.retryCallback, 'function');
-  assert.deepEqual(options, {
-    requestVertexNormals: true,
-    requestWaterMask: true,
+  assert.deepEqual(urls, [`${TERRAIN_FOLDER}/layer.json`]);
+  assert.deepEqual(result, {
+    provider: null,
+    spec: {
+      kind: 'quantizedMesh',
+      url: TERRAIN_FOLDER,
+      requestVertexNormals: true,
+      requestWaterMask: true,
+    },
   });
 });
 
 test('terrain: layer.json failure opens on the fallback terrain', async () => {
-  const { Cesium } = fakeCesium({ fail: true });
+  const { fetchImpl } = fakeFetch({ '*': { ok: false, status: 502 } });
   const warnings = [];
-  const result = await createBasemapTerrain(Cesium, config.terrain, {
-    fallback: async () => ({ provider: 'keyless' }),
+  const result = await createBasemapTerrain(config.terrain, {
+    fetchImpl,
+    fallback: async () => ({ provider: null, spec: { kind: 'ellipsoid' } }),
     warn: (...args) => warnings.push(args),
   });
-  assert.deepEqual(result, { provider: 'keyless' });
+  assert.deepEqual(result, { provider: null, spec: { kind: 'ellipsoid' } });
   assert.equal(warnings.length, 1);
 });
 
+test('terrain: a network failure opens on the fallback terrain too', async () => {
+  const { fetchImpl } = fakeFetch({ '*': new TypeError('fetch failed') });
+  const result = await createBasemapTerrain(config.terrain, {
+    fetchImpl,
+    fallback: async () => ({ provider: null, spec: { kind: 'keyless' } }),
+    warn: () => {},
+  });
+  assert.deepEqual(result.spec, { kind: 'keyless' });
+});
+
 test('terrain: an aborted switch is not turned into a fallback', async () => {
-  const { Cesium } = fakeCesium();
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(
-    createBasemapTerrain(Cesium, config.terrain, {
-      fallback: async () => ({ provider: 'keyless' }),
+    createBasemapTerrain(config.terrain, {
+      fetchImpl: fakeFetch().fetchImpl,
+      fallback: async () => ({ provider: null }),
       signal: controller.signal,
     }),
   );
@@ -98,11 +95,18 @@ test('stack descriptors are the decided ones', () => {
 });
 
 test('available source: imagery, terrain, credit, Esri fallbacks', async () => {
-  const { Cesium } = fakeCesium();
+  const { fetchImpl } = fakeFetch();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  after(() => {
+    globalThis.fetch = realFetch;
+  });
   const source = createBasemapMapSource({
-    Cesium,
     config,
-    fallbackTerrain: async () => ({ provider: 'keyless' }),
+    fallbackTerrain: async () => ({
+      provider: null,
+      spec: { kind: 'keyless' },
+    }),
   });
   assert.equal(source.descriptor, BYRDIT_OPEN_STACK);
   assert.equal(source.available, true);
@@ -111,18 +115,20 @@ test('available source: imagery, terrain, credit, Esri fallbacks', async () => {
   assert.equal(source.tileFailureFallback.id, 'esri-imagery');
   assert.equal(source.tileFailureFallback.threshold, 3);
   assert.equal(source.terrain.id, 'byrdit-open');
-  const provider = source.imagery({});
-  assert.equal(provider.options.url, config.imagery.url);
-  assert.deepEqual(await source.terrain.create({}), {
-    provider: { terrain: 'open' },
-  });
+  // The globe port's imagery spec (what the map stack hands the renderer).
+  const spec = source.imagery({});
+  assert.equal(spec.kind, 'xyz');
+  assert.equal(spec.url, config.imagery.url);
+  assert.equal(spec.maxLevel, 14);
+  assert.equal(spec.tileSize, 256);
+  assert.equal(typeof spec.fetchTile, 'function');
+  assert.equal((await source.terrain.create({})).spec.kind, 'quantizedMesh');
 });
 
 test('service down: available:false with the reason, never activated', () => {
   const down = normalizeBasemapConfig(null);
   down.unavailableReason = 'Byrd-IT Open map service is unavailable (HTTP 502)';
   const source = createBasemapMapSource({
-    Cesium: {},
     config: down,
     fallbackTerrain: null,
   });

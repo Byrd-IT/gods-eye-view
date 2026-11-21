@@ -37,7 +37,7 @@ export function validateDroneBox(box) {
     return {
       ok: false,
       reason: 'degenerate',
-      message: msg('Drag a bigger box (at least 20 m a side)'),
+      message: msg('Drag a bigger box (at least 20 m / about 65 ft a side)'),
     };
   }
   if (width > MAX_BOX_SIDE_M || height > MAX_BOX_SIDE_M) {

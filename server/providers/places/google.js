@@ -1,4 +1,5 @@
 import {
+  GOOGLE_DEFAULT_PER_MIN,
   googleServerApiKey,
   keylessGooglePlacesResponse,
   keylessGoogleGeocodeResponse,
@@ -15,17 +16,7 @@ import {
 // undefined = not built yet; null = the explicit 0 opt-out; fn = active limiter
 let _googleRateLimiter;
 
-/**
- * Requests/min/IP applied when GEV_RATELIMIT_GOOGLE_PER_MIN is unset. This is
- * the value the Pinokio build already ships (pinokio/_ENVIRONMENT), so the
- * packaged app keeps behaving exactly as it does today and only an
- * unconfigured server changes — from unlimited to what the product already
- * runs with. Places calls are user-driven (a search, a nearby lookup, an
- * installation probe) rather than polled, so this sits far above what the app
- * generates and bites only a caller enumerating the endpoint. `.env.example`
- * suggests a tighter 60 when the host is not localhost; that still applies.
- */
-export const GOOGLE_DEFAULT_PER_MIN = 120;
+export { GOOGLE_DEFAULT_PER_MIN };
 
 /** Google cost endpoints (nearby-places, text-search, geocoding). Null only when set to 0. */
 function googleRateLimiter() {
@@ -61,6 +52,13 @@ export function googlePlacesTimeoutMs(env = process.env) {
 
 /** Errors postPlaces already logged (the route catch must not log them twice). */
 const loggedPlacesFailures = new WeakSet();
+
+/** The error for a 200 whose body could not be read; postPlaces already logged it. */
+function unreadablePlacesError() {
+  const error = new Error('Google Places request failed');
+  loggedPlacesFailures.add(error);
+  return error;
+}
 
 /**
  * URL for a log line. The key travels in X-Goog-Api-Key, but an override
@@ -186,7 +184,7 @@ async function postPlaces(fetchImpl, route, url, init, secrets = []) {
           `class=${failureClass(error)} status=${response.status} elapsed_ms=${elapsed()} ` +
           `timeout_ms=${timeoutMs}`,
       );
-      return { response, data: {} };
+      return { response, data: {}, unreadable: response.ok };
     }
     const snippet = () => JSON.stringify(redactSnippet(raw, secrets));
     if (!response.ok)
@@ -203,7 +201,9 @@ async function postPlaces(fetchImpl, route, url, init, secrets = []) {
           `[Google Places] ${route} upstream body malformed target="${target}" ` +
             `class=malformed status=${response.status} elapsed_ms=${elapsed()} body=${snippet()}`,
         );
-      return { response, data: {} };
+      // A 200 we could not read is an upstream failure, not an empty answer
+      // (upstream fix, kept with the fork's logging).
+      return { response, data: {}, unreadable: response.ok };
     }
     if (response.ok && (data === null || typeof data !== 'object'))
       console.warn(
@@ -211,6 +211,9 @@ async function postPlaces(fetchImpl, route, url, init, secrets = []) {
           `json_type=${data === null ? 'null' : typeof data} status=${response.status} ` +
           `elapsed_ms=${elapsed()} body=${snippet()}`,
       );
+    // Upstream's rule: a 200 whose body is falsy (JSON null) is unreadable, like
+    // a body that does not parse. A JSON number or string stays an empty answer.
+    if (response.ok && !data) return { response, data: {}, unreadable: true };
     return { response, data };
   } catch (error) {
     console.warn(
@@ -266,6 +269,8 @@ const GEOCODE_UPSTREAM_TIMEOUT_MS = 10_000;
 
 const GEOCODE_MAX_RESPONSE_BYTES = 256 * 1024;
 
+const GEOCODE_ANSWER_STATUSES = new Set(['OK', 'ZERO_RESULTS']);
+
 /** Validate a free-text geocoder query before consuming request quota. */
 export function validateGeocodeAddress(searchParams) {
   const address = String(searchParams.get('address') || '').trim();
@@ -309,6 +314,10 @@ export function googlePlacesContextProxy({
       // Gate first, like the OpenAI routes: a cross-site caller learns nothing
       // about this endpoint's method surface.
       if (admitSameSite(req, res)) return;
+      // Default to no-store. The browser caches only the 200 answer below.
+      // A cached refusal (bad key, API off, quota) would outlive the key fix
+      // by five minutes.
+      res.setHeader('Cache-Control', 'no-store');
       if (req.method !== 'GET') {
         res.statusCode = 405;
         res.setHeader('Content-Type', 'application/json');
@@ -324,7 +333,6 @@ export function googlePlacesContextProxy({
       if (keyless) {
         res.statusCode = keyless.statusCode;
         res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Cache-Control', 'no-store');
         res.end(JSON.stringify(keyless.payload));
         return;
       }
@@ -357,7 +365,7 @@ export function googlePlacesContextProxy({
       );
 
       try {
-        const { response, data } = await postPlaces(
+        const { response, data, unreadable } = await postPlaces(
           fetchImpl,
           'nearby-places',
           endpoints.nearby ||
@@ -392,17 +400,18 @@ export function googlePlacesContextProxy({
           },
           [apiKey, String(latitude), String(longitude)],
         );
+        if (unreadable) throw unreadablePlacesError();
         const places = projectNearbyPlaces(data, latitude, longitude);
 
         res.statusCode = response.ok ? 200 : response.status;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.setHeader('Cache-Control', 'private, max-age=300');
+        if (response.ok) res.setHeader('Cache-Control', 'private, max-age=300');
         res.end(
           JSON.stringify({
             places,
             error: response.ok
               ? null
-              : data.error?.message || 'Google Places request failed',
+              : data?.error?.message || 'Google Places request failed',
           }),
         );
       } catch (error) {
@@ -420,11 +429,12 @@ export function googlePlacesContextProxy({
 
     // Text Search: resolve a named landmark/POI to a real coordinate, biased to
     // the view. Geocoding scatters obscure monument/POI names across the city;
-    // a view-biased Text Search lands on the actual feature. Same key, field
-    // mask, throttle, and `places: []` error contract as nearby-places above.
+    // a view-biased Text Search lands on the actual feature. Same key, throttle,
+    // cache rule, and `places: []` error contract as nearby-places above.
     middlewares.use('/api/google/text-search', async (req, res) => {
       // Paid like nearby-places, so gated the same way, first.
       if (admitSameSite(req, res)) return;
+      res.setHeader('Cache-Control', 'no-store');
       if (req.method !== 'GET') {
         res.statusCode = 405;
         res.setHeader('Content-Type', 'application/json');
@@ -440,7 +450,6 @@ export function googlePlacesContextProxy({
       if (keyless) {
         res.statusCode = keyless.statusCode;
         res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Cache-Control', 'no-store');
         res.end(JSON.stringify(keyless.payload));
         return;
       }
@@ -482,7 +491,7 @@ export function googlePlacesContextProxy({
       );
 
       try {
-        const { response, data } = await postPlaces(
+        const { response, data, unreadable } = await postPlaces(
           fetchImpl,
           'text-search',
           endpoints.textSearch ||
@@ -516,17 +525,18 @@ export function googlePlacesContextProxy({
           },
           [apiKey, textQuery, String(latitude), String(longitude)],
         );
+        if (unreadable) throw unreadablePlacesError();
         const places = projectTextSearchPlaces(data, latitude, longitude);
 
         res.statusCode = response.ok ? 200 : response.status;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.setHeader('Cache-Control', 'private, max-age=300');
+        if (response.ok) res.setHeader('Cache-Control', 'private, max-age=300');
         res.end(
           JSON.stringify({
             places,
             error: response.ok
               ? null
-              : data.error?.message || 'Google Places request failed',
+              : data?.error?.message || 'Google Places request failed',
           }),
         );
       } catch (error) {
@@ -567,6 +577,7 @@ export function googlePlacesContextProxy({
         // Gate first, like the Places routes above: a cross-site caller learns
         // nothing about this endpoint's method surface.
         if (admitSameSite(req, res)) return;
+        res.setHeader('Cache-Control', 'no-store');
         if (req.method !== 'GET') {
           refuse(405, 'Method not allowed');
           return;
@@ -580,7 +591,6 @@ export function googlePlacesContextProxy({
         if (keyless) {
           res.statusCode = keyless.statusCode;
           res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Cache-Control', 'no-store');
           res.end(JSON.stringify(keyless.payload));
           return;
         }
@@ -647,7 +657,10 @@ export function googlePlacesContextProxy({
 
           res.statusCode = response.ok ? 200 : response.status;
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
-          res.setHeader('Cache-Control', 'private, max-age=300');
+          // Geocoding reports a denied key or spent quota as HTTP 200 with a
+          // status of its own; only an answer is worth keeping.
+          if (response.ok && GEOCODE_ANSWER_STATUSES.has(data.status))
+            res.setHeader('Cache-Control', 'private, max-age=300');
           res.end(JSON.stringify(data));
         } catch {
           // Fixed public text: a transport, URL or runtime message would

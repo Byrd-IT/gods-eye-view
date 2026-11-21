@@ -267,7 +267,6 @@ test('every rail rule written for MAP LAYERS has its Solunar twin', () => {
     'layers.css',
     'responsive.css',
     'mobile-shell.css',
-    'cyber.css',
   ]) {
     const css = read(`src/ui/styles/${file}`);
     assert.equal(

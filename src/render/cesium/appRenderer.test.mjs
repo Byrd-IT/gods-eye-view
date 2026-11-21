@@ -11,13 +11,17 @@ import {
   releaseContinuousRender,
   uninstallRenderGovernor,
 } from '../../renderGovernor.js';
-import { cesiumMapEngine } from './mapEngine.js';
 import {
   ReadonlySet,
   cesiumRenderer,
   cesiumViewerOf,
   createCesiumRendererPlugin,
 } from './appRenderer.js';
+import {
+  _resetGreyDrawForTest,
+  greyControlOf,
+  greyDrawControl,
+} from '../../byrdit/historyUi/greyPainter.js';
 
 /** A document with just a body, recording what is attached. */
 function fakeDocument() {
@@ -150,9 +154,15 @@ test('the plugin wraps the viewer it is given, behind the accessor only', async 
     'free look is limited to low heights from the start',
   );
   const hooks = plugin.applicationHooks(renderer);
-  assert.equal(hooks.mapEngine, cesiumMapEngine, 'the map stacks use Cesium');
+  assert.equal(
+    hooks.mapEngine,
+    undefined,
+    'the map stacks switch through the globe port',
+  );
   assert.equal(hooks.ownCreditDisplay, true, 'Cesium shows its own credits');
   assert.equal(hooks.qaHandles.viewer, viewer, 'QA scripts read the viewer');
+  assert.equal(hooks.engine.kind, 'cesium', 'the engine says what it is');
+  assert.equal(hooks.engine.viewer, viewer, 'an application may draw with it');
   assert.equal(hooks.viewerDrawsEntity({ own: true }), true);
   assert.equal(hooks.viewerDrawsEntity({}), false);
   assert.equal(typeof hooks.trimStaleCommands, 'function');
@@ -266,6 +276,44 @@ test('work pending at destroy is rejected and lets go of the scene', async (t) =
   await load.promise;
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(destroyed, 'the late model is destroyed');
+});
+
+test('destroying a renderer unpublishes only its own grey control', async (t) => {
+  withDocument(t, fakeDocument());
+  t.after(() => _resetGreyDrawForTest());
+  const plugin = createCesiumRendererPlugin({
+    createViewer: () => fakeViewer([]),
+  });
+
+  const first = await plugin.create({
+    container: {},
+    signal: new AbortController().signal,
+  });
+  const firstControl = greyControlOf(first.draw);
+  assert.ok(firstControl, 'the renderer wraps its draw port');
+  assert.equal(greyDrawControl(), firstControl, 'the page paints through it');
+
+  // a scene re-init makes a newer renderer, the one the page paints through
+  const second = await plugin.create({ container: {} });
+  const secondControl = greyControlOf(second.draw);
+  assert.notEqual(secondControl, firstControl);
+  assert.equal(greyDrawControl(), secondControl);
+
+  // the old renderer is disposed after the new one: it takes only its own
+  // control, never the newer renderer's
+  first.destroy();
+  assert.equal(
+    greyDrawControl(),
+    secondControl,
+    'a newer renderer keeps the page control',
+  );
+
+  second.destroy();
+  assert.equal(
+    greyDrawControl(),
+    null,
+    'the destroyed renderer is no longer published',
+  );
 });
 
 test('the credits leave even when the viewer fails to destroy', async (t) => {
