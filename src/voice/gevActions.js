@@ -2463,7 +2463,7 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
       return {
         ok: false,
         action: 'control_cctv',
-        error: `No camera matched "${args.cameraQuery}"`,
+        error: 'No camera matched that query',
         ...summarize(),
       };
     }
@@ -2559,7 +2559,7 @@ export async function controlCctv(dataManager, args = {}, styleManager = null) {
     dataManager.setLayerParams('cctv', { [key]: next }, { origin: 'voice' });
     return { ok: true, action: 'control_cctv', ...summarize() };
   }
-  throw new Error(`Unknown CCTV action: ${args.action || 'missing'}`);
+  throw new Error('Unknown CCTV action');
 }
 
 const RADIO_COUNTRY_CENTERS = new Map([
