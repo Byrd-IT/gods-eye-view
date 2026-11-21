@@ -1162,13 +1162,13 @@ export const ACTION_DESCRIPTIONS = {
   },
   control_nav: {
     description:
-      'Control map navigation: tilt, compass heading, zoom, top down, north up, look, or read status. Tilt is the slider angle 0 to 79 degrees from top-down. Report actual state or refusal.',
+      'Control map navigation: tilt, compass heading, zoom, top down, north up, look, or read status. Tilt is the slider angle 0 to 179 degrees from top-down. Report actual state or refusal.',
     $position: 1,
     parameters: {
       properties: {
         action: { description: 'Navigation operation.', $position: 1 },
         tilt: {
-          description: 'Tilt slider degrees from top-down, 0 to 79.',
+          description: 'Tilt slider degrees from top-down, 0 to 179.',
           $position: 1,
         },
         heading: {

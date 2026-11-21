@@ -1,8 +1,4 @@
 import { HUD_LAYOUTS } from '../hudLayoutPolicy.js';
-// The tilt slider's own span (0 top-down .. straight up): the schema must
-// never offer less than the operator's slider can reach, so voice and pointer
-// share the one number. navMath is pure maths, so the schema stays off Cesium.
-import { TILT_SPAN_DEG } from '../byrdit/navControl/navMath.js';
 import {
   AREA_CANDIDATE_ID_PATTERN,
   MAX_AREA_CANDIDATE_ID_LENGTH,
@@ -14,6 +10,13 @@ import {
   VOICE_QUERY_LAYER_IDS,
   VOICE_TOGGLE_LAYER_IDS,
 } from './layerManifest.js';
+
+// The tilt slider's own span (0 top-down .. 179 straight up). The schema must
+// never offer less than the operator's slider can reach. The number is
+// repeated here, not imported, because this module ships in the
+// openai-provider package boundary and navControl does not; navControlVoice.test.mjs pins
+// the schema maximum to navMath's TILT_SPAN_DEG so the two cannot drift.
+const NAV_TILT_SPAN_DEG = 179;
 
 // Layer enums come from the voice layer manifest so every shipped layer is
 // reachable; the manifest test keeps it in step with the layer catalog.
@@ -1464,7 +1467,7 @@ const schemas = [
             'status',
           ],
         },
-        tilt: { type: 'integer', minimum: 0, maximum: TILT_SPAN_DEG },
+        tilt: { type: 'integer', minimum: 0, maximum: NAV_TILT_SPAN_DEG },
         heading: { type: 'integer', minimum: 0, maximum: 359 },
         direction: {
           type: 'string',

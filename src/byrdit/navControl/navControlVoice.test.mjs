@@ -11,6 +11,8 @@ import {
   mountNavControl,
 } from './navControl.js';
 import { readCameraTargetFrame } from '../../ui/cameraOrientationControls.js';
+import { TILT_SPAN_DEG } from './navMath.js';
+import { GEV_ACTION_SCHEMAS } from '../../voice/actionSchemas.js';
 
 const DEG = Math.PI / 180;
 const GROUND = Cesium.Cartesian3.fromDegrees(-97.7431, 30.2672, 0);
@@ -159,7 +161,16 @@ function setup(options = {}) {
   // The slider the operator drags, reached the same way the widget does.
   const slider = () =>
     handle.root.querySelectorAll('[data-nav="tilt-slider"]')[0];
-  return { viewer, doc, hookWindow, handle, navigations, toasts, frame, slider };
+  return {
+    viewer,
+    doc,
+    hookWindow,
+    handle,
+    navigations,
+    toasts,
+    frame,
+    slider,
+  };
 }
 
 // ── the adapter on its own, over a fake widget ──────────────────────────
@@ -207,7 +218,7 @@ test('the adapter exposes exactly the documented actions', () => {
     assert.equal(typeof voice[action], 'function', `${action} is callable`);
 });
 
-test('tilt accepts whole degrees from 0 to 79 and refuses the rest', async () => {
+test('tilt accepts whole degrees from 0 to 179 and refuses the rest', async () => {
   const handle = fakeHandle();
   const voice = createNavVoice({ getHandle: () => handle });
   const ok = await voice.tilt({ tilt: 40 });
@@ -457,10 +468,7 @@ const cameraState = (viewer) => ({
   pitch: viewer.camera.pitch,
   heading: viewer.camera.heading,
   position: Cesium.Cartesian3.clone(viewer.camera.positionWC),
-  range: Cesium.Cartesian3.distance(
-    viewer.camera.positionWC,
-    GROUND,
-  ),
+  range: Cesium.Cartesian3.distance(viewer.camera.positionWC, GROUND),
 });
 
 test('voice tilt matches the slider exactly, upward gaze included', async () => {
@@ -522,7 +530,9 @@ test('voice tilt to straight up keeps the orbit and the slider reads it back', a
     `gaze ${Cesium.Math.toDegrees(viewer.camera.pitch)}`,
   );
   assert.ok(
-    Math.abs(viewer.camera.positionCartographic.height - 3_000 * Math.sin(10 * DEG)) < 1,
+    Math.abs(
+      viewer.camera.positionCartographic.height - 3_000 * Math.sin(10 * DEG),
+    ) < 1,
     'the camera stays on its safe orbit limit',
   );
   assert.ok(Math.abs(result.tilt - 179) <= 1, `readback tilt ${result.tilt}`);
@@ -548,7 +558,9 @@ test('voice tilt on raised ground holds the camera high and toasts once per requ
   assert.equal(handle.root.getAttribute('data-tilt-mode'), 'look-up');
   assert.equal(handle.root.getAttribute('data-tilt-limited'), 'terrain');
   assert.equal(
-    handle.root.querySelectorAll('[data-nav="tilt-slider"]')[0].getAttribute('title'),
+    handle.root
+      .querySelectorAll('[data-nav="tilt-slider"]')[0]
+      .getAttribute('title'),
     'Tilt: camera held at a safe height above the terrain; the view tilts instead',
   );
   assert.deepEqual(toasts, [
@@ -631,4 +643,97 @@ test('the published voice answers when the widget is gone', async () => {
   const result = await voice.status();
   assert.equal(result.ok, false);
   assert.match(result.error, /not available/i);
+});
+
+// ── review repairs: schema span, async widgets, readback, raised gaze ───
+test('the voice schema tilt maximum is the slider span', () => {
+  const nav = GEV_ACTION_SCHEMAS.find((s) => s.name === 'control_nav');
+  assert.equal(nav.parameters.properties.tilt.maximum, TILT_SPAN_DEG);
+  assert.equal(NAV_TILT_MAX_DEG, TILT_SPAN_DEG);
+  assert.equal(TILT_SPAN_DEG, 179);
+});
+
+test('a widget method that rejects answers with an error and no stray rejection', async () => {
+  const stray = [];
+  const onStray = (reason) => stray.push(reason);
+  process.on('unhandledRejection', onStray);
+  try {
+    const voice = createNavVoice({
+      getHandle: () =>
+        fakeHandle({
+          setTilt: () => Promise.reject(new Error('Bearer sk-synthetic-XYZ')),
+          applySteps: async () => {
+            throw new Error('Bearer sk-synthetic-XYZ');
+          },
+        }),
+    });
+    const tilt = await voice.tilt({ tilt: 10 });
+    const zoom = await voice.zoom({ direction: 'in' });
+    for (const result of [tilt, zoom]) {
+      assert.equal(result.ok, false);
+      assert.ok(!JSON.stringify(result).includes('synthetic'));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(stray.length, 0);
+  } finally {
+    process.off('unhandledRejection', onStray);
+  }
+});
+
+test('the readback carries only the documented state fields', async () => {
+  const voice = createNavVoice({
+    getHandle: () =>
+      fakeHandle({
+        state: () => ({
+          heading: 10,
+          tilt: 20,
+          rangeM: 300,
+          northUp: false,
+          topDown: false,
+          following: false,
+          token: 'Bearer sk-synthetic-XYZ',
+          url: 'https://user:pass@example.test',
+        }),
+      }),
+  });
+  const result = await voice.status();
+  assert.deepEqual(result, {
+    ok: true,
+    heading: 10,
+    tilt: 20,
+    rangeM: 300,
+    northUp: false,
+    topDown: false,
+    following: false,
+  });
+});
+
+test('voice heading while looking up turns the raised gaze in place', async () => {
+  const { handle, viewer } = setup({
+    view: { heading: 25, pitch: -45, range: 3_000 },
+  });
+  assert.equal((await handle.voice.tilt({ tilt: 159 })).ok, true);
+  const at = Cesium.Cartesian3.clone(viewer.camera.positionWC);
+  const result = await handle.voice.heading({ heading: 200 });
+  assert.equal(result.ok, true);
+  assert.ok(
+    Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 70) < 0.1,
+    `gaze ${Cesium.Math.toDegrees(viewer.camera.pitch)}`,
+  );
+  assert.ok(Cesium.Cartesian3.distance(at, viewer.camera.positionWC) < 1e-3);
+  assert.equal(result.heading, 200);
+  assert.ok(Math.abs(result.tilt - 159) <= 1, `readback tilt ${result.tilt}`);
+});
+
+test('voice top_down after a look-up comes back around the same orbit', async () => {
+  const { handle, frame } = setup({
+    view: { heading: 25, pitch: -45, range: 3_000 },
+  });
+  assert.equal((await handle.voice.tilt({ tilt: 179 })).ok, true);
+  const down = await handle.voice.top_down();
+  assert.equal(down.ok, true);
+  assert.equal(down.topDown, true);
+  const after = frame();
+  assert.ok(Math.abs(after.pitch + 89 * DEG) < 1e-3);
+  assert.ok(Math.abs(after.range - 3_000) < 1, `range ${after.range}`);
 });

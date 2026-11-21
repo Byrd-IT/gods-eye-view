@@ -47,7 +47,7 @@ import { cesiumViewerFor } from '../cesiumViewer.js';
  * never throws: an unusable request answers {ok:false, error} so the model
  * can say why. Errors never repeat the text the caller sent.
  *
- *   tilt       set the tilt, 0 (straight down) to 79 (near the horizon)
+ *   tilt       set the tilt, 0 (straight down) to 179 (straight up)
  *   heading    set the heading, 0 to 359 degrees from north
  *   zoom       zoom in or out, one or more steps
  *   top_down   straight down over the target
@@ -55,7 +55,7 @@ import { cesiumViewerFor } from '../cesiumViewer.js';
  *   look       look left, right, up or down from where the camera is
  *   status     read-only state, including the camera readback
  *
- * The numbers are the widget's own scales (the tilt slider runs 0..79 and
+ * The numbers are the widget's own scales (the tilt slider runs 0..179 and
  * the compass ring shows 0..359), so voice and pointer agree. The maths and
  * the camera moves are the widget's: this only validates the arguments and
  * reads the camera back afterwards.
@@ -72,7 +72,7 @@ export const NAV_VOICE_ACTIONS = Object.freeze([
 
 /** Smallest and largest tilt the widget slider accepts. */
 export const NAV_TILT_MIN_DEG = 0;
-/** Largest tilt the widget slider accepts: the near-horizon end of its span. */
+/** Largest tilt the widget slider accepts: straight up, the top of its span. */
 export const NAV_TILT_MAX_DEG = TILT_SPAN_DEG;
 /** Heading bounds: whole degrees from north, 0..359. */
 export const NAV_HEADING_MIN_DEG = 0;
@@ -81,6 +81,15 @@ export const NAV_HEADING_MAX_DEG = 359;
 export const NAV_MAX_STEPS = 10;
 
 const NAV_UNAVAILABLE = 'Map navigation is not available right now';
+/** The readback fields the widget's state() publishes. */
+const NAV_STATE_FIELDS = Object.freeze([
+  'heading',
+  'tilt',
+  'rangeM',
+  'northUp',
+  'topDown',
+  'following',
+]);
 const NAV_REFUSED = 'The map navigation control refused that move';
 
 const NAV_ZOOM_DIRECTIONS = new Set(['in', 'out']);
@@ -116,9 +125,20 @@ export function createNavVoice({ getHandle } = {}) {
   }
 
   /** The camera readback the widget publishes. */
+  // Only the documented readback fields are returned, so whatever else a
+  // widget's state() carries never reaches the model's reply.
   const stateOf = (nav) => {
     const state = nav.state?.();
-    return state && typeof state === 'object' ? state : {};
+    if (!state || typeof state !== 'object') return {};
+    const out = {};
+    for (const key of NAV_STATE_FIELDS)
+      if (
+        Object.hasOwn(state, key) &&
+        (state[key] === null ||
+          ['number', 'boolean'].includes(typeof state[key]))
+      )
+        out[key] = state[key];
+    return out;
   };
 
   /** A step count the widget accepts, or null. */
@@ -136,7 +156,7 @@ export function createNavVoice({ getHandle } = {}) {
             ok: false,
             error: `tilt must be a whole number from ${NAV_TILT_MIN_DEG} to ${NAV_TILT_MAX_DEG}`,
           };
-        if (nav.setTilt?.(deg) !== true)
+        if ((await nav.setTilt?.(deg)) !== true)
           return { ok: false, error: NAV_REFUSED };
         return { ok: true, ...stateOf(nav) };
       });
@@ -154,7 +174,7 @@ export function createNavVoice({ getHandle } = {}) {
             ok: false,
             error: `heading must be a whole number from ${NAV_HEADING_MIN_DEG} to ${NAV_HEADING_MAX_DEG}`,
           };
-        if (nav.setHeading?.(deg) !== true)
+        if ((await nav.setHeading?.(deg)) !== true)
           return { ok: false, error: NAV_REFUSED };
         return { ok: true, ...stateOf(nav) };
       });
@@ -170,7 +190,7 @@ export function createNavVoice({ getHandle } = {}) {
             ok: false,
             error: `steps must be a whole number from 1 to ${NAV_MAX_STEPS}`,
           };
-        if (nav.applySteps?.(`zoom-${dir}`, count) !== true)
+        if ((await nav.applySteps?.(`zoom-${dir}`, count)) !== true)
           return { ok: false, error: NAV_REFUSED };
         return { ok: true, ...stateOf(nav) };
       });
@@ -178,7 +198,7 @@ export function createNavVoice({ getHandle } = {}) {
 
     async top_down() {
       return guard(async (nav) => {
-        if (nav.applySteps?.('top-down', 1) !== true)
+        if ((await nav.applySteps?.('top-down', 1)) !== true)
           return { ok: false, error: NAV_REFUSED };
         return { ok: true, ...stateOf(nav) };
       });
@@ -186,7 +206,7 @@ export function createNavVoice({ getHandle } = {}) {
 
     async north() {
       return guard(async (nav) => {
-        if (nav.applySteps?.('north', 1) !== true)
+        if ((await nav.applySteps?.('north', 1)) !== true)
           return { ok: false, error: NAV_REFUSED };
         return { ok: true, ...stateOf(nav) };
       });
@@ -206,7 +226,7 @@ export function createNavVoice({ getHandle } = {}) {
             ok: false,
             error: `steps must be a whole number from 1 to ${NAV_MAX_STEPS}`,
           };
-        if (nav.applySteps?.(`look-${dir}`, count) !== true)
+        if ((await nav.applySteps?.(`look-${dir}`, count)) !== true)
           return { ok: false, error: NAV_REFUSED };
         return { ok: true, ...stateOf(nav) };
       });
@@ -874,7 +894,16 @@ export function mountNavControl({
         for (let i = 0; i < times; i++) look = planLook(look, action);
         return lookInPlace(look.heading, look.pitch);
       }
-      const frame = animator.active ? animator.frame : readFrame();
+      // Top-down and north come back out of a look-up around its orbit,
+      // exactly as the buttons do (perform).
+      const anchored =
+        action === 'top-down' || action === 'north' ? validAnchor() : null;
+      if (action === 'top-down' || action === 'north') clearAnchor();
+      const frame = anchored
+        ? frameForTarget(camera, anchored.frame.target)
+        : animator.active
+          ? animator.frame
+          : readFrame();
       if (!frame) {
         // No target under the camera: zoom works in place, the rest has no
         // meaning without one.
@@ -884,7 +913,7 @@ export function mountNavControl({
         }
         return performWithoutTarget(action);
       }
-      let base = animator.destination || frame;
+      let base = anchored ? frame : animator.destination || frame;
       for (let i = 0; i < times; i++) base = planAction(base, action);
       animator.cancel();
       return applyFrame(frame, base);
@@ -922,6 +951,14 @@ export function mountNavControl({
     if (!Number.isFinite(value)) return false;
     const wanted = normalizeHeading((((value % 360) + 360) % 360) * DEG);
     const result = runNavigation('camera', () => {
+      // While looking up the gaze turns in place and keeps its raised pitch,
+      // the way the compass ring rotates it; an orbit frame would pull the
+      // pitch back down to the orbit limit.
+      if (validAnchor() || looksUp()) {
+        if (viewer.trackedEntity) return false;
+        animator.cancel();
+        return lookInPlace(wanted, camera.pitch);
+      }
       const frame = animator.active ? animator.frame : readFrame();
       if (!frame) return lookInPlace(wanted, camera.pitch);
       const base = animator.destination || frame;

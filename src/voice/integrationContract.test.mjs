@@ -749,13 +749,16 @@ test('the Realtime prompt stays within its size budget', () => {
   // both by 9, so the measured ceilings are 76,881 by default and 77,636 with
   // Overpass.
   // The live slider's raised-gaze limit changes 79 to 179 (+1 character).
-  const MAX_REALTIME_PROMPT_CHARS = { default: 76_882, overpass: 77_637 };
+  // The control_nav tilt descriptions follow the slider (0 to 179, +2), so
+  // the measured ceilings are 76,884 by default and 77,639 with Overpass.
+  const MAX_REALTIME_PROMPT_CHARS = { default: 76_884, overpass: 77_639 };
   const size = (overpass) =>
     realtimeInstructions(undefined, { overpass }).length +
     JSON.stringify(realtimeTools({ overpass })).length;
   for (const overpass of [false, true]) {
     const actual = size(overpass);
-    const ceiling = MAX_REALTIME_PROMPT_CHARS[overpass ? 'overpass' : 'default'];
+    const ceiling =
+      MAX_REALTIME_PROMPT_CHARS[overpass ? 'overpass' : 'default'];
     assert.ok(
       actual <= ceiling,
       `${overpass ? 'with Overpass' : 'default'} prompt ${actual} chars exceeds ${ceiling}`,

@@ -509,7 +509,7 @@ test('the complete current Realtime tool inventory is pinned', () => {
     // Re-pinned for the merged navigation voice: control_nav tilt's maximum is
     // the live tilt slider's span (TILT_SPAN_DEG, 179 = straight up) instead of
     // the pre-merge 79, so voice can ask for the raised gaze the slider reaches.
-    '8d7f3a1b6b2ef629c50137f012e1501eb5f343afdf45e1b8bc1949e923bcb7c1',
+    'b70fcc800b884f2cfa3dd1f8b2a17183c19b942315fb92323ad50a353ad06b4d',
   );
 });
 
