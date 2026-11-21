@@ -907,3 +907,37 @@ test('the plugin installs the same handler for dev and preview', () => {
   assert.equal(typeof installed[0], 'function');
   assert.equal(installed[0], installed[1]);
 });
+
+test('the plugin hooks return nothing, so Vite has no post hook to call', () => {
+  const [plugin] = coveragePlugins({
+    env: {},
+    readToken: () => TOKEN,
+    fetchImpl: async () => jsonResponse({ ok: true }),
+  });
+  // connect's `use` returns the app; a hook that passed it on would hand
+  // Vite a post hook that calls the app with no request.
+  const app = () => {
+    throw new Error('the app was called as a post hook');
+  };
+  app.use = () => app;
+  for (const key of ['configureServer', 'configurePreviewServer'])
+    assert.equal(plugin[key]({ middlewares: app }), undefined, key);
+});
+
+test('a real Vite dev server starts and stops with the coverage plugin', async () => {
+  const { createServer } = await import('vite');
+  const server = await createServer({
+    configFile: false,
+    root: path.dirname(new URL(import.meta.url).pathname),
+    plugins: coveragePlugins({
+      env: {},
+      readToken: () => TOKEN,
+      fetchImpl: async () => jsonResponse({ ok: true }),
+    }),
+    server: { middlewareMode: true, hmr: false, watch: null },
+    appType: 'custom',
+    optimizeDeps: { noDiscovery: true, include: [] },
+    logLevel: 'silent',
+  });
+  await server.close();
+});

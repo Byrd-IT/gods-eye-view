@@ -659,7 +659,12 @@ export function createCoverageHandler({
 
 export function coveragePlugins(options = {}) {
   const handler = createCoverageHandler(options);
-  const install = (server) => server.middlewares.use(handler);
+  // A block body on purpose: Vite calls whatever configureServer returns as a
+  // post hook, and connect's `use` returns the app itself, so an arrow that
+  // returned it would have Vite call the app with no request at startup.
+  const install = (server) => {
+    server.middlewares.use(handler);
+  };
   return [
     {
       name: 'byrdit-coverage',
