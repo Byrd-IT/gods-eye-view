@@ -641,6 +641,34 @@ test('holding tilt-up into the terrain limit toasts once per press, not per repe
   assert.equal(toasts.length, 3);
 });
 
+test('a slider drag or key press after a button press is a new gesture and may toast again', () => {
+  const { button, toasts, settle } = setup({
+    viewer: { sampleHeight: () => 168 },
+    view: { pitch: -15, range: 1_000 },
+  });
+  const tiltUp = button('tilt-up');
+  tiltUp.fire('pointerdown', { button: 0 });
+  tiltUp.fire('pointerup', { button: 0 });
+  settle(1_000);
+  assert.equal(toasts.length, 1);
+  const slider = button('tilt-slider');
+  slider.fire('pointerdown');
+  slider.value = '170';
+  slider.fire('input');
+  slider.value = '175';
+  slider.fire('input');
+  slider.fire('pointerup');
+  assert.equal(toasts.length, 2, 'the drag toasts once');
+  // Keyboard: a fresh key press is a gesture; its auto-repeat is not.
+  slider.fire('keydown', { key: 'ArrowUp', repeat: false });
+  slider.value = '176';
+  slider.fire('input');
+  slider.fire('keydown', { key: 'ArrowUp', repeat: true });
+  slider.value = '177';
+  slider.fire('input');
+  assert.equal(toasts.length, 3);
+});
+
 test('looking up after the camera was moved clears a stale terrain-limit title', () => {
   const { button, viewer, handle } = setup({
     viewer: { sampleHeight: () => 168 },

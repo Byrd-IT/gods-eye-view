@@ -471,7 +471,12 @@ export function mountNavControl({
     lookUpAnchor = null;
     return null;
   };
-  /** The camera gazes above what an orbit can reach (small slack for float noise). */
+  // Above HORIZON_PITCH (with a little slack for float noise) no orbit can
+  // point the camera, so the gaze was turned in place. Between a
+  // terrain-lowered orbit limit and HORIZON_PITCH only the anchor can tell a
+  // turned gaze from an orbit, so every caller asks validAnchor() first;
+  // without one the camera is simply where it is, and the next tilt
+  // re-plans from a fresh orbit frame (applyTilt).
   const looksUp = () => camera.pitch > HORIZON_PITCH + 1e-4;
   const clearAnchor = () => {
     lookUpAnchor = null;
@@ -794,8 +799,14 @@ export function mountNavControl({
   });
 
   // ── tilt slider ──────────────────────────────────────────────────────
+  // Each slider gesture (a drag, or a key press that is not auto-repeat)
+  // may say once that terrain holds the camera.
   listen(slider, 'pointerdown', () => {
     sliderDragging = true;
+    toastedThisGesture = false;
+  });
+  listen(slider, 'keydown', (event) => {
+    if (!event.repeat) toastedThisGesture = false;
   });
   for (const type of ['pointerup', 'pointercancel', 'blur'])
     listen(slider, type, () => {
