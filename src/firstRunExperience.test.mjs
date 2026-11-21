@@ -1167,10 +1167,13 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // description gained 14 chars (three-or-more corners, two-or-more aim
   // points), ring maxItems 64 was dropped (-14) and index lost maximum 59
   // (-13). Same tools, same ordering.
-  assert.equal(block.length, 46767, 'serialized tool schema length drifted');
+  // Re-pinned for the photoSpacingM schema repair (46767 -> 46758, -9): the
+  // unsupported `exclusiveMinimum: 0` becomes `minimum: 0`, which the tool
+  // schema subset and the voice bench both check. Same tools, same ordering.
+  assert.equal(block.length, 46758, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '11e469830c93f56e3f10bea0d78b0e3da4060ec690d2736f62bacfeeb64611e4',
+    'c90146dc47d86ad70f04494d41553624b71a7e5a08a122dc87abba9d009dd0fe',
     'serialized legacy-filtered tool schema drifted',
   );
   const instructions = fs.readFileSync(

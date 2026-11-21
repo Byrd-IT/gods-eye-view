@@ -745,7 +745,10 @@ test('the Realtime prompt stays within its size budget', () => {
   // The drone plan bound repair shrank both by 13 (ring maxItems and index
   // maximum dropped, ring description reworded), so the measured ceilings are
   // 76,890 by default and 77,645 with Overpass.
-  const MAX_REALTIME_PROMPT_CHARS = { default: 76_890, overpass: 77_645 };
+  // The photoSpacingM schema repair (exclusiveMinimum: 0 -> minimum: 0) shrank
+  // both by 9, so the measured ceilings are 76,881 by default and 77,636 with
+  // Overpass.
+  const MAX_REALTIME_PROMPT_CHARS = { default: 76_881, overpass: 77_636 };
   const size = (overpass) =>
     realtimeInstructions(undefined, { overpass }).length +
     JSON.stringify(realtimeTools({ overpass })).length;

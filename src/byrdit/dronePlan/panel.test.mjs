@@ -3006,6 +3006,19 @@ test('opening a plan with a bad document is refused and changes nothing', async 
   w.handle.destroy();
 });
 
+test('a voice loadPlan of a bad document says the document is invalid', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 200));
+  await w.handle.replan();
+  const voice = createDronePlanVoice(w.handle);
+  const refused = await voice.loadPlan({ plan: { schema: 'nope' } });
+  assert.equal(refused.ok, false);
+  // Not the generic unavailable note, and not readPlan's own reason.
+  assert.equal(refused.error, 'That is not a valid Drone Flight Plan document');
+  assert.equal(w.handle.getState().areas.length, 1);
+  w.handle.destroy();
+});
+
 test('importing a DJI Fly KMZ draws it, remembers the mission id and lists compatibility findings', async () => {
   const { readFileSync } = await import('node:fs');
   const w = setup();

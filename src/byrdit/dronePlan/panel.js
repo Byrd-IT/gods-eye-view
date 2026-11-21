@@ -6816,7 +6816,18 @@ export function initDronePlan({
 
   /** Restore a stored plan (already validated by readPlan) and plan again. */
   async function loadPlanDocument(raw) {
-    const plan = readPlan(raw);
+    let plan;
+    try {
+      plan = readPlan(raw);
+    } catch (error) {
+      // A .gevplan is untrusted input and readPlan refuses a bad one before
+      // any state changes. Its reason (not-a-plan, newer-version, bad-areas)
+      // is the library's own message; mark it so the voice adapter can report
+      // an invalid document instead of a generic panel failure, without
+      // repeating the reader's text.
+      if (error && typeof error === 'object') error.gevPlanRejected = true;
+      throw error;
+    }
     boxTool?.cancel('load');
     polygonTool?.cancel('load');
     areaEditTool?.cancel('load');

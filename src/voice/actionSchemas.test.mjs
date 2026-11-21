@@ -150,7 +150,9 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // maxItems (a path is two points, a polygon any count from three up, and
     // the panel's drawing tool has no corner ceiling), index with no maximum
     // (the list's own length bounds it), and the ring description reworded.
-    '0f9d6d80ab9881f7c98e2fa4b3d9bcb6d0faf5da6aa85d6bd27dd59c34ca64d9',
+    // Re-pinned for the photoSpacingM schema repair: exclusiveMinimum: 0 (which
+    // this subset cannot check) becomes minimum: 0 (-9 characters).
+    'c4586a6433472d9b63d9da986bd6a5f2f0a6fa2216a282326246e1b2b1e68f58',
   );
 });
 
@@ -501,7 +503,9 @@ test('the complete current Realtime tool inventory is pinned', () => {
     // no tool, argument or enum change).
     // Re-pinned for the drone plan bound repair (ring minItems 2, no maxItems;
     // index maximum removed; ring description reworded).
-    '1c30d5ed5328c2d9b4c0a0e90b0c5e84ef9102eb55ad5514d9b991ce423bfb63',
+    // Re-pinned for the photoSpacingM schema repair (exclusiveMinimum: 0 ->
+    // minimum: 0, -9 characters; no tool, argument or enum change).
+    '7b915d4db6ea69805ccd05ef6532a8186ecb87528a3b1c1774f947f3ed1c5a9f',
   );
 });
 
@@ -639,6 +643,27 @@ test("the opacity tool takes only whole percents inside the app's range", () => 
       `opacityPct ${pct}`,
     );
   assert.ok(validateArgs(schema, { layerId: 'flights' }).length > 0);
+});
+
+test('photoSpacingM states its floor without a keyword the schema subset cannot enforce', () => {
+  const schema = GEV_ACTION_SCHEMAS.find((s) => s.name === 'control_droneplan');
+  const prop = schema.parameters.properties.photoSpacingM;
+  assert.equal(prop.type, 'number');
+  // src/tools/schema.js and the voice bench know `minimum`, not
+  // `exclusiveMinimum`; the exact >0 rule lives in the adapter, which refuses
+  // zero. Nothing here adds a floor above the panel's own.
+  assert.equal(prop.exclusiveMinimum, undefined);
+  assert.equal(prop.minimum, 0);
+  assert.equal(prop.maximum, undefined);
+  // 0 passes the schema and is still refused by the handler's exact rule.
+  assert.deepEqual(
+    validateArgs(schema.parameters, { action: 'options', photoSpacingM: 0 }),
+    [],
+  );
+  assert.ok(
+    validateArgs(schema.parameters, { action: 'options', photoSpacingM: -1 })
+      .length > 0,
+  );
 });
 
 test('control_droneplan option bounds are the panel sliders', () => {

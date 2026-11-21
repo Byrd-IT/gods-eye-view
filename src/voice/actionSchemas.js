@@ -1374,8 +1374,10 @@ const schemas = [
         captureMode: { type: 'string', enum: ['stop', 'distance', 'timed'] },
         // Metres between photos on the Distance trigger. The panel keeps any
         // positive number (cleanPhotoSpacingM); zero clears the value, so it
-        // is the only number refused here.
-        photoSpacingM: { type: 'number', exclusiveMinimum: 0 },
+        // is the only number refused here. The floor is `minimum: 0` because
+        // the tool schema subset (src/tools/schema.js, the voice bench) has no
+        // exclusiveMinimum; the adapter keeps the exact >0 rule.
+        photoSpacingM: { type: 'number', minimum: 0 },
         // Viewing angles for the orbit rings (orbitRings.js: 10-80, up to 6).
         orbitAnglesDeg: {
           type: 'array',

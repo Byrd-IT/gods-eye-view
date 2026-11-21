@@ -1262,6 +1262,25 @@ test('loadPlan restores a document and reports the replanned state', async () =>
   });
 });
 
+test('a refused plan document is reported as invalid, not as an unavailable panel', async () => {
+  const { handle } = panelHandle();
+  const voice = createDronePlanVoice(handle);
+  handle.loadPlan = async () => {
+    throw Object.assign(new Error('not-a-plan'), { gevPlanRejected: true });
+  };
+  const refused = await voice.loadPlan({ plan: { schema: 'nope' } });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, 'That is not a valid Drone Flight Plan document');
+  // The reader's own reason is never repeated to the caller.
+  assert.equal(JSON.stringify(refused).includes('not-a-plan'), false);
+  // A panel failure that is not a refused document keeps the unavailable note.
+  handle.loadPlan = async () => {
+    throw new Error('terrain');
+  };
+  const failed = await voice.loadPlan({ plan: { schema: 'nope' } });
+  assert.equal(failed.error, 'Drone Flight Plan is not available right now');
+});
+
 test('photoCheck reports the coverage numbers, not the photo names', async () => {
   const { handle } = panelHandle();
   const result = await createDronePlanVoice(handle).photoCheck();

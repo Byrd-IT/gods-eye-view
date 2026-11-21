@@ -66,6 +66,8 @@ export const DRONEPLAN_VOICE_ACTIONS = Object.freeze([
 ]);
 
 const UNAVAILABLE = 'Drone Flight Plan is not available right now';
+/** A .gevplan the reader refused: the document, not the panel, is the fault. */
+const INVALID_PLAN = 'That is not a valid Drone Flight Plan document';
 /** A two-setter request that could not be undone half-way: never claimed. */
 const NOT_TOGETHER =
   'The check and surface settings could not be changed together';
@@ -941,8 +943,17 @@ export function createDronePlanVoice(handle) {
           return fail('loadPlan needs a plan document');
         if (typeof handle.loadPlan !== 'function')
           return fail('The plan library is not available');
-        const loaded = await handle.loadPlan(args.plan);
-        if (loaded !== true) return fail('That plan cannot be loaded');
+        let loaded;
+        try {
+          loaded = await handle.loadPlan(args.plan);
+        } catch (error) {
+          // readPlan refused the document (the panel marks its own rejection):
+          // that is a bad file, not a panel that is down, and the reader's
+          // reason is not repeated.
+          if (error?.gevPlanRejected === true) return fail(INVALID_PLAN);
+          throw error;
+        }
+        if (loaded !== true) return fail(INVALID_PLAN);
         return summary();
       });
     },
