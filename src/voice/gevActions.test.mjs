@@ -6673,7 +6673,7 @@ test('drone plan siblings from one response take the panel in call order', async
   );
 });
 
-test('a newer reply retires a queued drone plan sibling instead of interleaving it', async () => {
+test('a newer reply waits behind the queued drone plan sibling and the edit on the panel', async () => {
   const order = [];
   let releaseObstacle;
   const obstacleGate = new Promise((resolve) => {
@@ -6686,11 +6686,12 @@ test('a newer reply retires a queued drone plan sibling instead of interleaving 
     async obstacle() {
       order.push('obstacle:start');
       await obstacleGate;
+      order.push('obstacle:end');
       return { ok: true, refreshed: true, obstacleCount: 1 };
     },
-    async options() {
-      order.push('options');
-      return { ok: true, aglM: 60 };
+    async options(patch) {
+      order.push(`options:${patch.aglM}`);
+      return { ok: true, aglM: patch.aglM };
     },
   };
   const viewer = bindFakeCesiumCamera({
@@ -6719,29 +6720,683 @@ test('a newer reply retires a queued drone plan sibling instead of interleaving 
   // The first edit is under way and the second is still queued behind it.
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(order, ['obstacle:start']);
-  // The person speaks again while the reply is still working.
+  // The person speaks again while the reply is still working. A newer reply
+  // may retire work still waiting for a turn, but it must not rewind the panel
+  // queue: it waits for the edit already on the panel and for the sibling that
+  // queued before it.
+  let newerSettled = false;
   const newer = runner(
     'control_droneplan',
     { action: 'options', aglM: 90 },
     { authorityGroup: 'newer-response' },
+  ).then((result) => {
+    newerSettled = true;
+    return result;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    newerSettled,
+    false,
+    'the newer reply waits its turn instead of overlapping the panel',
   );
-  assert.equal((await newer).ok, true);
+  assert.deepEqual(
+    order,
+    ['obstacle:start'],
+    'neither the queued sibling nor the newer reply touched the panel',
+  );
   releaseObstacle();
   assert.equal(
     (await first).ok,
     true,
     'the edit already on the panel finishes its own work',
   );
+  // The sibling queued before the newer reply comes next, finds itself
+  // superseded, and gives up its turn without touching the panel.
   const retired = await queued;
   assert.equal(retired.ok, false);
   assert.equal(retired.cancelled, true);
   assert.equal(retired.code, 'CANCELLED');
+  const newerResult = await newer;
+  assert.equal(newerResult.ok, true);
+  assert.equal(newerResult.aglM, 90, 'the newer reply is the one that landed');
   assert.deepEqual(
     order,
-    ['obstacle:start', 'options'],
-    'the retired sibling never touched the panel',
+    ['obstacle:start', 'obstacle:end', 'options:90'],
+    'the retired sibling never touched the panel, and the newer reply came after the panel was free',
   );
 });
+
+test('a queued drone plan call cancelled while it waits never takes the panel', async () => {
+  const order = [];
+  let releaseObstacle;
+  const obstacleGate = new Promise((resolve) => {
+    releaseObstacle = resolve;
+  });
+  const voice = {
+    async obstacle() {
+      order.push('obstacle:start');
+      await obstacleGate;
+      order.push('obstacle:end');
+      return { ok: true, refreshed: true, obstacleCount: 1 };
+    },
+    async options(patch) {
+      order.push(`options:${patch.aglM}`);
+      return { ok: true, aglM: patch.aglM };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+  const held = runner(
+    'control_droneplan',
+    { action: 'obstacle' },
+    { authorityGroup: 'reply-1' },
+  );
+  // The caller of the queued edit goes away (the person interrupted the
+  // session) while it is still waiting its turn.
+  const controller = new AbortController();
+  const cancelled = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 60 },
+    { authorityGroup: 'reply-1', signal: controller.signal },
+  );
+  const after = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 90 },
+    { authorityGroup: 'reply-1' },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['obstacle:start']);
+  controller.abort();
+  const cancelledResult = await cancelled;
+  assert.equal(cancelledResult.ok, false);
+  assert.equal(cancelledResult.cancelled, true);
+  assert.equal(cancelledResult.code, 'CANCELLED');
+  releaseObstacle();
+  assert.equal((await held).ok, true);
+  assert.equal((await after).ok, true);
+  assert.deepEqual(
+    order,
+    ['obstacle:start', 'obstacle:end', 'options:90'],
+    'a call cancelled while queued gives up its place without touching the panel',
+  );
+});
+
+test('a drone plan adapter that advertises the signal is handed the caller turn', async () => {
+  // The eight actions whose adapter method awaits the panel take the runner's
+  // turn options as their optional last argument; the shipped adapter says so
+  // with `acceptsSignal` instead of arity (every method has a default).
+  const SIGNAL_ACTIONS = [
+    'recommend',
+    'options',
+    'replan',
+    'suite',
+    'download',
+    'obstacle',
+    'preview',
+    'loadPlan',
+  ];
+  const calls = [];
+  let releaseOptions;
+  const optionsGate = new Promise((resolve) => {
+    releaseOptions = resolve;
+  });
+  let seenSignal = null;
+  const voice = {
+    acceptsSignal: new Set(SIGNAL_ACTIONS),
+    async open(...rest) {
+      calls.push(['open', rest.length]);
+      return { ok: true, open: true };
+    },
+    async options(patch, options) {
+      calls.push(['options', arguments.length]);
+      seenSignal = options?.signal ?? null;
+      await optionsGate;
+      return { ok: true, aglM: patch.aglM };
+    },
+    async replan(...rest) {
+      calls.push(['replan', rest.length, rest[0]]);
+      return { ok: true, planned: true };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+
+  // An action the adapter did not advertise is called exactly as before: one
+  // argument, no stray signal for a method that would ignore it.
+  assert.equal(
+    (await runner('control_droneplan', { action: 'open' })).ok,
+    true,
+  );
+  assert.deepEqual(calls.at(-1), ['open', 0]);
+
+  const controller = new AbortController();
+  const pending = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 60 },
+    { authorityGroup: 'reply-1', signal: controller.signal },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    calls.at(-1),
+    ['options', 2],
+    'the signal is the second argument',
+  );
+  assert.equal(seenSignal?.aborted, false);
+  // The person speaks again: the turn this adapter is running is superseded.
+  controller.abort();
+  assert.equal(
+    seenSignal?.aborted,
+    true,
+    'the adapter can see the caller went away',
+  );
+  releaseOptions();
+  const interrupted = await pending;
+  assert.equal(
+    interrupted.interrupted,
+    true,
+    'a result that finished after the caller left says so',
+  );
+
+  // Another advertised action runs (the interrupted call released the panel).
+  // It is still handed the turn options: the runner always carries a
+  // conversation-level signal, and an adapter that advertises one is told about
+  // it even when the caller passed no signal of its own.
+  const after = await runner(
+    'control_droneplan',
+    { action: 'replan' },
+    { authorityGroup: 'reply-2' },
+  );
+  assert.equal(after.ok, true);
+  const [ranAction, argCount, turnOptions] = calls.at(-1);
+  assert.equal(ranAction, 'replan');
+  assert.equal(
+    argCount,
+    1,
+    'a no-argument action still takes the turn options',
+  );
+  assert.ok(
+    turnOptions?.signal instanceof AbortSignal,
+    'the conversation signal arrives without a caller signal',
+  );
+  assert.equal(turnOptions.signal.aborted, false);
+});
+
+test('the runner hands the turn signal to the advertised no-argument actions', async () => {
+  // Regression: `replan` and `suite` take no argument of their own, and the
+  // runner's no-argument path once called them with nothing at all — so an
+  // adapter that advertises `acceptsSignal` never saw the caller's abort on
+  // exactly the actions that rebuild a whole plan. Each must arrive with one
+  // argument (the turn options, signal included) and report a result that
+  // finished after the caller left as `interrupted`, through the real runner.
+  for (const action of ['replan', 'suite']) {
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const calls = [];
+    const voice = {
+      acceptsSignal: new Set(['replan', 'suite']),
+      async [action](...rest) {
+        calls.push(rest);
+        await gate;
+        return { ok: true, [action]: true };
+      },
+    };
+    const viewer = bindFakeCesiumCamera({
+      clock: { onTick: { addEventListener: () => () => {} } },
+      scene: {
+        canvas: { addEventListener() {}, removeEventListener() {} },
+      },
+      camera: {
+        moveEnd: { addEventListener() {} },
+        positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+      },
+    });
+    const runner = createActionRunner({
+      viewer,
+      styleManager: {},
+      dataManager: { layers: new Map(), getAll: () => [] },
+      dronePlan: () => voice,
+    });
+    const controller = new AbortController();
+    const pending = runner(
+      'control_droneplan',
+      { action },
+      { authorityGroup: `reply-${action}`, signal: controller.signal },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.length, 1, `${action} was called once`);
+    assert.equal(
+      calls[0].length,
+      1,
+      `${action} takes one argument: the turn options, not a bare call`,
+    );
+    const turnOptions = calls[0][0];
+    assert.equal(typeof turnOptions, 'object');
+    assert.notEqual(turnOptions, null);
+    assert.ok(
+      turnOptions.signal instanceof AbortSignal,
+      `${action} is handed a real abort signal`,
+    );
+    assert.equal(
+      turnOptions.signal.aborted,
+      false,
+      `${action} sees a live turn while the caller is present`,
+    );
+    // The person speaks again: the turn this adapter is running is superseded.
+    controller.abort();
+    assert.equal(
+      turnOptions.signal.aborted,
+      true,
+      `${action} can see the caller went away`,
+    );
+    release();
+    const result = await pending;
+    assert.equal(result.ok, true);
+    assert.equal(
+      result.interrupted,
+      true,
+      `${action} reports a result that finished after the caller left`,
+    );
+  }
+});
+
+test('the shipped drone plan adapter advertises exactly the actions that take the turn signal', async () => {
+  const { DRONEPLAN_VOICE_SIGNAL_ACTIONS, createDronePlanVoice } =
+    await import('../byrdit/dronePlan/dronePlanVoice.js');
+  const voice = createDronePlanVoice({});
+  // The runner reads `acceptsSignal` off the adapter it is given; the eight
+  // names are the adapter methods that await the panel and take `{ signal }`.
+  assert.equal(voice.acceptsSignal, DRONEPLAN_VOICE_SIGNAL_ACTIONS);
+  assert.deepEqual(
+    [...DRONEPLAN_VOICE_SIGNAL_ACTIONS],
+    [
+      'obstacle',
+      'replan',
+      'suite',
+      'recommend',
+      'options',
+      'download',
+      'preview',
+      'loadPlan',
+    ],
+  );
+  for (const action of DRONEPLAN_VOICE_SIGNAL_ACTIONS)
+    assert.equal(
+      typeof voice[action],
+      'function',
+      `${action} is a real action`,
+    );
+  // Actions that finish without awaiting the panel never claim to take one.
+  for (const action of ['open', 'close', 'status', 'draw', 'undo'])
+    assert.equal(
+      DRONEPLAN_VOICE_SIGNAL_ACTIONS.includes(action),
+      false,
+      `${action} does not take the turn signal`,
+    );
+});
+
+test('a view read-back waits for the drone plan edit already on the panel', async () => {
+  const order = [];
+  let releaseObstacle;
+  const obstacleGate = new Promise((resolve) => {
+    releaseObstacle = resolve;
+  });
+  let aglM = 60;
+  const voice = {
+    async obstacle() {
+      order.push('obstacle:start');
+      await obstacleGate;
+      aglM = 90;
+      order.push('obstacle:end');
+      return { ok: true, refreshed: true, obstacleCount: 1 };
+    },
+    async status() {
+      order.push('status');
+      return { ok: true, open: true, aglM, areaCount: 1 };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+  const edit = runner(
+    'control_droneplan',
+    { action: 'obstacle' },
+    { authorityGroup: 'reply-1' },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  let readSettled = false;
+  const read = runner('get_current_view_state').then((packet) => {
+    readSettled = true;
+    return packet;
+  });
+  // Give the read every chance to answer early: it must not, because the panel
+  // is mid-edit and a status now would report a state nobody held.
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(readSettled, false, 'the read-back waits for the panel');
+  assert.deepEqual(order, ['obstacle:start']);
+  releaseObstacle();
+  assert.equal((await edit).ok, true);
+  const packet = await read;
+  assert.equal(
+    packet.dronePlan.aglM,
+    90,
+    'the read-back answers the panel the edit left behind',
+  );
+  assert.deepEqual(order, ['obstacle:start', 'obstacle:end', 'status']);
+});
+
+test('a stalled drone plan edit costs the view read-back a bounded wait, not the turn', async () => {
+  const order = [];
+  let releaseObstacle;
+  const obstacleGate = new Promise((resolve) => {
+    releaseObstacle = resolve;
+  });
+  const voice = {
+    async obstacle() {
+      order.push('obstacle:start');
+      await obstacleGate;
+      order.push('obstacle:end');
+      return { ok: true, refreshed: true, obstacleCount: 1 };
+    },
+    async status() {
+      order.push('status');
+      return { ok: true, open: true, aglM: 75, areaCount: 1 };
+    },
+    async options(patch) {
+      order.push(`options:${patch.aglM}`);
+      return { ok: true, aglM: patch.aglM };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const skyHandle = { status: () => ({ ok: true, open: true }) };
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+    // A live neighbour that must answer even while the panel is stalled.
+    sky: () => skyHandle,
+  });
+  const edit = runner(
+    'control_droneplan',
+    { action: 'obstacle' },
+    { authorityGroup: 'stalled-reply' },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['obstacle:start']);
+  const startedAt = Date.now();
+  const packet = await runner('get_current_view_state');
+  const elapsed = Date.now() - startedAt;
+  assert.ok(elapsed < 5000, `the read-back settled in ${elapsed} ms`);
+  assert.equal(
+    'dronePlan' in packet,
+    false,
+    'a panel that never answers is reported as not answering, never as a state',
+  );
+  assert.deepEqual(order, ['obstacle:start'], 'the read never asked mid-edit');
+  assert.deepEqual(
+    packet.sky,
+    { open: true },
+    'the other hosts answered while the panel was stalled',
+  );
+  releaseObstacle();
+  assert.equal((await edit).ok, true);
+  // The timed-out read left no waiter behind: the next edits and reads run.
+  assert.equal(
+    (await runner('control_droneplan', { action: 'options', aglM: 40 })).ok,
+    true,
+  );
+  const after = await runner('get_current_view_state');
+  assert.equal(after.dronePlan.aglM, 75);
+  assert.deepEqual(order, [
+    'obstacle:start',
+    'obstacle:end',
+    'options:40',
+    'status',
+  ]);
+});
+
+test('a view read-back queued behind a stalled panel edit is stopped by reset and dispose', async () => {
+  const statusCalls = [];
+  const voice = {
+    obstacle: () => new Promise(() => {}),
+    status() {
+      statusCalls.push('status');
+      return { ok: true, open: true, aglM: 55 };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+  // This edit never settles, so only cancellation can free a queued read.
+  runner('control_droneplan', { action: 'obstacle' }, { authorityGroup: 'r1' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const firstRead = runner('get_current_view_state');
+  await new Promise((resolve) => setImmediate(resolve));
+  const resetAt = Date.now();
+  runner.resetConversation();
+  const first = await firstRead;
+  assert.ok(
+    Date.now() - resetAt < 1000,
+    'reset drops the queued read without waiting for the panel',
+  );
+  assert.equal('dronePlan' in first, false);
+
+  const secondRead = runner('get_current_view_state');
+  await new Promise((resolve) => setImmediate(resolve));
+  const disposeAt = Date.now();
+  runner.dispose();
+  const second = await secondRead;
+  assert.ok(
+    Date.now() - disposeAt < 1000,
+    'dispose drops the queued read without waiting for the panel',
+  );
+  assert.equal('dronePlan' in second, false);
+  assert.deepEqual(statusCalls, [], 'a cancelled read never touches the panel');
+  const ended = await runner('get_current_view_state');
+  assert.equal(ended.cancelled, true, 'a disposed runner runs nothing');
+});
+
+test('a view read-back cancelled by its own caller stops waiting for the panel', async () => {
+  const voice = {
+    obstacle: () => new Promise(() => {}),
+    status: () => ({ ok: true, open: true, aglM: 12 }),
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+  runner('control_droneplan', { action: 'obstacle' }, { authorityGroup: 'r1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const controller = new AbortController();
+  const read = runner(
+    'get_current_view_state',
+    {},
+    { signal: controller.signal },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  const abortedAt = Date.now();
+  controller.abort();
+  const packet = await read;
+  assert.ok(
+    Date.now() - abortedAt < 1000,
+    'the caller abort drops the queued read at once',
+  );
+  assert.equal('dronePlan' in packet, false);
+});
+
+test('a view read-back on the panel keeps a new drone plan edit off it', async () => {
+  const order = [];
+  let releaseStatus;
+  const statusGate = new Promise((resolve) => {
+    releaseStatus = resolve;
+  });
+  const voice = {
+    async status() {
+      order.push('status:start');
+      await statusGate;
+      order.push('status:end');
+      return { ok: true, open: true, aglM: 5 };
+    },
+    async options(patch) {
+      order.push(`options:${patch.aglM}`);
+      return { ok: true, aglM: patch.aglM };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+  const read = runner('get_current_view_state');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['status:start'], 'the read holds the panel');
+  const edit = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 9 },
+    { authorityGroup: 'next-reply' },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(
+    order,
+    ['status:start'],
+    'an edit starting during the read waits for it',
+  );
+  releaseStatus();
+  const packet = await read;
+  assert.equal(packet.dronePlan.aglM, 5);
+  assert.equal((await edit).ok, true);
+  assert.deepEqual(order, ['status:start', 'status:end', 'options:9']);
+});
+
+test('a panel status that never answers gives the panel back to the queued edit', async () => {
+  const order = [];
+  const voice = {
+    status: () => new Promise(() => {}),
+    async options(patch) {
+      order.push(`options:${patch.aglM}`);
+      return { ok: true, aglM: patch.aglM };
+    },
+  };
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  const runner = createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+  const read = runner('get_current_view_state');
+  await new Promise((resolve) => setImmediate(resolve));
+  const edit = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 21 },
+    { authorityGroup: 'queued-reply' },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.deepEqual(order, [], 'the queued edit waits while the read holds');
+  const packet = await read;
+  assert.equal('dronePlan' in packet, false);
+  assert.equal((await edit).ok, true, 'the stalled read released the panel');
+  assert.deepEqual(order, ['options:21']);
+});
+
 
 test('different OSM siblings from one response do not race the server slot or memory', async () => {
   const releases = [];

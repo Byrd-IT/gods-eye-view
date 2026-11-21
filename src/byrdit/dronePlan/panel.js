@@ -1440,8 +1440,19 @@ export function initDronePlan({
    */
   function syncObstacles({ force = false } = {}) {
     if (!state.areas.length) {
+      // The areas the in-flight look-up was for are gone: its rows belong to
+      // an area nobody is planning, so it must not commit them. Aborting it
+      // and taking its token makes a late answer resolve false (the token
+      // check below) instead of writing obstacles for an empty plan.
+      obstacleAbort?.abort();
+      obstacleAbort = null;
+      obstacleToken += 1;
       obstacleKey = null;
       obstaclePending = null;
+      // The rows and the status line described an area that is gone: neither
+      // is left standing as if it still applied to this (empty) plan.
+      obstacleStatusText = '';
+      renderObstacleStatus();
       return null;
     }
     const key = areasKey();
@@ -1845,6 +1856,14 @@ export function initDronePlan({
     state.suiteBusy = false;
     if (hadSuite) syncGlobe();
     if (!state.areas.length) {
+      // The areas are all gone, so any look-up still in flight was for an
+      // area nobody is planning now. This returns before the syncObstacles()
+      // below, so the invalidation has to happen here: otherwise the old
+      // look-up's token still matches and it lands its rows after the last
+      // area was removed. syncObstacles() with no areas only drops that
+      // look-up and its status line; rows already in the store stay as they
+      // are, the same as any plan that never had an area.
+      syncObstacles();
       state.orbitsPlanned = false;
       state.result = null;
       state.error = null;
@@ -3879,49 +3898,85 @@ export function initDronePlan({
   ]);
 
   /**
+   * The named own keys of a caller's patch, read inside a guard. A patch can
+   * be a Proxy (or carry getters) whose traps throw — with any message,
+   * including one that reads like a secret — so every read of the caller's
+   * object happens here. A patch that cannot be read is `null`: a refused
+   * patch, never an exception out of the panel and never text from it.
+   */
+  function readPatchFields(patch, keys) {
+    if (
+      patch === null ||
+      (typeof patch !== 'object' && typeof patch !== 'function')
+    )
+      return null;
+    try {
+      const fields = {};
+      for (const key of keys) {
+        if (!Object.hasOwn(patch, key)) continue;
+        fields[key] = patch[key];
+      }
+      return fields;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * The 3D check switches, from voice. Every value is checked before any is
    * applied, so a refused patch changes nothing; the panel controls are the
    * same ones the checkboxes and the photo slider call. Unknown keys are
-   * ignored, not rejected, so a wider caller adds no failure.
+   * ignored, not rejected, so a wider caller adds no failure. A patch whose
+   * own keys cannot be read at all is refused the same way.
    */
   function setCheck(patch = {}) {
     const c = state.check;
+    const fields = readPatchFields(patch, [
+      'enabled',
+      'zone',
+      'curtain',
+      'footprints',
+      'frustum',
+      'halfWidthM',
+      'index',
+    ]);
+    if (!fields) return false;
     const next = {};
-    if (Object.hasOwn(patch, 'enabled')) {
-      if (typeof patch.enabled !== 'boolean') return false;
-      next.enabled = patch.enabled;
+    if (Object.hasOwn(fields, 'enabled')) {
+      if (typeof fields.enabled !== 'boolean') return false;
+      next.enabled = fields.enabled;
     }
     for (const key of ['zone', 'curtain']) {
-      if (!Object.hasOwn(patch, key)) continue;
-      if (typeof patch[key] !== 'boolean') return false;
-      next[key] = patch[key];
+      if (!Object.hasOwn(fields, key)) continue;
+      if (typeof fields[key] !== 'boolean') return false;
+      next[key] = fields[key];
     }
-    if (Object.hasOwn(patch, 'footprints')) {
-      if (!FOOTPRINT_MODES.includes(patch.footprints)) return false;
-      next.footprints = patch.footprints;
+    if (Object.hasOwn(fields, 'footprints')) {
+      if (!FOOTPRINT_MODES.includes(fields.footprints)) return false;
+      next.footprints = fields.footprints;
     }
-    if (Object.hasOwn(patch, 'frustum')) {
-      if (!CHECK_VIEW_MODES.includes(patch.frustum)) return false;
-      next.frustum = patch.frustum;
+    if (Object.hasOwn(fields, 'frustum')) {
+      if (!CHECK_VIEW_MODES.includes(fields.frustum)) return false;
+      next.frustum = fields.frustum;
     }
-    if (Object.hasOwn(patch, 'halfWidthM')) {
+    if (Object.hasOwn(fields, 'halfWidthM')) {
       if (
-        typeof patch.halfWidthM !== 'number' ||
-        !Number.isFinite(patch.halfWidthM) ||
-        patch.halfWidthM < MIN_ZONE_HALF_WIDTH_M ||
-        patch.halfWidthM > MAX_ZONE_HALF_WIDTH_M
+        typeof fields.halfWidthM !== 'number' ||
+        !Number.isFinite(fields.halfWidthM) ||
+        fields.halfWidthM < MIN_ZONE_HALF_WIDTH_M ||
+        fields.halfWidthM > MAX_ZONE_HALF_WIDTH_M
       )
         return false;
-      next.halfWidthM = patch.halfWidthM;
+      next.halfWidthM = fields.halfWidthM;
     }
-    if (Object.hasOwn(patch, 'index')) {
-      if (!Number.isInteger(patch.index) || patch.index < 0) return false;
+    if (Object.hasOwn(fields, 'index')) {
+      if (!Number.isInteger(fields.index) || fields.index < 0) return false;
       // The panel's own stepper runs 1..count over the photos that exist
       // (syncCheckUi sets ui.checkPhoto.max). A higher index would be
       // silently clamped by the check layer, so it is refused here instead.
       const count = preview.checkInfo?.().count ?? 0;
-      if (patch.index > Math.max(0, count - 1)) return false;
-      next.index = patch.index;
+      if (fields.index > Math.max(0, count - 1)) return false;
+      next.index = fields.index;
     }
     Object.assign(c, next);
     pushCheck();
@@ -3935,25 +3990,28 @@ export function initDronePlan({
    * checked before any is applied, so a refused patch changes nothing.
    * Unknown keys are ignored, not rejected, so a wider caller adds no
    * failure. The values are the ones the panel's own controls write, and
-   * they are remembered with the same store (prefs.js readClearance).
+   * they are remembered with the same store (prefs.js readClearance). A
+   * patch whose own keys cannot be read at all is refused the same way.
    */
   function setSurface(patch = {}) {
     const s = state.surface;
+    const fields = readPatchFields(patch, ['enabled', 'minM', 'marginM']);
+    if (!fields) return false;
     const next = {};
-    if (Object.hasOwn(patch, 'enabled')) {
-      if (typeof patch.enabled !== 'boolean') return false;
-      next.enabled = patch.enabled;
+    if (Object.hasOwn(fields, 'enabled')) {
+      if (typeof fields.enabled !== 'boolean') return false;
+      next.enabled = fields.enabled;
     }
     for (const key of ['minM', 'marginM']) {
-      if (!Object.hasOwn(patch, key)) continue;
+      if (!Object.hasOwn(fields, key)) continue;
       if (
-        typeof patch[key] !== 'number' ||
-        !Number.isFinite(patch[key]) ||
-        patch[key] < 0 ||
-        patch[key] > CLEARANCE_MAX_M
+        typeof fields[key] !== 'number' ||
+        !Number.isFinite(fields[key]) ||
+        fields[key] < 0 ||
+        fields[key] > CLEARANCE_MAX_M
       )
         return false;
-      next[key] = patch[key];
+      next[key] = fields[key];
     }
     const toggled =
       Object.hasOwn(next, 'enabled') && next.enabled !== s.enabled;

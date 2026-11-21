@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   DRONEPLAN_VOICE_ACTIONS,
+  DRONEPLAN_VOICE_SIGNAL_ACTIONS,
   createDronePlanVoice,
 } from './dronePlanVoice.js';
 
@@ -1010,6 +1011,138 @@ test('an obstacle height outside the panel range is refused, not swapped for a t
   assert.equal(tallest.ok, true);
   assert.equal(obstacles[0].heightM, 60);
   assert.equal(state.areas.length, 0);
+});
+
+test('the adapter advertises exactly the actions that take the turn signal', () => {
+  const { handle } = panelHandle();
+  const voice = createDronePlanVoice(handle);
+  // The runner reads `acceptsSignal` off the adapter; a name the adapter does
+  // not really take a signal on would make a caller believe the panel had been
+  // told to stop when it had not.
+  assert.equal(voice.acceptsSignal, DRONEPLAN_VOICE_SIGNAL_ACTIONS);
+  assert.deepEqual([...voice.acceptsSignal], [
+    'obstacle',
+    'replan',
+    'suite',
+    'recommend',
+    'options',
+    'download',
+    'preview',
+    'loadPlan',
+  ]);
+  for (const action of voice.acceptsSignal)
+    assert.equal(typeof voice[action], 'function', `${action} is a real action`);
+  for (const action of ['open', 'close', 'status', 'draw', 'undo'])
+    assert.equal(
+      voice.acceptsSignal.includes(action),
+      false,
+      `${action} does not take the turn signal`,
+    );
+});
+
+test('every advertised action refuses a superseded turn before touching the panel', async () => {
+  const { handle, calls } = panelHandle();
+  const voice = createDronePlanVoice(handle);
+  // Each advertised action, called the way the runner calls it, with the turn
+  // options as the optional last argument.
+  const callsFor = {
+    obstacle: (signal) => voice.obstacle({}, { signal }),
+    replan: (signal) => voice.replan({ signal }),
+    suite: (signal) => voice.suite({ signal }),
+    recommend: (signal) => voice.recommend(null, { signal }),
+    options: (signal) => voice.options({}, { signal }),
+    download: (signal) => voice.download({ which: 'mission' }, { signal }),
+    preview: (signal) => voice.preview({}, { signal }),
+    loadPlan: (signal) => voice.loadPlan({ plan: {} }, { signal }),
+  };
+  const controller = new AbortController();
+  controller.abort();
+  const before = calls.length;
+  for (const action of voice.acceptsSignal) {
+    const result = await callsFor[action](controller.signal);
+    assert.equal(result.ok, false, action);
+    assert.equal(
+      result.error,
+      'Drone Flight Plan action cancelled',
+      action,
+    );
+  }
+  assert.equal(calls.length, before, 'no cancelled action touched the panel');
+});
+
+test('a superseded turn does not start the obstacle look-up or report it', async () => {
+  const { handle, state, calls } = panelHandle();
+  state.areas = [{ id: 'area-1', kind: 'rect' }];
+  const voice = createDronePlanVoice(handle);
+  const controller = new AbortController();
+  controller.abort();
+  const before = calls.length;
+  const result = await voice.obstacle({}, { signal: controller.signal });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'Drone Flight Plan action cancelled');
+  assert.equal(calls.length, before, 'the panel was not asked for a look-up');
+});
+
+test('an obstacle look-up superseded mid-await reports the cancellation, not its rows', async () => {
+  const { handle, state, calls, obstacles } = panelHandle();
+  state.areas = [{ id: 'area-1', kind: 'rect' }];
+  const voice = createDronePlanVoice(handle);
+  const controller = new AbortController();
+  // The look-up is still pending when the turn is cancelled: the stub's row
+  // lands on the next microtask, after the abort.
+  const pending = voice.obstacle({}, { signal: controller.signal });
+  controller.abort();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'Drone Flight Plan action cancelled');
+  assert.ok(
+    calls.some((call) => call[0] === 'obstacleRefresh'),
+    'the look-up had already been asked for',
+  );
+  // The limitation, stated: the panel committed the row as the look-up
+  // resolved, and this adapter cannot undo a write that beat the abort.
+  assert.equal(
+    obstacles.length,
+    1,
+    'rows the panel committed before the abort stay',
+  );
+});
+
+test('a hostile turn options object is no signal, never an exception', async () => {
+  const { handle, state } = panelHandle();
+  state.areas = [{ id: 'area-1', kind: 'rect' }];
+  const voice = createDronePlanVoice(handle);
+  const hostile = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error(SECRET);
+      },
+    },
+  );
+  const result = await voice.obstacle({}, hostile);
+  assert.equal(result.ok, true);
+  assert.equal(result.refreshed, true);
+  assert.equal(result.obstacleCount, 1);
+});
+
+test('a superseded turn does not plan, and one aborted while planning says cancelled', async () => {
+  const { handle, state, calls } = panelHandle();
+  state.areas = [{ id: 'area-1', kind: 'rect' }];
+  state.result = { missions: [{}] };
+  const voice = createDronePlanVoice(handle);
+  const aborted = new AbortController();
+  aborted.abort();
+  const before = calls.length;
+  const skipped = await voice.replan(aborted);
+  assert.equal(skipped.error, 'Drone Flight Plan action cancelled');
+  assert.equal(calls.length, before, 'the panel was not asked to plan');
+  // A turn aborted while the panel plans is not reported as a plan.
+  const during = new AbortController();
+  const pending = voice.replan(during);
+  during.abort();
+  assert.equal((await pending).error, 'Drone Flight Plan action cancelled');
+  assert.ok(calls.some((call) => call[0] === 'replan'), 'the plan did run');
 });
 
 test('an obstacle refresh says it refreshed only when a look-up really ran', async () => {

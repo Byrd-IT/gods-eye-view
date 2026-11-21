@@ -1771,6 +1771,56 @@ function obstacleWorld(fetchObstacles) {
 }
 const settle = () => new Promise((r) => setTimeout(r, 15));
 
+test('obstacles: the last area removed drops the look-up that was for it', async () => {
+  let release;
+  let gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const signals = [];
+  const w = obstacleWorld(async (areas, opts) => {
+    signals.push(opts?.signal);
+    await gate;
+    return { obstacles: obstacleRows(), status: {} };
+  });
+  const statusText = () =>
+    w.find((n) => n.className.includes('gev-dp-obstacle-status'))[0]
+      ?.textContent ?? '';
+  w.handle.setBox(boxM(300, 200));
+  // The drawn box schedules the plan (and its look-up); let that run so the
+  // look-up is genuinely in flight, the way a user's draw leaves it.
+  await settle();
+  assert.match(
+    statusText(),
+    /Looking up open-data heights/,
+    'the look-up is running',
+  );
+  // Natural flow only: removeArea schedules the replan itself. No refresh is
+  // called, so the only thing that can drop the look-up is the lifecycle.
+  assert.equal(w.handle.removeArea('area-1'), true);
+  await settle();
+  assert.equal(signals.length, 1, 'one look-up asked');
+  assert.equal(
+    signals[0]?.aborted,
+    true,
+    'the look-up the removed area was for is aborted',
+  );
+  assert.equal(statusText(), '', 'no open-data claim is left standing');
+  // The rows arrive anyway (a fetch that ignores its signal), and must not
+  // land: they describe an area nobody is planning now.
+  release();
+  await settle();
+  assert.deepEqual(w.handle.obstacles.list(), []);
+  assert.equal(statusText(), '', 'a late answer writes no status line');
+  // Drawing again looks up the new area from scratch: the dropped look-up
+  // left no key behind to skip it.
+  gate = Promise.resolve();
+  w.handle.setBox(boxM(300, 200));
+  await settle();
+  assert.equal(await w.handle.obstacles.refresh(), true);
+  assert.equal(w.handle.obstacles.list().length, 2);
+  w.handle.destroy();
+});
+
 test('obstacles: open-data estimates appear in the panel with their source', async () => {
   const w = obstacleWorld(async () => ({
     obstacles: obstacleRows(),
@@ -4017,6 +4067,55 @@ test('check and surface: a mixed patch is refused whole, and one voice request l
   assert.equal(s.check.zone, true);
   assert.equal(s.surface.enabled, true);
   assert.equal(s.surface.minM, 12);
+  w.handle.destroy();
+});
+
+test('check and surface: a patch that cannot even be read is refused, never thrown', () => {
+  const w = setup({ surfaceClient: surfaceStub() });
+  const s = w.handle.getState();
+  const secret = 'do-not-leak-this';
+  // A Proxy whose traps throw text that must never leave the panel: own-key
+  // lookup, descriptor lookup, the value read and a bare `has` all throw.
+  const hostile = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error(secret);
+      },
+      has() {
+        throw new Error(secret);
+      },
+      getOwnPropertyDescriptor() {
+        throw new Error(secret);
+      },
+      ownKeys() {
+        throw new Error(secret);
+      },
+    },
+  );
+  const checkBefore = { ...s.check };
+  const surfaceBefore = { ...s.surface };
+  const dirtyBefore = s.dirty;
+  // Fail-closed: a refusal, not an exception, and no text from the patch.
+  assert.equal(w.handle.setCheck(hostile), false);
+  assert.equal(w.handle.setSurface(hostile), false);
+  // One throwing value refuses the whole patch; the values read before it
+  // are not half-applied.
+  const halfHostile = { zone: true, minM: 12 };
+  Object.defineProperty(halfHostile, 'enabled', {
+    enumerable: true,
+    get() {
+      throw new Error(secret);
+    },
+  });
+  assert.equal(w.handle.setCheck(halfHostile), false);
+  assert.equal(w.handle.setSurface(halfHostile), false);
+  // A patch that is not an object at all is the same refusal.
+  assert.equal(w.handle.setCheck(null), false);
+  assert.equal(w.handle.setSurface('enabled'), false);
+  assert.deepEqual(s.check, checkBefore);
+  assert.deepEqual(s.surface, surfaceBefore);
+  assert.equal(s.dirty, dirtyBefore, 'a refusal is not a change');
   w.handle.destroy();
 });
 

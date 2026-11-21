@@ -4,6 +4,11 @@
  * The rail already draws, plans and downloads. This module does not add a
  * control and does not change the panel. It calls the handle methods the
  * buttons already call, and it never puts caller text into an error.
+ *
+ * Every method that awaits the panel takes the runner's turn options as an
+ * optional last argument (`{ signal }`). A superseded turn answers with a
+ * fixed cancellation and never reports the rows or counts that finished
+ * after it, though edits the panel committed before that await stay.
  */
 import {
   MIN_AGL_M,
@@ -65,6 +70,25 @@ export const DRONEPLAN_VOICE_ACTIONS = Object.freeze([
   'corner',
 ]);
 
+/**
+ * The actions whose adapter method takes the runner's turn options
+ * (`{ signal }`) as an optional last argument. Advertised to the runner as
+ * `acceptsSignal` so a signal is handed over exactly where it is understood;
+ * every other action is called with the arguments it always took, because a
+ * stray second argument would be silently ignored and the caller would think
+ * the panel had been told to stop when it had not.
+ */
+export const DRONEPLAN_VOICE_SIGNAL_ACTIONS = Object.freeze([
+  'obstacle',
+  'replan',
+  'suite',
+  'recommend',
+  'options',
+  'download',
+  'preview',
+  'loadPlan',
+]);
+
 const UNAVAILABLE = 'Drone Flight Plan is not available right now';
 /** A .gevplan the reader refused: the document, not the panel, is the fault. */
 const INVALID_PLAN = 'That is not a valid Drone Flight Plan document';
@@ -72,6 +96,8 @@ const INVALID_PLAN = 'That is not a valid Drone Flight Plan document';
 const NOT_TOGETHER =
   'The check and surface settings could not be changed together';
 const OUT_OF_RANGE = 'That option is outside the panel range';
+/** Fixed text for a turn the runner's signal superseded; never caller text. */
+const CANCELLED = 'Drone Flight Plan action cancelled';
 const SPEED_MAX_MS = 15;
 const ORBIT_RADIUS_MIN_M = 10;
 const ORBIT_RADIUS_MAX_M = 300;
@@ -195,6 +221,38 @@ export function createDronePlanVoice(handle) {
     } catch {
       return fail(UNAVAILABLE);
     }
+  }
+
+  /**
+   * The turn's cancellation signal, handed in by the runner as the optional
+   * last argument of a voice method (`{ signal }`, or the run options that
+   * carry one). Only the runner supplies it; a missing, hostile or malformed
+   * value means "no signal", never an exception.
+   */
+  function turnSignal(options) {
+    try {
+      const signal = options?.signal;
+      return signal &&
+        typeof signal === 'object' &&
+        typeof signal.aborted === 'boolean'
+        ? signal
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * True once the turn that asked for this call was superseded by a newer one.
+   * Checked before the first await and again after the last: work that
+   * finishes after the turn was cancelled reports nothing, so its counts and
+   * rows are never presented as this turn's answer. It cannot undo what the
+   * panel already committed before that await (the obstacle look-up writes its
+   * rows as it resolves, and a plan is committed by the panel's own replan);
+   * those edits stay, and the answer says only that it was cancelled.
+   */
+  function superseded(options) {
+    return turnSignal(options)?.aborted === true;
   }
 
   /** The 3D check switches, as the panel keeps them (state.check). */
@@ -434,6 +492,8 @@ export function createDronePlanVoice(handle) {
   }
 
   return {
+    /** See DRONEPLAN_VOICE_SIGNAL_ACTIONS: the opt-in the runner reads. */
+    acceptsSignal: DRONEPLAN_VOICE_SIGNAL_ACTIONS,
     async open() {
       return guard(() => {
         handle.open({ draw: false });
@@ -500,18 +560,21 @@ export function createDronePlanVoice(handle) {
         return { ok: true, points: points.length };
       });
     },
-    async recommend(mode) {
+    async recommend(mode, options = {}) {
       return guard(async () => {
+        if (superseded(options)) return fail(CANCELLED);
         if (mode != null && !MODES.includes(mode))
           return fail(`mode must be ${MODES.join(', ')}`);
         ensureOpen();
         handle.useRecommended(mode ?? undefined, { planNow: true });
         await handle.replan();
+        if (superseded(options)) return fail(CANCELLED);
         return summary();
       });
     },
-    async options(patch) {
+    async options(patch, options = {}) {
       return guard(async () => {
+        if (superseded(options)) return fail(CANCELLED);
         const next = readOptions(patch);
         if (!next.ok) return next;
         if (!Object.keys(next.patch).length)
@@ -534,6 +597,7 @@ export function createDronePlanVoice(handle) {
           );
         }
         if (needsPlan) await handle.replan();
+        if (superseded(options)) return fail(CANCELLED);
         return summary();
       });
     },
@@ -593,35 +657,41 @@ export function createDronePlanVoice(handle) {
         };
       });
     },
-    async replan() {
+    async replan(options = {}) {
       return guard(async () => {
+        if (superseded(options)) return fail(CANCELLED);
         ensureOpen();
         await handle.replan();
+        if (superseded(options)) return fail(CANCELLED);
         return summary();
       });
     },
-    async suite() {
+    async suite(options = {}) {
       return guard(async () => {
+        if (superseded(options)) return fail(CANCELLED);
         const state = handle.getState();
         if (!state.areas?.length) return fail('Draw an area first');
         if (state.busy || state.suiteBusy)
           return fail('A plan is already running');
         ensureOpen();
         if (handle.getState().dirty) await handle.replan();
+        if (superseded(options)) return fail(CANCELLED);
         const planned = handle.getState();
         if (planned.error)
           return fail('The plan has an error; fix it in the panel first');
         if (!planned.result) return fail('Plan the area first');
         if (typeof handle.planSuite !== 'function') return fail(UNAVAILABLE);
         await handle.planSuite();
+        if (superseded(options)) return fail(CANCELLED);
         // A suite that did not arrive was not planned: the panel refuses one
         // while it is busy or out of date, and never claims the passes.
         if (!handle.getState().suite) return fail('Could not plan all passes');
         return summary();
       });
     },
-    async download(args = {}) {
+    async download(args = {}, options = {}) {
       return guard(async () => {
+        if (superseded(options)) return fail(CANCELLED);
         const which = args.which;
         if (which !== 'mission' && which !== 'all' && which !== 'suite')
           return fail('which must be mission, all, or suite');
@@ -636,6 +706,9 @@ export function createDronePlanVoice(handle) {
             return fail('Downloads are not available yet');
           if ((await handle.downloadSuite()) !== true)
             return fail('The file could not be saved');
+          // A file already written cannot be recalled; only the claim that
+          // this turn saved it is dropped.
+          if (superseded(options)) return fail(CANCELLED);
           return { ok: true, downloaded: true, which };
         }
         if (which === 'all') {
@@ -645,6 +718,7 @@ export function createDronePlanVoice(handle) {
             return fail('Downloads are not available yet');
           if ((await handle.downloadAll()) !== true)
             return fail('The file could not be saved');
+          if (superseded(options)) return fail(CANCELLED);
           return { ok: true, downloaded: true, which };
         }
         const missions = handle.getResult?.()?.missions ?? [];
@@ -657,6 +731,7 @@ export function createDronePlanVoice(handle) {
           return fail('No mission at that index');
         if ((await handle.downloadMission(index)) !== true)
           return fail('The file could not be saved');
+        if (superseded(options)) return fail(CANCELLED);
         return { ok: true, downloaded: true, which, index };
       });
     },
@@ -706,8 +781,9 @@ export function createDronePlanVoice(handle) {
      * removes one; nothing re-reads the heights from the open-data service
      * and answers before that read has finished.
      */
-    async obstacle(args = {}) {
+    async obstacle(args = {}, options = {}) {
       return guard(async () => {
+        if (superseded(options)) return fail(CANCELLED);
         const store = handle.obstacles;
         if (!store) return fail(UNAVAILABLE);
         const idAt = (index) => {
@@ -772,6 +848,11 @@ export function createDronePlanVoice(handle) {
         // from an older panel) means nothing was looked up, and is not
         // reported as a refresh that happened.
         const looked = await store.refresh?.();
+        // The turn was superseded while the look-up ran: the panel has already
+        // committed whatever rows it found (that write happens as the look-up
+        // resolves and cannot be recalled here), but this turn no longer
+        // counts them, so the answer is the cancellation, not the rows.
+        if (superseded(options)) return fail(CANCELLED);
         const refreshed = looked === true;
         return {
           ok: true,
@@ -884,8 +965,9 @@ export function createDronePlanVoice(handle) {
       });
     },
     /** The picture of one flight of the current plan (index, default 0). */
-    async preview(args = {}) {
+    async preview(args = {}, options = {}) {
       return guard(async () => {
+        if (superseded(options)) return fail(CANCELLED);
         // The same gate as download: with no finished plan (or a plan the
         // panel will not export) there is no picture to draw, whichever
         // flight was named.
@@ -906,6 +988,7 @@ export function createDronePlanVoice(handle) {
         if (typeof handle.downloadPreview !== 'function')
           return fail(UNAVAILABLE);
         const made = await handle.downloadPreview(index);
+        if (superseded(options)) return fail(CANCELLED);
         if (made !== true)
           return fail('The picture could not be drawn in this browser');
         return { ok: true, downloaded: true, which: 'preview', index };
@@ -937,8 +1020,9 @@ export function createDronePlanVoice(handle) {
       });
     },
     /** Open a saved plan document the caller already validated. */
-    async loadPlan(args = {}) {
+    async loadPlan(args = {}, options = {}) {
       return guard(async () => {
+        if (superseded(options)) return fail(CANCELLED);
         if (!args.plan || typeof args.plan !== 'object')
           return fail('loadPlan needs a plan document');
         if (typeof handle.loadPlan !== 'function')
@@ -953,6 +1037,9 @@ export function createDronePlanVoice(handle) {
           if (error?.gevPlanRejected === true) return fail(INVALID_PLAN);
           throw error;
         }
+        // The document is loaded (the panel committed it before answering);
+        // only this turn's claim on it is dropped, not the load itself.
+        if (superseded(options)) return fail(CANCELLED);
         if (loaded !== true) return fail(INVALID_PLAN);
         return summary();
       });

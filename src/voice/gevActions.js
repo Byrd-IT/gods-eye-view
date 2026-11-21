@@ -332,7 +332,121 @@ function cachesFor(service) {
 }
 const VISIBLE_ENTITY_SHORTLIST = 64;
 const BASEMAP_CONTEXT_WAIT_MS = 1500;
+// How long a view read-back may spend on the Drone Flight Plan panel before it
+// reports the panel as not answering. Kept under worldPacket's own 1.5 s status
+// bound on purpose: that outer race would otherwise abandon a read still
+// waiting for a turn, and the abandoned wait would take the panel afterwards.
+const PANEL_READ_WAIT_MS = 1000;
 const viewTargetCache = new WeakMap();
+
+/**
+ * A FIFO turn-taking queue for a surface that only one call may hold.
+ *
+ * The voice runner's sibling chains are ordered *within* one reply and are
+ * deliberately rewound when a newer reply arrives, which is right for actions
+ * that only touch the camera or a layer list. A panel that holds one document
+ * is different: rewinding its chain let an edit already on the panel be
+ * overlapped by the next reply's edit. So the panel gets a queue that outlives
+ * reply groups: a call waits for every earlier call, whatever group it came
+ * from, and a call whose caller went away while it waited is dropped without
+ * taking a turn (a cancelled call must never start).
+ *
+ * The slot is held until `release()` runs, and `release(after)` can defer that
+ * until a promise settles, so work the caller stopped waiting for still keeps
+ * the next call off the panel. A waiter may also give itself a fixed deadline:
+ * a *read* that cannot get the panel in time answers "not available" instead
+ * of hanging the turn, and a timed-out waiter leaves the queue without a
+ * trace. A caller that already holds the panel never loses it to a timeout —
+ * only a waiter can time out, so a mutating call can never be un-locked
+ * mid-write.
+ */
+function createPanelQueue() {
+  /** Calls waiting for a turn, in arrival order. */
+  const waiting = [];
+  let held = false;
+
+  function drain() {
+    if (held) return;
+    const entry = waiting.shift();
+    if (!entry) return;
+    held = true;
+    entry.begin();
+  }
+
+  /** Drop a waiter from the queue; false when it already took its turn. */
+  function leave(entry) {
+    const at = waiting.indexOf(entry);
+    if (at === -1) return false;
+    waiting.splice(at, 1);
+    return true;
+  }
+
+  return {
+    /**
+     * Take a turn. Resolves `{ ok: true, release }` once this call holds the
+     * panel, or `{ ok: false, reason }` when `signal` aborted while it was
+     * still waiting (`reason: 'cancelled'`) or `timeoutMs` elapsed first
+     * (`reason: 'timeout'`) — that call gives up its place and never touches
+     * the panel.
+     */
+    acquire(signal, { timeoutMs = 0 } = {}) {
+      if (signal?.aborted)
+        return Promise.resolve({ ok: false, reason: 'cancelled' });
+      return new Promise((resolve) => {
+        let timer = null;
+        let done = false;
+        const finish = (value) => {
+          if (done) return;
+          done = true;
+          if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+          }
+          signal?.removeEventListener('abort', onAbort);
+          resolve(value);
+        };
+        const entry = {
+          begin: () => {
+            let released = false;
+            const release = (after = null) => {
+              if (released) return;
+              released = true;
+              // Hold the turn until abandoned work settles, so a call the
+              // caller stopped waiting for cannot overlap the next one.
+              const settled =
+                after && typeof after.then === 'function'
+                  ? after.then(
+                      () => {},
+                      () => {},
+                    )
+                  : Promise.resolve();
+              settled.then(() => {
+                held = false;
+                drain();
+              });
+            };
+            finish({ ok: true, release });
+          },
+        };
+        function onAbort() {
+          const dropped = leave(entry);
+          finish({ ok: false, reason: 'cancelled' });
+          // We may have been the head of the line; let the next one in.
+          if (dropped) drain();
+        }
+        waiting.push(entry);
+        signal?.addEventListener('abort', onAbort, { once: true });
+        if (timeoutMs > 0)
+          timer = setTimeout(() => {
+            const dropped = leave(entry);
+            finish({ ok: false, reason: 'timeout' });
+            if (dropped) drain();
+          }, timeoutMs);
+        drain();
+      });
+    },
+  };
+}
 
 /** Create application actions over the supplied scene and services. */
 export function createGevActionRunner({
@@ -1749,10 +1863,27 @@ export function createGevActionRunner({
       // History playback, the Drone Flight Plan, the imagery year and the
       // map stack's automatic mode. A handle that is absent or that fails
       // contributes nothing, and the read changes nothing.
+      //
+      // The Drone Flight Plan is the one handle whose state is written by
+      // another action (control_droneplan), so a read that arrives while that
+      // panel is mid-edit would answer a state nobody ever held. Take a panel
+      // turn for that one read: a status in the same reply then answers the
+      // plan its edits left behind, and a read running now cannot overlap an
+      // edit that starts next. The other handles are read beside it, so a
+      // busy panel never delays Sky, History, imagery or the map stack.
+      //
+      // The turn is bounded and cancellable: a panel call that stalls costs
+      // the read a fixed wait and then reports the panel as not answering
+      // (dronePlan absent, exactly like a mount that never happened), and a
+      // reset/dispose or a superseded turn drops the read at once. A read-back
+      // must never wedge the reply, which is what an unbounded wait did.
+      const panelSignal = runOptions.signal
+        ? AbortSignal.any([conversationAbort.signal, runOptions.signal])
+        : conversationAbort.signal;
       const hostState = await readHostViewState({
         sky,
         history,
-        dronePlan,
+        dronePlan: readDronePanelStatusHandle(panelSignal),
         imagery,
         mapStack,
       });
@@ -1869,8 +2000,9 @@ export function createGevActionRunner({
     if (name === 'control_droneplan') {
       // The host is read, and the action dispatched, inside the guard: a panel
       // bug, a throwing getter or a caller-supplied value whose toString
-      // throws must never carry its message out of this action.
-      return controlDronePlanGuarded(dronePlan, args);
+      // throws must never carry its message out of this action. The caller's
+      // signal goes with it so an adapter that can stop its own work is told.
+      return controlDronePlanGuarded(dronePlan, args, runOptions);
     }
 
     if (name === 'set_clean_view') {
@@ -1968,13 +2100,82 @@ export function createGevActionRunner({
     // The Drone Flight Plan is one panel holding one plan: a reply that both
     // edits it and reads it back ("set the obstacle height and replan", "add
     // a target and plan the passes") run beside each other interleaves their
-    // writes and reports a state neither one made. Read-backs queue too, so a
-    // status in the same reply answers the panel the edit left behind.
+    // writes and reports a state neither one made. It is serialized on its own
+    // page-lifetime queue rather than the per-reply sibling chain below,
+    // because a newer reply must not rewind past an edit already on the panel;
+    // see createPanelQueue.
     'control_droneplan',
   ]);
   let serializedAttempt = 0;
   let serializedSiblingGroup = null;
   let serializedSiblingTail = Promise.resolve();
+  // One Drone Flight Plan panel for the page lifetime, so the queue outlives
+  // both reply groups and voice sessions: an edit still on the panel when the
+  // session ends still blocks the next one until it settles.
+  const dronePanelQueue = createPanelQueue();
+  /**
+   * The Drone Flight Plan handle as a view read-back sees it: a status handle
+   * that takes a panel turn first, bounded and cancellable.
+   *
+   * `readHostViewState` reads every host handle in parallel and asks each for
+   * `status()` only. Wrapping the panel here keeps that contract and makes the
+   * one handle another action writes read *under the same lock* an edit takes,
+   * so a read can never overlap an edit's writes and can never wait forever
+   * behind one: on timeout, cancellation or a status that itself stalls, the
+   * wrapper answers null and the packet omits the drone plan rather than
+   * claiming a state nobody held.
+   */
+  function readDronePanelStatusHandle(signal) {
+    let adapter = null;
+    try {
+      adapter = typeof dronePlan === 'function' ? dronePlan() : dronePlan;
+    } catch {
+      return null;
+    }
+    if (
+      !adapter ||
+      typeof adapter !== 'object' ||
+      typeof adapter.status !== 'function' ||
+      adapter.destroyed
+    )
+      return null;
+    return {
+      get destroyed() {
+        return adapter.destroyed === true;
+      },
+      async status() {
+        // One deadline covers the wait for the turn *and* the status call, so
+        // the whole read settles inside worldPacket's bound and nothing of it
+        // is left waiting to take the panel afterwards.
+        const deadline = Date.now() + PANEL_READ_WAIT_MS;
+        const remaining = () => Math.max(0, deadline - Date.now());
+        const turn = await dronePanelQueue.acquire(signal, {
+          timeoutMs: remaining(),
+        });
+        if (!turn.ok) return null;
+        let timer = null;
+        try {
+          // Bound the status call too, so a stalled adapter cannot keep the
+          // turn (and every queued edit) waiting; the status is a pure read,
+          // so answering "not reported" is always safe. An edit never reaches
+          // this path.
+          const timedOut = new Promise((resolve) => {
+            timer = setTimeout(() => resolve(null), remaining());
+          });
+          const status = await Promise.race([
+            Promise.resolve().then(() => adapter.status()),
+            timedOut,
+          ]);
+          return status && typeof status === 'object' ? status : null;
+        } catch {
+          return null;
+        } finally {
+          if (timer !== null) clearTimeout(timer);
+          turn.release();
+        }
+      },
+    };
+  }
   // Direct/programmatic callers do not necessarily arrive through
   // createVoiceSession, so the runner must own the conversation lifetime of
   // its serialized spatial workflows as well. Reset/dispose abort the real
@@ -1994,24 +2195,31 @@ export function createGevActionRunner({
     let attempt = null;
     let releaseSerializedSibling = null;
     const serialized = serializedSiblingActions.has(name);
+    // The Drone Flight Plan takes a turn on the page-lifetime panel queue
+    // instead of the per-reply sibling chain: a newer reply retires work still
+    // waiting for a turn, but it must never rewind the chain an edit already
+    // running holds (that is what let two edits overlap the panel).
+    const panelSerialized = name === 'control_droneplan';
     if (serialized) {
       const siblingGroup = callerOptions.authorityGroup || null;
       if (siblingGroup) {
         if (siblingGroup !== serializedSiblingGroup) {
           serializedSiblingGroup = siblingGroup;
-          serializedSiblingTail = Promise.resolve();
+          if (!panelSerialized) serializedSiblingTail = Promise.resolve();
           serializedAttempt++;
         }
         attempt = serializedAttempt;
-        const predecessor = serializedSiblingTail;
-        const completion = new Promise((resolve) => {
-          releaseSerializedSibling = resolve;
-        });
-        serializedSiblingTail = predecessor.then(() => completion);
-        await predecessor;
+        if (!panelSerialized) {
+          const predecessor = serializedSiblingTail;
+          const completion = new Promise((resolve) => {
+            releaseSerializedSibling = resolve;
+          });
+          serializedSiblingTail = predecessor.then(() => completion);
+          await predecessor;
+        }
       } else {
         serializedSiblingGroup = null;
-        serializedSiblingTail = Promise.resolve();
+        if (!panelSerialized) serializedSiblingTail = Promise.resolve();
         attempt = ++serializedAttempt;
       }
     }
@@ -2047,6 +2255,42 @@ export function createGevActionRunner({
           input,
           builders,
         );
+      }
+      if (panelSerialized) {
+        // Wait for the panel; a caller that gives up while waiting (or whose
+        // session ends) loses its place without ever touching it.
+        const turn = await dronePanelQueue.acquire(signal);
+        if (!turn.ok) {
+          return attachVoiceResult(
+            name,
+            {
+              ok: false,
+              action: name,
+              code: 'CANCELLED',
+              cancelled: true,
+              error: 'Drone Flight Plan action cancelled',
+            },
+            input,
+            builders,
+          );
+        }
+        releaseSerializedSibling = () => turn.release();
+        // A newer reply may have retired this call while it waited its turn;
+        // a retired call must not touch the panel now that the turn is free.
+        if (!runOptions.isCurrent()) {
+          return attachVoiceResult(
+            name,
+            {
+              ok: false,
+              action: name,
+              code: 'CANCELLED',
+              cancelled: true,
+              error: 'This request was superseded.',
+            },
+            input,
+            builders,
+          );
+        }
       }
       // Point-and-ask: 'pointer' and referent:n become real targets here, from
       // the turn's pointer snapshot and the latest numbered result.
@@ -2864,8 +3108,15 @@ async function controlImagery(voice, args = {}, dataManager = null) {
 /**
  * Voice Drone Flight Plan control over the panel adapter (dronePlanVoice.js,
  * handed in as `dronePlan`). The rail is unchanged; this only calls it.
+ *
+ * Cancellation is only as real as the adapter: an action is handed the
+ * caller's `{ signal }` as its last argument when (and only when) the adapter
+ * says it takes one — see dronePlanTakesSignal. Nothing is invented for an
+ * adapter that takes one argument, because a stray second argument would be
+ * silently ignored and the caller would believe the panel had been told to
+ * stop when it had not.
  */
-async function controlDronePlan(voice, args = {}) {
+async function controlDronePlan(voice, args = {}, options = {}) {
   const action = String(args.action || '').toLowerCase();
   const wrap = (result) => ({ action: 'control_droneplan', ...result });
   if (!voice)
@@ -2873,41 +3124,58 @@ async function controlDronePlan(voice, args = {}) {
       ok: false,
       error: 'Drone Flight Plan is not available in this host',
     });
-  if (action === 'open') return wrap(await voice.open());
-  if (action === 'close') return wrap(await voice.close());
-  if (action === 'status') return wrap(await voice.status());
-  if (action === 'draw') return wrap(await voice.draw(args.kind));
+  // `undefined` is meaningful here: several adapter methods take no argument
+  // at all, and calling them with an explicit undefined is not the same shape.
+  const call = (method, arg, hasArg = true) => {
+    const fn = voice[method];
+    if (typeof fn !== 'function')
+      return Promise.reject(new TypeError('Drone plan action unavailable'));
+    const signal = options?.signal;
+    if (signal && dronePlanTakesSignal(voice, method))
+      return hasArg
+        ? fn.call(voice, arg, { signal })
+        : fn.call(voice, { signal });
+    return hasArg ? fn.call(voice, arg) : fn.call(voice);
+  };
+  if (action === 'open') return wrap(await call('open', null, false));
+  if (action === 'close') return wrap(await call('close', null, false));
+  if (action === 'status') return wrap(await call('status', null, false));
+  if (action === 'draw') return wrap(await call('draw', args.kind));
   if (action === 'box')
     return wrap(
-      await voice.box({
+      await call('box', {
         west: args.west,
         south: args.south,
         east: args.east,
         north: args.north,
       }),
     );
-  if (action === 'polygon') return wrap(await voice.polygon(args.ring));
-  if (action === 'recommend') return wrap(await voice.recommend(args.mode));
-  if (action === 'options') return wrap(await voice.options(args));
+  if (action === 'polygon') return wrap(await call('polygon', args.ring));
+  if (action === 'recommend') return wrap(await call('recommend', args.mode));
+  if (action === 'options') return wrap(await call('options', args));
   if (action === 'takeoff')
     return wrap(
-      await voice.takeoff({
+      await call('takeoff', {
         takeoff: args.takeoff,
         lat: args.lat,
         lon: args.lon,
       }),
     );
   if (action === 'remove')
-    return wrap(await voice.remove({ areaId: args.areaId, index: args.index }));
-  if (action === 'replan') return wrap(await voice.replan());
-  if (action === 'suite') return wrap(await voice.suite());
+    return wrap(
+      await call('remove', { areaId: args.areaId, index: args.index }),
+    );
+  if (action === 'replan') return wrap(await call('replan', null, false));
+  if (action === 'suite') return wrap(await call('suite', null, false));
   if (action === 'download')
-    return wrap(await voice.download({ which: args.which, index: args.index }));
+    return wrap(
+      await call('download', { which: args.which, index: args.index }),
+    );
   if (action === 'edit')
-    return wrap(await voice.edit({ areaId: args.areaId, index: args.index }));
+    return wrap(await call('edit', { areaId: args.areaId, index: args.index }));
   if (action === 'obstacle')
     return wrap(
-      await voice.obstacle({
+      await call('obstacle', {
         lat: args.lat,
         lon: args.lon,
         index: args.index,
@@ -2916,21 +3184,23 @@ async function controlDronePlan(voice, args = {}) {
     );
   if (action === 'target')
     return wrap(
-      await voice.target({ lat: args.lat, lon: args.lon, index: args.index }),
+      await call('target', { lat: args.lat, lon: args.lon, index: args.index }),
     );
   if (action === 'path')
-    return wrap(await voice.path({ ring: args.ring, index: args.index }));
+    return wrap(await call('path', { ring: args.ring, index: args.index }));
   if (action === 'preview')
-    return wrap(await voice.preview({ index: args.index }));
-  if (action === 'library') return wrap(await voice.library());
+    return wrap(await call('preview', { index: args.index }));
+  if (action === 'library') return wrap(await call('library', null, false));
   if (action === 'loadplan')
-    return wrap(await voice.loadPlan({ plan: args.plan }));
-  if (action === 'photocheck') return wrap(await voice.photoCheck());
-  if (action === 'check') return wrap(await voice.check(args));
-  if (action === 'units') return wrap(await voice.units({ units: args.units }));
-  if (action === 'finish') return wrap(await voice.finish());
-  if (action === 'undo') return wrap(await voice.undo());
-  if (action === 'corner') return wrap(await voice.corner());
+    return wrap(await call('loadPlan', { plan: args.plan }));
+  if (action === 'photocheck')
+    return wrap(await call('photoCheck', null, false));
+  if (action === 'check') return wrap(await call('check', args));
+  if (action === 'units')
+    return wrap(await call('units', { units: args.units }));
+  if (action === 'finish') return wrap(await call('finish', null, false));
+  if (action === 'undo') return wrap(await call('undo', null, false));
+  if (action === 'corner') return wrap(await call('corner', null, false));
   // The action is caller text (the model writes it), so the refusal never
   // repeats it: even an all-lower-case secret in that field stays here.
   throw dronePlanUnknownActionError();
@@ -3015,15 +3285,56 @@ function dronePlanFailure(error) {
 }
 
 /**
+ * Does this panel adapter take the caller's abort signal?
+ *
+ * The shipped adapter (dronePlanVoice.js) takes one argument per action, and
+ * its methods are declared with defaults, so arity cannot answer this: a
+ * method with a default has `.length === 0` whatever it really accepts. An
+ * adapter that can stop its own work says so instead — `acceptsSignal: true`
+ * for every action, or the names of the actions that take `{ signal }` as
+ * their last argument. Everything else is called exactly as it was before.
+ */
+function dronePlanTakesSignal(voice, method) {
+  try {
+    const advertised = voice?.acceptsSignal;
+    if (advertised === true) return true;
+    if (typeof advertised === 'string') return advertised === method;
+    if (Array.isArray(advertised)) return advertised.includes(method);
+    if (advertised instanceof Set) return advertised.has(method);
+    return false;
+  } catch {
+    // A hostile getter is not an advertisement.
+    return false;
+  }
+}
+
+/**
  * `control_droneplan` action boundary. The host handle is resolved and the
  * action dispatched inside one guard, so a synchronous host getter throw or a
  * throwing `args.action` is covered as well as a rejected voice method.
+ *
+ * The caller's abort is honoured here in the only two ways that are real: an
+ * action is not started once the caller has gone away, and the signal is
+ * handed to the adapter when it takes one. A panel call that had already
+ * started on an adapter that takes no signal cannot be un-done, so it is
+ * reported as what it did, flagged `interrupted`, and never as rolled back.
  */
-async function controlDronePlanGuarded(host, args) {
+async function controlDronePlanGuarded(host, args, options = {}) {
   try {
+    if (options?.signal?.aborted)
+      return {
+        action: 'control_droneplan',
+        ok: false,
+        code: 'CANCELLED',
+        cancelled: true,
+        error: DRONE_PLAN_ACTION_CANCELLED,
+      };
     const voice =
       host == null ? null : typeof host === 'function' ? host() : host;
-    return await controlDronePlan(voice, args);
+    const result = await controlDronePlan(voice, args, options);
+    if (options?.signal?.aborted && result?.ok === true && !result.cancelled)
+      return { ...result, interrupted: true };
+    return result;
   } catch (error) {
     throw dronePlanFailure(error);
   }
