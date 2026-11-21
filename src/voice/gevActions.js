@@ -337,6 +337,17 @@ const BASEMAP_CONTEXT_WAIT_MS = 1500;
 // bound on purpose: that outer race would otherwise abandon a read still
 // waiting for a turn, and the abandoned wait would take the panel afterwards.
 const PANEL_READ_WAIT_MS = 1000;
+// How long a *mutating* Drone Flight Plan action may wait its turn behind an
+// edit already on the panel. An internal bound chosen for voice interaction (a
+// person is waiting for a reply), not a panel limit; it is never applied to a
+// call that already holds the panel. A held edit that never settles — a stalled
+// terrain read is the one reproduced — used to keep every later voice edit
+// waiting forever, across a reset as well, because the queue is page-lifetime.
+// A waiter that reaches this bound answers a fixed busy reply and never touches
+// the panel, so the caller can retry once the held edit settles. The bound is
+// short on purpose: a genuinely long prior edit can also answer busy, and an
+// honest, bounded "try that again" is the trade accepted for never hanging.
+const PANEL_EDIT_WAIT_MS = 4000;
 const viewTargetCache = new WeakMap();
 
 /**
@@ -355,10 +366,12 @@ const viewTargetCache = new WeakMap();
  * until a promise settles, so work the caller stopped waiting for still keeps
  * the next call off the panel. A waiter may also give itself a fixed deadline:
  * a *read* that cannot get the panel in time answers "not available" instead
- * of hanging the turn, and a timed-out waiter leaves the queue without a
- * trace. A caller that already holds the panel never loses it to a timeout —
- * only a waiter can time out, so a mutating call can never be un-locked
- * mid-write.
+ * of hanging the turn, an *edit* that cannot get it in time answers a fixed
+ * busy reply and is never started, and either timed-out waiter leaves the
+ * queue without a trace. A caller that already holds the panel never loses it
+ * to a timeout — only a waiter can time out, so a mutating call can never be
+ * un-locked mid-write. A held call whose own promise never settles therefore
+ * costs later callers one bounded wait each, not their whole session.
  */
 function createPanelQueue() {
   /** Calls waiting for a turn, in arrival order. */
@@ -2111,7 +2124,9 @@ export function createGevActionRunner({
   let serializedSiblingTail = Promise.resolve();
   // One Drone Flight Plan panel for the page lifetime, so the queue outlives
   // both reply groups and voice sessions: an edit still on the panel when the
-  // session ends still blocks the next one until it settles.
+  // session ends still keeps the next one off it until that edit settles, and
+  // a later caller waits only PANEL_EDIT_WAIT_MS for its turn rather than as
+  // long as the held edit runs.
   const dronePanelQueue = createPanelQueue();
   /**
    * The Drone Flight Plan handle as a view read-back sees it: a status handle
@@ -2120,10 +2135,19 @@ export function createGevActionRunner({
    * `readHostViewState` reads every host handle in parallel and asks each for
    * `status()` only. Wrapping the panel here keeps that contract and makes the
    * one handle another action writes read *under the same lock* an edit takes,
-   * so a read can never overlap an edit's writes and can never wait forever
-   * behind one: on timeout, cancellation or a status that itself stalls, the
-   * wrapper answers null and the packet omits the drone plan rather than
-   * claiming a state nobody held.
+   * so a read of the shipped adapter cannot overlap an edit's writes and can
+   * never wait forever behind one: on timeout, cancellation or a status that
+   * itself stalls, the wrapper answers null and the packet omits the drone plan
+   * rather than claiming a state nobody held.
+   *
+   * Limitation, stated exactly: the turn is given back when the deadline
+   * expires even if the status call has not settled. That is safe only for the
+   * shipped adapter, whose `status()` is a synchronous read of panel state —
+   * it has finished before the race can lose — and it is deliberate, because
+   * holding the turn for a promise that never settles is what let a stalled
+   * status block every queued edit. A host that returned an asynchronous
+   * `status()` doing real work could therefore still be running when the next
+   * edit starts; nothing here claims otherwise for an arbitrary host.
    */
   function readDronePanelStatusHandle(signal) {
     let adapter = null;
@@ -2158,7 +2182,8 @@ export function createGevActionRunner({
           // Bound the status call too, so a stalled adapter cannot keep the
           // turn (and every queued edit) waiting; the status is a pure read,
           // so answering "not reported" is always safe. An edit never reaches
-          // this path.
+          // this path. The release below does not wait for a status promise
+          // that lost the race — see the limitation in this handle's doc.
           const timedOut = new Promise((resolve) => {
             timer = setTimeout(() => resolve(null), remaining());
           });
@@ -2257,10 +2282,36 @@ export function createGevActionRunner({
         );
       }
       if (panelSerialized) {
-        // Wait for the panel; a caller that gives up while waiting (or whose
-        // session ends) loses its place without ever touching it.
-        const turn = await dronePanelQueue.acquire(signal);
+        // Wait for the panel, but only for so long: an edit already on the
+        // panel that never settles (a stalled terrain read) must not hold
+        // every later voice edit forever. A waiter that gives up (or whose
+        // session ends) leaves the queue without touching the panel, and a
+        // call that *holds* the panel is never timed out — so an edit already
+        // writing keeps the panel until its own promise settles, and only a
+        // waiter is answered early.
+        const turn = await dronePanelQueue.acquire(signal, {
+          timeoutMs: PANEL_EDIT_WAIT_MS,
+        });
         if (!turn.ok) {
+          // A timeout is not a cancellation and says nothing about what the
+          // held edit did: this action never started, so the answer is a
+          // fixed busy reply the caller can retry, never a completion claim.
+          if (turn.reason === 'timeout') {
+            return attachVoiceResult(
+              name,
+              {
+                ok: false,
+                action: name,
+                code: 'BUSY',
+                busy: true,
+                cancelled: false,
+                retryable: true,
+                error: DRONE_PLAN_ACTION_BUSY,
+              },
+              input,
+              builders,
+            );
+          }
           return attachVoiceResult(
             name,
             {
@@ -3212,6 +3263,13 @@ const DRONE_PLAN_ACTION_UNKNOWN = 'Unknown drone plan action';
 const DRONE_PLAN_ACTION_FAILED = 'Drone Flight Plan action failed';
 /** Fixed text for a drone-plan call cancelled by a newer request or a reset. */
 const DRONE_PLAN_ACTION_CANCELLED = 'Drone Flight Plan action cancelled';
+/**
+ * Fixed text for a drone-plan call that never got its turn because an earlier
+ * edit is still on the panel. It says the action did not run (nothing about
+ * the held edit), and names no caller text, so a retry is the only reading.
+ */
+const DRONE_PLAN_ACTION_BUSY =
+  'Drone Flight Plan is busy with an earlier change; try that again';
 
 /**
  * Refusals this module minted. Authenticated by identity, so a host cannot

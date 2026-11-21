@@ -6835,6 +6835,163 @@ test('a queued drone plan call cancelled while it waits never takes the panel', 
   );
 });
 
+/** A runner over one fake drone plan adapter, with a fake camera host. */
+function dronePanelRunner(voice) {
+  const viewer = bindFakeCesiumCamera({
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: {
+      canvas: { addEventListener() {}, removeEventListener() {} },
+    },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0, longitude: 0 },
+    },
+  });
+  return createActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: { layers: new Map(), getAll: () => [] },
+    dronePlan: () => voice,
+  });
+}
+
+test('a drone plan edit behind a held mutation answers busy instead of hanging, and a retry lands once it settles', async (t) => {
+  // Regression: the mutation path took the panel queue with no deadline, so an
+  // edit whose own promise never settled (a stalled terrain read) left every
+  // later voice edit waiting forever. The waiter must now be bounded, must
+  // never touch the panel, and must never claim the action ran.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const order = [];
+  let releaseObstacle;
+  const obstacleGate = new Promise((resolve) => {
+    releaseObstacle = resolve;
+  });
+  const voice = {
+    async obstacle() {
+      order.push('obstacle:start');
+      await obstacleGate;
+      order.push('obstacle:end');
+      return { ok: true, refreshed: true, obstacleCount: 1 };
+    },
+    async options(patch) {
+      order.push(`options:${patch.aglM}`);
+      return { ok: true, aglM: patch.aglM };
+    },
+  };
+  const runner = dronePanelRunner(voice);
+  const held = runner(
+    'control_droneplan',
+    { action: 'obstacle' },
+    { authorityGroup: 'held-reply' },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['obstacle:start']);
+
+  const controller = new AbortController();
+  let queuedSettled = false;
+  const queued = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 60 },
+    { authorityGroup: 'later-reply', signal: controller.signal },
+  ).then((result) => {
+    queuedSettled = true;
+    return result;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    queuedSettled,
+    false,
+    'the queued edit waits its turn instead of overlapping the held one',
+  );
+  assert.deepEqual(order, ['obstacle:start']);
+
+  // The held edit never settles. The waiter is bounded, not left hanging.
+  t.mock.timers.tick(60_000);
+  const busy = await queued;
+  assert.equal(busy.ok, false, 'a busy panel did not run the action');
+  assert.equal(busy.cancelled, false, 'a busy panel is not a cancellation');
+  assert.equal(busy.code, 'BUSY');
+  assert.equal(busy.busy, true);
+  assert.equal(busy.retryable, true);
+  assert.match(busy.error, /busy/i);
+  assert.equal(
+    Object.hasOwn(busy, 'aglM'),
+    false,
+    'the busy reply carries no result of its own',
+  );
+  assert.deepEqual(order, ['obstacle:start'], 'the busy edit never touched the panel');
+
+  // The timed-out caller's signal was detached from the queue: aborting it
+  // afterwards disturbs nothing, and the held edit is still on the panel.
+  controller.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['obstacle:start']);
+
+  // The held edit finally settles; the caller's retry takes the panel.
+  releaseObstacle();
+  assert.equal((await held).ok, true);
+  const retried = await runner(
+    'control_droneplan',
+    { action: 'options', aglM: 90 },
+    { authorityGroup: 'retry-reply' },
+  );
+  assert.equal(retried.ok, true);
+  assert.equal(retried.aglM, 90);
+  assert.deepEqual(order, ['obstacle:start', 'obstacle:end', 'options:90']);
+});
+
+test('a drone plan edit left waiting by a reset still gets a bounded answer, never a hang', async (t) => {
+  // The queue is page-lifetime, so a held mutation outlives the voice session
+  // that started it. Reset must drop the waiter it superseded, and the next
+  // session's edit must still be answered inside the bound rather than waiting
+  // for a mutation that may never settle.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const order = [];
+  const voice = {
+    obstacle: () => {
+      order.push('obstacle:start');
+      return new Promise(() => {});
+    },
+    async options(patch) {
+      order.push(`options:${patch.aglM}`);
+      return { ok: true, aglM: patch.aglM };
+    },
+  };
+  const runner = dronePanelRunner(voice);
+  runner('control_droneplan', { action: 'obstacle' }, { authorityGroup: 'session-1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const queued = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 30 },
+    { authorityGroup: 'session-1' },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  runner.resetConversation();
+  const dropped = await queued;
+  assert.equal(dropped.ok, false);
+  assert.equal(dropped.cancelled, true, 'reset drops the waiter it superseded');
+  assert.equal(dropped.code, 'CANCELLED');
+
+  // A new session asks the still-held panel for an edit: bounded, not endless.
+  const next = runner(
+    'control_droneplan',
+    { action: 'options', aglM: 45 },
+    { authorityGroup: 'session-2' },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['obstacle:start'], 'the held mutation still owns the panel');
+  t.mock.timers.tick(60_000);
+  const busy = await next;
+  assert.equal(busy.ok, false);
+  assert.equal(busy.code, 'BUSY');
+  assert.equal(busy.cancelled, false);
+  assert.deepEqual(
+    order,
+    ['obstacle:start'],
+    'neither session touched the panel behind the held mutation',
+  );
+});
+
 test('a drone plan adapter that advertises the signal is handed the caller turn', async () => {
   // The eight actions whose adapter method awaits the panel take the runner's
   // turn options as their optional last argument; the shipped adapter says so
