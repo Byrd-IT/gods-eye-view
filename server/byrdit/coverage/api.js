@@ -377,8 +377,9 @@ async function discardBody(response) {
 /**
  * Fetch one fixed-origin upstream path. Never follows redirects, never copies
  * an upstream header, and refuses any success body that contains the
- * credential (a long credential is unmistakable; short ones are not scanned
- * to avoid false positives, and are still never logged or returned by us).
+ * credential. Every credential `isSafeCoverageToken` accepts is scanned,
+ * including short values: a reflection is refused closed rather than risk
+ * forwarding one to the browser.
  */
 async function callUpstream({
   res,
@@ -469,7 +470,10 @@ async function callUpstream({
       bytes.byteOffset,
       bytes.byteLength,
     );
-    if (token.length >= 8 && bodyBytes.includes(Buffer.from(token, 'utf8'))) {
+    // Scan for every accepted credential, however short. A token is a
+    // credential regardless of length, and a false positive is a refused
+    // response (fail closed), never a leaked one.
+    if (bodyBytes.includes(Buffer.from(token, 'utf8'))) {
       throw new CoverageError('upstream-leak', 502);
     }
     return {

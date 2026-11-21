@@ -718,6 +718,65 @@ test('a success body that echoes the credential is refused, not forwarded', asyn
   }
 });
 
+test('short credentials are scanned too: JSON and binary reflections fail closed', async () => {
+  // Every one of these passes isSafeCoverageToken; the first three are shorter
+  // than the old 8-byte scan floor. None of these strings occurs in the fixed
+  // error body, so its absence proves the upstream body was not forwarded.
+  const tokens = ['q7z', 'abc1234', 'tok-7ch', TOKEN];
+  for (const token of tokens) {
+    for (const kind of ['json', 'binary']) {
+      const s = await boot({
+        token,
+        fetchImpl: async () =>
+          kind === 'json'
+            ? jsonResponse({ model: 's4_today', leak: token })
+            : bytesResponse(
+                Buffer.concat([
+                  Buffer.from([0x00, 0x7f, 0xff]),
+                  Buffer.from(token, 'utf8'),
+                ]),
+              ),
+      });
+      try {
+        const suffix =
+          kind === 'json' ? '/s4_today/model.json' : '/s4_today/points.bin';
+        const r = await s.call('GET', suffix);
+        assert.equal(r.status, 502, `${token} ${kind}`);
+        assert.equal(r.json.error, 'upstream-leak', `${token} ${kind}`);
+        assert.equal(r.json.message, 'The coverage origin response was refused');
+        assert.ok(
+          !r.buffer.includes(Buffer.from(token, 'utf8')),
+          `${token} ${kind}: the reflected credential is not forwarded`,
+        );
+        assert.ok(
+          s.logs.every((args) =>
+            args.every((arg) => !String(arg).includes(token)),
+          ),
+          `${token} ${kind}: the credential is not logged`,
+        );
+      } finally {
+        await s.close();
+      }
+    }
+  }
+});
+
+test('a short credential is not refused when the body does not reflect it', async () => {
+  for (const [suffix, response] of [
+    ['/s4_today/model.json', () => jsonResponse({ ok: true })],
+    ['/s4_today/points.bin', () => bytesResponse(Buffer.from([0x00, 0x01, 0x02]))],
+  ]) {
+    const s = await boot({ token: 'q7z', fetchImpl: async () => response() });
+    try {
+      const r = await s.call('GET', suffix);
+      assert.equal(r.status, 200, suffix);
+      assert.equal(s.calls.length, 1, suffix);
+    } finally {
+      await s.close();
+    }
+  }
+});
+
 test('upstream timeouts are bounded and sanitized', async () => {
   const s = await boot({
     timeoutMs: 20,
