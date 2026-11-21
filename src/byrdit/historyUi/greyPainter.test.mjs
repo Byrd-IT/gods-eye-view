@@ -388,6 +388,75 @@ test('a column clear drops cached items, so a repaint never replays them', () =>
   );
 });
 
+test('a mode change on upsert recolours every row the set already holds', () => {
+  // An upsert reaches only its own ids: a grey/live flip inside it must not
+  // leave the rows written before it in the other mode.
+  const { port, control, modes, record } = setup();
+  const icons = port.icons({ id: 'flights-icons:9' });
+  icons.set([
+    { id: 'a', color: RED },
+    { id: 'b', color: RED },
+  ]);
+  const live = record('flights-icons:9');
+  assert.deepEqual(live.items.get('a').color, RED);
+  assert.deepEqual(live.items.get('b').color, RED);
+
+  modes.set('flights', MODE_GREY);
+  const writes = live.writes;
+  icons.upsert([{ id: 'a', color: RED }]);
+  assert.equal(live.writes, writes + 1, 'one items write, not two');
+  assert.ok(isGrey(live.items.get('a').color), 'the batch row is grey');
+  assert.ok(
+    isGrey(live.items.get('b').color),
+    'the row left out of the batch is grey too',
+  );
+
+  modes.set('flights', MODE_LIVE);
+  const back = live.writes;
+  icons.upsert([{ id: 'b', color: RED }]);
+  assert.equal(live.writes, back + 1, 'one items write, not two');
+  assert.deepEqual(live.items.get('a').color, RED, 'live again for every row');
+  assert.deepEqual(live.items.get('b').color, RED);
+});
+
+test('a repaint never replays rows the columns no longer name', () => {
+  const modes = new Map([['flights', MODE_LIVE]]);
+  const raw = fakeDrawPort();
+  const base = raw.icons;
+  raw.icons = (spec) => {
+    const set = base(spec);
+    const rec = raw.sets.get(spec.id);
+    // This port's columns own its rows: the latest columns are the rows.
+    set.setColumns = (cols) => {
+      const ids = new Set(cols?.ids ?? []);
+      for (const id of [...rec.items.keys()])
+        if (!ids.has(id)) rec.items.delete(id);
+    };
+    return set;
+  };
+  const port = greyDrawPort(raw);
+  const control = greyControlOf(port);
+  control.setModeOf((id) => modes.get(id) ?? MODE_LIVE);
+  const set = port.icons({ id: 'flights-icons:11' });
+  set.set([
+    { id: 'a', color: RED },
+    { id: 'b', color: RED },
+  ]);
+  // the layer drops 'b' by rewriting the columns to its live rows only
+  set.setColumns({ ids: ['a'], colors: new Uint8Array([255, 0, 0, 255]) });
+  const record = raw.sets.get('flights-icons:11');
+  assert.equal(record.items.has('b'), false, 'the layer dropped b');
+
+  modes.set('flights', MODE_GREY);
+  control.changed();
+  assert.equal(
+    record.items.has('b'),
+    false,
+    'a grey repaint must not replay a row the columns dropped',
+  );
+  assert.ok(isGrey(record.items.get('a').color), 'the live row is grey');
+});
+
 test('hiddenSets counts the sets hidden now, and a hidden set disposal leaves it', () => {
   const { port, control, modes } = setup();
   const first = port.points({ id: 'satellites:1:points' });
@@ -458,7 +527,11 @@ test('releasing a draw port unpublishes only its own control', () => {
 
   // the renderer's own raw port releases the same control
   releaseGreyDrawPort(raw);
-  assert.equal(greyDrawControl(), secondControl, 'the newer port is not that one');
+  assert.equal(
+    greyDrawControl(),
+    secondControl,
+    'the newer port is not that one',
+  );
 
   releaseGreyDrawPort(second);
   assert.equal(greyDrawControl(), null, 'the latest renderer is unpublished');

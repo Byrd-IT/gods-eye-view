@@ -274,19 +274,24 @@ export function greyDrawPort(draw, { layers = GREY_SET_LAYERS, report } = {}) {
       get hidden() {
         return state.hidden;
       },
-      /** Bring the drawn set in line with the layer's mode. */
+      /**
+       * Bring the drawn set in line with the layer's mode.
+       * @returns {boolean} Whether the mode flipped (the caller's own write
+       *   must then cover every row, not just its batch).
+       */
       repaint({ writeItems = true, writeColumns = true } = {}) {
         const next = desired();
         if (next.hidden !== state.hidden) {
           state = { ...state, hidden: next.hidden };
           set.show = next.hidden ? false : ownShow;
         }
-        if (next.grey === state.grey) return;
+        if (next.grey === state.grey) return false;
         state = { ...state, grey: next.grey };
         stats.repaints += 1;
         if (writeColumns && columns && set.setColumns)
           set.setColumns(drawnColumns(columns));
         if (writeItems && items.size) set.set([...items.values()].map(drawn));
+        return true;
       },
     };
 
@@ -304,7 +309,14 @@ export function greyDrawPort(draw, { layers = GREY_SET_LAYERS, report } = {}) {
       },
       upsert(list) {
         for (const item of list) items.set(item.id, item);
-        record.repaint({ writeItems: false });
+        // An upsert reaches only its own ids: on a mode flip the rows this
+        // set already holds would stay in the old mode. Write them all once
+        // (this batch is in the cache too), so no row is left behind and no
+        // row is written twice.
+        if (record.repaint({ writeItems: false }) && items.size) {
+          set.set([...items.values()].map(drawn));
+          return;
+        }
         set.upsert(state.grey ? list.map(drawn) : list);
       },
       remove(ids) {
@@ -336,9 +348,14 @@ export function greyDrawPort(draw, { layers = GREY_SET_LAYERS, report } = {}) {
     };
     if (typeof set.setColumns === 'function')
       wrapped.setColumns = (cols) => {
-        // An empty column set is a clear. Drop the item cache too, so a later
-        // grey/live repaint cannot replay rows the layer has cleared.
-        if (Array.isArray(cols?.ids) && cols.ids.length === 0) items.clear();
+        // The columns are the set's rows: cached items for rows they no
+        // longer name are dropped (an empty column set is a clear), so a
+        // later grey/live repaint cannot replay a row the layer dropped.
+        if (Array.isArray(cols?.ids)) {
+          const ids = new Set(cols.ids);
+          for (const id of [...items.keys()])
+            if (!ids.has(id)) items.delete(id);
+        }
         columns = cols;
         // repaint only brings the items along when the mode changed; the
         // caller's columns are written once, below.

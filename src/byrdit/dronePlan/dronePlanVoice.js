@@ -11,6 +11,8 @@ import {
   MAX_ORBIT_TARGETS,
   MAX_WAYPOINTS_PER_MISSION,
   MIN_WAYPOINTS_PER_MISSION,
+  PATTERNS,
+  PHOTO_MODES,
   cleanMinPhotoIntervalS,
   cleanTimedIntervalS,
 } from './planner.js';
@@ -79,6 +81,13 @@ const RING_MODES = ['angles', 'heights'];
 const ORBIT_TARGET_HEIGHT_MAX_M = 60;
 const OBSTACLE_HEIGHT_MAX_M = 60;
 const SURFACE_STATUS = ['idle', 'loading', 'ready', 'none', 'signin', 'error'];
+/** Options that never change the plan: the export file, or a file label. */
+const PLAN_FREE_OPTIONS = new Set([
+  'exportCompact',
+  'droneEnumValue',
+  'clearDroneCode',
+]);
+const JOBS = ['per-area', 'whole'];
 const ORBIT_TARGET_ID = /^(?:target|rec)-\d{1,3}$/;
 const PATH_ID = /^path-\d{1,3}$/;
 const OBSTACLE_ID = /^[A-Za-z0-9._:-]{1,60}$/;
@@ -258,30 +267,39 @@ export function createDronePlanVoice(handle) {
     const preset = getPreset(options.presetId);
     const result = state.result;
     const kmz = kmzStatus(preset, state.wpml?.droneEnumValue ?? null);
+    // Read back only what the panel's own controls could have written: a
+    // stored string is passed through none of these fields.
+    const speedMs = finite(options.speedMs, MIN_PLAN_SPEED_MS, SPEED_MAX_MS)
+      ? options.speedMs
+      : null;
     return {
       ok: true,
       open: handle.isOpen?.() === true,
       aircraft: preset?.name ?? null,
       presetId: preset?.id ?? null,
       mode: modeFor(options),
-      pattern: options.pattern ?? null,
-      aglM: options.aglM ?? null,
-      frontOverlap: options.frontOverlap ?? null,
-      sideOverlap: options.sideOverlap ?? null,
-      speedMs: options.speedMs ?? null,
+      pattern: PATTERNS.includes(options.pattern) ? options.pattern : null,
+      aglM: finite(options.aglM, MIN_AGL_M, AGL_CAP_M) ? options.aglM : null,
+      frontOverlap: finite(options.frontOverlap, 50, 98)
+        ? options.frontOverlap
+        : null,
+      sideOverlap: finite(options.sideOverlap, 40, 95)
+        ? options.sideOverlap
+        : null,
+      speedMs,
       // The same speed in miles per hour, one decimal: the unit a pilot reads.
       speedMph:
-        typeof options.speedMs === 'number' && Number.isFinite(options.speedMs)
-          ? Math.round(options.speedMs * MPH_PER_MS * 10) / 10
-          : null,
+        speedMs == null ? null : Math.round(speedMs * MPH_PER_MS * 10) / 10,
       // The trigger and, for Timed shot, the interval (seconds) the person
       // will set in DJI Fly. Null: none chosen. Not the camera minimum.
       captureMode: ['distance', 'timed'].includes(options.captureMode)
         ? options.captureMode
         : 'stop',
-      timedIntervalS: options.timedIntervalS ?? null,
-      photoMode: options.photoMode ?? null,
-      jobs: state.jobGrouping ?? null,
+      timedIntervalS: cleanTimedIntervalS(options.timedIntervalS),
+      photoMode: PHOTO_MODES.includes(options.photoMode)
+        ? options.photoMode
+        : null,
+      jobs: JOBS.includes(state.jobGrouping) ? state.jobGrouping : null,
       // The settable fields the panel shows but status used to leave out, in
       // the panel's own units. Each is validated, never echoed as given.
       direction: DIRECTIONS.includes(options.direction)
@@ -491,7 +509,13 @@ export function createDronePlanVoice(handle) {
         if (!Object.keys(next.patch).length)
           return fail('options needs a panel control to set');
         ensureOpen();
-        if (handle.applyOptions(next.patch, { planNow: true }) !== true) {
+        // The compact export and the drone code are not plan inputs: the
+        // panel only writes them down, so a new plan would be wasted work and
+        // its numbers claimed as a change nobody asked for.
+        const needsPlan = Object.keys(next.patch).some(
+          (key) => !PLAN_FREE_OPTIONS.has(key),
+        );
+        if (handle.applyOptions(next.patch, { planNow: needsPlan }) !== true) {
           // The only change the panel can refuse after readOptions accepted
           // it is a camera preset its own list does not hold (a panel built
           // from a different catalog). "No aircraft matched" was a guess.
@@ -501,7 +525,7 @@ export function createDronePlanVoice(handle) {
               : 'The panel did not accept those options',
           );
         }
-        await handle.replan();
+        if (needsPlan) await handle.replan();
         return summary();
       });
     },

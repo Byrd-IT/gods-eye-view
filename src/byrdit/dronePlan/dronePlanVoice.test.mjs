@@ -72,6 +72,9 @@ function fakeHandle(over = {}) {
       calls.push(['applyOptions', patch, opts]);
       if (patch.presetId) state.options.presetId = patch.presetId;
       if (patch.aglM != null) state.options.aglM = patch.aglM;
+      // The panel keeps the compact export beside its options, not in them.
+      if (Object.hasOwn(patch, 'exportCompact'))
+        state.exportCompact = patch.exportCompact === true;
       return true;
     },
     clearTakeoff() {
@@ -386,6 +389,114 @@ test('options reports the plan after replan, not the counts from before', async 
   assert.equal(result.plan.photoCount, 40);
   assert.equal(result.dirty, false);
   assert.equal(result.plan.missionCount, 2);
+});
+
+test('options that only affect the export or a file label do not replan', async () => {
+  const { handle, calls } = panelHandle();
+  const voice = createDronePlanVoice(handle);
+  const compact = await voice.options({ exportCompact: true });
+  assert.equal(compact.ok, true);
+  assert.equal(compact.exportCompact, true);
+  assert.equal(
+    calls.some((call) => call[0] === 'replan'),
+    false,
+    'no plan was asked for',
+  );
+  assert.deepEqual(
+    calls.filter((call) => call[0] === 'applyOptions').at(-1)[2],
+    { planNow: false },
+    'the panel was told not to plan',
+  );
+  // The drone code is written into the file, not flown: same rule.
+  const code = await voice.options({ droneEnumValue: 68 });
+  assert.equal(code.ok, true);
+  assert.equal(calls.some((call) => call[0] === 'replan'), false, 'still none');
+  // A control the plan depends on still replans, alone or beside the export.
+  const planned = await voice.options({ aglM: 90 });
+  assert.equal(planned.ok, true);
+  assert.equal(calls.filter((call) => call[0] === 'replan').length, 1);
+  assert.deepEqual(
+    calls.filter((call) => call[0] === 'applyOptions').at(-1)[2],
+    { planNow: true },
+  );
+  const mixed = await voice.options({ exportCompact: false, sideOverlap: 60 });
+  assert.equal(mixed.ok, true);
+  assert.equal(
+    calls.filter((call) => call[0] === 'replan').length,
+    2,
+    'the export flag never suppresses the plan it rides with',
+  );
+  assert.deepEqual(
+    calls.filter((call) => call[0] === 'applyOptions').at(-1)[2],
+    { planNow: true },
+  );
+});
+
+test('status echoes no stored string from any option or state field', async () => {
+  // A stored credential-shaped string in a field the panel would have written
+  // as a number or from a fixed list: the read-back must drop it, never
+  // repeat it verbatim, encoded or trimmed.
+  const SECRET = 'sk-ant-api03-AbCdEf0123456789GhIjKlMnOpQrStUvWxYz';
+  const { handle, state } = panelHandle();
+  Object.assign(state.options, {
+    pattern: SECRET,
+    photoMode: SECRET,
+    aglM: SECRET,
+    frontOverlap: SECRET,
+    sideOverlap: SECRET,
+    speedMs: SECRET,
+    timedIntervalS: SECRET,
+    direction: SECRET,
+    orbitRingMode: SECRET,
+  });
+  state.jobGrouping = SECRET;
+  const voice = createDronePlanVoice(handle);
+  const summary = await voice.status();
+  assert.equal(summary.ok, true);
+  for (const key of [
+    'pattern',
+    'photoMode',
+    'aglM',
+    'frontOverlap',
+    'sideOverlap',
+    'speedMs',
+    'speedMph',
+    'timedIntervalS',
+    'direction',
+    'orbitRingMode',
+    'jobs',
+  ])
+    assert.equal(summary[key], null, key);
+  const text = JSON.stringify(await voice.replan());
+  assert.equal(text.includes(SECRET), false, 'replan summary');
+  assert.equal(text.includes(encodeURIComponent(SECRET)), false);
+  assert.equal(text.includes(SECRET.slice(0, 8)), false);
+  assert.equal(text.includes(SECRET.slice(-6)), false);
+  // The same fields read back when they hold what the panel writes.
+  Object.assign(state.options, {
+    pattern: 'orbit',
+    photoMode: 'interval',
+    aglM: 80,
+    frontOverlap: 75,
+    sideOverlap: 65,
+    speedMs: 4,
+    timedIntervalS: 2,
+    direction: 'ns',
+    orbitRingMode: 'angles',
+  });
+  state.jobGrouping = 'whole';
+  const good = await voice.status();
+  assert.equal(good.pattern, 'orbit');
+  assert.equal(good.photoMode, 'interval');
+  assert.equal(good.aglM, 80);
+  assert.equal(good.frontOverlap, 75);
+  assert.equal(good.sideOverlap, 65);
+  assert.equal(good.speedMs, 4);
+  assert.equal(good.speedMph, 8.9);
+  assert.equal(good.timedIntervalS, 2);
+  assert.equal(good.direction, 'ns');
+  assert.equal(good.orbitRingMode, 'angles');
+  assert.equal(good.jobs, 'whole');
 });
 
 test('status reports the panel plan error, not a field the plan never sets', async () => {

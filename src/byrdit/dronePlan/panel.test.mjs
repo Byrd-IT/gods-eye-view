@@ -7113,3 +7113,78 @@ test('voice: a refused ring is not reported as finished, and a rect has no corne
   assert.equal(JSON.stringify(w.handle.getState().areas[0].box), before);
   w.handle.destroy();
 });
+
+test('voice: angles replace fixed heights, and the plan flies the angles', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(300, 200));
+  pick(w, 'Mode', 'splat-orbit');
+  w.handle.applyOptions(
+    { orbitHeightsM: [30, 60], orbitRingMode: 'heights' },
+    { planNow: true },
+  );
+  await w.handle.replan();
+  const before = w.handle.getResult().plan.orbit;
+  assert.equal(before.ringMode, 'heights');
+  assert.deepEqual(
+    before.rings.map((ring) => ring.aglM),
+    [30, 60],
+    'the typed heights are what flew',
+  );
+
+  const voice = createDronePlanVoice(w.handle);
+  // Voice sends the angles only: no mode, no heights. The panel has to make
+  // them the ring definition, or the old heights would keep flying.
+  const applied = await voice.options({ orbitAnglesDeg: [25, 40] });
+  assert.equal(applied.ok, true);
+  const options = w.handle.getState().options;
+  assert.equal(options.orbitRingMode, 'angles', 'the mode follows the angles');
+  assert.deepEqual(options.orbitAnglesDeg, [25, 40]);
+  const orbit = w.handle.getResult().plan.orbit;
+  assert.equal(orbit.ringMode, 'angles');
+  assert.deepEqual(
+    orbit.rings.map((ring) => ring.angleDeg),
+    [25, 40],
+    'the planner flew the angles it was given',
+  );
+  assert.deepEqual(applied.orbitAnglesDeg, [25, 40]);
+  assert.equal(
+    JSON.stringify(orbit.rings.map((ring) => ring.aglM)) ===
+      JSON.stringify([30, 60]),
+    false,
+    'and not the heights they replaced',
+  );
+
+  // The reverse still holds: fixed heights are the definition again.
+  const heights = await voice.options({ orbitHeightsM: [50] });
+  assert.equal(heights.ok, true);
+  assert.equal(w.handle.getState().options.orbitRingMode, 'heights');
+  assert.equal(w.handle.getResult().plan.orbit.ringMode, 'heights');
+  w.handle.destroy();
+});
+
+test('voice: the compact export does not replan the mission it only writes', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(400, 200));
+  await w.handle.replan();
+  const runs = [];
+  const realReplan = w.handle.replan.bind(w.handle);
+  w.handle.replan = (...args) => {
+    runs.push(args);
+    return realReplan(...args);
+  };
+  const voice = createDronePlanVoice(w.handle);
+  const before = w.handle.getResult();
+  const compact = await voice.options({ exportCompact: true });
+  assert.equal(compact.ok, true);
+  assert.equal(compact.exportCompact, true);
+  assert.equal(runs.length, 0, 'the export flag alone planned nothing');
+  assert.equal(w.handle.getResult(), before, 'the same plan result');
+
+  // A control the plan depends on still plans, and its numbers are the new.
+  const planned = await voice.options({ aglM: 90 });
+  assert.equal(planned.ok, true);
+  assert.equal(runs.length, 1);
+  assert.notEqual(w.handle.getResult(), before);
+  assert.equal(w.handle.getState().options.aglM, 90);
+  w.handle.destroy();
+});

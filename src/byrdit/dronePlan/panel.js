@@ -7030,13 +7030,29 @@ export function initDronePlan({
         o.orbitRingMode = patch.orbitHeightsM?.length ? 'heights' : 'angles';
       plan = true;
     }
-    for (const key of [
-      'orbitRingMode',
-      'orbitAnglesDeg',
-      'orbitOutward',
-      'orbitOutwardPitchDeg',
-      'lookAtPaths',
-    ]) {
+    // Typed angles are the ring definition, exactly as the angles field is:
+    // leaving fixed heights in place would keep the planner in heights mode
+    // and silently ignore the angles just asked for.
+    if (Object.hasOwn(patch, 'orbitAnglesDeg')) {
+      o.orbitAnglesDeg = patch.orbitAnglesDeg;
+      if (!Object.hasOwn(patch, 'orbitRingMode')) {
+        o.orbitRingMode = 'angles';
+        o.orbitHeightsM = null;
+      }
+      plan = true;
+    }
+    // The mode alone (an old caller, a saved plan): angles and heights never
+    // both stand as the definition, so an angle mode drops stale heights.
+    if (Object.hasOwn(patch, 'orbitRingMode')) {
+      o.orbitRingMode = patch.orbitRingMode;
+      if (
+        o.orbitRingMode === 'angles' &&
+        !Object.hasOwn(patch, 'orbitHeightsM')
+      )
+        o.orbitHeightsM = null;
+      plan = true;
+    }
+    for (const key of ['orbitOutward', 'orbitOutwardPitchDeg', 'lookAtPaths']) {
       if (Object.hasOwn(patch, key)) {
         o[key] = patch[key];
         plan = true;
