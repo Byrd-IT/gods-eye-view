@@ -31,6 +31,7 @@ test('clean view hides every fork map control with visibility, never display', (
     '.gev-nav',
     '.gev-sky-btn',
     '.gev-sky-panel',
+    '#sky-view-panel',
   ]);
   assert.match(m[2], /visibility: hidden !important/);
   assert.match(m[2], /pointer-events: none !important/);

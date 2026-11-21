@@ -243,9 +243,13 @@ export function planLook(look, action, stepDeg = LOOK_STEP_DEG) {
   else if (action === 'look-right') heading = normalizeHeading(heading + step);
   else if (action === 'look-up') pitch += step;
   else if (action === 'look-down') pitch -= step;
+  // The pad looks at most LOOK_MAX_PITCH up, but never pulls a gaze the tilt
+  // slider already raised past it (up to straight up) down to that cap.
+  const start = Number.isFinite(look.pitch) ? look.pitch : TOP_DOWN_PITCH;
+  const max = Math.min(LOOK_UP_PITCH, Math.max(LOOK_MAX_PITCH, start));
   return {
     heading,
-    pitch: Math.min(LOOK_MAX_PITCH, Math.max(TOP_DOWN_PITCH, pitch)),
+    pitch: Math.min(max, Math.max(TOP_DOWN_PITCH, pitch)),
   };
 }
 

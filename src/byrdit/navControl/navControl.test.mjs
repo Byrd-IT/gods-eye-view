@@ -669,6 +669,25 @@ test('a slider drag or key press after a button press is a new gesture and may t
   assert.equal(toasts.length, 3);
 });
 
+test('rotating and looking around while looking up keep the raised gaze', () => {
+  const { button, viewer, settle } = setup({
+    view: { pitch: -45, range: 2_000 },
+  });
+  const slider = button('tilt-slider');
+  slider.value = '159'; // 70 degrees above the horizon
+  slider.fire('input');
+  const at = Cesium.Cartesian3.clone(viewer.camera.positionWC);
+  const heading = viewer.camera.heading;
+  button('ring').fire('keydown', { key: 'ArrowLeft' });
+  settle(1_000);
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 70) < 0.1);
+  assert.ok(Cesium.Cartesian3.distance(at, viewer.camera.positionWC) < 1e-3);
+  assert.notEqual(viewer.camera.heading, heading);
+  button('look-down').fire('click', { detail: 0 });
+  assert.ok(Math.abs(Cesium.Math.toDegrees(viewer.camera.pitch) - 67) < 0.1);
+  assert.ok(Cesium.Cartesian3.distance(at, viewer.camera.positionWC) < 1e-3);
+});
+
 test('looking up after the camera was moved clears a stale terrain-limit title', () => {
   const { button, viewer, handle } = setup({
     viewer: { sampleHeight: () => 168 },

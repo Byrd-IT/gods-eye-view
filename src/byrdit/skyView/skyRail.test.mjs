@@ -82,6 +82,10 @@ test('the card hides its body while collapsed; the panel flows in the card', () 
 
 test('clean view and Sky mode hide the whole right rail, the SKY card with it', () => {
   assert.match(
+    read('src/byrdit/cleanView/cleanView.css'),
+    /body\.ui-clean-view\s*:is\([^)]*#sky-view-panel[^)]*\)/,
+  );
+  assert.match(
     read('src/ui/styles/layers.css'),
     /body\.ui-clean-view #right-context-rail > \[data-panel-id\]/,
   );

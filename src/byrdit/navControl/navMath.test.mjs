@@ -283,6 +283,12 @@ test('look around turns the gaze in place and clamps the pitch', () => {
     planLook({ heading: 0, pitch: Number.NaN }, 'look-up').pitch,
     TOP_DOWN_PITCH + 3 * DEG,
   );
+  // A gaze the tilt slider raised past the pad's cap stays there: look-down
+  // steps from it, look-up and look-left keep it, nothing passes straight up.
+  near(planLook({ heading: 0, pitch: 90 * DEG }, 'look-down').pitch, 87 * DEG);
+  near(planLook({ heading: 0, pitch: 60 * DEG }, 'look-left').pitch, 60 * DEG);
+  near(planLook({ heading: 0, pitch: 60 * DEG }, 'look-up').pitch, 60 * DEG);
+  near(planLook({ heading: 0, pitch: 89 * DEG }, 'look-up').pitch, 89 * DEG);
 });
 
 test('ease runs 0 to 1 monotonically and clamps its input', () => {

@@ -615,6 +615,21 @@ export function mountNavControl({
       const anchored =
         action === 'top-down' || action === 'north' ? validAnchor() : null;
       if (action === 'top-down' || action === 'north') clearAnchor();
+      // Rotating while looking up turns the view in place and keeps the
+      // raised gaze; an orbit step would pull the pitch back to the horizon.
+      if (
+        (action === 'rotate-left' || action === 'rotate-right') &&
+        (validAnchor() || looksUp())
+      ) {
+        if (viewer.trackedEntity) return false;
+        animator.cancel();
+        const pitch = camera.pitch;
+        const next = planAction(
+          { heading: camera.heading, pitch, range: 1_000 },
+          action,
+        );
+        return lookInPlace(next.heading, pitch);
+      }
       if (LOOK_ACTIONS.has(action)) {
         if (viewer.trackedEntity) return false;
         animator.cancel();
