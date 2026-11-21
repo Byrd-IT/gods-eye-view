@@ -5,6 +5,22 @@ import { rankGaps } from './gaps.js';
 import { modelLatLon } from './coordinates.js';
 import { beginScreenSelection } from './screenSelection.js';
 
+/** Coverage dates arrive as ISO (2026-11-17) or compact (20261117). */
+function compactDate(value) {
+  const match = /^(\d{4})-?(\d{2})-?(\d{2})/.exec(String(value ?? '').trim());
+  return match ? `${match[1]}${match[2]}${match[3]}` : '';
+}
+/** Read the first numeric field the coverage schema provides. */
+function photoNumber(photo, keys) {
+  for (const key of keys) {
+    const value = photo?.[key];
+    if (value === null || value === undefined || value === '') continue;
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return NaN;
+}
+
 /** Small Map Layers card section. No request is made until explicitly enabled. */
 export function attachCoveragePanel({
   Cesium,
@@ -225,18 +241,24 @@ export function attachCoveragePanel({
       maxH = maxHeight.value === '' ? Infinity : Number(maxHeight.value),
       minP = minPitch.value === '' ? -Infinity : Number(minPitch.value),
       maxP = maxPitch.value === '' ? Infinity : Number(maxPitch.value),
-      date = filterDate.value.replaceAll('-', '');
+      date = compactDate(filterDate.value);
     return new Set(
       s.photos
-        .filter(
-          (p) =>
-            (!date || p.flight_date === date) &&
+        .filter((p) => {
+          const height = photoNumber(p, ['height_ft']);
+          const gimbal = photoNumber(p, ['gimbal_pitch']);
+          const pitch = Number.isFinite(gimbal)
+            ? gimbal
+            : -photoNumber(p, ['pitch_deg']);
+          return (
+            (!date || compactDate(p.flight_date) === date) &&
             (!flagged.checked || p.flags?.length) &&
-            (!Number.isFinite(minH) || p.height_ft >= minH) &&
-            (!Number.isFinite(maxH) || p.height_ft <= maxH) &&
-            (!Number.isFinite(minP) || p.pitch_deg >= minP) &&
-            (!Number.isFinite(maxP) || p.pitch_deg <= maxP),
-        )
+            (!Number.isFinite(minH) || height >= minH) &&
+            (!Number.isFinite(maxH) || height <= maxH) &&
+            (!Number.isFinite(minP) || pitch >= minP) &&
+            (!Number.isFinite(maxP) || pitch <= maxP)
+          );
+        })
         .map((p) => p.name),
     );
   }

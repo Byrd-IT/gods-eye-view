@@ -72,3 +72,56 @@ test('solid tall wall occludes ground even when camera begins outside the grid',
   const noWall = { ...state, cells: { ...grid, z: k.map(() => 0) } };
   assert(footprintMask(noWall, 0).some((i) => i % nx > 3));
 });
+
+test('a rising ray is blocked at its lowest point inside a wall', () => {
+  const nx = 6,
+    ny = 4;
+  const k = Array.from({ length: nx * ny }, (_, i) => i);
+  // The wall tops out between the ray's entry and exit heights, so only the
+  // minimum height inside the column (the entry, for a rising ray) is blocked.
+  const grid = {
+    nx,
+    ny,
+    x0: 0,
+    y0: 0,
+    cell_m: 1,
+    k,
+    z: k.map((i) => (i % nx === 3 ? 7 : i % nx === 5 ? 10 : 0)),
+  };
+  const rising = {
+    ...photo,
+    x: -1.5,
+    y: 1.5,
+    z: 1,
+    fwd: [Math.SQRT1_2, 0, Math.SQRT1_2],
+    down: [Math.SQRT1_2, 0, -Math.SQRT1_2],
+    hfov: 120,
+    vfov: 120,
+  };
+  const state = { cells: grid, meta: { ground_z: 0 }, photos: [rising] };
+  assert(!footprintMask(state, 0).some((i) => i % nx === 5));
+  const noWall = {
+    ...state,
+    cells: { ...grid, z: k.map((i) => (i % nx === 5 ? 10 : 0)) },
+  };
+  assert.equal(
+    footprintMask(noWall, 0).filter((i) => i % nx === 5).length,
+    ny,
+  );
+});
+
+test('missing cells.z fails closed instead of throwing', () => {
+  const withoutZ = {
+    cells: { nx: 3, ny: 3, x0: 0, y0: 0, cell_m: 1, k: cells.k },
+    photos: [photo],
+    meta: { ground_z: 0 },
+  };
+  assert.deepEqual(footprintMask(withoutZ, 0), []);
+  assert.deepEqual(
+    footprintMask(
+      { ...withoutZ, cells: { ...withoutZ.cells, z: undefined } },
+      0,
+    ),
+    [],
+  );
+});

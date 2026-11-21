@@ -32,7 +32,6 @@ function losBlocked(T, p, tx, ty, tz) {
   const dist = Math.hypot(dx, dy);
   if (!(dist > 1e-9)) return false;
   const dzPer = (tz - p.z) / dist; // ray z change per horizontal metre
-  if (!(dzPer < 0)) return false; // only a descending ray can dive into a column
   const cm = T.cm,
     nx = T.nx,
     ny = T.ny;
@@ -82,8 +81,11 @@ function losBlocked(T, p, tx, ty, tz) {
         const present = T.present[k],
           h = present ? T.zh[k] : T.ground;
         if (Number.isFinite(h)) {
-          const exitHeight = p.z + dzPer * (sNext - LOS_MARGIN_M);
-          if (exitHeight <= h) return true;
+          // A linear ray is lowest at its entry when rising and at its exit
+          // when descending; compare that minimum with the solid column.
+          const entry = p.z + dzPer * (s + LOS_MARGIN_M);
+          const exit = p.z + dzPer * (sNext - LOS_MARGIN_M);
+          if (Math.min(entry, exit) <= h) return true;
         }
       }
     }
@@ -193,8 +195,36 @@ function bigComponents(ks, nx, ny, min = FP_MIN_COMP) {
   return big.length ? big : null;
 }
 
+function maskable(C, photos, index, ground) {
+  return (
+    C &&
+    Number.isInteger(C.nx) &&
+    C.nx > 0 &&
+    Number.isInteger(C.ny) &&
+    C.ny > 0 &&
+    Number.isFinite(C.cell_m) &&
+    C.cell_m > 0 &&
+    Number.isFinite(C.x0) &&
+    Number.isFinite(C.y0) &&
+    Array.isArray(C.k) &&
+    Array.isArray(C.z) &&
+    C.k.length === C.z.length &&
+    Array.isArray(photos) &&
+    Number.isInteger(index) &&
+    index >= 0 &&
+    index < photos.length &&
+    Number.isFinite(ground)
+  );
+}
+
 export function footprintMask(state, index) {
-  const cov = { C: state.cells, P: state.photos, ground: state.meta.ground_z };
+  const C = state?.cells,
+    photos = state?.photos,
+    ground = state?.meta?.ground_z;
+  // Without matching terrain heights no cell can be proven visible. Fail
+  // closed (no footprint) rather than throwing while footprints are enabled.
+  if (!maskable(C, photos, index, ground)) return [];
+  const cov = { C, P: photos, ground };
   const table = losTables(cov),
     m = maskOf(cov, index, table);
   if (!m) return [];

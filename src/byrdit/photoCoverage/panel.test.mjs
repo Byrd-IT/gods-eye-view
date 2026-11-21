@@ -100,3 +100,108 @@ test('no fetch before opt-in; photo selection, discard, and teardown', async () 
   detach();
   assert.equal(root.children.length, 0);
 });
+test('pitch and date filters read the coverage photo schema', async () => {
+  const doc = fakeDocument(),
+    root = doc.createElement('div');
+  const rows = [
+    {
+      name: 'iso.jpg',
+      placed: true,
+      looks_at_ground: true,
+      x: 0,
+      y: 0,
+      gimbal_pitch: -45,
+      flight_date: '2026-11-17',
+    },
+    {
+      name: 'compact.jpg',
+      placed: true,
+      looks_at_ground: true,
+      x: 0,
+      y: 0,
+      gimbal_pitch: -20,
+      flight_date: '20261118',
+    },
+    {
+      name: 'legacy.jpg',
+      placed: true,
+      looks_at_ground: true,
+      x: 0,
+      y: 0,
+      pitch_deg: 70,
+      flight_date: '2026-11-19',
+    },
+    {
+      name: 'nodate.jpg',
+      placed: true,
+      looks_at_ground: true,
+      x: 0,
+      y: 0,
+      gimbal_pitch: -60,
+    },
+  ];
+  const photoCells = { ...cells, photos: [[0, 1, 2, 3]] };
+  const fetchImpl = async (url) => {
+    if (url.endsWith('/model.json'))
+      return ok({ id: model, origin: { lat: 0, lon: 0 }, ground_z: 0 });
+    if (url.endsWith('/photos.json')) return ok({ model, photos: rows });
+    if (url.endsWith('/cells.json')) return ok(photoCells);
+    return ok([]);
+  };
+  let visible = null;
+  const createLayer = async (x) => {
+    visible = x.state.visibleNames;
+    return { destroy() {} };
+  };
+  const detach = attachCoveragePanel({
+    doc,
+    container: root,
+    viewer: {},
+    Cesium: {},
+    fetchImpl,
+    createLayer,
+  });
+  root.find((n) => n.textContent === 'Show photo coverage').onclick();
+  await tick();
+  await tick();
+  assert.deepEqual([...visible], ['iso.jpg', 'compact.jpg', 'legacy.jpg', 'nodate.jpg']);
+  const date = root.find((n) => n.getAttribute('aria-label') === 'Flight date');
+  date.value = '2026-11-17';
+  date.onchange();
+  await tick();
+  assert.deepEqual([...visible], ['iso.jpg']);
+  date.value = '20261117';
+  date.onchange();
+  await tick();
+  assert.deepEqual([...visible], ['iso.jpg']);
+  date.value = '2026-11-18';
+  date.onchange();
+  await tick();
+  assert.deepEqual([...visible], ['compact.jpg']);
+  date.value = '20261118';
+  date.onchange();
+  await tick();
+  assert.deepEqual([...visible], ['compact.jpg']);
+  date.value = '';
+  date.onchange();
+  await tick();
+  const minPitch = root.find(
+    (n) => n.getAttribute('aria-label') === 'Minimum pitch in degrees',
+  );
+  const maxPitch = root.find(
+    (n) => n.getAttribute('aria-label') === 'Maximum pitch in degrees',
+  );
+  minPitch.value = '-50';
+  maxPitch.value = '-40';
+  minPitch.onchange();
+  maxPitch.onchange();
+  await tick();
+  assert.deepEqual([...visible], ['iso.jpg']);
+  minPitch.value = '-80';
+  maxPitch.value = '-65';
+  minPitch.onchange();
+  maxPitch.onchange();
+  await tick();
+  assert.deepEqual([...visible], ['legacy.jpg']);
+  detach();
+});

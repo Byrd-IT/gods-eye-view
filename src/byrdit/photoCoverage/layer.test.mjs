@@ -183,6 +183,17 @@ test('terrain failure removes all partially created resources', async () => {
   assert.equal(h.primitives.length, 0);
   assert.equal(h.dataSources.length, 0);
 });
+test('footprints without terrain heights fail closed without rejecting the layer', async () => {
+  const h = harness();
+  const layer = await createCoverageLayer({
+    Cesium: h.C,
+    viewer: h.viewer,
+    state: { ...state, footprintNames: ['p.jpg'] },
+  });
+  assert.equal(h.primitives.length, 1);
+  assert.equal(h.primitives[0].items.length, 1);
+  layer.destroy();
+});
 test('all cameras share the single terrain anchor at model origin', async () => {
   const h = harness();
   let sampled;
