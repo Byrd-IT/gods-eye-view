@@ -1163,10 +1163,14 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // check/surface/orbit/waypoint options they set.
   // Re-pinned for the control_droneplan prompt compaction (47434 -> 46780,
   // -654): descriptions only; every property, action and enum is unchanged.
-  assert.equal(block.length, 46780, 'serialized tool schema length drifted');
+  // Re-pinned for the drone plan bound repair (46780 -> 46767, -13): the ring
+  // description gained 14 chars (three-or-more corners, two-or-more aim
+  // points), ring maxItems 64 was dropped (-14) and index lost maximum 59
+  // (-13). Same tools, same ordering.
+  assert.equal(block.length, 46767, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '0a7791be3d4e0831051bebea4b1a36e413469f45e970ac05f090d77c0b419b6a',
+    '11e469830c93f56e3f10bea0d78b0e3da4060ec690d2736f62bacfeeb64611e4',
     'serialized legacy-filtered tool schema drifted',
   );
   const instructions = fs.readFileSync(

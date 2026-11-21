@@ -3944,6 +3944,24 @@ test('check and surface: a mixed patch is refused whole, and one voice request l
   w.handle.destroy();
 });
 
+test('the 3D check steps to any photo the plan has, not a fixed 59', async () => {
+  const w = setup();
+  w.handle.setBox(boxM(2000, 2000));
+  w.handle.setCheck({ enabled: true });
+  await w.handle.replan();
+  const info = w.handle.checkInfo();
+  assert.ok(info.count > 60, `photo count ${info.count}`);
+  // The stepper's real limit is the number of photos that exist: index 60 is
+  // a photo on a plan with more than sixty, so the panel accepts it.
+  assert.equal(w.handle.setCheck({ index: 60 }), true);
+  assert.equal(w.handle.checkInfo().index, 60);
+  // One past the last photo would be clamped by the check layer, so the
+  // panel refuses it and keeps showing the photo it was already on.
+  assert.equal(w.handle.setCheck({ index: info.count }), false);
+  assert.equal(w.handle.checkInfo().index, 60);
+  w.handle.destroy();
+});
+
 test('surface model: no model, no sign-in or a failed read falls back to the tree height and says so', async () => {
   for (const client of [
     { list: async () => [], load: async () => null },

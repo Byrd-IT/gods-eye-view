@@ -892,7 +892,7 @@ export const ACTION_DESCRIPTIONS = {
         },
         ring: {
           description:
-            'polygon: 3 to 64 corners as lon/lat, in order. For path: the camera aim points, in order.',
+            'polygon: three or more corners as lon/lat, in order. For path: two or more camera aim points, in order.',
           $position: 1,
         },
         aircraft: {

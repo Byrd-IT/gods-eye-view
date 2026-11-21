@@ -146,7 +146,11 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // Re-pinned for the control_droneplan prompt compaction: the same actions
     // and arguments, with each description cut to its concise meaning so the
     // Realtime prompt grows as little as the tool allows.
-    '3d2944977aa035b791556f82b07b33de04513b9679c4256a483350620239f96e',
+    // Re-pinned for the drone plan bound repair: ring minItems 2 with no
+    // maxItems (a path is two points, a polygon any count from three up, and
+    // the panel's drawing tool has no corner ceiling), index with no maximum
+    // (the list's own length bounds it), and the ring description reworded.
+    '0f9d6d80ab9881f7c98e2fa4b3d9bcb6d0faf5da6aa85d6bd27dd59c34ca64d9',
   );
 });
 
@@ -495,7 +499,9 @@ test('the complete current Realtime tool inventory is pinned', () => {
     // timedIntervalS minimum 0.1).
     // Re-pinned for the control_droneplan prompt compaction (descriptions only,
     // no tool, argument or enum change).
-    '32349d724fbfd4ecc87495bf6f7762ee3dcb82d68a8248de233b3a6f90d7be70',
+    // Re-pinned for the drone plan bound repair (ring minItems 2, no maxItems;
+    // index maximum removed; ring description reworded).
+    '1c30d5ed5328c2d9b4c0a0e90b0c5e84ef9102eb55ad5514d9b991ce423bfb63',
   );
 });
 

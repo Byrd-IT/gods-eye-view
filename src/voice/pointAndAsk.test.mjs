@@ -355,7 +355,9 @@ test('deixis prompt lint: one short rule, and every sentinel it names exists in 
   // concise descriptions with every property and feature kept, then the ceiling
   // was raised to the measured size, pinned exactly: 77,498 characters with
   // every tool present. The owner approved sizes above 55,500 only as needed.
-  assert.ok(size <= 77_498, `prompt size ${size}`);
+  // The drone plan bound repair (ring maxItems and index maximum dropped, ring
+  // description reworded) brings the measured size to 77,485.
+  assert.ok(size <= 77_485, `prompt size ${size}`);
 });
 
 test('after-tool speech allows returned items to answer requested lists and rankings', () => {

@@ -201,7 +201,11 @@ export function createDronePlanVoice(handle) {
     // The index the check is really showing, not the one last asked for: the
     // check layer steps over the photos that exist and clamps anything
     // higher, so the panel's own answer (checkInfo) is what is reported.
-    const shown = intOrNull(handle.checkInfo?.()?.index, 0, 59);
+    const shown = intOrNull(
+      handle.checkInfo?.()?.index,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
     return {
       enabled: check.enabled === true,
       zone: check.zone === true,
@@ -210,7 +214,7 @@ export function createDronePlanVoice(handle) {
         ? check.footprints
         : 'selected',
       frustum: FRUSTUM_MODES.includes(check.frustum) ? check.frustum : 'one',
-      index: shown ?? intOrNull(check.index, 0, 59) ?? 0,
+      index: shown ?? intOrNull(check.index, 0, Number.MAX_SAFE_INTEGER) ?? 0,
       halfWidthM: finite(
         check.halfWidthM,
         MIN_ZONE_HALF_WIDTH_M,
@@ -478,12 +482,14 @@ export function createDronePlanVoice(handle) {
     },
     async polygon(ring) {
       return guard(() => {
-        if (!Array.isArray(ring) || ring.length < 3 || ring.length > 64)
-          return fail('ring needs 3 to 64 points');
+        // The panel's drawing tool and addPolygon() have no corner ceiling;
+        // only the three-corner floor is real (polygon.js).
+        if (!Array.isArray(ring) || ring.length < 3)
+          return fail('ring needs at least 3 points');
         const points = [];
         for (const point of ring) {
           if (!finite(point?.lon, -180, 180) || !finite(point?.lat, -90, 90))
-            return fail('ring needs 3 to 64 points');
+            return fail('ring needs at least 3 points');
           points.push({ lon: point.lon, lat: point.lat });
         }
         ensureOpen();
@@ -972,12 +978,16 @@ export function createDronePlanVoice(handle) {
         const checkPatch = {};
         const surfacePatch = {};
         if (args.index != null) {
-          if (!integerIn(args.index, 0, 59))
-            return fail('index must be 0 to 59');
+          if (!Number.isInteger(args.index) || args.index < 0)
+            return fail('index must be zero or more');
           // The panel steps over the photos that exist; the check layer would
           // clamp a higher index and the read-back would name a flight that
           // is not on show, so it is refused here.
-          const count = intOrNull(handle.checkInfo?.()?.count, 0, 1e6);
+          const count = intOrNull(
+            handle.checkInfo?.()?.count,
+            0,
+            Number.MAX_SAFE_INTEGER,
+          );
           if (count != null && args.index > Math.max(0, count - 1))
             return fail('That flight index cannot be shown');
           checkPatch.index = args.index;

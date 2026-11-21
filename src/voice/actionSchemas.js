@@ -1289,10 +1289,13 @@ const schemas = [
         south: { type: 'number', minimum: -90, maximum: 90 },
         east: { type: 'number', minimum: -180, maximum: 180 },
         north: { type: 'number', minimum: -90, maximum: 90 },
+        // Polygon and path share this array. A path needs two points; a
+        // polygon needs three, and the adapter enforces that itself (the
+        // panel's own drawing tool has no upper corner count either, so no
+        // maxItems is stated here).
         ring: {
           type: 'array',
-          minItems: 3,
-          maxItems: 64,
+          minItems: 2,
           items: {
             type: 'object',
             additionalProperties: false,
@@ -1344,7 +1347,10 @@ const schemas = [
         lon: { type: 'number', minimum: -180, maximum: 180 },
         areaId: { type: 'string', minLength: 1, maxLength: 20 },
         which: { type: 'string', enum: ['mission', 'all', 'suite'] },
-        index: { type: 'integer', minimum: 0, maximum: 59 },
+        // A zero-based list position. The list's own length decides the
+        // largest valid index (areas, missions, obstacles, targets, paths,
+        // and the photos of the 3D check), so no fixed ceiling is stated.
+        index: { type: 'integer', minimum: 0 },
         // The 3D check switches the panel's own checkboxes drive (panel.js
         // setCheck, state.check). Omitted: the check is only read.
         checkEnabled: { type: 'boolean' },

@@ -742,7 +742,10 @@ test('the Realtime prompt stays within its size budget', () => {
   // needs to call the tool. The owner approved prompt sizes above 55,500 only
   // as far as needed, so the ceiling is the measured size, pinned exactly:
   // 76,903 chars by default and 77,658 with the optional Overpass tool.
-  const MAX_REALTIME_PROMPT_CHARS = { default: 76_903, overpass: 77_658 };
+  // The drone plan bound repair shrank both by 13 (ring maxItems and index
+  // maximum dropped, ring description reworded), so the measured ceilings are
+  // 76,890 by default and 77,645 with Overpass.
+  const MAX_REALTIME_PROMPT_CHARS = { default: 76_890, overpass: 77_645 };
   const size = (overpass) =>
     realtimeInstructions(undefined, { overpass }).length +
     JSON.stringify(realtimeTools({ overpass })).length;

@@ -3907,8 +3907,7 @@ export function initDronePlan({
       next.halfWidthM = patch.halfWidthM;
     }
     if (Object.hasOwn(patch, 'index')) {
-      if (!Number.isInteger(patch.index) || patch.index < 0 || patch.index > 59)
-        return false;
+      if (!Number.isInteger(patch.index) || patch.index < 0) return false;
       // The panel's own stepper runs 1..count over the photos that exist
       // (syncCheckUi sets ui.checkPhoto.max). A higher index would be
       // silently clamped by the check layer, so it is refused here instead.

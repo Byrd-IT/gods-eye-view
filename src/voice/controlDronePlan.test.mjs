@@ -8,6 +8,7 @@ import {
   DRONEPLAN_VOICE_ACTIONS,
   createDronePlanVoice,
 } from '../byrdit/dronePlan/dronePlanVoice.js';
+import { validateArgs } from '../../scripts/voice-bench/grade.mjs';
 
 globalThis.window = globalThis.window || {
   clearTimeout,
@@ -176,4 +177,45 @@ test('control_droneplan option bounds are the panel sliders, not guesswork', asy
   assert.equal((await voice.options({ frontOverlap: 98 })).ok, true);
   assert.equal(calls.at(-1).frontOverlap, 98);
   assert.equal((await voice.options({ frontOverlap: 98.1 })).ok, false);
+});
+
+test('the drone plan schema states no bound the panel does not have', () => {
+  const params = GEV_REALTIME_TOOLS.find(
+    (tool) => tool.name === 'control_droneplan',
+  ).parameters;
+  const { ring, index } = params.properties;
+  // One ring argument serves polygon and path. A path is two or more points
+  // (panel.js addLookAtPath), a polygon three or more (polygon.js, enforced
+  // by the adapter); the panel's drawing tool has no upper corner count.
+  assert.equal(ring.minItems, 2);
+  assert.equal(ring.maxItems, undefined);
+  const twoPoints = [
+    { lon: -94.9, lat: 32.7 },
+    { lon: -94.91, lat: 32.71 },
+  ];
+  assert.deepEqual(
+    validateArgs(params, { action: 'path', ring: twoPoints }),
+    [],
+    'a two-point path is a real panel action',
+  );
+  assert.ok(
+    validateArgs(params, { action: 'path', ring: twoPoints.slice(0, 1) }).length >
+      0,
+    'one point is not a path',
+  );
+  const many = Array.from({ length: 120 }, (_, i) => ({
+    lon: -94.9 + i * 0.00001,
+    lat: 32.7,
+  }));
+  assert.deepEqual(validateArgs(params, { action: 'polygon', ring: many }), []);
+  // A list index is bounded by that list, which the panel reports at call
+  // time: a plan with more than sixty missions or photos makes index 60 real.
+  assert.equal(index.minimum, 0);
+  assert.equal(index.maximum, undefined);
+  assert.deepEqual(validateArgs(params, { action: 'preview', index: 60 }), []);
+  assert.deepEqual(validateArgs(params, { action: 'check', index: 60 }), []);
+  assert.ok(
+    validateArgs(params, { action: 'preview', index: -1 }).length > 0,
+    'a negative position is not a list index',
+  );
 });

@@ -1122,6 +1122,49 @@ test('path adds the ring points, removes one by index, and starts drawing', asyn
   assert.equal(bad.ok, false);
 });
 
+test('a polygon takes every corner count the panel accepts, and still needs three', async () => {
+  const { handle, calls } = panelHandle();
+  const voice = createDronePlanVoice(handle);
+  const circle = (n) =>
+    Array.from({ length: n }, (_, i) => {
+      const a = (2 * Math.PI * i) / n;
+      return {
+        lon: -94.9 + 0.001 * Math.cos(a),
+        lat: 32.7 + 0.001 * Math.sin(a),
+      };
+    });
+  // The panel's drawing tool and addPolygon() have no corner ceiling, so a
+  // spoken polygon must not invent one either.
+  const many = await voice.polygon(circle(120));
+  assert.equal(many.ok, true);
+  assert.equal(many.points, 120);
+  assert.equal(calls.find((call) => call[0] === 'setPolygon')[1].length, 120);
+  // Three corners is the real floor (polygon.js), and it is the adapter's job.
+  const two = await voice.polygon(circle(2));
+  assert.equal(two.ok, false);
+  assert.equal(two.error, 'ring needs at least 3 points');
+});
+
+test('the 3D check steps to any photo the plan has, not a fixed index ceiling', async () => {
+  const { handle, state } = panelHandle();
+  state.checkPhotoCount = 8400;
+  const voice = createDronePlanVoice(handle);
+  const at60 = await voice.check({ index: 60 });
+  assert.equal(at60.ok, true);
+  assert.equal(at60.check.index, 60);
+  assert.equal((await voice.status()).check.index, 60);
+  // The list length is the only ceiling: one past the last photo is refused…
+  const past = await voice.check({ index: 8400 });
+  assert.equal(past.ok, false);
+  assert.equal(past.error, 'That flight index cannot be shown');
+  // …and a negative index or a fraction is not a list position at all.
+  for (const bad of [-1, 1.5, '3']) {
+    const refused = await voice.check({ index: bad });
+    assert.equal(refused.ok, false, String(bad));
+    assert.equal(refused.error, 'index must be zero or more', String(bad));
+  }
+});
+
 test('a path a spoken request adds is active, and switching one off keeps it in the list', async () => {
   const { handle, state } = panelHandle();
   const voice = createDronePlanVoice(handle);
