@@ -69,9 +69,19 @@ NAME_RE = re.compile(r"^[A-Za-z0-9 /&+().,'-]{1,80}$")
 CREDIT_RE = NAME_RE
 SRC_RE = re.compile(r"^(?:(?P<host>[A-Za-z0-9._-]+):)?(?P<path>/[A-Za-z0-9._/-]+)$")
 BUILD_RE = re.compile(r"^[0-9a-f][0-9a-f-]{7,39}$")
+# Host names that may appear in logs, errors and the manifest. Anything else
+# (a typo, or a secret pasted where a host belongs) is shown as <host>.
+SHOWN_HOST_RE = re.compile(r"^(?:[Ss]\d{1,2}|server\d{1,2}|localhost|(?:\d{1,3}\.){3}\d{1,3})$")
 TAG = "gev-publish-odm3d"
 PRIORITY = {"info": "user.info", "warn": "user.warning", "error": "user.err"}
 FT = 0.3048
+
+
+def shown_host(host: str | None) -> str:
+    """A host name safe to log: fleet names and plain IPv4 only."""
+    if not host:
+        return "local"
+    return host if SHOWN_HOST_RE.fullmatch(host) else "<host>"
 
 
 class Fail(Exception):
@@ -150,7 +160,7 @@ def remote_test(host: str | None, command: str) -> bool:
     if result.returncode == 1:
         return False
     raise Fail(
-        f"could not read {host or 'local'} state (exit {result.returncode}); "
+        f"could not read {shown_host(host)} state (exit {result.returncode}); "
         "no manifest entry was added"
     )
 
@@ -277,7 +287,7 @@ def safe_source(host, path) -> str:
     build id (a uuid) is shown as <custom> so a stray token in a path is never logged."""
     name = path.rstrip("/").rsplit("/", 1)[-1]
     shown = name if BUILD_RE.fullmatch(name) else "<custom>"
-    return f"{host or 'local'}:{shown}"
+    return f"{shown_host(host)}:{shown}"
 
 
 def safe_id(value) -> str:

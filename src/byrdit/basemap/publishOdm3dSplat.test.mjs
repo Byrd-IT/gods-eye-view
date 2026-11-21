@@ -40,6 +40,22 @@ const entryOf = (text) => {
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'gev-publish-3d-'));
 
+test('publisher diagnostics never echo arbitrary source hostnames', () => {
+  const python = `
+import importlib.util, sys, types
+spec = importlib.util.spec_from_file_location('publisher', sys.argv[1])
+p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)
+secret = 'syntheticHostTokenABC123'
+print(p.safe_source(secret, '/builds/custom'))
+p.sh = lambda *a, **k: types.SimpleNamespace(returncode=255)
+try: p.remote_test(secret, 'ignored')
+except p.Fail as error: print(str(error))
+`;
+  const r = spawnSync('python3', ['-c', python, script], { encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /syntheticHostTokenABC123/);
+});
+
 const TRANSFORM = [
   0.9959588334139836, -0.08981092441711609, 0, 0, 0.04850704705607071,
   0.5379192154168977, 0.8415996578368894, 0, -0.07558484325945963,
