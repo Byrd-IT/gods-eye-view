@@ -278,7 +278,9 @@ export class IntelHUD {
     this._placeLabels = null;
     this._hudSurfaceRevision = 0;
     this._hudGlobe = findGlobe(viewer);
-    this._hudPendingSurface = false;
+    // Subscription may start after the pending event; the first settled
+    // progress still invalidates a target picked while tiles were loading.
+    this._hudPendingSurface = true;
     this._offHudProgress = this._hudGlobe?.on('progress', (progress) => {
       const pending = progress.terrainPending > 0 || progress.tilesPending > 0;
       if (this._hudPendingSurface && !pending) {
@@ -919,11 +921,16 @@ export class IntelHUD {
       // Left dirty on purpose: the next periodic tick retries instead of
       // sticking on the fallback line for the rest of the session. The
       // fallback was composed for this view; a moved camera keeps its own.
-      if (revision === this._summaryRevision)
+      if (
+        revision === this._summaryRevision &&
+        this._visible &&
+        !document.hidden
+      )
         this._setSummaryText(fallbackText, animate);
       return;
     }
-    if (revision !== this._summaryRevision) return;
+    if (revision !== this._summaryRevision || !this._visible || document.hidden)
+      return;
     // Without a place label the model invents a place: show the plain line.
     const described = [
       context.placeLabels,
@@ -931,7 +938,8 @@ export class IntelHUD {
       context.nearbyPlaceLabels,
     ].some((list) => list?.length);
     if (!described) {
-      this._summaryDirty = false;
+      // A missed pick can recover without camera or terrain events.
+      this._summaryDirty = this._placeLabels?.view === null;
       this._setSummaryText(fallbackText, false);
       return;
     }

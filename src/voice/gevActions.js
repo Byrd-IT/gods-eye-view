@@ -6923,6 +6923,7 @@ function getViewTargetCartographic(
   const cached = cache.get(viewer);
   if (
     cached?.signature === signature &&
+    (hudSurfaceRevision === undefined || cached.target !== null) &&
     (hudSurfaceRevision === undefined
       ? performance.now() - cached.cachedAt < 2500
       : cached.surfaceRevision === hudSurfaceRevision)

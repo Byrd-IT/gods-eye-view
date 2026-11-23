@@ -410,3 +410,27 @@ test('HUD view target is reused while idle and recomputed after a camera move', 
     delete performance.now;
   }
 });
+
+test('HUD retries a missed target when the scene becomes pickable', async () => {
+  const { viewer } = createViewer({
+    latitude: 30.26,
+    longitude: -97.74,
+    heightM: 600,
+  });
+  let picks = 0;
+  let ready = false;
+  const pick = viewer.scene.pickPosition;
+  viewer.scene.pickPosition = (...args) => {
+    picks++;
+    return ready ? pick(...args) : undefined;
+  };
+  viewer.camera.pickEllipsoid = () => undefined;
+  const service = createService();
+  await getBasemapLabelContext(viewer, service, { hudSurfaceRevision: 0 });
+  ready = true;
+  const result = await getBasemapLabelContext(viewer, service, {
+    hudSurfaceRevision: 0,
+  });
+  assert.equal(picks, 2);
+  assert.ok(result.placeLabels.length > 0);
+});

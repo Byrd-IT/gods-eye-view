@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { hudReadouts } from './testSupport/hudReadouts.mjs';
 import { registerHooks } from 'node:module';
 import { fakeCameraPort } from './testSupport/fakeCameraPort.mjs';
+import { bindRenderer } from './render/rendererOf.js';
 import { toDegrees as deg } from './geo/index.js';
 
 const MGRS_STUB_URL = 'gev-test-stub:mgrs';
@@ -192,4 +193,68 @@ test('hidden HUD or background tab does not build summary context', async (t) =>
   globalThis.document.hidden = false;
   await hud._updateSummary(false, true);
   assert.equal(calls.context, 1, 'visible HUD refreshes');
+});
+
+test('hiding or backgrounding while context is pending prevents a summary request', async (t) => {
+  for (const mode of ['hud', 'page']) {
+    await t.test(mode, async (st) => {
+      let resolveContext;
+      let sends = 0;
+      const { hud } = createHud(st, {
+        configured: async () => true,
+        summarize: async () => {
+          sends++;
+          return { ok: true, data: { summary: 'x' } };
+        },
+      });
+      hud._summaryContext = () =>
+        new Promise((resolve) => {
+          resolveContext = resolve;
+        });
+      const job = hud._updateSummary(false, true);
+      await new Promise((resolve) => setImmediate(resolve));
+      if (mode === 'hud') hud.hide();
+      else document.hidden = true;
+      resolveContext({ placeLabels: ['Austin'] });
+      await job;
+      assert.equal(sends, 0);
+    });
+  }
+});
+
+test('a missed target leaves the summary dirty for a later retry', async (t) => {
+  const { hud } = createHud(t, { configured: async () => true });
+  hud._summaryContext = async () => {
+    hud._placeLabels = { view: null };
+    return { placeLabels: [], streetLabels: [], nearbyPlaceLabels: [] };
+  };
+  await hud._updateSummary(false, true);
+  assert.equal(hud._summaryDirty, true);
+});
+
+test('first settled progress invalidates a target picked before subscription', (t) => {
+  const page = installPage();
+  let listener;
+  const unbind = bindRenderer(page.viewer, {
+    globe: {
+      on(_event, fn) {
+        listener = fn;
+        return () => {};
+      },
+    },
+  });
+  const hud = new IntelHUD(page.viewer, {
+    camera: fakeCameraPort().port,
+    publish: page.publish,
+  });
+  t.after(() => {
+    hud.destroy();
+    unbind();
+    page.restore();
+  });
+  const revision = hud._hudSurfaceRevision;
+  listener({ terrainPending: 0, tilesPending: 0 });
+  assert.equal(hud._hudSurfaceRevision, revision + 1);
+  listener({ terrainPending: 0, tilesPending: 0 });
+  assert.equal(hud._hudSurfaceRevision, revision + 1);
 });
