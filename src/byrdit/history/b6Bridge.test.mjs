@@ -12,6 +12,7 @@ import { firePerimetersProxy } from '../../../server/providers/firePerimeters.js
 import { cycloneProxy } from '../../../server/providers/cyclones.js';
 import { parseFirmsCsv, filterTrailing24h } from '../../data/firmsCsv.js';
 import { normalizeFirePerimeterSnapshot } from '../../layers/perimeters/records.js';
+import { validateCycloneSnapshot } from '../../layers/cyclones/source.js';
 import {
   parseCycloneStatus,
   attachCycloneGeometry,
@@ -104,7 +105,25 @@ test('contract: GEV cyclone describe() == collector /v1/latest/cyclones bytes (p
       reason: null,
       storms,
     });
-    assert.equal(gev, fx(body).toString('utf8'), body);
+    // Upstream #1891 (JTWC) adds `agency` and `dangerArea` to every storm
+    // GEV parses; the collector (gev-history repo) renders NHC storms
+    // without them. The client reads a storm without `agency` as NHC, so
+    // the contract is what the map sees: both bodies validate to the same
+    // snapshot. Every other byte still has to match.
+    const collector = fx(body).toString('utf8');
+    const bare = JSON.parse(gev);
+    for (const storm of bare.storms) {
+      assert.equal(storm.agency, 'nhc', body);
+      assert.equal(storm.dangerArea, null, body);
+      delete storm.agency;
+      delete storm.dangerArea;
+    }
+    assert.equal(JSON.stringify(bare), collector, body);
+    assert.deepEqual(
+      validateCycloneSnapshot(JSON.parse(collector)),
+      validateCycloneSnapshot(JSON.parse(gev)),
+      body,
+    );
     assert.equal(storms[0].geometryStatus, geometry);
   }
 });

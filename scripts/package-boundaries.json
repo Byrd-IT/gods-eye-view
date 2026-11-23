@@ -5908,6 +5908,7 @@
       "src/byrdit/basemap/imagery.js",
       "src/byrdit/basemap/terrain.js",
       "src/byrdit/basemap/credits.js",
+      "src/byrdit/basemap/googleHandle.js",
       "src/byrdit/basemap/googleSession.js",
       "src/byrdit/basemap/autoSwitch.js",
       "src/byrdit/basemap/buildings.js",
