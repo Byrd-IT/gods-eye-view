@@ -354,10 +354,30 @@ test('a view pass writes only the icons it changes, in one write', () => {
     assert.equal(rendering.refreshHorizonCulling(), true);
     assert.equal(set.writes, writes + 1, 'one write for the pass');
     assert.equal(set.items.get('near').show, true);
-    assert.equal(set.items.get('far').show, false);
+    assert.equal(set.items.has('far'), false, 'culled camera has no GPU row');
+    assert.equal(
+      state._icons.item('far').show,
+      false,
+      'catalog state remains available',
+    );
 
     assert.equal(rendering.refreshHorizonCulling(), false);
     assert.equal(set.writes, writes + 1, 'an unchanged view writes nothing');
+
+    // A hidden camera can change while offscreen, and must reappear with
+    // its latest style and pick identity when the view changes.
+    const hidden = state._icons.item('far');
+    state._icons.put({ ...hidden, focus: 0.4 });
+    assert.equal(set.items.has('far'), false);
+    [near.position, far.position] = [far.position, near.position];
+    assert.equal(rendering.refreshHorizonCulling(), true);
+    assert.equal(set.items.has('near'), false);
+    assert.equal(set.items.get('far').focus, 0.4);
+    assert.equal(set.items.get('far').meta.id, 'far');
+    assert.deepEqual(
+      state._viewRecords.map((r) => r.camera.id),
+      ['far'],
+    );
 
     // Another layer on the same viewer draws its icons in a set of its own.
     const other = createRendering({
@@ -422,7 +442,11 @@ test('a pose with no perspective field of view is projected by the renderer', ()
     const set = draw.set(setId);
     assert.deepEqual(asked.sort(), [0, 1000]);
     assert.equal(set.items.get('on').show, true);
-    assert.equal(set.items.get('off').show, false);
+    assert.equal(
+      set.items.has('off'),
+      false,
+      'offscreen camera has no GPU row',
+    );
   } finally {
     unbind();
   }

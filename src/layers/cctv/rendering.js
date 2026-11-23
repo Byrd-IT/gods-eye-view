@@ -150,7 +150,39 @@ export function createRendering({
     // Columns of no rows put the set's host in the scene now, rather than
     // with its first camera.
     set.setColumns?.({ ids: [] });
-    layerState._icons = createIconBook(set);
+    // Keep the complete book for styling and selection, but do not submit
+    // culled rows to the renderer: a hidden GPU row is still an instance.
+    const drawn = new Set();
+    const visibleSet = {
+      id: set.id,
+      get show() {
+        return set.show;
+      },
+      set show(value) {
+        set.show = value;
+      },
+      upsert(items) {
+        const add = [];
+        const remove = [];
+        for (const item of items) {
+          if (item.show !== false) {
+            drawn.add(item.id);
+            add.push(item);
+          } else if (drawn.delete(item.id)) remove.push(item.id);
+        }
+        if (remove.length) set.remove(remove);
+        if (add.length) set.upsert(add);
+      },
+      remove(ids) {
+        const remove = ids.filter((id) => drawn.delete(id));
+        if (remove.length) set.remove(remove);
+      },
+      dispose() {
+        drawn.clear();
+        set.dispose();
+      },
+    };
+    layerState._icons = createIconBook(visibleSet);
     layerState._counts = createCountMarkers(
       services.overlays?.registerWorldOverlayPaintLane,
       `cctv:${iconSets}:counts`,
