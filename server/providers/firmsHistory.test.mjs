@@ -8,7 +8,9 @@ const NOW = Date.UTC(2026, 8, 12, 12);
 
 function install(plugin) {
   let handler;
-  plugin.configureServer({ middlewares: { use: (_route, fn) => (handler = fn) } });
+  plugin.configureServer({
+    middlewares: { use: (_route, fn) => (handler = fn) },
+  });
   return async (url = '/') => {
     const res = {
       headersSent: false,
@@ -41,9 +43,14 @@ function isolate(t, fetchImpl) {
   t.mock.method(globalThis, 'fetch', fetchImpl);
 }
 
-const csv = (rows) => HEADER + rows.map((row) => row.join(',')).join('\n') + '\n';
+const csv = (rows) =>
+  HEADER + rows.map((row) => row.join(',')).join('\n') + '\n';
 const okFetch = async (raw) =>
-  new Response(String(raw).includes('VIIRS_NOAA20') ? csv([[30, -97, '2026-09-12', '1100', 'h', 10]]) : csv([]));
+  new Response(
+    String(raw).includes('VIIRS_NOAA20')
+      ? csv([[30, -97, '2026-09-12', '1100', 'h', 10]])
+      : csv([]),
+  );
 
 function spy() {
   const calls = { tap: [], failure: [] };
@@ -61,7 +68,11 @@ test('a fresh refresh is handed to the recorder once, with the payload the clien
   const request = install(firmsProxy({ recorder }));
   const [a, b] = await Promise.all([request(), request()]);
   assert.equal(a.status, 200);
-  assert.equal(recorder.calls.tap.length, 1, 'two waiters on one refresh record it once');
+  assert.equal(
+    recorder.calls.tap.length,
+    1,
+    'two waiters on one refresh record it once',
+  );
   const [feed, payload, meta] = recorder.calls.tap[0];
   assert.equal(feed, 'firms');
   assert.deepEqual(JSON.parse(a.body), payload);
@@ -73,7 +84,9 @@ test('a fresh refresh is handed to the recorder once, with the payload the clien
 
 test('the response is byte-identical with recording on or off, and survives a recorder that throws', async (t) => {
   isolate(t, okFetch);
-  const off = await install(firmsProxy({ recorder: { tap() {}, tapFailure() {} } }))();
+  const off = await install(
+    firmsProxy({ recorder: { tap() {}, tapFailure() {} } }),
+  )();
   const throwing = {
     tap() {
       throw new Error('boom api_key=zzz');
@@ -99,7 +112,9 @@ test('a refresh that fails everywhere is recorded as a failed poll, not as an em
 test('serving the stale cache while upstream is down records a failed poll', async (t) => {
   let up = true;
   let now = NOW;
-  isolate(t, async (raw) => (up ? okFetch(raw) : new Response('offline', { status: 503 })));
+  isolate(t, async (raw) =>
+    up ? okFetch(raw) : new Response('offline', { status: 503 }),
+  );
   t.mock.method(Date, 'now', () => now);
   const recorder = spy();
   const request = install(firmsProxy({ recorder }));
@@ -116,4 +131,19 @@ test('without a recorder the proxy records nothing and still answers', async (t)
   isolate(t, okFetch);
   const response = await install(firmsProxy())();
   assert.equal(response.status, 200);
+});
+
+test('a slow successful poll is stale at the same ttl edge as status', async (t) => {
+  let now = NOW;
+  isolate(t, async (raw) => {
+    if (String(raw).includes('mapkey_status')) return new Response('{}');
+    now = NOW + 30 * 60_000;
+    return okFetch(raw);
+  });
+  t.mock.method(Date, 'now', () => now);
+  const request = install(firmsProxy());
+  const body = JSON.parse((await request()).body);
+  const status = JSON.parse((await request('/status')).body);
+  assert.equal(body.stale, true);
+  assert.equal(status.stale, body.stale);
 });

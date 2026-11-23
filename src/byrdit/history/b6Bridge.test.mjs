@@ -346,7 +346,17 @@ test('network-blocked: B6 routes relay collector bytes, then last-good STALE wit
   for (const [route, threshold] of Object.entries(stale)) {
     const r = await request(route);
     assert.equal(r.statusCode, 200, route);
-    assert.ok(r.body.equals(BODIES[routes[route]]), `${route}: last good kept`);
+    if (route.startsWith('/api/firms')) {
+      assert.deepEqual(JSON.parse(r.body), {
+        ...JSON.parse(BODIES[routes[route]]),
+        stale: true,
+      });
+    } else {
+      assert.ok(
+        r.body.equals(BODIES[routes[route]]),
+        `${route}: last good kept`,
+      );
+    }
     assert.equal(r.headers['x-feed-cache'], 'STALE', route);
     assert.equal(r.headers['x-feed-bridge'], 'cache', route);
     assert.equal(
@@ -623,4 +633,37 @@ test('R1: GEV_BRIDGE_FIRMS off leaves every /api/firms path to firmsProxy (uncha
   assert.equal(JSON.parse(status.body).hasKey, true);
   // with no flag at all the history plugin list is empty: byte-identical GEV
   assert.deepEqual(historyPlugins({ env: { GEV_BRIDGE_FIRMS: '' } }), []);
+});
+
+test('FIRMS body and status share ttl freshness on collector and cached responses', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', () => {});
+  let now = FIRMS_NOW + 1_799_999;
+  const collector = await startCollector(t, { lastOk: FIRMS_NOW });
+  blockNetwork(t, collector.url);
+  const request = chain(
+    historyPlugins({
+      env: {
+        GEV_BRIDGE_FIRMS: '1',
+        GEV_COLLECTOR_URLS: collector.url,
+        GEV_COLLECTOR_TIMEOUT_MS: '500',
+      },
+      now: () => now,
+    }),
+  );
+  async function check(expected, source) {
+    for (const path of ['/api/firms', '/api/firms/status']) {
+      const response = await request(path);
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.headers['x-feed-bridge'], source);
+      assert.equal(JSON.parse(response.body).stale, expected, path);
+    }
+  }
+  await check(false, 'collector');
+  now++;
+  await check(true, 'collector');
+  await collector.stop();
+  await check(true, 'cache');
+  now = FIRMS_NOW + 1_799_999;
+  await check(false, 'cache');
 });

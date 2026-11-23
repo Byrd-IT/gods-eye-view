@@ -496,6 +496,29 @@ export function createCollectorBridge({
     return feed.decorate ? feed.decorate(headers, target) : headers;
   }
 
+  // Snapshot freshness uses the producer's TTL, not the separate bridge
+  // transport-health threshold. Re-evaluate even for last-good copies.
+  function firmsBody(target, body) {
+    const status = target.collectorFeed === 'firms-status';
+    if (!status && target.collectorFeed !== 'firms') return body;
+    try {
+      const data = JSON.parse(new TextDecoder().decode(body));
+      const at = status ? data.lastFetch : data.fetchedAt;
+      if (
+        !Number.isFinite(at) ||
+        !Number.isFinite(data.ttlMs) ||
+        data.ttlMs <= 0
+      )
+        return body;
+      const stale = now() - at >= data.ttlMs;
+      return data.stale === stale
+        ? body
+        : Buffer.from(JSON.stringify({ ...data, stale }));
+    } catch {
+      return body;
+    }
+  }
+
   function serveCache(req, res, reason, target, cache, degraded = null) {
     const key = target.collectorFeed;
     touch(caches, key);
@@ -525,7 +548,13 @@ export function createCollectorBridge({
       headers['X-Feed-Reason'] = degraded ?? reason;
     }
     transition(key, 'cache', degraded ?? reason);
-    send(req, res, 200, decorate(withGrey(headers), target), cache.body);
+    send(
+      req,
+      res,
+      200,
+      decorate(withGrey(headers), target),
+      firmsBody(target, cache.body),
+    );
   }
 
   function serveNone(req, res, reason, target, cause = null) {
@@ -540,6 +569,7 @@ export function createCollectorBridge({
         'X-Feed-Source': feed.source,
         'X-Feed-Reason': reason,
         'X-Feed-Bridge': 'none',
+        ...(cause ? { 'X-Feed-Disabled-Cause': cause } : {}),
       },
       JSON.stringify(
         reason === 'disabled'
@@ -573,7 +603,6 @@ export function createCollectorBridge({
       'X-Feed-Reason': reason,
       'X-Feed-Bridge': 'es-fallback',
       'X-Flight-Coverage': answer.coverage,
-        ...(cause ? { 'X-Feed-Disabled-Cause': cause } : {}),
     };
     transition(target.collectorFeed, 'es-fallback', 'es_fallback');
     send(req, res, 200, decorate(withGrey(headers), target), answer.body);
@@ -783,7 +812,13 @@ export function createCollectorBridge({
         if (trails && target.transitFeed)
           trails.ingest(target.transitFeed, result.body);
         transition(key, 'collector');
-        send(req, res, 200, decorate(headers, target), result.body);
+        send(
+          req,
+          res,
+          200,
+          decorate(headers, target),
+          firmsBody(target, result.body),
+        );
         return;
       }
       await fallback(result.reason, result.cause);

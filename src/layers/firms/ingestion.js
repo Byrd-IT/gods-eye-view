@@ -60,6 +60,14 @@ export function createIngestion({
       layerState._lastUpdate = Number.isFinite(payload?.fetchedAt)
         ? payload.fetchedAt
         : Date.now();
+      // The payload states the age at which its own producer stops calling it
+      // fresh (server/providers/firms.js and the collector's firms-status body
+      // both use `now - fetchedAt >= ttlMs`). Keep that ONE number: the row
+      // applies it in getStats() rather than a second hard-coded threshold.
+      layerState._ttlMs =
+        Number.isFinite(payload?.ttlMs) && payload.ttlMs > 0
+          ? payload.ttlMs
+          : null;
       // Settle the previous selection BEFORE the LOD rebuild. renderCurrentLod
       // runs refreshContextRegistrations(), which deletes every context record
       // not in the new top-N — including the one the store still points at.

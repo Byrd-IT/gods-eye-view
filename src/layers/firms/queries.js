@@ -196,6 +196,22 @@ export function createQueries({
      */
     getStats() {
       const now = Date.now();
+      // One threshold, stated by the payload itself: `ttlMs` is the age at
+      // which the proxy that produced this snapshot stops calling it fresh
+      // (server/providers/firms.js and the collector's firms-status body both
+      // compare `now - fetchedAt` against it). A row that only echoed the
+      // response's `stale` flag kept claiming LIVE past it — the live sweep
+      // read "LIVE · LIVE · updated 33m ago" against ttlMs 30 min. Without a
+      // stated ttl the row invents no threshold and trusts `stale` alone.
+      const ageMs = Number.isFinite(layerState._lastUpdate)
+        ? now - layerState._lastUpdate
+        : null;
+      const pastTtl =
+        ageMs !== null &&
+        Number.isFinite(layerState._ttlMs) &&
+        layerState._ttlMs > 0 &&
+        ageMs >= layerState._ttlMs;
+      const stale = layerState._stale || pastTtl;
       const staleText = layerState._lastUpdate
         ? t('STALE · cached {age}', {
             age:
@@ -210,7 +226,7 @@ export function createQueries({
           : t('loading...');
       } else if (layerState._keyRequired) {
         loadingLabel = t('KEY REQUIRED');
-      } else if (layerState._stale) {
+      } else if (stale) {
         loadingLabel = staleText;
       } else if (layerState._error) {
         loadingLabel = layerState._error;
@@ -231,12 +247,18 @@ export function createQueries({
         cells: layerState._cellCount,
         lastUpdate: layerState._lastUpdate,
         loading: layerState._loading,
-        stale: layerState._stale,
+        // The row's own verdict (response flag OR past the payload's ttl), so
+        // the chip, the voice snapshot and the label cannot disagree.
+        stale,
         // The end of the 24 hours shown when the snapshot ends at a set time;
         // null for the trailing 24 hours to now. Such a snapshot is not live,
         // so the row names the provider without the catalog's "LIVE".
         at: Number.isFinite(layerState._at) ? layerState._at : null,
-        ...(Number.isFinite(layerState._at) ? { source: 'NASA FIRMS' } : {}),
+        // A snapshot that ends at a set time, or one the row has just marked
+        // STALE, is not live: name the provider without the catalog's "LIVE".
+        ...(Number.isFinite(layerState._at) || stale
+          ? { source: 'NASA FIRMS' }
+          : {}),
         // The machine-readable half of the keyless state, ahead of the human
         // strings below: without it "no key configured" is indistinguishable
         // from a broken feed, and the row reads as a fault instead of a step
@@ -244,7 +266,7 @@ export function createQueries({
         keyRequired: layerState._keyRequired,
         error: layerState._keyRequired
           ? t('KEY REQUIRED')
-          : layerState._stale
+          : stale
             ? staleText
             : layerState._error,
         loadingLabel,

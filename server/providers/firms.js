@@ -603,11 +603,11 @@ export function firmsProxy({ recorder = NO_RECORDER } = {}) {
    * Cache entry → response payload. Fires are RE-filtered to the trailing
    * 24 h at serve time so a stale cache never serves >24h-old detections.
    */
-  function buildPayload(entry, stale) {
+  function buildPayload(entry) {
     const fires = filterTrailing24h(entry.fires, Date.now());
     return {
       fetchedAt: entry.at,
-      stale,
+      stale: Date.now() - entry.at >= TTL_MS,
       ttlMs: TTL_MS,
       sources: entry.sources,
       count: fires.length,
@@ -747,7 +747,7 @@ export function firmsProxy({ recorder = NO_RECORDER } = {}) {
 
         const entry = mem;
         if (entry && Date.now() - entry.at < TTL_MS) {
-          sendJson(200, buildPayload(entry, false));
+          sendJson(200, buildPayload(entry));
           return;
         }
         // Stale or missing → refresh, single-flight (concurrent requests
@@ -784,11 +784,11 @@ export function firmsProxy({ recorder = NO_RECORDER } = {}) {
           }
         };
         if (fresh) {
-          const payload = buildPayload(fresh, false);
+          const payload = buildPayload(fresh);
           sendJson(200, payload);
           record(() => recorder.tap('firms', payload, { t: fresh.at }));
         } else if (entry) {
-          sendJson(200, buildPayload(entry, true)); // upstream down — stale beats empty
+          sendJson(200, buildPayload(entry)); // upstream down — stale beats empty
           record(() => recorder.tapFailure('firms', { t: Date.now() }));
         } else {
           sendJson(502, {

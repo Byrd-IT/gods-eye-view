@@ -76,6 +76,14 @@ export function createFirmsState({ services, config }) {
 
   layerState._lastUpdate = null;
 
+  /**
+   * The snapshot's own freshness threshold (payload.ttlMs) — the age at which
+   * its producer stops calling it fresh. Null until a payload states it; the
+   * row never invents a threshold of its own.
+   */
+
+  layerState._ttlMs = null;
+
   layerState._at = null;
 
   layerState._currentLodId = null;
