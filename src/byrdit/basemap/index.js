@@ -1,6 +1,9 @@
 import { createDefaultMapSources } from '../../maps/defaultSources.js';
 import { mapEngineFor } from '../../maps/engine.js';
-import { loadPhotorealisticTileset } from '../../render/cesium/google3d.js';
+import {
+  loadGooglePortHandle,
+  releaseGooglePortHandle,
+} from './googleHandle.js';
 // The photo coverage layer draws through `drawOf(viewer)`; load the Cesium
 // adapter's unbound draw factory with the scene that reaches it, as the
 // render/unboundCamera ratchet requires of every entry with a findDraw caller.
@@ -117,18 +120,16 @@ export async function openBasemap({
   if (!config.available) console.warn('[Basemap]', config.unavailableReason);
 
   const scene = viewer.scene;
+  // Google 3D is a handle of the scene's globe port (upstream's photoreal
+  // contract), so the map stack can switch it; see googleHandle.js.
   const session = createGoogleSession({
     hasCredentials: Boolean(String(googleApiKey || '').trim() || googleTokens),
     load: () =>
-      loadPhotorealisticTileset(Cesium, { googleApiKey, googleTokens }),
-    attach: (tileset) => {
-      tileset.show = false;
-      scene.primitives.add(tileset);
+      loadGooglePortHandle(sceneViewer, { googleApiKey, googleTokens }),
+    attach: (handle) => {
+      handle.show = false;
     },
-    detach: (tileset) => {
-      if (tileset.isDestroyed?.()) return;
-      if (!scene.primitives.remove(tileset)) tileset.destroy?.();
-    },
+    detach: (handle) => releaseGooglePortHandle(sceneViewer, handle),
     reRootAgeMs: config.switch.reRootAgeMs,
     rootAttemptsPerHour: config.switch.rootAttemptsPerHour,
   });
