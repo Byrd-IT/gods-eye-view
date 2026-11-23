@@ -141,16 +141,36 @@ export function createIngestion({ state, services, parts, source }) {
   }
 
   /**
-   * Fetch a feed's path pack once. A 404 means the feed has no paths and its
-   * trains keep straight-line motion; any other failure (a 503 from a pack
-   * the server cannot read now, say) is retried on the schedule packs'
+   * Fetch a feed's path pack once. A feed the catalog marks `paths: false`
+   * (the host never built its pack) is not asked for: the answer could only
+   * be a 404, and its trains keep straight-line motion. A 404 to a feed the
+   * catalog said nothing about means the same; any other failure (a 503 from
+   * a pack the server cannot read now, say) is retried on the schedule packs'
    * stepped delay, 30 s doubling to ten minutes (scheduleRetryDelayMs).
-   * @param {object} feed Registry entry.
+   * @param {object} feed Catalog entry.
    */
   function ensurePaths(feed) {
     const known = state._pathPacks.get(feed.id);
     if (known && !(known.status === 'none' && Date.now() >= known.retryAt))
       return;
+    // The catalog entry, whichever entry this feed object came from (the
+    // bundled registry while the catalog was still in flight).
+    const catalogPaths = state._catalog?.find(
+      (listed) => listed.id === feed.id,
+    )?.paths;
+    if (feed.paths === false || catalogPaths === false) {
+      state._pathPacks.set(feed.id, {
+        status: 'none',
+        pack: null,
+        retryAt: Infinity,
+        // The catalog said so: its line cannot be drawn here.
+        absent: true,
+      });
+      return;
+    }
+    // A catalog is on its way: wait for its word on the packs rather than
+    // asking a host that may have built none (loadCatalog resumes this).
+    if (state._catalogRequest) return;
     if (typeof source.requestPaths !== 'function') {
       state._pathPacks.set(feed.id, {
         status: 'none',
@@ -188,6 +208,7 @@ export function createIngestion({ state, services, parts, source }) {
       } catch (error) {
         slot.status = 'none';
         slot.failures += 1;
+        slot.absent = error?.status === 404;
         slot.retryAt =
           error?.status === 404
             ? Infinity
@@ -524,6 +545,15 @@ export function createIngestion({ state, services, parts, source }) {
     state._inFlight.clear();
   }
 
+  /**
+   * Ask for the path packs of the feeds in view. Called when the catalog
+   * answers, for the feeds polled while it was in flight (ensurePaths held
+   * their packs back until the catalog said which are built).
+   */
+  function ensurePathsForActiveFeeds() {
+    for (const feed of state._activeFeeds.values()) ensurePaths(feed);
+  }
+
   return {
     feedStatus,
     removeTrain,
@@ -531,6 +561,7 @@ export function createIngestion({ state, services, parts, source }) {
     sweepAgedTrains,
     applySnapshot,
     pollFeed,
+    ensurePathsForActiveFeeds,
     abortAllInFlight,
     duplicates,
   };

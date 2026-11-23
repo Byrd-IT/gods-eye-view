@@ -1611,12 +1611,18 @@ export function classifyTrain(feed, routeId, context = null) {
  * it could misuse. With `schedulePackBuilt`, a feed that needs its pack
  * (`railFeedNeedsSchedulePack`) appears only once the host has that pack:
  * packs are opt-in build output, so a feed nobody has built is absent rather
- * than shown as unavailable.
- * @param {{schedulePackBuilt?: ((feedId: string) => boolean)|null}}
- *   [options]
+ * than shown as unavailable. With `pathPackBuilt`, each feed says whether its
+ * path pack (route shapes) is built, so a browser on a host that never ran
+ * the build does not ask for a pack that answers 404; a host that cannot tell
+ * leaves the field out and the browser asks as it always did.
+ * @param {{schedulePackBuilt?: ((feedId: string) => boolean)|null,
+ *   pathPackBuilt?: ((feedId: string) => boolean)|null}} [options]
  * @returns {object[]}
  */
-export function publicRailCatalog({ schedulePackBuilt = null } = {}) {
+export function publicRailCatalog({
+  schedulePackBuilt = null,
+  pathPackBuilt = null,
+} = {}) {
   const listed = (feed) =>
     typeof schedulePackBuilt !== 'function' ||
     !railFeedNeedsSchedulePack(feed) ||
@@ -1632,6 +1638,9 @@ export function publicRailCatalog({ schedulePackBuilt = null } = {}) {
       loadRadiusKm: feed.loadRadiusKm,
       positions: railFeedPositions(feed),
       tripUpdates: railFeedHasTripUpdates(feed),
+      ...(typeof pathPackBuilt === 'function'
+        ? { paths: pathPackBuilt(feed.id) === true }
+        : {}),
       license: feed.license,
       licenseUrl: feed.licenseUrl,
       attribution: feed.attribution,

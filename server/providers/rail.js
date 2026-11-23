@@ -137,25 +137,48 @@ export function createFsSchedulePackReader(dir, { cache = null } = {}) {
 }
 
 /**
- * A `hasSchedulePack` for the rail service: whether
- * `<dir>/<feedId>.schedule.json` is a file. Only the directory entry is
- * read, never the pack; a missing file is false, any other error is thrown
- * (the service then lists the feed, so the read shows the failure).
+ * A pack probe for the rail service: whether `<dir>/<feedId><suffix>` is a
+ * file. Only the directory entry is read, never the pack; a missing file is
+ * false, any other error is thrown (the service then lists the feed, so the
+ * read shows the failure).
  * @param {string} dir
+ * @param {string} suffix `.schedule.json` or `.json`
  * @returns {(feedId: string) => Promise<boolean>}
  */
-export function createFsSchedulePackProbe(dir) {
+function createFsPackProbe(dir, suffix) {
   const root = path.resolve(dir);
   return async (feedId) => {
     if (typeof feedId !== 'string' || !RAIL_FEED_ID_PATTERN.test(feedId))
       return false;
     try {
-      return (await stat(path.join(root, `${feedId}.schedule.json`))).isFile();
+      return (await stat(path.join(root, `${feedId}${suffix}`))).isFile();
     } catch (error) {
       if (error?.code === 'ENOENT') return false;
       throw error;
     }
   };
+}
+
+/**
+ * A `hasSchedulePack` for the rail service: whether
+ * `<dir>/<feedId>.schedule.json` is a file.
+ * @param {string} dir
+ * @returns {(feedId: string) => Promise<boolean>}
+ */
+export function createFsSchedulePackProbe(dir) {
+  return createFsPackProbe(dir, '.schedule.json');
+}
+
+/**
+ * A `hasPathPack` for the rail service: whether `<dir>/<feedId>.json` (a
+ * path pack) is a file. The catalog reports it, so a browser on a host whose
+ * packs were never built does not ask for each feed's pack to learn it is
+ * missing.
+ * @param {string} dir
+ * @returns {(feedId: string) => Promise<boolean>}
+ */
+export function createFsPathPackProbe(dir) {
+  return createFsPackProbe(dir, '.json');
 }
 
 /**
@@ -235,6 +258,9 @@ export function railProxy(options = {}) {
     hasSchedulePack:
       options.hasSchedulePack ||
       (options.readSchedulePack ? null : createFsSchedulePackProbe(pathsDir)),
+    hasPathPack:
+      options.hasPathPack ||
+      (options.readPathPack ? null : createFsPathPackProbe(pathsDir)),
     schedulePackVersion:
       options.schedulePackVersion ||
       (options.readSchedulePack ? null : createFsSchedulePackVersion(pathsDir)),

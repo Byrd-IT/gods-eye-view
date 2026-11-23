@@ -98,6 +98,9 @@ export function createViewport({ state, services, parts, source }) {
         state._catalogFailures = 0;
         state._catalogRequest = null;
         logCatalog(usable);
+        // Feeds polled while the catalog was in flight were not asked for
+        // their path packs; it now says which the host has built.
+        parts.ingestion.ensurePathsForActiveFeeds();
         runProximityCheck();
       } catch (error) {
         if (error?.name === 'AbortError' || state._catalogRequest !== request)

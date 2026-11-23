@@ -277,7 +277,10 @@ test('a pack-routed live feed waits for the catalog, then runs once its pack is 
   liveFeedsAnswer(app);
   await app.enable();
   const asks = () => [...app.requestedSchedules, ...app.requestedPaths];
-  assert.ok(app.requestedPaths.includes(CERCANIAS), 'Cercanías starts at once');
+  assert.ok(app.requested.includes(CERCANIAS), 'Cercanías starts at once');
+  // Its line waits for the catalog: only it says which packs the host built,
+  // so asking before that could only log a 404 on a host that built none.
+  assert.deepEqual(app.requestedPaths, [], 'its pack waits for the catalog');
   assert.deepEqual(asks().filter(needsPack), []);
   assert.ok(!app.state()._activeFeeds.has(LONG_DISTANCE));
   assert.ok(!app.requested.includes(LONG_DISTANCE));
@@ -289,6 +292,10 @@ test('a pack-routed live feed waits for the catalog, then runs once its pack is 
   assert.ok(app.state()._activeFeeds.has(LONG_DISTANCE));
   assert.ok(app.requested.includes(LONG_DISTANCE), 'its live positions');
   assert.ok(app.requestedPaths.includes(LONG_DISTANCE), 'and its line');
+  assert.ok(
+    app.requestedPaths.includes(CERCANIAS),
+    'the line of a feed polled meanwhile',
+  );
   // Its schedule pack is not needed to place anything.
   assert.deepEqual(app.requestedSchedules, []);
 });

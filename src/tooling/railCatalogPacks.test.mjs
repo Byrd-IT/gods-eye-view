@@ -20,6 +20,9 @@ import {
   railFeedNeedsSchedulePack,
 } from '../data/railFeeds.js';
 import {
+  createFsPathPackProbe,
+  createFsPathPackReader,
+  createFsPathPackVersion,
   createFsSchedulePackProbe,
   createFsSchedulePackVersion,
 } from '../../server/providers/rail.js';
@@ -232,4 +235,107 @@ test('the fs pack version changes when the pack is rebuilt', async (t) => {
   await utimes(file, 2_000, 2_000);
   assert.notEqual(await version('ktmb'), first);
   assert.equal(await version('../ktmb'), null, 'ids never leave the dir');
+});
+
+test('the catalog says which feeds have a path pack built', async (t) => {
+  const service = createRailService({
+    fetchImpl: async () => {
+      throw new Error('no network in tests');
+    },
+    hasPathPack: async (feedId) => feedId === 'mbta-rail',
+  });
+  t.after(() => service.close());
+  const response = await service.handle(request('/api/rail/feeds'));
+  assert.equal(response.status, 200);
+  const { feeds } = await response.json();
+  const paths = new Map(feeds.map((feed) => [feed.id, feed.paths]));
+  assert.equal(paths.size, feeds.length, 'every listed feed answers');
+  assert.equal(paths.get('mbta-rail'), true);
+  assert.equal(paths.get('marc'), false);
+});
+
+test('without a path probe the catalog claims nothing about a feed', async (t) => {
+  const service = createRailService({
+    fetchImpl: async () => {
+      throw new Error('no network in tests');
+    },
+  });
+  t.after(() => service.close());
+  const response = await service.handle(request('/api/rail/feeds'));
+  const { feeds } = await response.json();
+  assert.ok(feeds.length > 0);
+  // Not false: a host that cannot tell must not stop the browser asking.
+  for (const feed of feeds) assert.equal('paths' in feed, false, feed.id);
+});
+
+test('a failing path probe answers built, so a feed is never hidden by it', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const service = createRailService({
+    fetchImpl: async () => {
+      throw new Error('no network in tests');
+    },
+    hasPathPack: async (feedId) => {
+      if (feedId === 'marc') throw new Error('EACCES');
+      return false;
+    },
+  });
+  t.after(() => service.close());
+  const response = await service.handle(request('/api/rail/feeds'));
+  const { feeds } = await response.json();
+  const marc = feeds.find((feed) => feed.id === 'marc');
+  assert.ok(marc, 'the feed stays listed');
+  assert.equal(marc.paths, true, 'unknown is not "not built"');
+});
+
+test('the fs path probe sees only a path pack file', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'rail-path-probe-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(path.join(dir, 'marc.json'), '{}');
+  await writeFile(path.join(dir, 'ktmb.schedule.json'), '{}');
+  await mkdir(path.join(dir, 'mbta-rail.json'));
+  const probe = createFsPathPackProbe(dir);
+  assert.equal(await probe('marc'), true);
+  assert.equal(
+    await probe('ktmb'),
+    false,
+    'a schedule pack alone is not built',
+  );
+  assert.equal(await probe('mbta-rail'), false, 'a directory is not a pack');
+  assert.equal(await probe('../marc'), false, 'ids never leave the dir');
+});
+
+test('a pack on disk is listed in the catalog and served', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'rail-path-serve-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const pack = {
+    version: 1,
+    feedId: 'marc',
+    shapes: [],
+    dist: [],
+    trips: {},
+    routes: {},
+  };
+  await writeFile(path.join(dir, 'marc.json'), JSON.stringify(pack));
+  const service = createRailService({
+    fetchImpl: async () => {
+      throw new Error('no network in tests');
+    },
+    readPathPack: createFsPathPackReader(dir),
+    hasPathPack: createFsPathPackProbe(dir),
+    pathPackVersion: createFsPathPackVersion(dir),
+  });
+  t.after(() => service.close());
+  const catalog = await (
+    await service.handle(request('/api/rail/feeds'))
+  ).json();
+  assert.equal(catalog.feeds.find((feed) => feed.id === 'marc').paths, true);
+  assert.equal(
+    catalog.feeds.find((feed) => feed.id === 'mbta-rail').paths,
+    false,
+  );
+  const built = await service.handle(request('/api/rail/paths/marc'));
+  assert.equal(built.status, 200);
+  assert.deepEqual(await built.json(), pack);
+  const missing = await service.handle(request('/api/rail/paths/mbta-rail'));
+  assert.equal(missing.status, 404);
 });

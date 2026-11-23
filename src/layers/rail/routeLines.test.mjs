@@ -26,6 +26,7 @@ import {
   pointAtS,
   projectOnPath,
 } from '../../data/railPaths.js';
+import { publicRailCatalog } from '../../data/railFeeds.js';
 
 const M_PER_DEG = 111_320;
 const LAT = 42.36;
@@ -338,4 +339,38 @@ test('with the layer off, its feeds are released after ten minutes', async (t) =
   t.mock.timers.tick(FEED_RELEASE_AFTER_MS);
   assert.ok(!app.state()._networks.has('mbta-rail'));
   assert.ok(!app.state()._pathPacks.has('mbta-rail'));
+});
+
+test('a feed the catalog says has no path pack is not asked for one', async (t) => {
+  // A fresh install builds no packs; the catalog says so, so the browser
+  // never asks for a pack that would answer 404.
+  const catalog = publicRailCatalog().map((feed) => ({
+    ...feed,
+    paths: feed.id !== 'mbta-rail',
+  }));
+  const app = harness(t, { at: BOSTON, catalog, paths: {} });
+  app.feeds.set('mbta-rail', () => [train('T1', BOSTON.lat, BOSTON.lon)]);
+  await app.enable();
+  assert.deepEqual(app.requestedPaths, [], 'no 404 asked for');
+  const stats = app.layer.getStats();
+  assert.equal(stats.count, 1, 'the trains still draw');
+  assert.equal(stats.pathsMissing, 1);
+  assert.equal(stats.degraded, true, 'the row does not read nominal');
+  assert.match(app.layer.getRowControls().info, /Route lines unavailable/);
+});
+
+test('a path pack that answers 404 is reported, not asked for again', async (t) => {
+  // A host whose catalog says nothing about packs: the 404 is the answer,
+  // and it is final for the feed's stay in view.
+  const app = harness(t, { at: BOSTON, paths: {} });
+  app.feeds.set('mbta-rail', () => [train('T1', BOSTON.lat, BOSTON.lon)]);
+  await app.enable();
+  assert.deepEqual(app.requestedPaths, ['mbta-rail']);
+  const stats = app.layer.getStats();
+  assert.equal(stats.count, 1);
+  assert.equal(stats.pathsMissing, 1);
+  assert.equal(stats.degraded, true);
+  assert.match(app.layer.getRowControls().info, /Route lines unavailable/);
+  await app.poll();
+  assert.deepEqual(app.requestedPaths, ['mbta-rail'], 'asked once, not again');
 });

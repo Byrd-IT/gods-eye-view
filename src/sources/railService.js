@@ -220,6 +220,7 @@ const SCHEDULE_PACK_PROBE_RETRY_S = SCHEDULE_PACK_PROBE_TTL_MS / 1000;
  *   readSchedulePack?: (feedId: string, options: {maxBytes: number}) =>
  *     Promise<string|Uint8Array|null>,
  *   hasSchedulePack?: (feedId: string) => Promise<boolean>,
+ *   hasPathPack?: (feedId: string) => Promise<boolean>,
  *   schedulePackVersion?: (feedId: string) => Promise<string|null>,
  *   pathPackVersion?: (feedId: string) => Promise<string|null>,
  *   now?: () => number}} [options]
@@ -230,6 +231,7 @@ export function createRailService({
   readPathPack = null,
   readSchedulePack = null,
   hasSchedulePack = null,
+  hasPathPack = null,
   schedulePackVersion = null,
   pathPackVersion = null,
   now: clock = () => Date.now(),
@@ -254,39 +256,82 @@ export function createRailService({
               }
             }
           : null;
-  /** Probe answers by feed id: {at, built}. */
-  const schedulePackProbes = new Map();
-  async function schedulePackBuilt(feedId) {
-    if (!probeSchedulePack) return false;
-    const seen = schedulePackProbes.get(feedId);
-    if (seen && clock() - seen.at < SCHEDULE_PACK_PROBE_TTL_MS)
-      return seen.built;
-    let built;
-    try {
-      built = (await probeSchedulePack(feedId)) === true;
-    } catch (error) {
-      console.warn(`[rail] ${feedId}: schedule pack probe failed`, error);
-      built = true;
-    }
-    schedulePackProbes.set(feedId, { at: clock(), built });
-    return built;
+  /** Whether a feed's path pack is built, as the host can tell. */
+  const probePathPack =
+    typeof hasPathPack === 'function'
+      ? hasPathPack
+      : typeof pathPackVersion === 'function'
+        ? async (feedId) => (await pathPackVersion(feedId)) != null
+        : typeof readPathPack === 'function'
+          ? async (feedId) => {
+              try {
+                const body = await readPathPack(feedId, {
+                  maxBytes: RAIL_PATH_PACK_MAX_BYTES,
+                });
+                return body !== null && body !== undefined;
+              } catch (error) {
+                // Built, but refused: the pack's own route says so.
+                if (error?.code === 'PACK_TOO_LARGE') return true;
+                throw error;
+              }
+            }
+          : null;
+  /**
+   * A pack probe's answers by feed id ({at, built}), kept for the pack TTL.
+   * A probe that fails answers built: a feed is never hidden, nor its pack
+   * reported missing, by a read the host could not make.
+   * @param {((feedId: string) => Promise<boolean>)|null} probe
+   * @param {string} label
+   * @returns {(feedId: string) => Promise<boolean>}
+   */
+  function cachedPackProbe(probe, label) {
+    const answers = new Map();
+    return async (feedId) => {
+      if (!probe) return false;
+      const seen = answers.get(feedId);
+      if (seen && clock() - seen.at < SCHEDULE_PACK_PROBE_TTL_MS)
+        return seen.built;
+      let built;
+      try {
+        built = (await probe(feedId)) === true;
+      } catch (error) {
+        console.warn(`[rail] ${feedId}: ${label} probe failed`, error);
+        built = true;
+      }
+      answers.set(feedId, { at: clock(), built });
+      return built;
+    };
   }
+  const schedulePackBuilt = cachedPackProbe(probeSchedulePack, 'schedule pack');
+  /** Whether a feed's route shapes are built; false when nothing can tell. */
+  const pathPackBuilt = cachedPackProbe(probePathPack, 'path pack');
   /** Whether the feed can be served: it needs no pack, or its pack is built. */
   async function feedServable(feed) {
     return !railFeedNeedsSchedulePack(feed) || schedulePackBuilt(feed.id);
   }
-  /** The catalog, with pack-routed feeds whose pack is unbuilt left out. */
+  /**
+   * The catalog, with pack-routed feeds whose pack is unbuilt left out and
+   * each listed feed's path pack marked built or not (`paths`). A host that
+   * cannot tell leaves the field out, so the browser asks as it always did.
+   */
   async function catalog() {
     const built = new Set();
+    const paths = new Map();
     await Promise.all(
-      railEnabledFeeds()
-        .filter((feed) => railFeedNeedsSchedulePack(feed))
-        .map(async (feed) => {
-          if (await schedulePackBuilt(feed.id)) built.add(feed.id);
-        }),
+      railEnabledFeeds().map(async (feed) => {
+        if (
+          railFeedNeedsSchedulePack(feed) &&
+          (await schedulePackBuilt(feed.id))
+        )
+          built.add(feed.id);
+        paths.set(feed.id, await pathPackBuilt(feed.id));
+      }),
     );
     return publicRailCatalog({
       schedulePackBuilt: (feedId) => built.has(feedId),
+      ...(probePathPack
+        ? { pathPackBuilt: (feedId) => paths.get(feedId) === true }
+        : {}),
     });
   }
   /**

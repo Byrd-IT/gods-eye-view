@@ -52,6 +52,33 @@ export function createControls({ state, parts, timetable }) {
     return counts;
   }
 
+  /**
+   * Active feeds the host has no path pack for (the catalog says so, or the
+   * pack answered 404): their trains are drawn, but their route line cannot
+   * be. An empty list is the normal case, packs built or never asked for.
+   * @returns {string[]}
+   */
+  function feedsWithoutPaths() {
+    return [...state._activeFeeds.keys()].filter(
+      (feedId) => state._pathPacks.get(feedId)?.absent === true,
+    );
+  }
+
+  /**
+   * The row's info line while a feed in view has no path pack: what the layer
+   * cannot draw, and why. Empty when every feed in view has its pack.
+   * @returns {{info: string, infoTitle: string}}
+   */
+  function pathPackNotice() {
+    if (feedsWithoutPaths().length === 0) return { info: '', infoTitle: '' };
+    return {
+      info: t('Route lines unavailable: no path pack built'),
+      infoTitle: t(
+        'A route line is drawn from the path pack built from the operator’s GTFS shapes. None is built on this server, so its trains show without their line.',
+      ),
+    };
+  }
+
   /** The coverage line: each active feed and its train count, aged when quiet. */
   function coverageLine(active, now) {
     const drawn = drawnCounts();
@@ -131,7 +158,7 @@ export function createControls({ state, parts, timetable }) {
         color: RAIL_CATEGORY_COLORS[category],
         count: counts.get(category),
       }));
-      return { chips, legend };
+      return { chips, legend, ...pathPackNotice() };
     },
     /** Route-line, stop, schedule and camera-follow state, for QA probes. */
     getRouteDisplayStats() {
@@ -149,6 +176,9 @@ export function createControls({ state, parts, timetable }) {
       );
       const now = Date.now();
       const health = aggregateTransitFeedHealth(statuses, now);
+      // Feeds in view whose route shapes were never built (or answered 404):
+      // the map shows their trains without their line, which is not nominal.
+      const pathsMissing = feedsWithoutPaths();
       let count = 0;
       for (const entry of state._trains.values())
         if (parts.rendering.categoryShown(entry)) count += 1;
@@ -181,7 +211,7 @@ export function createControls({ state, parts, timetable }) {
         ...(count === 0 && Number.isFinite(health.retryInSec)
           ? { retryInSec: health.retryInSec }
           : {}),
-        degraded: count > 0 && health.degraded,
+        degraded: (count > 0 && health.degraded) || pathsMissing.length > 0,
         loading: health.loading && count === 0,
         loadingLabel:
           // i18n-ignore: English data, translated on display (ui/statusText.js)
@@ -189,6 +219,9 @@ export function createControls({ state, parts, timetable }) {
             ? `Loading ${active.map((feed) => feed.name).join(', ')}`
             : undefined,
         stale: health.stale,
+        ...(pathsMissing.length > 0
+          ? { pathsMissing: pathsMissing.length }
+          : {}),
         // The panel reads this as "PARTIAL · N of M records accepted".
         ...(capped > 0 && count > 0
           ? {
