@@ -6,7 +6,6 @@ import { CCTV_OVERLAY_SOURCE_ID } from '../../data/cctvCards.js';
 import { GIZMO_ID_PREFIX } from '../../data/cctvGizmo.js';
 import { inputFor } from '../../input/dispatcher.js';
 import {
-  GROUND_PRIOR_INIT_WAIT_MS,
   CALIBRATION_RANGE_FLOOR_M,
   VIEW_MOTION_REFRESH_MS,
   VIEW_MOTION_MIN_MOVE_FRACTION,
@@ -35,6 +34,21 @@ export function createLifecycle({
   const { releaseContinuousRender } = services.render;
 
   /**
+   * Resolves terrain heights for the cameras the view is drawing right now.
+   * Shared by enable() and the settled-view pass so a camera that scrolls
+   * into view is grounded on the same visibility-gated batch.
+   */
+  function resolveViewGroundPriors() {
+    // No height traffic for a layer that is off (the moveEnd listener stays
+    // attached across disable).
+    if (!layerState._enabled) return;
+    if (!parts.ground?.resolveVisibleGroundPriors) return;
+    const workingSet = parts.geometryQueue.geometryWorkingSet?.();
+    if (!workingSet?.length) return;
+    void parts.ground.resolveVisibleGroundPriors(workingSet);
+  }
+
+  /**
    * The settled-view pass: thin the icons, queue the newly visible geometry,
    * reselect cards, and tell subscribers (the camera picker) when the shown
    * set changed since they were last told, including by motion passes.
@@ -43,6 +57,11 @@ export function createLifecycle({
     const changed = parts.rendering.refreshHorizonCulling();
     noteViewPose();
     parts.geometryQueue.enqueueViewGeometry();
+    // Heights only for the cameras this view draws. The catalog is global
+    // (~13.7K cameras); asking for all of them at enable is the terrain
+    // request storm, and an off-view camera is grounded by the view pass when
+    // it comes on screen.
+    resolveViewGroundPriors();
     parts.cards.refreshAmbientCards();
     if (changed || layerState._viewUnpublished) {
       layerState._viewUnpublished = false;
@@ -279,35 +298,19 @@ export function createLifecycle({
         parts.model.ensureCameraPose(camera);
       }
 
-      // Task 5 (height-datum fix): batch ALL camera coords through the Re:Earth
-      // ellipsoidal ground-prior resolver (network-cached — NOT a scene query;
-      // the catalog's orthometric groundElevationM feeds the geoid fallback
-      // chain). Bounded wait: a warm proxy cache resolves in milliseconds, so
-      // records are normally built WITH their prior (correct first paint in
-      // every regime); a cold/slow upstream loses the race and the batch
-      // applies post-hoc via applyLateGroundPriors instead of hanging init.
-      const priorsPromise = parts.ground.resolveGroundPriors(catalog);
-      const priors = await Promise.race([
-        priorsPromise,
-        new Promise((resolve) =>
-          setTimeout(() => resolve(null), GROUND_PRIOR_INIT_WAIT_MS),
-        ),
-      ]);
-      sourceAbort.signal.throwIfAborted();
+      // Ground priors are resolved from the VIEW, not here: a catalog-wide
+      // batch is ~13.7K cameras / 214 height chunks against a 90-request/min
+      // route (the CCTV enable-time 429 storm). Records start on the catalog's
+      // orthometric fallback; enable() and every settled view ask the
+      // visibility-gated resolver for the cameras actually drawn, and the view
+      // pass adopts the drawn terrain for the rest.
 
       for (let i = 0; i < catalog.length; i++) {
         const camera = catalog[i];
-        // Ellipsoidal ground prior (or null while the batch is still in
-        // flight). Geometry falls back to the catalog value only until the
-        // batch lands.
-        const groundPrior = priors?.[i] || null;
-        // Cheap first-pass altitude from the ellipsoidal prior (catalog value
-        // only as the pre-prior fallback) — the staggered geometry queue
-        // refines with sampled tile heights after enable so the init path
-        // never raycasts the scene once per camera.
-        const priorGround = Number.isFinite(groundPrior?.ellipsoid)
-          ? groundPrior.ellipsoid
-          : Number(camera.groundElevationM) || 0;
+        // Cheap first-pass altitude from the catalog value. The staggered
+        // geometry queue and the view pass refine it with terrain heights
+        // after enable, so init never raycasts the scene once per camera.
+        const priorGround = Number(camera.groundElevationM) || 0;
         camera.absoluteHeightM = priorGround + camera.mountHeightM;
         const position = fromDegrees(
           camera.lon,
@@ -334,7 +337,7 @@ export function createLifecycle({
           //     "has ever resolved" memory for the B9c mid-stream guard.
           //   frustumPositions — cached Cartesians for pure recomputes (so
           //     plane placement never re-derives geometry it already has).
-          groundPrior,
+          groundPrior: null,
           groundResolved: {},
           groundSamples: {},
           frustumGeometry: null,
@@ -360,18 +363,6 @@ export function createLifecycle({
       layerState._count = layerState._records.length;
       // No camera is picked here: enable() opens on the one nearest the
       // viewer, unless restored params selected one first.
-
-      // Task 5: if the prior batch lost init's bounded race, apply it post-hoc
-      // when it lands (pure recomputes — applyLateGroundPriors guards against
-      // a torn-down/re-inited catalog).
-      if (!priors) {
-        const initRecords = layerState._records.slice();
-        priorsPromise
-          .then((late) => {
-            if (late) parts.ground.applyLateGroundPriors(initRecords, late);
-          })
-          .catch(() => {});
-      }
 
       // Task 5: track the surface regime the initial geometry was computed for
       // and listen for map-stack changes (main.js re-dispatches
@@ -528,6 +519,9 @@ export function createLifecycle({
         parts.frames.refreshProjectionImage(activeRecord, true);
       }
       parts.rendering.refreshHorizonCulling();
+      // Enable-time heights: only the cameras the first view pass will draw.
+      // The old catalog-wide batch is what 429'd the terrain route.
+      resolveViewGroundPriors();
       // Re-enabled mid-flight: moveStart has already fired.
       if (layerState._cameraMoving) startViewMotionTimer();
       parts.geometryQueue.startGeometryLoadQueue();

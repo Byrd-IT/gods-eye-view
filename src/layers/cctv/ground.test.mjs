@@ -62,3 +62,66 @@ test('a late geoid fallback leaves a drawn-terrain height in place', () => {
   assert.equal(record.groundPrior.source, 'drawn-terrain');
   assert.ok(!calls.geometry.includes(8), 'mount not lowered to the fallback');
 });
+
+test('a visibility-gated prior batch asks for the passed records only', async () => {
+  const requested = [];
+  const makeRecord = (id, lon) => ({
+    camera: { id, lat: 40, lon, mountHeightM: 5 },
+    position: fromDegrees(lon, 40, 100),
+    frustumGeometry: null,
+    frustumPositions: null,
+    groundSamples: {},
+    groundResolved: {},
+    groundPrior: null,
+  });
+  const records = [
+    makeRecord('a', -77),
+    makeRecord('b', -78),
+    makeRecord('c', -79),
+  ];
+  const state = {
+    _viewer: null,
+    _recordById: new Map(records.map((record) => [record.camera.id, record])),
+  };
+  const parts = {
+    rendering: { refreshHorizonCulling: () => false, moveCameraIcon() {} },
+    geometryQueue: { enqueueViewGeometry() {} },
+    presentation: { notifyListeners() {} },
+    geometry: { updateRecordGeometry() {} },
+  };
+  const ground = createGround({
+    state,
+    services: {
+      ground: { resolveGroundFloorCells: async () => {} },
+      terrain: {
+        async resolveEllipsoidalGround(coords) {
+          requested.push(coords.map((coord) => coord.lon));
+          return coords.map(() => ({ ellipsoid: 1234, source: 'reearth' }));
+        },
+      },
+    },
+    parts,
+  });
+
+  // The view pass shows a and c; b is off screen and must not be fetched.
+  const count = await ground.resolveVisibleGroundPriors([
+    records[0],
+    records[2],
+  ]);
+
+  assert.equal(count, 2);
+  assert.deepEqual(requested, [[-77, -79]]);
+  assert.equal(records[0].groundPrior.ellipsoid, 1234);
+  assert.equal(records[0].groundPrior.source, 'reearth');
+  assert.equal(records[1].groundPrior, null, 'an off-view camera is untouched');
+
+  // A later settle re-passes the same working set; warm records are not
+  // requested again.
+  await ground.resolveVisibleGroundPriors(records);
+  assert.deepEqual(
+    requested,
+    [[-77, -79], [-78]],
+    'only the cold record is asked for',
+  );
+  assert.equal(records[2].groundPrior.source, 'reearth');
+});

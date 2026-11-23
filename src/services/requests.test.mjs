@@ -127,6 +127,28 @@ test('a failed terrain request carries the real heights the server had', async (
   });
 });
 
+test('a rate-limited terrain response is identifiable by its status and Retry-After', async () => {
+  const services = createApplicationRequestServices({
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': '10' },
+      }),
+  });
+
+  await assert.rejects(
+    services.terrain.getHeights([{ lat: 30, lon: -97 }]),
+    (error) => {
+      // The terrain resolver can only stop a large batch on a rate limit if
+      // the transport says which failure this was; the message alone is not
+      // enough (502 and 429 read the same there).
+      assert.equal(error.status, 429);
+      assert.equal(error.retryAfterMs, 10_000);
+      return true;
+    },
+  );
+});
+
 test('the summary capability probe is asked once and unknown when unanswered', async () => {
   for (const [answer, expected] of [
     [() => Response.json({ configured: false }), false],

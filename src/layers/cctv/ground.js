@@ -192,10 +192,62 @@ export function createGround({ state: layerState, services, parts, source }) {
     }
   }
 
+  /** Camera ids with a prior request in flight, so settles cannot duplicate. */
+  const priorRequestsInFlight = new Set();
+
   /**
-   * Task 5: applies a LATE-arriving ground-prior batch (init's bounded race
-   * lost — cold proxy cache / slow upstream). Pure recomputes only, no scene
-   * queries:
+   * Resolves ground priors for the cameras the CURRENT VIEW draws — the
+   * geometry working set (shown icons, the active camera, the coverage
+   * cohort) — instead of the whole global catalog.
+   *
+   * The catalog carries 13,657 cameras. Requesting a height for every one of
+   * them on enable produced ~214 sequential `/api/terrain/heights` chunks
+   * against a route limited to 90 requests/min/client: ~110 chunks 429'd, the
+   * row stayed in LOADING for ~30 s, and the rejected cameras silently fell
+   * back to flat geoid heights. Cameras outside the view do not need a
+   * network prior: they are grounded when they come into view (the view pass
+   * adopts the drawn terrain and the geometry queue resolves the rest).
+   *
+   * Records that already hold a real prior, or a drawn-terrain read, are
+   * skipped — no network. Geoid fallbacks are retried through the resolver,
+   * which enforces its own cooldown. Concurrent calls do not duplicate work
+   * for a camera already in flight.
+   *
+   * @param {Object[]} records - Records from the view's working set.
+   * @returns {Promise<number>} How many records were sent for a prior.
+   */
+
+  async function resolveVisibleGroundPriors(records) {
+    if (!Array.isArray(records) || records.length === 0) return 0;
+    const targets = [];
+    const seen = new Set();
+    for (const record of records) {
+      const id = record?.camera?.id;
+      if (!id || seen.has(id) || priorRequestsInFlight.has(id)) continue;
+      seen.add(id);
+      const source = record.groundPrior?.source;
+      if (source === 'reearth' || source === 'drawn-terrain') continue;
+      targets.push(record);
+    }
+    if (targets.length === 0) return 0;
+    for (const record of targets) priorRequestsInFlight.add(record.camera.id);
+    try {
+      const priors = await resolveGroundPriors(
+        targets.map((record) => record.camera),
+      );
+      if (!priors) return 0;
+      applyLateGroundPriors(targets, priors);
+      return targets.length;
+    } finally {
+      for (const record of targets)
+        priorRequestsInFlight.delete(record.camera.id);
+    }
+  }
+
+  /**
+   * Applies a visibility-gated ground-prior batch when it lands (the network
+   * may still be pending after the view has painted). Pure recomputes only,
+   * no scene queries:
    *  - records without geometry yet: only the icon moves onto the prior;
    *    the frustum is built when the camera enters the view.
    *  - terrain-globe regime: the prior IS the resolution → re-run the
@@ -427,6 +479,7 @@ export function createGround({ state: layerState, services, parts, source }) {
     rearmGroundResolution,
     resolveCommittedGroundAnchor,
     resolveGroundPriors,
+    resolveVisibleGroundPriors,
     applyLateGroundPriors,
     adoptDrawnGround,
     handleMapStackChanged,

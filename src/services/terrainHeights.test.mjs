@@ -169,3 +169,42 @@ test('an out-of-range cache bound falls back to the default instead of disabling
     );
   }
 });
+
+test('a rate-limited chunk ends the batch instead of firing every remaining chunk', async () => {
+  let calls = 0;
+  const terrain = createTerrainHeights({
+    source: {
+      async getHeights() {
+        calls += 1;
+        const error = new Error('Terrain heights unavailable (429)');
+        error.status = 429;
+        error.retryAfterMs = 10_000;
+        throw error;
+      },
+    },
+  });
+  // 400 points = 7 chunks at the 64-point client batch size. The old loop
+  // treated each rejection as a per-chunk geoid fallback and kept going, so a
+  // big catalog produced one 429 per chunk — the CCTV enable-time storm.
+  const batch = Array.from({ length: 400 }, (_, i) => pointAt(i));
+
+  const results = await terrain.resolveEllipsoidalGround(batch);
+
+  assert.equal(calls, 1, 'the first 429 stops further chunks');
+  assert.equal(
+    results.length,
+    batch.length,
+    'every input still gets an outcome',
+  );
+  assert.equal(results[0].source, 'geoid-fallback');
+  assert.equal(
+    results.at(-1).source,
+    'unresolved',
+    'unattempted chunks stay unresolved so they retry after the cooldown',
+  );
+  assert.equal(terrain.cachedEllipsoidalGround(0, lonAt(399)), null);
+
+  // Within the cooldown a second call issues no request at all.
+  await terrain.resolveEllipsoidalGround([pointAt(500)]);
+  assert.equal(calls, 1, 'the cooldown keeps the route quiet');
+});

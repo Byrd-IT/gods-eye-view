@@ -58,6 +58,19 @@ export function createTerrainHeights({
   const GEOID_FALLBACK_COOLDOWN_MS = 60_000;
 
   /**
+   * After the proxy answers 429, leave the route alone for its Retry-After
+   * (bounded) instead of walking the rest of a large batch. A 13.7K-camera
+   * CCTV batch used to issue ~214 sequential 64-point chunks in one burst
+   * against a route limited to 90 requests/min/client: ~112 were rejected,
+   * every rejection logged another console error, and each rejected chunk was
+   * still another request.
+   */
+  const RATE_LIMIT_COOLDOWN_MS = 10_000;
+  const RATE_LIMIT_COOLDOWN_MAX_MS = 60_000;
+  /** Epoch ms before which this instance sends no network request. */
+  let rateLimitedUntil = 0;
+
+  /**
    * Live entry ceiling for the cache below. The rounding in point 2 of the file
    * header makes repeated visits to one place share a key; it does nothing to
    * bound the number of DISTINCT places a session visits, and this cache had no
@@ -297,6 +310,10 @@ export function createTerrainHeights({
     // failure is isolated to that chunk's points (geoid fallback), so a single
     // bad chunk doesn't lose results for the rest of a large batch.
     for (let i = 0; i < uncached.length; i += CHUNK_SIZE) {
+      // The proxy rate-limited an earlier chunk: every further request in
+      // this batch would be rejected too. Stop; the points not attempted stay
+      // unresolved and retry on the next call once the cooldown expires.
+      if (Date.now() < rateLimitedUntil) break;
       const chunk = uncached.slice(i, i + CHUNK_SIZE);
       try {
         const resolved = await fetchChunk(chunk, requestSignal);
@@ -317,6 +334,18 @@ export function createTerrainHeights({
         }
       } catch (error) {
         requestSignal?.throwIfAborted();
+        // A 429 is the proxy telling this client to stop, not a per-chunk
+        // transient: park the rest of the batch behind a cooldown instead of
+        // firing every remaining chunk into the same limiter.
+        const rateLimited = error?.status === 429;
+        if (rateLimited) {
+          const wait = Number.isFinite(error.retryAfterMs)
+            ? error.retryAfterMs
+            : RATE_LIMIT_COOLDOWN_MS;
+          rateLimitedUntil =
+            Date.now() +
+            Math.min(Math.max(wait, 0), RATE_LIMIT_COOLDOWN_MAX_MS);
+        }
         // Proxy down (or cold cache had nothing to serve-stale) — fall back to
         // geoid math for the points in this chunk. A failure that still
         // carries real heights (the proxy's `partial`, e.g. cached points
@@ -339,7 +368,10 @@ export function createTerrainHeights({
           resolvedThisCall.set(item.key, entry);
           cacheStore(item.key, entry);
         });
-        if (fallback.length === 0) continue;
+        if (fallback.length === 0) {
+          if (rateLimited) break;
+          continue;
+        }
         await ensureGeoidReady();
         requestSignal?.throwIfAborted();
         for (const item of fallback) {
@@ -356,6 +388,7 @@ export function createTerrainHeights({
           resolvedThisCall.set(item.key, entry);
           cacheStore(item.key, entry);
         }
+        if (rateLimited) break;
       }
     }
 

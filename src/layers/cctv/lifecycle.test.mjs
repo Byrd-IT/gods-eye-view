@@ -372,3 +372,143 @@ test('the card painted on top takes world clicks, whatever is drawn under it', a
   click({ set: 'cctv:fixture', id: 'cam-1' }, [foreignCard, ownCard], []);
   click({ set: 'cctv:fixture', id: 'cam-1' }, [], ['cam-1']);
 });
+
+/** A camera catalog fixture of `count` entries at one site. */
+function catalogOf(count) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `cam-${i}`,
+    lat: 38.9,
+    lon: -77.03,
+    mountHeightM: 6,
+    groundElevationM: 12,
+    cityId: 'washington',
+  }));
+}
+
+/** The lifecycle parts `init` needs, with a real catalog and inert the rest. */
+function initHarness(catalog, batches) {
+  const { viewer } = viewerWithCamera();
+  viewer.scene = { canvas: {} };
+  const input = fakeInput(viewer);
+  const state = {};
+  const lifecycle = createLifecycle({
+    state,
+    services: { activation: {}, picking, focus: {}, render: {} },
+    parts: {
+      calibration: { loadCalibrationStore: () => new Map() },
+      catalog: {
+        loadCameraSources: async () => [],
+        buildCatalogFromSources: () => catalog,
+        seedCatalog: () => [],
+      },
+      model: { ensureCameraPose: () => {} },
+      ground: {
+        resolveGroundPriors: async (cameras) => {
+          batches.push(cameras.length);
+          return cameras.map(() => null);
+        },
+        currentSurfaceRegime: () => 'terrain-globe',
+        handleMapStackChanged: () => {},
+      },
+      rendering: inert({ refreshHorizonCulling: () => false }),
+      health: { syncHealthState: async () => {} },
+      geometryQueue: inert(),
+      cards: inert(),
+      projection: inert(),
+      presentation: inert(),
+      navigation: inert(),
+      hover: inert(),
+      selection: {
+        bindCctvWorldClickGesture: (target, onClick) => target.onClick(onClick),
+        extractPickedCameraId: () => null,
+        cctvEmptyClickDeselects: () => false,
+        deactivateActiveCamera: () => {},
+      },
+    },
+  });
+  return { lifecycle, state, input, viewer };
+}
+
+test('init does not fetch a terrain height for every camera in the catalog', async (t) => {
+  // The live catalog is 13,657 cameras. Fetching all of their heights at
+  // enable is the CCTV terrain storm: ~214 sequential chunks against a route
+  // limited to 90 requests/min/client, so ~110 chunks 429'd, the row sat in
+  // LOADING for ~30 s and the rejected cameras went flat.
+  const catalog = catalogOf(5000);
+  const batches = [];
+  const { lifecycle, state, input, viewer } = initHarness(catalog, batches);
+  t.after(() => {
+    state._clickSubscription?.();
+    input.destroy();
+  });
+
+  await lifecycle.methods.init(viewer);
+
+  assert.equal(state._records.length, catalog.length);
+  assert.deepEqual(batches, [], 'no catalog-wide height batch at init');
+  assert.ok(
+    state._records.every((record) => record.groundPrior === null),
+    'records start on the catalog fallback and refine from the view',
+  );
+});
+
+test('enable asks for heights only for the cameras the view will draw', () => {
+  const catalog = catalogOf(100);
+  const records = catalog.map((camera) => ({
+    camera,
+    position: null,
+    frustumGeometry: null,
+    groundSamples: {},
+    groundResolved: {},
+    groundPrior: null,
+  }));
+  const working = [records[3], records[77]];
+  const requested = [];
+  const state = {
+    _enabled: false,
+    _records: records,
+    _recordById: new Map(records.map((record) => [record.camera.id, record])),
+    _viewRecords: [],
+    _coverageVisibleIds: new Set(),
+    _cctvOverlayHost: { setVisible() {} },
+  };
+  const lifecycle = createLifecycle({
+    state,
+    services: {
+      activation: {},
+      picking,
+      focus: { onFocusTargetAppear: () => () => {} },
+      render: {},
+    },
+    parts: {
+      ground: {
+        resolveVisibleGroundPriors: async (set) => {
+          requested.push(set);
+          return set.length;
+        },
+        currentSurfaceRegime: () => 'terrain-globe',
+      },
+      rendering: inert({ refreshHorizonCulling: () => false }),
+      geometryQueue: inert({
+        geometryWorkingSet: () => working,
+        startGeometryLoadQueue() {},
+      }),
+      projection: inert(),
+      frames: inert(),
+      cards: inert(),
+      presentation: inert(),
+      navigation: { openingCameraId: () => null },
+      selection: { getActiveRecord: () => null, countClickCard: () => null },
+    },
+  });
+
+  lifecycle.methods.enable();
+
+  assert.equal(requested.length, 1);
+  assert.deepEqual(
+    requested[0].map((record) => record.camera.id),
+    ['cam-3', 'cam-77'],
+    'the view working set, not the whole catalog',
+  );
+  assert.equal(state._records[0].groundPrior, null);
+});

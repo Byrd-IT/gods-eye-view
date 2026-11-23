@@ -158,15 +158,19 @@ export function createApplicationRequestServices({
         // A failed request still carries the real heights the server had, so
         // the caller can keep them; null marks a point without one.
         const partial = response.data?.partial;
-        if (
-          !response.ok &&
-          Array.isArray(partial) &&
-          partial.length === points.length
-        ) {
+        if (!response.ok) {
           const error = new Error(
             `Terrain heights unavailable (${response.status})`,
           );
-          error.partial = partial;
+          if (Array.isArray(partial) && partial.length === points.length)
+            error.partial = partial;
+          // The batch resolver needs the status to tell a rate limit (stop
+          // asking) from a transient upstream failure (fall back per chunk).
+          error.status = response.status;
+          const retryAfter = retryAfterMs(
+            response.headers?.get?.('Retry-After'),
+          );
+          if (retryAfter != null) error.retryAfterMs = retryAfter;
           throw error;
         }
         return requireOk(response, 'Terrain heights')?.results;
