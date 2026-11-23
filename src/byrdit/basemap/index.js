@@ -138,6 +138,17 @@ export async function openBasemap({
       cesiumToken,
       googleApiKey,
       basemapSource,
+      // Byrd-IT: the scene's map engine, resolved when a stack switches (the
+      // renderer binds after attach). Without it the stacks fall back to
+      // mapEngine(), which throws for a viewer with a renderer bound.
+      engine: {
+        get terrain() {
+          return mapEngineFor(sceneViewer).terrain;
+        },
+        get imagery() {
+          return mapEngineFor(sceneViewer).imagery;
+        },
+      },
     }),
     session,
     baseId,

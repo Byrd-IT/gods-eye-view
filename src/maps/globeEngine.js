@@ -15,6 +15,7 @@
 import { findFrame, findGlobe, rendererOf } from '../render/rendererOf.js';
 import { ESRI_IMAGERY_CREDIT, ESRI_TILES } from './attribution.js';
 import { KEYLESS_TERRAIN_URL } from './keylessTerrain.js';
+import { ionRequestOptions } from '../byrdit/serverKeys.js';
 
 /** Esri World Imagery's deepest level (its tile info lists levels 0–23). */
 const ESRI_MAX_LEVEL = 23;
@@ -93,11 +94,23 @@ const ION_WORLD_TERRAIN = 1;
  * @param {string} token
  * @param {AbortSignal} [signal]
  */
+/**
+ * Byrd-IT: the endpoint URL for an asset. The server-managed marker goes to
+ * this app's ion stand-in with no token; an explicit token goes to ion.
+ * @param {number} asset
+ * @param {string} token
+ */
+export function ionEndpointUrl(asset, token) {
+  const { accessToken, server } = ionRequestOptions(token);
+  const base = server ?? 'https://api.cesium.com/';
+  const query = accessToken
+    ? `?access_token=${encodeURIComponent(accessToken)}`
+    : '';
+  return `${base}v1/assets/${asset}/endpoint${query}`;
+}
+
 async function ionEndpoint(asset, token, signal) {
-  const response = await fetch(
-    `https://api.cesium.com/v1/assets/${asset}/endpoint?access_token=${encodeURIComponent(token)}`,
-    { signal },
-  );
+  const response = await fetch(ionEndpointUrl(asset, token), { signal });
   const body = await response.json().catch(() => null);
   if (!response.ok)
     throw new Error(

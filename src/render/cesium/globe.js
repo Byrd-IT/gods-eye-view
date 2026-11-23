@@ -23,6 +23,7 @@ import { createCesiumImagery } from './imagery.js';
 import { attributionText } from './vectorBase.js';
 import { loadVectorStyle } from '../vectorBase/index.js';
 import { createTerrainRetryPolicy } from '../../maps/terrainRetry.js';
+import { ionRequestOptions } from '../../byrdit/serverKeys.js';
 
 // The base marks live outside the adapter, so code that is not Cesium's can
 // mark a base; they are re-exported here for the code that still is.
@@ -46,9 +47,11 @@ async function terrainProvider(spec, { worldDataToken }) {
       throw new TypeError(
         'World terrain needs the renderer’s world data token',
       );
-    const resource = await Cesium.IonResource.fromAssetId(WORLD_TERRAIN_ASSET, {
-      accessToken,
-    });
+    // Byrd-IT: the server-managed marker routes through this app's ion stand-in.
+    const resource = await Cesium.IonResource.fromAssetId(
+      WORLD_TERRAIN_ASSET,
+      ionRequestOptions(accessToken),
+    );
     return Cesium.CesiumTerrainProvider.fromUrl(resource, {
       requestVertexNormals: spec.requestVertexNormals ?? false,
       requestWaterMask: false,
