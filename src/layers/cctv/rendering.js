@@ -200,7 +200,7 @@ export function createRendering({
     layerState._counts = null;
   }
 
-  /** The icon item a camera record draws, idle and shown, at its position. */
+  /** Keep a new icon hidden until the first view pass selects it. */
   function cameraIconItem(record) {
     const id = record.camera.id;
     return {
@@ -213,7 +213,7 @@ export function createRendering({
       disableDepthTest: Infinity,
       motion: { kind: 'hold' },
       meta: { layer: 'cctv', id },
-      show: true,
+      show: false,
     };
   }
 
@@ -235,7 +235,7 @@ export function createRendering({
     if (items.length) layerState._icons?.putMany(items);
   }
 
-  /** Add a camera record's icon, idle and shown, once it has a position. */
+  /** Add a camera record's hidden icon once it has a position. */
   function addCameraIcon(record) {
     const icons = layerState._icons;
     if (!icons || !record.position) return;

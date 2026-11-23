@@ -80,7 +80,10 @@ test('focus de-emphasis fades each icon from its own color', () => {
     });
   try {
     const setId = createCameraIcons(viewer);
-    for (const r of state._records) addCameraIcon(r);
+    for (const r of state._records) {
+      addCameraIcon(r);
+      state._icons.put({ ...state._icons.item(r.camera.id), show: true });
+    }
 
     refreshCctvFocusStyles(1000);
 
@@ -349,6 +352,12 @@ test('a view pass writes only the icons it changes, in one write', () => {
     const setId = rendering.createCameraIcons(viewer);
     for (const r of state._records) rendering.addCameraIcon(r);
     const set = draw.set(setId);
+    assert.equal(
+      set.items.size,
+      0,
+      'no camera enters the draw set before culling',
+    );
+    assert.equal(state._icons.has('near'), true, 'catalog retains the camera');
     const writes = set.writes;
 
     assert.equal(rendering.refreshHorizonCulling(), true);
