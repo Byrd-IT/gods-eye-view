@@ -64,6 +64,7 @@ function createHud(
       },
     },
   });
+  hud._visible = true;
   t.after(() => {
     hud.destroy();
     setLocale('en');

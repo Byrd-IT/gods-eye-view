@@ -366,3 +366,47 @@ test('cached-only lookups read every cached viewport sample and never request', 
   assert.ok(b.placeLabels.includes(cachedLabel));
   assert.deepEqual(service.calls, before);
 });
+
+test('HUD view target is reused while idle and recomputed after a camera move', async () => {
+  const { viewer, state } = createViewer({
+    latitude: 30.26,
+    longitude: -97.74,
+    heightM: 600,
+  });
+  let picks = 0;
+  const pick = viewer.scene.pickPosition;
+  viewer.scene.pickPosition = (...args) => {
+    picks++;
+    return pick(...args);
+  };
+  const service = createService();
+  const first = await getBasemapLabelContext(viewer, service, {
+    hudSurfaceRevision: 0,
+  });
+  const now = performance.now;
+  Object.defineProperty(performance, 'now', {
+    configurable: true,
+    value: () => now.call(performance) + 60000,
+  });
+  try {
+    await getBasemapLabelContext(viewer, service, {
+      previous: first,
+      hudSurfaceRevision: 0,
+    });
+    assert.equal(picks, 1, 'idle summary must not read depth again');
+    state.latitude += 0.01;
+    const moved = await getBasemapLabelContext(viewer, service, {
+      previous: first,
+      hudSurfaceRevision: 0,
+    });
+    assert.equal(picks, 2);
+    assert.notDeepEqual(moved.placeLabels, first.placeLabels);
+    await getBasemapLabelContext(viewer, service, {
+      previous: moved,
+      hudSurfaceRevision: 1,
+    });
+    assert.equal(picks, 3, 'surface load invalidates target');
+  } finally {
+    delete performance.now;
+  }
+});

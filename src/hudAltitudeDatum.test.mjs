@@ -196,7 +196,10 @@ test('a cold tick paints both readouts uncorrected, and resolving flips both in 
   const env = installHudEnvironment();
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      publish: env.publish,
+    });
     const alt = () => env.elements.get('hud-alt').textContent;
     const summary = () => env.elements.get('hud-summary').textContent;
 
@@ -252,7 +255,10 @@ test('the corrected readouts are the MSL datum, not a coincidence of the SFO sig
   });
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      publish: env.publish,
+    });
     hud._updateCameraData(); // cold: requests the grid, paints uncorrected
     assert.match(env.elements.get('hud-alt').textContent, /^ALT: 100m/);
     await ensureGeoidReady();
@@ -287,7 +293,12 @@ test('a summary asked for one view is dropped once the camera moves', async () =
   };
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, summaryService, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      summaryService,
+      publish: env.publish,
+    });
+    hud._visible = true;
     let place = 'Yellowstone';
     hud._summaryContext = async () => ({ placeLabels: [place] });
     const summary = () => env.elements.get('hud-summary').textContent;
@@ -347,7 +358,12 @@ test('a request the camera leaves paints nothing: aborted, failed, or its contex
   };
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, summaryService, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      summaryService,
+      publish: env.publish,
+    });
+    hud._visible = true;
     hud._summaryContext = async () => ({ placeLabels: ['Yellowstone'] });
     const element = env.elements.get('hud-summary');
     const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -409,7 +425,12 @@ test('a cancelled summary retries the same context but completed answers stay re
   };
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, summaryService, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      summaryService,
+      publish: env.publish,
+    });
+    hud._visible = true;
     hud._summaryContext = async () => ({ placeLabels: ['San Francisco'] });
     hud._updateCameraData();
     const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -466,7 +487,12 @@ test('after a dropped or timed-out request the next tick asks again, and a move 
   };
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, summaryService, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      summaryService,
+      publish: env.publish,
+    });
+    hud._visible = true;
     // The same place before and after: a slow follow camera, a small pan.
     hud._summaryContext = async () => ({ placeLabels: ['Lisboa'] });
     const element = env.elements.get('hud-summary');
@@ -531,7 +557,12 @@ test('a summary interrupted while typing can retry unchanged context', async (t)
   };
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, summaryService, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      summaryService,
+      publish: env.publish,
+    });
+    hud._visible = true;
     hud._summaryContext = async () => ({ placeLabels: ['San Francisco'] });
     hud._updateCameraData();
     await hud._updateSummary(true);
@@ -572,7 +603,10 @@ test('a retired Operator layout falls back to Tactical in the live HUD', () => {
   const env = installHudEnvironment();
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      publish: env.publish,
+    });
     hud.setVariant('minimal');
     assert.equal(hud.getVariant(), 'minimal');
     hud.setVariant('operator');
@@ -588,7 +622,10 @@ test('a camera with no position leaves the readouts as they were', () => {
   const env = installHudEnvironment();
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      publish: env.publish,
+    });
     hud._updateCameraData();
     const alt = env.elements.get('hud-alt').textContent;
     const metrics = hud._latestMetrics;
@@ -607,7 +644,10 @@ test('the view window is measured from the camera’s rectangle in degrees', () 
   const env = installHudEnvironment();
   let hud;
   try {
-    hud = new IntelHUD(env.viewer, { camera: env.camera.port, publish: env.publish });
+    hud = new IntelHUD(env.viewer, {
+      camera: env.camera.port,
+      publish: env.publish,
+    });
     assert.equal(hud._viewWindowKm(0), null, 'no rectangle, no window');
     env.camera.setViewRectangle({ west: -1, south: -0.5, east: 1, north: 0.5 });
     assert.deepEqual(hud._viewWindowKm(0), { widthKm: 222, heightKm: 111 });

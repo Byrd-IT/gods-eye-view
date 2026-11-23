@@ -61,6 +61,7 @@ import {
 import { isRtlLocale } from './i18n/locale.js';
 import { localizeLayerName } from './ui/layerPanel.js';
 import { isEmbeddedInline } from './app/embed.js';
+import { findGlobe } from './render/rendererOf.js';
 import { subscribeSelectedVessel } from './hudReadouts.js';
 
 /** Color palettes keyed by shader mode; applied as CSS custom properties. */
@@ -275,6 +276,17 @@ export class IntelHUD {
     // The last place lookup and the view it answered for (see
     // getBasemapLabelContext), reused until the view changes enough.
     this._placeLabels = null;
+    this._hudSurfaceRevision = 0;
+    this._hudGlobe = findGlobe(viewer);
+    this._hudPendingSurface = false;
+    this._offHudProgress = this._hudGlobe?.on('progress', (progress) => {
+      const pending = progress.terrainPending > 0 || progress.tilesPending > 0;
+      if (this._hudPendingSurface && !pending) {
+        this._hudSurfaceRevision++;
+        this._markSummaryDirty();
+      }
+      this._hudPendingSurface = pending;
+    });
     this._lastSummarySignature = '';
     /** The reply painted for `_lastSummarySignature`, when it was accepted. */
     this._lastSummaryReply = null;
@@ -873,6 +885,7 @@ export class IntelHUD {
    *   by character; otherwise sets it instantly.
    */
   async _updateSummary(animate = false, force = false) {
+    if (!this._visible || document.hidden) return;
     const fallbackText = this._composeSummary();
     if (!this._latestMetrics) {
       this._setSummaryText(fallbackText, animate);
@@ -890,7 +903,8 @@ export class IntelHUD {
       this._setSummaryText(fallbackText, animate);
       return;
     }
-    if (revision !== this._summaryRevision) return;
+    if (revision !== this._summaryRevision || !this._visible || document.hidden)
+      return;
     // Every caller invokes this as `void this._updateSummary(...)`, so nothing
     // owns the returned promise — a rejection escaping from here lands as an
     // unhandled rejection in the console. Building the context walks the live
@@ -1033,6 +1047,7 @@ export class IntelHUD {
       ...this.basemapContext,
       previous: this._placeLabels,
       camera: this._camera,
+      hudSurfaceRevision: `${this._hudSurfaceRevision}:${this._hudGlobe?.surfaceVersion?.() ?? ''}`,
     });
     // A slower build for a view the camera has left must not replace the
     // newer view's lookup.
@@ -1221,6 +1236,7 @@ export class IntelHUD {
     clearInterval(this._summaryTypingInterval);
     for (const off of this._offCamera.splice(0)) off();
     this._dataManagerUnsubscribe?.();
+    this._offHudProgress?.();
     this._vesselUnsubscribe?.();
     this._summaryRequest?.abort();
     this._offLocale();

@@ -78,6 +78,7 @@ function createHud(t, summaryService) {
     page.restore();
   });
   const calls = { context: 0 };
+  hud._visible = true;
   hud._latestMetrics = { altM: 600 };
   hud._summaryContext = async () => {
     calls.context += 1;
@@ -174,4 +175,21 @@ test('an unchanged context restores its accepted reply over the fallback line', 
   await hud._updateSummary(false);
   assert.equal(service.calls, 1);
   assert.equal(shown(), 'Austin capitol district live');
+});
+
+test('hidden HUD or background tab does not build summary context', async (t) => {
+  const { hud, calls } = createHud(t, {
+    configured: async () => true,
+    summarize: async () => ({ ok: true, data: { summary: 'Austin live' } }),
+  });
+  hud._visible = false;
+  await hud._updateSummary(false, true);
+  assert.equal(calls.context, 0, 'hidden HUD');
+  hud._visible = true;
+  globalThis.document.hidden = true;
+  await hud._updateSummary(false, true);
+  assert.equal(calls.context, 0, 'background tab');
+  globalThis.document.hidden = false;
+  await hud._updateSummary(false, true);
+  assert.equal(calls.context, 1, 'visible HUD refreshes');
 });

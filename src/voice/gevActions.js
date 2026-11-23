@@ -349,6 +349,7 @@ const PANEL_READ_WAIT_MS = 1000;
 // honest, bounded "try that again" is the trade accepted for never hanging.
 const PANEL_EDIT_WAIT_MS = 4000;
 const viewTargetCache = new WeakMap();
+const hudViewTargetCache = new WeakMap();
 
 /**
  * A FIFO turn-taking queue for a surface that only one call may hold.
@@ -4688,11 +4689,16 @@ function runManagedVoiceNavigation(
 export async function getBasemapLabelContext(
   viewer,
   service = defaultGeospatial,
-  { cachedOnly = false, previous = null, camera = cameraOf(viewer) } = {},
+  {
+    cachedOnly = false,
+    previous = null,
+    camera = cameraOf(viewer),
+    hudSurfaceRevision,
+  } = {},
 ) {
   const pose = camera.pose();
   const cameraHeightM = pose.height;
-  const target = getViewTargetCartographic(viewer, camera);
+  const target = getViewTargetCartographic(viewer, camera, hudSurfaceRevision);
   if (!target) {
     return {
       placeLabels: [],
@@ -6906,12 +6912,20 @@ function coarseBasemapPlace(
   };
 }
 
-function getViewTargetCartographic(viewer, camera = cameraOf(viewer)) {
+function getViewTargetCartographic(
+  viewer,
+  camera = cameraOf(viewer),
+  hudSurfaceRevision,
+) {
   const signature = cameraViewSignature(camera);
-  const cached = viewTargetCache.get(viewer);
+  const cache =
+    hudSurfaceRevision === undefined ? viewTargetCache : hudViewTargetCache;
+  const cached = cache.get(viewer);
   if (
     cached?.signature === signature &&
-    performance.now() - cached.cachedAt < 2500
+    (hudSurfaceRevision === undefined
+      ? performance.now() - cached.cachedAt < 2500
+      : cached.surfaceRevision === hudSurfaceRevision)
   ) {
     return cached.target;
   }
@@ -6922,8 +6936,9 @@ function getViewTargetCartographic(viewer, camera = cameraOf(viewer)) {
   const target = carto
     ? { longitude: carto.lon, latitude: carto.lat, height: carto.height }
     : null;
-  viewTargetCache.set(viewer, {
+  cache.set(viewer, {
     signature,
+    surfaceRevision: hudSurfaceRevision,
     target,
     cachedAt: performance.now(),
   });
