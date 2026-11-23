@@ -258,3 +258,20 @@ test('first settled progress invalidates a target picked before subscription', (
   listener({ terrainPending: 0, tilesPending: 0 });
   assert.equal(hud._hudSurfaceRevision, revision + 1);
 });
+
+test('an inline panel the host reports hidden still builds its summary', async (t) => {
+  const { hud, calls } = createHud(t, {
+    configured: async () => true,
+    summarize: async () => ({ ok: true, data: { summary: 'Austin live' } }),
+  });
+  hud._visible = true;
+  globalThis.document.hidden = true;
+  globalThis.GEV_EMBED_INLINE = true;
+  try {
+    await hud._updateSummary(false, true);
+    assert.equal(calls.context, 1, 'inline embed is on screen');
+  } finally {
+    delete globalThis.GEV_EMBED_INLINE;
+    globalThis.document.hidden = false;
+  }
+});

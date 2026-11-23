@@ -61,6 +61,11 @@ import {
 import { isRtlLocale } from './i18n/locale.js';
 import { localizeLayerName } from './ui/layerPanel.js';
 import { isEmbeddedInline } from './app/embed.js';
+
+// A hidden page skips HUD work, except an inline panel, whose host may
+// report it hidden while it is on screen (see app/panelRendering.js).
+const pageHidden = () =>
+  Boolean(globalThis.document?.hidden) && !isEmbeddedInline();
 import { findGlobe } from './render/rendererOf.js';
 import { subscribeSelectedVessel } from './hudReadouts.js';
 
@@ -887,7 +892,7 @@ export class IntelHUD {
    *   by character; otherwise sets it instantly.
    */
   async _updateSummary(animate = false, force = false) {
-    if (!this._visible || document.hidden) return;
+    if (!this._visible || pageHidden()) return;
     const fallbackText = this._composeSummary();
     if (!this._latestMetrics) {
       this._setSummaryText(fallbackText, animate);
@@ -905,7 +910,7 @@ export class IntelHUD {
       this._setSummaryText(fallbackText, animate);
       return;
     }
-    if (revision !== this._summaryRevision || !this._visible || document.hidden)
+    if (revision !== this._summaryRevision || !this._visible || pageHidden())
       return;
     // Every caller invokes this as `void this._updateSummary(...)`, so nothing
     // owns the returned promise — a rejection escaping from here lands as an
@@ -921,15 +926,11 @@ export class IntelHUD {
       // Left dirty on purpose: the next periodic tick retries instead of
       // sticking on the fallback line for the rest of the session. The
       // fallback was composed for this view; a moved camera keeps its own.
-      if (
-        revision === this._summaryRevision &&
-        this._visible &&
-        !document.hidden
-      )
+      if (revision === this._summaryRevision && this._visible && !pageHidden())
         this._setSummaryText(fallbackText, animate);
       return;
     }
-    if (revision !== this._summaryRevision || !this._visible || document.hidden)
+    if (revision !== this._summaryRevision || !this._visible || pageHidden())
       return;
     // Without a place label the model invents a place: show the plain line.
     const described = [
