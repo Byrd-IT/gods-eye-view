@@ -17,6 +17,7 @@ import {
 import { initGeoFileImport } from '../ui/geoFileImport.js';
 import { useDisplayStore } from '../ui/stores/display.js';
 import { applicationPinia } from '../ui/vueRuntime.js';
+import { createContextCardOpener } from '../ui/stores/entityCard.js';
 import { initImageryBoxTool } from '../ui/imageryBoxTool.js';
 import { createBuildingFootprintProvider } from '../byrdit/dronePlan/buildingFootprints.js';
 import { fetchOpenObstacles } from '../byrdit/dronePlan/obstacleData.js';
@@ -393,6 +394,8 @@ export function createApplicationTools({
     // automatic basemap switch owns the stack. Its own state answers that;
     // a controller without the automatic switch says nothing.
     mapStack: () => mapStackController ?? null,
+    // A voice or chat selection opens its card in Context, as a click does.
+    contextCard: createContextCardOpener(applicationPinia()),
   });
   defer(() => {
     voiceCommands.stop({ removeUi: true });
