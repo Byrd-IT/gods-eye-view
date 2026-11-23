@@ -62,12 +62,13 @@ import { isRtlLocale } from './i18n/locale.js';
 import { localizeLayerName } from './ui/layerPanel.js';
 import { isEmbeddedInline } from './app/embed.js';
 
+import { findGlobe } from './render/rendererOf.js';
+import { subscribeSelectedVessel } from './hudReadouts.js';
+
 // A hidden page skips HUD work, except an inline panel, whose host may
 // report it hidden while it is on screen (see app/panelRendering.js).
 const pageHidden = () =>
   Boolean(globalThis.document?.hidden) && !isEmbeddedInline();
-import { findGlobe } from './render/rendererOf.js';
-import { subscribeSelectedVessel } from './hudReadouts.js';
 
 /** Color palettes keyed by shader mode; applied as CSS custom properties. */
 const HUD_COLORS = {
@@ -463,7 +464,7 @@ export class IntelHUD {
     // page, except an inline panel, whose host may report it hidden while it
     // is on screen (see keepPanelRendering in app/panelRendering.js).
     this._updateInterval = setInterval(() => {
-      if (!this._visible || (document.hidden && !isEmbeddedInline())) return;
+      if (!this._visible || pageHidden()) return;
       this._updateCameraData();
     }, 250);
 
