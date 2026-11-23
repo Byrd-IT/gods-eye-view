@@ -163,7 +163,9 @@ export function chipState(entry, elapsedMs, { timeZone, locale } = {}) {
       ? serverNow - base.lastOkAt
       : null;
   let chip = 'LIVE';
-  if (paused) chip = base.chip;
+  if (base.reason === 'disabled')
+    chip = entry.cause ? `Disabled: ${entry.cause}` : 'Disabled';
+  else if (paused) chip = base.chip;
   else if (state !== 'live')
     chip =
       base.lastOkAt === null
@@ -227,6 +229,10 @@ export function createFeedChips({
     entries.set(key, {
       feed,
       base,
+      cause:
+        base.reason === 'disabled'
+          ? read(response.headers, 'x-feed-disabled-cause')
+          : null,
       serverNow: serverNowOf(response),
       at: monotonic(),
     });

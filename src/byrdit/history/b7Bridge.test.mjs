@@ -315,6 +315,60 @@ test('network-blocked: launches + per-group CelesTrak relay collector bytes, the
   assert.ok(!existsSync(join(cwd, '.gev-cache', 'celestrak-HALT.json')));
 });
 
+test('celestrak bridge: a group the collector disabled reports disabled, not collector_down', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'info', () => {});
+  freshCwd(t);
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    seen.push(req.url);
+    assert.equal(req.url, '/v1/latest/celestrak-gp');
+    res.writeHead(503, {
+      'Content-Type': 'application/json',
+      'X-Feed-Source': 'CelesTrak',
+      'X-Collector-Role': 'active',
+      'X-Feed-Reason': 'disabled',
+    });
+    res.end(
+      JSON.stringify({
+        error: 'feed disabled',
+        feed: 'celestrak-gp',
+        reason: 'upstream 200 body is not GP CSV',
+      }),
+    );
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        server.closeAllConnections?.();
+        server.close(() => resolve());
+      }),
+  );
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const blocked = blockNetwork(t, url);
+  const request = chain([
+    ...historyPlugins({ env: ENV_ON(url) }),
+    celestrakProxy(),
+  ]);
+  const r = await request('/api/celestrak/gp');
+  assert.equal(r.statusCode, 503);
+  assert.equal(r.headers['x-feed-bridge'], 'none');
+  assert.equal(
+    r.headers['x-feed-reason'],
+    'disabled',
+    'the collector is active; the GROUP is disabled (upstream 200, not GP CSV)',
+  );
+  assert.equal(
+    r.headers['x-feed-disabled-cause'],
+    'upstream 200 body is not GP CSV',
+  );
+  assert.equal(JSON.parse(r.body).reason, 'upstream 200 body is not GP CSV');
+  assert.deepEqual(seen, ['/v1/latest/celestrak-gp']);
+  assert.deepEqual(blocked, [], 'never asks celestrak.org about the group');
+});
+
 test('terminal: odd sub-paths and methods never reach GEV launch / CelesTrak proxies', async (t) => {
   t.mock.method(console, 'warn', () => {});
   t.mock.method(console, 'info', () => {});

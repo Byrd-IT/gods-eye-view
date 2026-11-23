@@ -127,8 +127,12 @@ const METADATA_FORMATS = Object.freeze({
   'x-feed-age-ms': /^[0-9]{1,15}$/,
   'x-feed-last-ok': /^[0-9]{1,15}$/,
   'x-feed-stale-since': /^[0-9]{1,15}$/,
+  // Collector reasons (gev-history collector.js disabledResponse and
+  // latestStore.render). `disabled` is a GROUP the collector will never poll
+  // (e.g. a CelesTrak GROUP that does not exist, whose 200 was not GP CSV):
+  // the collector is active, so it must not read as `collector_down`.
   'x-feed-reason':
-    /^(?:no_snapshot|upstream_error|halted|incomplete_coverage|system_down|collector_down|bridge_error|opensky_paused_until=(?:[01][0-9]|2[0-3]):[0-5][0-9])$/,
+    /^(?:no_snapshot|upstream_error|halted|disabled|incomplete_coverage|system_down|collector_down|bridge_error|opensky_paused_until=(?:[01][0-9]|2[0-3]):[0-5][0-9])$/,
   'x-collector-role': /^(?:active|standby)$/,
   'x-flight-coverage':
     /^OpenSky viewport tiles \([0-9]{1,5}\)(?:, cached areas only|, incomplete: (?:100|[0-9]{1,2})% of the view)?$/,
@@ -353,6 +357,7 @@ export function createCollectorBridge({
    */
   async function readCollector(collectorFeed, search, lease = null) {
     let reason = 'collector_down';
+    let cause = null;
     for (const base of urls) {
       try {
         const response = await fetchImpl(
@@ -392,12 +397,31 @@ export function createCollectorBridge({
         // Standby (503, no X-Feed-Reason) or an active collector with no
         // snapshot yet: keep its reason, try the next collector.
         const r = response.headers.get('x-feed-reason');
-        if (r && validMetadata('x-feed-reason', r)) reason = r;
+        if (r && validMetadata('x-feed-reason', r)) {
+          reason = r;
+          cause = null;
+          if (r === 'disabled') {
+            try {
+              const value = JSON.parse(new TextDecoder().decode(body)).reason;
+              if (
+                [
+                  'not GP CSV',
+                  'upstream 200 body is not GP CSV',
+                  'disabled by configuration',
+                  'disabled',
+                ].includes(value)
+              )
+                cause = value;
+            } catch {
+              /* malformed collector response: omit cause */
+            }
+          }
+        }
       } catch {
         /* unreachable / timeout: next collector */
       }
     }
-    return { ok: false, reason };
+    return { ok: false, reason, cause };
   }
 
   /**
@@ -504,7 +528,7 @@ export function createCollectorBridge({
     send(req, res, 200, decorate(withGrey(headers), target), cache.body);
   }
 
-  function serveNone(req, res, reason, target) {
+  function serveNone(req, res, reason, target, cause = null) {
     transition(target.collectorFeed, 'none', reason);
     send(
       req,
@@ -517,7 +541,11 @@ export function createCollectorBridge({
         'X-Feed-Reason': reason,
         'X-Feed-Bridge': 'none',
       },
-      JSON.stringify({ error: 'no snapshot', noDataSince: null }),
+      JSON.stringify(
+        reason === 'disabled'
+          ? { error: 'feed disabled', reason: cause }
+          : { error: 'no snapshot', noDataSince: null },
+      ),
     );
   }
 
@@ -545,6 +573,7 @@ export function createCollectorBridge({
       'X-Feed-Reason': reason,
       'X-Feed-Bridge': 'es-fallback',
       'X-Flight-Coverage': answer.coverage,
+        ...(cause ? { 'X-Feed-Disabled-Cause': cause } : {}),
     };
     transition(target.collectorFeed, 'es-fallback', 'es_fallback');
     send(req, res, 200, decorate(withGrey(headers), target), answer.body);
@@ -665,7 +694,9 @@ export function createCollectorBridge({
       }
       return false;
     }
-    const fallback = async (reason) => {
+    const fallback = async (reason, cause = null) => {
+      if (reason === 'disabled')
+        return serveNone(req, res, reason, target, cause);
       const entry = cacheGet(key, cacheKeyOf(url));
       // The qualification above (empty states, lookback) is ES-fallback
       // reasoning: a reader-less bridge (flag-off or another feed) keeps
@@ -755,7 +786,7 @@ export function createCollectorBridge({
         send(req, res, 200, decorate(headers, target), result.body);
         return;
       }
-      await fallback(result.reason);
+      await fallback(result.reason, result.cause);
     } catch {
       // Never fall through to the upstream plugin, whatever failed here.
       if (res.headersSent) {

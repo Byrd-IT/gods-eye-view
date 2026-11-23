@@ -74,6 +74,24 @@ test('bridged routes map to chips; track routes and other paths do not', () => {
   );
 });
 
+test('disabled satellite chip displays the collector cause', () => {
+  const { chips } = harness();
+  chips.observe(
+    '/api/celestrak/gp',
+    new Response('{}', {
+      status: 503,
+      headers: {
+        'X-Feed-Reason': 'disabled',
+        'X-Feed-Disabled-Cause': 'upstream 200 body is not GP CSV',
+      },
+    }),
+  );
+  const [s] = chips.states();
+  assert.equal(s.draw, false);
+  assert.equal(s.reason, 'disabled');
+  assert.equal(s.chip, 'Disabled: upstream 200 body is not GP CSV');
+});
+
 test('state live: green LIVE chip, layer drawn', () => {
   const { chips } = harness();
   chips.observe('/api/military', bridgeResponse({ lastOk: T0 }));
