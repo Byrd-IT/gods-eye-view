@@ -344,7 +344,10 @@ export function createTerrainHeights({
             : RATE_LIMIT_COOLDOWN_MS;
           rateLimitedUntil =
             Date.now() +
-            Math.min(Math.max(wait, 0), RATE_LIMIT_COOLDOWN_MAX_MS);
+            Math.min(
+              Math.max(wait, RATE_LIMIT_COOLDOWN_MS),
+              RATE_LIMIT_COOLDOWN_MAX_MS,
+            );
         }
         // Proxy down (or cold cache had nothing to serve-stale) — fall back to
         // geoid math for the points in this chunk. A failure that still

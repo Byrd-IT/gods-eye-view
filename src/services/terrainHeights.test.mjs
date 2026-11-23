@@ -208,3 +208,26 @@ test('a rate-limited chunk ends the batch instead of firing every remaining chun
   await terrain.resolveEllipsoidalGround([pointAt(500)]);
   assert.equal(calls, 1, 'the cooldown keeps the route quiet');
 });
+
+test('a short Retry-After still keeps the 10 s rate-limit cooldown floor', async () => {
+  let calls = 0;
+  const terrain = createTerrainHeights({
+    source: {
+      async getHeights() {
+        calls += 1;
+        const error = new Error('Terrain heights unavailable (429)');
+        error.status = 429;
+        error.retryAfterMs = 0;
+        throw error;
+      },
+    },
+  });
+  await terrain.resolveEllipsoidalGround([pointAt(0)]);
+  assert.equal(calls, 1);
+  // Other points, asked for at once: a Retry-After of 0 must not end the
+  // cooldown early (the floor is 10 s, the cap 60 s).
+  await terrain.resolveEllipsoidalGround(
+    Array.from({ length: 3 }, (_, i) => pointAt(1000 + i)),
+  );
+  assert.equal(calls, 1, 'no request inside the cooldown floor');
+});
