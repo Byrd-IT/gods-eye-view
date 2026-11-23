@@ -162,16 +162,24 @@ export function createRendering({
         set.show = value;
       },
       upsert(items) {
-        const add = [];
-        const remove = [];
-        for (const item of items) {
+        // The common write (every row shown, e.g. a focus pass) forwards the
+        // caller's list as is; arrays are only made when a row is culled.
+        const list = Array.isArray(items) ? items : [...items];
+        let add = null;
+        let remove = null;
+        for (let i = 0; i < list.length; i++) {
+          const item = list[i];
           if (item.show !== false) {
             drawn.add(item.id);
-            add.push(item);
-          } else if (drawn.delete(item.id)) remove.push(item.id);
+            add?.push(item);
+            continue;
+          }
+          add ??= list.slice(0, i);
+          if (drawn.delete(item.id)) (remove ??= []).push(item.id);
         }
-        if (remove.length) set.remove(remove);
-        if (add.length) set.upsert(add);
+        if (remove) set.remove(remove);
+        const write = add ?? list;
+        if (write.length) set.upsert(write);
       },
       remove(ids) {
         const remove = ids.filter((id) => drawn.delete(id));
